@@ -120,7 +120,11 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "research_schema_version": "1",
             "information_cutoff_at": "2026-07-24T23:59:59Z",
             "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
+            "research_kind": "full",
+            "full_baseline_run_id": None,
+            "is_cycle_head": True,
             "is_primary": True,
+            "is_active": True,
             "trashed_at": None,
         }
     ]
@@ -167,7 +171,91 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
             {"instrument": "NVDA", "primary_cycle_id": run.id, "node_count": 1}
         ],
         "total": 1,
+        "limit": 50,
+        "offset": 0,
     }
+
+
+@pytest.mark.anyio
+async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    def commit_full(ticker: str) -> str:
+        request = AnalysisRequest(
+            ticker=ticker,
+            analysis_date=date(2026, 7, 24),
+            make_primary=False,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="1",
+            information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
+            method_snapshot={"schema_version": "1"},
+            research_kind="full",
+        )
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=request.analysis_date,
+            effective_date=request.analysis_date,
+            content="fixture",
+        )
+        evidence = EvidenceBundle(
+            instrument=ticker, analysis_date=request.analysis_date, items=(item,)
+        )
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument=ticker,
+                reports={},
+                decision=research_decision(evidence_refs=(item.ref,)),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    first = commit_full("NVDA")
+    second = commit_full("NVDA")
+    foreign = commit_full("AAPL")
+
+    response = await web_client.put(
+        "/api/v1/timelines/NVDA/primary-cycle",
+        json={"full_run_id": second},
+    )
+    repeated = await web_client.put(
+        "/api/v1/timelines/NVDA/primary-cycle",
+        json={"full_run_id": second},
+    )
+    cross_instrument = await web_client.put(
+        "/api/v1/timelines/NVDA/primary-cycle",
+        json={"full_run_id": foreign},
+    )
+    missing = await web_client.put(
+        "/api/v1/timelines/NVDA/primary-cycle",
+        json={"full_run_id": "missing"},
+    )
+    web_repository.trash_runs((second,))
+    trashed = await web_client.put(
+        "/api/v1/timelines/NVDA/primary-cycle",
+        json={"full_run_id": second},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["timeline"]["primary_cycle_id"] == second
+    assert repeated.json() == response.json()
+    assert first != second
+    assert cross_instrument.status_code == 422
+    assert cross_instrument.json()["error"]["code"] == "invalid_primary_cycle"
+    assert missing.status_code == 422
+    assert trashed.status_code == 422
 
 
 @pytest.mark.anyio

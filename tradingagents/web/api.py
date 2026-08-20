@@ -44,6 +44,7 @@ from tradingagents.application.repository import (
     EvidenceConflictError,
     EvidenceNotSealedError,
     IdempotencyConflictError,
+    InvalidPrimaryResearchCycleError,
     InvalidRunTransitionError,
     RunNotFoundError,
 )
@@ -61,6 +62,7 @@ from .models import (
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
+    PrimaryCycleSelectionRequest,
     ProviderModelCatalog,
     RequestValidationErrorResponse,
     RunBatchRequest,
@@ -132,6 +134,13 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(InvalidPrimaryResearchCycleError)
+    async def invalid_primary_cycle(
+        _request: Request,
+        exc: InvalidPrimaryResearchCycleError,
+    ):
+        return _error(422, "invalid_primary_cycle", str(exc))
 
     @app.exception_handler(UnsupportedInstrumentError)
     async def unsupported_instrument(
@@ -336,8 +345,11 @@ def create_app(
         return repository.recent_instruments(limit=limit)
 
     @app.get(f"{API_PREFIX}/timelines", response_model=ResearchTimelinePage)
-    def list_timelines():
-        return repository.list_timelines()
+    def list_timelines(
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        return repository.list_timelines(limit=limit, offset=offset)
 
     @app.get(
         f"{API_PREFIX}/timelines/{{instrument}}",
@@ -345,6 +357,18 @@ def create_app(
     )
     def get_timeline(instrument: str):
         return TimelineDetail(timeline=repository.get_timeline(instrument))
+
+    @app.put(
+        f"{API_PREFIX}/timelines/{{instrument}}/primary-cycle",
+        response_model=TimelineDetail,
+    )
+    def select_primary_cycle(
+        instrument: str,
+        payload: PrimaryCycleSelectionRequest,
+    ):
+        return TimelineDetail(
+            timeline=repository.select_primary_cycle(instrument, payload.full_run_id)
+        )
 
     @app.post(
         f"{API_PREFIX}/runs/trash",

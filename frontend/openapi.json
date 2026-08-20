@@ -71,6 +71,17 @@
             ],
             "title": "Llm Provider"
           },
+          "make_primary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make Primary"
+          },
           "output_language": {
             "anyOf": [
               {
@@ -2313,6 +2324,22 @@
         "title": "NumericTemporalBasis",
         "type": "string"
       },
+      "PrimaryCycleSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "full_run_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Full Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_run_id"
+        ],
+        "title": "PrimaryCycleSelectionRequest",
+        "type": "object"
+      },
       "ProviderCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -2934,7 +2961,7 @@
       },
       "ResearchNodeView": {
         "additionalProperties": false,
-        "description": "A Run-backed Full node; it deliberately owns no duplicate research data.",
+        "description": "A Run-backed Node; it deliberately owns no duplicate research data.",
         "properties": {
           "analysis_date": {
             "format": "date",
@@ -2944,6 +2971,17 @@
           "cycle_id": {
             "title": "Cycle Id",
             "type": "string"
+          },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
           },
           "id": {
             "title": "Id",
@@ -2958,6 +2996,14 @@
             "title": "Instrument",
             "type": "string"
           },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_cycle_head": {
+            "title": "Is Cycle Head",
+            "type": "boolean"
+          },
           "is_primary": {
             "title": "Is Primary",
             "type": "boolean"
@@ -2966,6 +3012,14 @@
             "additionalProperties": true,
             "title": "Method Snapshot",
             "type": "object"
+          },
+          "research_kind": {
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Research Kind",
+            "type": "string"
           },
           "research_schema_version": {
             "title": "Research Schema Version",
@@ -2992,7 +3046,10 @@
           "research_schema_version",
           "information_cutoff_at",
           "method_snapshot",
-          "is_primary"
+          "research_kind",
+          "is_cycle_head",
+          "is_primary",
+          "is_active"
         ],
         "title": "ResearchNodeView",
         "type": "object"
@@ -3105,6 +3162,17 @@
             "title": "Items",
             "type": "array"
           },
+          "limit": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
           "total": {
             "minimum": 0.0,
             "title": "Total",
@@ -3112,7 +3180,9 @@
           }
         },
         "required": [
-          "total"
+          "total",
+          "limit",
+          "offset"
         ],
         "title": "ResearchTimelinePage",
         "type": "object"
@@ -3468,6 +3538,17 @@
             ],
             "title": "Llm Provider"
           },
+          "make_primary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make Primary"
+          },
           "output_language": {
             "anyOf": [
               {
@@ -3807,6 +3888,17 @@
               }
             ],
             "title": "Llm Provider"
+          },
+          "make_primary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make Primary"
           },
           "output_language": {
             "anyOf": [
@@ -5305,6 +5397,31 @@
     "/api/v1/timelines": {
       "get": {
         "operationId": "list_timelines_api_v1_timelines_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5315,6 +5432,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Timelines"
@@ -5357,6 +5484,55 @@
           }
         },
         "summary": "Get Timeline"
+      }
+    },
+    "/api/v1/timelines/{instrument}/primary-cycle": {
+      "put": {
+        "operationId": "select_primary_cycle_api_v1_timelines__instrument__primary_cycle_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instrument",
+            "required": true,
+            "schema": {
+              "title": "Instrument",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrimaryCycleSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Primary Cycle"
       }
     }
   }

@@ -144,6 +144,9 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(vi.mocked(api.createRun).mock.calls[1][0]).not.toHaveProperty(
     "provenance",
   );
+  expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
+    make_primary: true,
+  });
 });
 
 test.each([

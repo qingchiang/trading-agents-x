@@ -97,6 +97,46 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
     ]
 
 
+def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selected(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+
+    first = service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    with pytest.raises(ValueError, match="make_primary"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    later = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            make_primary=False,
+        )
+    )
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == sorted(
+        (first.run_id, later.run_id)
+    )
+    assert repository.get_timeline("NVDA").primary_cycle_id == first.run_id
+
+    selected = repository.select_primary_cycle("NVDA", later.run_id)
+    repeated = repository.select_primary_cycle("NVDA", later.run_id)
+
+    assert selected.primary_cycle_id == later.run_id
+    assert repeated == selected
+    assert [node.is_primary for node in selected.nodes] == [
+        node.id == later.run_id for node in selected.nodes
+    ]
+
+
 @pytest.mark.parametrize(
     ("field", "changed_value"),
     [

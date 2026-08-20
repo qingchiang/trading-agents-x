@@ -80,6 +80,10 @@ _TERMINAL_STATUSES = {
 }
 
 
+class InvalidPrimaryResearchCycleError(ValueError):
+    """A requested Primary Research Cycle is not an active Full Cycle."""
+
+
 def _numeric_audit_warning_message(
     appendix: DecisionNumericAuditAppendix | None,
 ) -> str:
@@ -1309,6 +1313,13 @@ class RunRepository:
                             updated_at=now,
                         )
                     )
+                elif request.make_primary is None:
+                    raise ValueError(
+                        "later Full Research requires an explicit make_primary choice"
+                    )
+                elif request.make_primary:
+                    primary.full_run_id = run_id
+                    primary.updated_at = now
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1322,19 +1333,68 @@ class RunRepository:
             aggregate = self._merge_metrics(record, attempt, result.metrics)
         return aggregate
 
+    def has_active_full_cycle(self, instrument: str) -> bool:
+        with self.sessions() as session:
+            return (
+                session.scalar(
+                    select(ResearchNodeRecord.run_id)
+                    .join(RunRecord, RunRecord.id == ResearchNodeRecord.run_id)
+                    .where(
+                        func.json_extract(RunRecord.request_json, "$.ticker")
+                        == instrument,
+                        ResearchNodeRecord.research_kind == "full",
+                        RunRecord.status == RunStatus.SUCCEEDED.value,
+                        RunRecord.trashed_at.is_(None),
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
+
+    def select_primary_cycle(
+        self,
+        instrument: str,
+        full_run_id: str,
+    ) -> ResearchTimeline:
+        """Idempotently select one active Full Cycle for a Timeline."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            row = session.execute(
+                select(RunRecord, ResearchNodeRecord)
+                .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                .where(ResearchNodeRecord.run_id == full_run_id)
+            ).one_or_none()
+            if row is None:
+                raise InvalidPrimaryResearchCycleError("Full Cycle was not found")
+            run, node = row
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            if (
+                node.research_kind != "full"
+                or request.ticker != instrument
+                or run.status != RunStatus.SUCCEEDED.value
+                or run.trashed_at is not None
+            ):
+                raise InvalidPrimaryResearchCycleError(
+                    "Primary Research must be an active Full Cycle on this Timeline"
+                )
+            primary = session.get(PrimaryResearchCycleRecord, instrument)
+            if primary is None:
+                raise InvalidPrimaryResearchCycleError("Timeline has no Primary Cycle")
+            if primary.full_run_id != full_run_id:
+                primary.full_run_id = full_run_id
+                primary.updated_at = now
+        return self.get_timeline(instrument)
+
     def get_timeline(self, instrument: str) -> ResearchTimeline:
-        """Return retained Full nodes without turning Execution History into a copy."""
+        """Return derived Cycles without copying Run products into a Timeline."""
         with self.sessions() as session:
             primary = session.get(PrimaryResearchCycleRecord, instrument)
             rows = list(
                 session.execute(
                     select(RunRecord, ResearchNodeRecord)
                     .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
-                    .where(
-                        func.json_extract(RunRecord.request_json, "$.ticker")
-                        == instrument,
-                        ResearchNodeRecord.research_kind == "full",
-                    )
+                    .where(func.json_extract(RunRecord.request_json, "$.ticker") == instrument)
                     .order_by(RunRecord.request_json["analysis_date"], RunRecord.id)
                 )
             )
@@ -1344,7 +1404,11 @@ class RunRepository:
             nodes=tuple(
                 ResearchNodeView(
                     id=run.id,
-                    cycle_id=run.id,
+                    cycle_id=(
+                        run.id
+                        if node.research_kind == "full"
+                        else node.full_baseline_run_id
+                    ),
                     instrument=instrument,
                     analysis_date=RunRequestSnapshot.model_validate(
                         run.request_json
@@ -1352,14 +1416,30 @@ class RunRepository:
                     research_schema_version=run.research_schema_version,
                     information_cutoff_at=_aware(run.information_cutoff_at),
                     method_snapshot=run.method_snapshot_json or {},
+                    research_kind=node.research_kind,
+                    full_baseline_run_id=node.full_baseline_run_id,
+                    is_cycle_head=(
+                        run.trashed_at is None
+                        and not any(
+                            other_node.full_baseline_run_id
+                            == (run.id if node.research_kind == "full" else node.full_baseline_run_id)
+                            and other_run.trashed_at is None
+                            and RunRequestSnapshot.model_validate(
+                                other_run.request_json
+                            ).analysis_date
+                            > RunRequestSnapshot.model_validate(run.request_json).analysis_date
+                            for other_run, other_node in rows
+                        )
+                    ),
                     is_primary=primary is not None and primary.full_run_id == run.id,
+                    is_active=run.trashed_at is None,
                     trashed_at=_aware(run.trashed_at),
                 )
-                for run, _node in rows
+                for run, node in rows
             ),
         )
 
-    def list_timelines(self) -> ResearchTimelinePage:
+    def list_timelines(self, *, limit: int = 50, offset: int = 0) -> ResearchTimelinePage:
         """List derived Timelines without introducing a second product store."""
         ticker = func.json_extract(RunRecord.request_json, "$.ticker")
         stmt = (
@@ -1378,6 +1458,7 @@ class RunRepository:
             .group_by(ticker, PrimaryResearchCycleRecord.full_run_id)
             .order_by(ticker)
         )
+        count_stmt = select(func.count()).select_from(stmt.subquery())
         with self.sessions() as session:
             items = tuple(
                 ResearchTimelineSummary(
@@ -1385,9 +1466,10 @@ class RunRepository:
                     primary_cycle_id=row.primary_cycle_id,
                     node_count=int(row.node_count),
                 )
-                for row in session.execute(stmt).mappings()
+                for row in session.execute(stmt.offset(offset).limit(limit)).mappings()
             )
-        return ResearchTimelinePage(items=items, total=len(items))
+            total = int(session.scalar(count_stmt) or 0)
+        return ResearchTimelinePage(items=items, total=total, limit=limit, offset=offset)
 
     def fail(
         self,

@@ -12,6 +12,7 @@ export interface components {
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
@@ -323,6 +324,9 @@ export interface components {
       unit: string;
     };
     NumericTemporalBasis: "point_in_time" | "live_snapshot";
+    PrimaryCycleSelectionRequest: {
+      full_run_id: string;
+    };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -418,11 +422,15 @@ export interface components {
     ResearchNodeView: {
       analysis_date: string;
       cycle_id: string;
+      full_baseline_run_id?: string | null;
       id: string;
       information_cutoff_at: string;
       instrument: string;
+      is_active: boolean;
+      is_cycle_head: boolean;
       is_primary: boolean;
       method_snapshot: Record<string, unknown>;
+      research_kind: "full" | "incremental";
       research_schema_version: string;
       trashed_at?: string | null;
     };
@@ -442,6 +450,8 @@ export interface components {
     };
     ResearchTimelinePage: {
       items?: components["schemas"]["ResearchTimelineSummary"][];
+      limit: number;
+      offset: number;
       total: number;
     };
     ResearchTimelineSummary: {
@@ -492,6 +502,7 @@ export interface components {
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
@@ -540,6 +551,7 @@ export interface components {
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;

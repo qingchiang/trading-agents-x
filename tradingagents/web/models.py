@@ -71,6 +71,15 @@ class TimelineDetail(ApiModel):
     timeline: ResearchTimeline
 
 
+class PrimaryCycleSelectionRequest(ApiModel):
+    full_run_id: str = Field(min_length=1, max_length=36)
+
+    @field_validator("full_run_id", mode="before")
+    @classmethod
+    def normalize_full_run_id(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
 class RunCreateRequest(AnalysisRequest):
     source_run_id: str | None = Field(default=None, min_length=1, max_length=36)
 

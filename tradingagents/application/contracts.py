@@ -1503,6 +1503,9 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    # The first Full Cycle is selected automatically.  Once a Timeline exists,
+    # callers must make this choice explicitly rather than relying on order.
+    make_primary: bool | None = None
     # Keep the union inline so Pydantic preserves the existing OpenAPI shape;
     # a named PEP 695 alias is emitted as a separate schema component.
     output_language: ReportLanguage | str | None = None
@@ -1577,6 +1580,7 @@ class RunRequestSnapshot(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    make_primary: bool | None = None
     output_language: ReportLanguage | str | None = None
 
     def to_analysis_request(self) -> AnalysisRequest:
@@ -1691,7 +1695,7 @@ class RunView(FrozenModel):
 
 
 class ResearchNodeView(FrozenModel):
-    """A Run-backed Full node; it deliberately owns no duplicate research data."""
+    """A Run-backed Node; it deliberately owns no duplicate research data."""
 
     id: str
     cycle_id: str
@@ -1700,7 +1704,11 @@ class ResearchNodeView(FrozenModel):
     research_schema_version: str
     information_cutoff_at: datetime
     method_snapshot: dict[str, Any]
+    research_kind: Literal["full", "incremental"]
+    full_baseline_run_id: str | None = None
+    is_cycle_head: bool
     is_primary: bool
+    is_active: bool
     trashed_at: datetime | None = None
 
 
@@ -1721,6 +1729,8 @@ class ResearchTimelineSummary(FrozenModel):
 class ResearchTimelinePage(FrozenModel):
     items: tuple[ResearchTimelineSummary, ...] = ()
     total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
 
 
 class RunAttemptView(FrozenModel):

@@ -46,6 +46,7 @@ export default function NewRun() {
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
   const [sourceRunId, setSourceRunId] = useState("");
+  const [makePrimary, setMakePrimary] = useState(true);
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -314,6 +315,7 @@ export default function NewRun() {
       quick_reasoning_effort: quickReasoning,
       deep_reasoning_effort: deepReasoning,
       output_language: outputLanguage,
+      make_primary: makePrimary,
       source_run_id: sourceRunId || null,
     };
     try {
@@ -568,6 +570,23 @@ export default function NewRun() {
                 {modelsLoading ? t("discoveringModels") : modelWarning}
               </p>
             )}
+          </div>
+        </article>
+        <article className="panel form-section">
+          <span className="step">04</span>
+          <div className="form-section-body">
+            <h2>{t("primaryResearch")}</h2>
+            <label className="check-card">
+              <input
+                type="checkbox"
+                checked={makePrimary}
+                onChange={(event) => setMakePrimary(event.target.checked)}
+              />
+              <span>
+                <strong>{t("makePrimary")}</strong>
+                <small>{t("makePrimaryHint")}</small>
+              </span>
+            </label>
           </div>
         </article>
         {error && <div className="alert">{error}</div>}

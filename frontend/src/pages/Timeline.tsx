@@ -11,6 +11,8 @@ export default function Timeline() {
   const instrument = decodeURIComponent(pathname.split("/").at(-1) ?? "");
   const [detail, setDetail] = useState<TimelineDetail | null>(null);
   const [timelines, setTimelines] = useState<ResearchTimelinePage | null>(null);
+  const [timelineOffset, setTimelineOffset] = useState(0);
+  const timelineItems = timelines?.items ?? [];
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -19,7 +21,7 @@ export default function Timeline() {
       active &&
       setError(cause instanceof Error ? cause.message : t("timelineLoadFailed"));
     if (isList) {
-      void api.timelines().then(
+      void api.timelines(50, timelineOffset).then(
         (value) => active && setTimelines(value),
         onError,
       );
@@ -32,7 +34,7 @@ export default function Timeline() {
     return () => {
       active = false;
     };
-  }, [instrument, isList, t]);
+  }, [instrument, isList, t, timelineOffset]);
 
   if (isList) {
     return (
@@ -52,7 +54,7 @@ export default function Timeline() {
         {timelines && (timelines.items?.length ?? 0) === 0 && (
           <div className="empty-state">{t("noResearchTimelines")}</div>
         )}
-        {timelines?.items?.map((timeline) => (
+        {timelineItems.map((timeline) => (
           <article className="panel" key={timeline.instrument}>
             <div className="panel-header">
               <div>
@@ -66,6 +68,35 @@ export default function Timeline() {
             </Link>
           </article>
         ))}
+        {timelines && timelines.total > (timelines.limit ?? 50) && (
+          <div className="pagination">
+            <button
+              type="button"
+              className="button"
+              disabled={timelineOffset === 0}
+              onClick={() =>
+                setTimelineOffset((current) => Math.max(0, current - (timelines.limit ?? 50)))
+              }
+            >
+              ← {t("previous")}
+            </button>
+            <span>
+              {t("runRange", {
+                start: timelineOffset + 1,
+                end: Math.min(timelineOffset + timelineItems.length, timelines.total),
+                total: timelines.total,
+              })}
+            </span>
+            <button
+              type="button"
+              className="button"
+              disabled={timelineOffset + timelineItems.length >= timelines.total}
+              onClick={() => setTimelineOffset((current) => current + (timelines.limit ?? 50))}
+            >
+              {t("next")} →
+            </button>
+          </div>
+        )}
       </section>
     );
   }
@@ -95,8 +126,12 @@ export default function Timeline() {
             <div>
               <p className="eyebrow">{t("fullResearchNode")}</p>
               <h2>{node.analysis_date}</h2>
+              {node.research_kind === "full" && <span>{t("fullBaseline")}</span>}
             </div>
-            {node.is_primary && <strong>{t("primaryCycle")}</strong>}
+            <div>
+              {node.is_cycle_head && <strong>{t("cycleHead")}</strong>}
+              {node.is_primary && <strong>{t("primaryCycle")}</strong>}
+            </div>
           </div>
           <dl className="definition-list">
             <div>
@@ -118,6 +153,22 @@ export default function Timeline() {
               </dd>
             </div>
           </dl>
+          {!node.is_primary && node.is_active && node.research_kind === "full" && (
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setError("");
+                void api.selectPrimaryCycle(instrument, node.id).then(
+                  (value) => setDetail(value),
+                  (cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : t("timelineLoadFailed")),
+                );
+              }}
+            >
+              {t("makePrimary")}
+            </button>
+          )}
           <Link className="text-link" to={`/runs/${node.id}`}>
             {t("openOperationalRun")} →
           </Link>
