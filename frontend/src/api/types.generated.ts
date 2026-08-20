@@ -440,6 +440,15 @@ export interface components {
       nodes?: components["schemas"]["ResearchNodeView"][];
       primary_cycle_id?: string | null;
     };
+    ResearchTimelinePage: {
+      items?: components["schemas"]["ResearchTimelineSummary"][];
+      total: number;
+    };
+    ResearchTimelineSummary: {
+      instrument: string;
+      node_count: number;
+      primary_cycle_id?: string | null;
+    };
     ResearchWarning: {
       code?: string;
       evidence_ref?: string | null;

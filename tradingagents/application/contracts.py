@@ -1710,6 +1710,19 @@ class ResearchTimeline(FrozenModel):
     nodes: tuple[ResearchNodeView, ...] = ()
 
 
+class ResearchTimelineSummary(FrozenModel):
+    """Derived Timeline identity and stable, non-duplicated summary metadata."""
+
+    instrument: str
+    primary_cycle_id: str | None = None
+    node_count: int = Field(ge=1)
+
+
+class ResearchTimelinePage(FrozenModel):
+    items: tuple[ResearchTimelineSummary, ...] = ()
+    total: int = Field(ge=0)
+
+
 class RunAttemptView(FrozenModel):
     """Observed execution usage and lifecycle for one retry attempt."""
 

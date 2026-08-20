@@ -376,7 +376,7 @@ export default function Runs() {
                               className="text-link"
                               to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
                             >
-                              Timeline
+                              {t("researchTimeline")}
                             </Link>
                           )}
                         <Link className="text-link" to={`/runs/${run.id}`}>

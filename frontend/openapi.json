@@ -3094,6 +3094,61 @@
         "title": "ResearchTimeline",
         "type": "object"
       },
+      "ResearchTimelinePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchTimelineSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "ResearchTimelinePage",
+        "type": "object"
+      },
+      "ResearchTimelineSummary": {
+        "additionalProperties": false,
+        "description": "Derived Timeline identity and stable, non-duplicated summary metadata.",
+        "properties": {
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "primary_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Cycle Id"
+          }
+        },
+        "required": [
+          "instrument",
+          "node_count"
+        ],
+        "title": "ResearchTimelineSummary",
+        "type": "object"
+      },
       "ResearchWarning": {
         "additionalProperties": false,
         "description": "Structured, plain-text warning suitable for APIs and audit exports.",
@@ -5245,6 +5300,24 @@
           }
         },
         "summary": "Retry Run"
+      }
+    },
+    "/api/v1/timelines": {
+      "get": {
+        "operationId": "list_timelines_api_v1_timelines_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchTimelinePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Timelines"
       }
     },
     "/api/v1/timelines/{instrument}": {

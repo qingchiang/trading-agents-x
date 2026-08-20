@@ -24,6 +24,8 @@ export default function App() {
       <NewRun />
     ) : pathname === "/runs" ? (
       <Runs />
+    ) : pathname === "/timelines" ? (
+      <Timeline />
     ) : /^\/timelines\/[^/]+\/?$/.test(pathname) ? (
       <Timeline />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (

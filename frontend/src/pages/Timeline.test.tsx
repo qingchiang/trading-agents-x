@@ -2,12 +2,16 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { api } from "../api/client";
+import i18n from "../i18n";
 import { Router } from "../router";
 import Timeline from "./Timeline";
 
-vi.mock("../api/client", () => ({ api: { timeline: vi.fn() } }));
+vi.mock("../api/client", () => ({ api: { timeline: vi.fn(), timelines: vi.fn() } }));
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(async () => {
+  vi.resetAllMocks();
+  await i18n.changeLanguage("en");
+});
 
 test("shows the first Full Run-backed node and keeps its operational Run link", async () => {
   vi.mocked(api.timeline).mockResolvedValue({
@@ -41,4 +45,24 @@ test("shows the first Full Run-backed node and keeps its operational Run link", 
   expect(
     screen.getByRole("link", { name: "Open operational Run →" }),
   ).toHaveAttribute("href", "/runs/run-1");
+});
+
+test("lists derived timelines without presenting Execution History as a timeline", async () => {
+  vi.mocked(api.timelines).mockResolvedValue({
+    items: [{ instrument: "7203.T", primary_cycle_id: "run-1", node_count: 1 }],
+    total: 1,
+  } as never);
+
+  render(
+    <Router initialPath="/timelines">
+      <Timeline />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Research Timelines" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "7203.T" })).toHaveAttribute(
+    "href",
+    "/timelines/7203.T",
+  );
+  expect(screen.getByText("1 research node")).toBeVisible();
 });

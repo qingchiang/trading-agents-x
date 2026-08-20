@@ -127,6 +127,50 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
 
 
 @pytest.mark.anyio
+async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
+    run, _ = web_repository.create_run(
+        request,
+        web_settings.resolve_run(request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
+        research_kind="full",
+    )
+    web_repository.claim_run(run.id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture", evidence_type="fixture", requested_date=request.analysis_date,
+        effective_date=request.analysis_date, content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=request.ticker, analysis_date=request.analysis_date, items=(item,)
+    )
+    web_repository.seal_evidence(run.id, evidence)
+    web_repository.complete(
+        run.id,
+        AnalysisResult(
+            run_id=run.id, status=RunStatus.SUCCEEDED, instrument=request.ticker,
+            reports={}, decision=research_decision(evidence_refs=(item.ref,)), evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+
+    response = await web_client.get("/api/v1/timelines")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {"instrument": "NVDA", "primary_cycle_id": run.id, "node_count": 1}
+        ],
+        "total": 1,
+    }
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("result", "status", "code"),
     [

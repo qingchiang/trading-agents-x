@@ -38,6 +38,8 @@ from .contracts import (
     ResearchNodeView,
     ResearchRating,
     ResearchTimeline,
+    ResearchTimelinePage,
+    ResearchTimelineSummary,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
@@ -1356,6 +1358,36 @@ class RunRepository:
                 for run, _node in rows
             ),
         )
+
+    def list_timelines(self) -> ResearchTimelinePage:
+        """List derived Timelines without introducing a second product store."""
+        ticker = func.json_extract(RunRecord.request_json, "$.ticker")
+        stmt = (
+            select(
+                ticker.label("instrument"),
+                PrimaryResearchCycleRecord.full_run_id.label("primary_cycle_id"),
+                func.count(ResearchNodeRecord.run_id).label("node_count"),
+            )
+            .select_from(RunRecord)
+            .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+            .outerjoin(
+                PrimaryResearchCycleRecord,
+                PrimaryResearchCycleRecord.instrument == ticker,
+            )
+            .where(ResearchNodeRecord.research_kind == "full")
+            .group_by(ticker, PrimaryResearchCycleRecord.full_run_id)
+            .order_by(ticker)
+        )
+        with self.sessions() as session:
+            items = tuple(
+                ResearchTimelineSummary(
+                    instrument=str(row.instrument),
+                    primary_cycle_id=row.primary_cycle_id,
+                    node_count=int(row.node_count),
+                )
+                for row in session.execute(stmt).mappings()
+            )
+        return ResearchTimelinePage(items=items, total=len(items))
 
     def fail(
         self,

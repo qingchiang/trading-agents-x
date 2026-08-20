@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
+    ResearchTimelinePage,
     RunEvent,
     RunPage,
     RunStatus,
@@ -333,6 +334,10 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ):
         return repository.recent_instruments(limit=limit)
+
+    @app.get(f"{API_PREFIX}/timelines", response_model=ResearchTimelinePage)
+    def list_timelines():
+        return repository.list_timelines()
 
     @app.get(
         f"{API_PREFIX}/timelines/{{instrument}}",

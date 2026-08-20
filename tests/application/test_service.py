@@ -26,7 +26,12 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
-from tradingagents.application.database import RunRecord
+from tradingagents.application.database import (
+    DecisionRecord,
+    PrimaryResearchCycleRecord,
+    ResearchNodeRecord,
+    RunRecord,
+)
 from tradingagents.application.errors import UnsupportedInstrumentError
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
@@ -65,10 +70,94 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
         2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC
     )
     assert run.method_snapshot["schema_version"] == "1"
+    assert run.method_snapshot["research_schema_version"] == "1"
+    assert run.method_snapshot["prompt_versions"]
+    assert run.method_snapshot["enabled_roles"] == [
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+    ]
+    assert set(run.method_snapshot["data_routes"]) == {
+        "data_vendors",
+        "tool_vendors",
+        "data_vendors_by_market",
+    }
+    configured_routes = app_settings.default_run_settings.snapshot()["data_config"]
+    assert run.method_snapshot["data_routes"] == {
+        key: configured_routes[key]
+        for key in ("data_vendors", "tool_vendors", "data_vendors_by_market")
+    }
+    assert run.method_snapshot["coverage_policy"]["version"] == "1"
+    assert run.method_snapshot["thresholds"]["news_article_limit"] == 30
+    assert len(run.method_snapshot["configuration_fingerprint"]) == 64
     assert timeline.primary_cycle_id == result.run_id
     assert [(node.id, node.cycle_id, node.is_primary) for node in timeline.nodes] == [
         (result.run_id, result.run_id, True)
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("backend_url", "https://changed-gateway.example.invalid/v1"),
+        ("temperature", 0.7),
+        ("llm_max_retries", 5),
+    ],
+)
+def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
+    app_settings,
+    repository,
+    field,
+    changed_value,
+) -> None:
+    """Queued Runs retain non-secret LLM behavior that can change a method."""
+    base_run_settings = app_settings.default_run_settings.model_copy(
+        update={
+            "backend_url": "https://gateway.example.invalid/v1",
+            "temperature": 0.2,
+            "llm_max_retries": 3,
+            "data_config": {
+                **app_settings.default_run_settings.data_config,
+                "provider_api_key": "method-snapshot-test-secret",
+            },
+        }
+    )
+    base_settings = app_settings.model_copy(
+        update={"default_run_settings": base_run_settings}
+    )
+    request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
+
+    base_run = AnalysisService(
+        base_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    ).enqueue(request, idempotency_key=f"method-snapshot-base-{field}")
+    base_snapshot = repository.get_run(base_run.id).method_snapshot
+
+    assert base_snapshot["backend_url"] == "https://gateway.example.invalid/v1"
+    assert base_snapshot["temperature"] == 0.2
+    assert base_snapshot["llm_max_retries"] == 3
+    assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
+
+    changed_run_settings = base_run_settings.model_copy(
+        update={field: changed_value}
+    )
+    changed_settings = app_settings.model_copy(
+        update={"default_run_settings": changed_run_settings}
+    )
+    changed_run = AnalysisService(
+        changed_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    ).enqueue(request, idempotency_key=f"method-snapshot-changed-{field}")
+    changed_snapshot = repository.get_run(changed_run.id).method_snapshot
+
+    assert changed_snapshot[field] == changed_value
+    assert (
+        changed_snapshot["configuration_fingerprint"]
+        != base_snapshot["configuration_fingerprint"]
+    )
 
 
 def test_current_market_day_freezes_current_instant_and_future_rejects_without_run(
@@ -89,6 +178,69 @@ def test_current_market_day_freezes_current_instant_and_future_rejects_without_r
     with pytest.raises(ValueError, match="future analysis cutoff"):
         service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 25)))
     assert repository.list_runs().total == 1
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        "decision_insert",
+        "node_insert",
+        "primary_insert",
+        "run_success",
+        "attempt_success",
+    ],
+)
+def test_atomic_research_commit_rolls_back_every_persisted_boundary(
+    app_settings,
+    repository,
+    trigger,
+) -> None:
+    """SQLite failures leave the lifecycle in failed History, never partial Timeline."""
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+    trigger_sql = {
+        "decision_insert": """
+            CREATE TRIGGER fail_decision_insert BEFORE INSERT ON decisions
+            BEGIN SELECT RAISE(ABORT, 'injected decision failure'); END
+        """,
+        "node_insert": """
+            CREATE TRIGGER fail_node_insert BEFORE INSERT ON research_nodes
+            BEGIN SELECT RAISE(ABORT, 'injected node failure'); END
+        """,
+        "primary_insert": """
+            CREATE TRIGGER fail_primary_insert BEFORE INSERT ON primary_research_cycles
+            BEGIN SELECT RAISE(ABORT, 'injected primary failure'); END
+        """,
+        "run_success": """
+            CREATE TRIGGER fail_run_success BEFORE UPDATE OF status ON runs
+            WHEN NEW.status = 'succeeded'
+            BEGIN SELECT RAISE(ABORT, 'injected run success failure'); END
+        """,
+        "attempt_success": """
+            CREATE TRIGGER fail_attempt_success BEFORE UPDATE OF status ON run_attempts
+            WHEN NEW.status = 'succeeded'
+            BEGIN SELECT RAISE(ABORT, 'injected attempt success failure'); END
+        """,
+    }[trigger]
+    with repository.engine.begin() as connection:
+        connection.exec_driver_sql(trigger_sql)
+
+    with pytest.raises(Exception, match="injected"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24)))
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    with repository.sessions() as session:
+        assert session.query(DecisionRecord).count() == 0
+        assert session.query(ResearchNodeRecord).count() == 0
+        assert session.query(PrimaryResearchCycleRecord).count() == 0
+    assert repository.get_timeline("NVDA").nodes == ()
 
 
 @pytest.mark.parametrize(

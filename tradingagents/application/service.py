@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime, time
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -140,7 +142,7 @@ class AnalysisService:
             run_settings=run_settings,
         )
         information_cutoff_at = self._information_cutoff_at(request)
-        method_snapshot = self._method_snapshot(run_settings)
+        method_snapshot = self._method_snapshot(run_settings, request)
         view, created = self.repository.create_run(
             request,
             run_settings.snapshot(),
@@ -181,19 +183,70 @@ class AnalysisService:
         ).astimezone(UTC)
 
     @staticmethod
-    def _method_snapshot(run_settings: RunSettings) -> dict[str, Any]:
+    def _method_snapshot(
+        run_settings: RunSettings,
+        request: AnalysisRequest,
+    ) -> dict[str, Any]:
         """Persist audit-relevant, redacted method choices without replay claims."""
         snapshot = run_settings.snapshot()
-        return {
+        data_config = snapshot["data_config"]
+        method_snapshot = {
             "schema_version": "1",
+            "research_schema_version": "1",
             "application_version": __version__,
+            "prompt_versions": {
+                "analyst": "v6-sealed-context",
+                "research_case": "v6-readable",
+                "debate_agenda": "v9-thinking-json",
+                "rebuttal": "v5-compact",
+                "research_judge": "v6-readable",
+                "risk_review": "v6-readable",
+                "final_committee_brief": "v3-input-evidence-binding",
+                "final_committee": "v14-dimensionless-display-scale",
+            },
             "llm_provider": snapshot["llm_provider"],
             "quick_model": snapshot["quick_model"],
             "deep_model": snapshot["deep_model"],
+            "backend_url": snapshot["backend_url"],
             "quick_reasoning_effort": snapshot["quick_reasoning_effort"],
             "deep_reasoning_effort": snapshot["deep_reasoning_effort"],
+            "temperature": snapshot["temperature"],
+            "llm_max_retries": snapshot["llm_max_retries"],
             "output_language": snapshot["output_language"],
-            "data_routes": snapshot["data_config"].get("data_vendors", {}),
+            "enabled_roles": list(request.analysts),
+            "data_routes": {
+                "data_vendors": data_config.get("data_vendors", {}),
+                "tool_vendors": data_config.get("tool_vendors", {}),
+                "data_vendors_by_market": data_config.get(
+                    "data_vendors_by_market", {}
+                ),
+            },
+            "coverage_policy": {
+                "version": "1",
+                "required_domains": ["fundamentals", "market", "news"],
+                "advisory_domains": ["social"],
+            },
+            "thresholds": {
+                key: data_config.get(key)
+                for key in (
+                    "news_article_limit",
+                    "sentiment_filing_limit",
+                    "ticker_news_lookback_days",
+                    "social_lookback_days",
+                    "global_news_article_limit",
+                    "global_news_lookback_days",
+                )
+            },
+        }
+        canonical = json.dumps(
+            method_snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return {
+            **method_snapshot,
+            "configuration_fingerprint": sha256(canonical.encode()).hexdigest(),
         }
 
     def _validate_instrument_eligibility(
