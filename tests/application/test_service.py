@@ -5,10 +5,11 @@ import json
 import operator
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import UTC, date, datetime
 from threading import Barrier, Lock
 from typing import Annotated, TypedDict
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -36,6 +37,84 @@ from tradingagents.graph.research_graph import GraphExecution
 
 def _equity_resolver(ticker: str) -> dict[str, str]:
     return {"symbol": ticker, "quote_type": "EQUITY"}
+
+
+def test_first_full_run_commits_same_identity_node_and_primary_timeline(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+        now=lambda: datetime(2026, 7, 25, 1, 30, tzinfo=UTC),
+    )
+
+    result = service.run(
+        AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
+    )
+    timeline = repository.get_timeline("7203.T")
+    run = repository.get_run(result.run_id)
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert run.research_schema_version == "1"
+    assert run.information_cutoff_at == datetime(
+        2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC
+    )
+    assert run.method_snapshot["schema_version"] == "1"
+    assert timeline.primary_cycle_id == result.run_id
+    assert [(node.id, node.cycle_id, node.is_primary) for node in timeline.nodes] == [
+        (result.run_id, result.run_id, True)
+    ]
+
+
+def test_current_market_day_freezes_current_instant_and_future_rejects_without_run(
+    app_settings,
+    repository,
+) -> None:
+    now = datetime(2026, 7, 24, 15, 30, tzinfo=ZoneInfo("Asia/Tokyo"))
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: now,
+    )
+
+    run = service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=now.date()))
+    assert run.information_cutoff_at == now.astimezone(UTC)
+
+    with pytest.raises(ValueError, match="future analysis cutoff"):
+        service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 25)))
+    assert repository.list_runs().total == 1
+
+
+@pytest.mark.parametrize(
+    ("ticker", "expected"),
+    [
+        ("NVDA", datetime(2026, 7, 25, 3, 59, 59, 999999, tzinfo=UTC)),
+        ("7203.T", datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)),
+        ("600000.SS", datetime(2026, 7, 24, 15, 59, 59, 999999, tzinfo=UTC)),
+    ],
+)
+def test_historical_cutoffs_use_each_listed_instrument_market_day_end(
+    app_settings,
+    repository,
+    ticker,
+    expected,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: datetime(2026, 7, 26, tzinfo=UTC),
+    )
+
+    run = service.enqueue(AnalysisRequest(ticker=ticker, analysis_date="2026-07-24"))
+
+    assert run.information_cutoff_at == expected
 
 
 def _execution(ticker: str) -> GraphExecution:
@@ -118,6 +197,61 @@ class _ArtifactGraph:
             )
         )
         return execution
+
+
+class _DecisionlessGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(self, context, **_kwargs):
+        execution = _execution(context.request.ticker)
+        return GraphExecution(
+            state=execution.state,
+            evidence=execution.evidence,
+            reports=execution.reports,
+            decision=None,
+        )
+
+
+def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decision(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_DecisionlessGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+
+    with pytest.raises(ValueError, match="complete Research Decision"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items[0]
+    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_result(failed.id).decision is None
+
+
+def test_queued_legacy_run_fails_execution_boundary_without_a_node(
+    app_settings,
+    repository,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    run, _ = repository.create_run(request, {"fixture": True})
+    claimed = repository.claim_run(run.id, "worker", 30)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    )
+
+    with pytest.raises(ValueError, match="legacy runs"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert repository.get_run(run.id).status is RunStatus.FAILED
+    assert repository.get_timeline("NVDA").nodes == ()
 
 
 class _MetricFailureGraph:

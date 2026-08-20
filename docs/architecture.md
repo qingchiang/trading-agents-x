@@ -254,6 +254,8 @@ Alembic manages application tables:
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
+| `research_nodes` | same-identity successful Run role and direct Full-baseline relation |
+| `primary_research_cycles` | the only mutable per-instrument Timeline pointer |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.

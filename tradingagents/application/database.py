@@ -48,6 +48,16 @@ class RunRecord(Base):
     )
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    research_schema_version: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    information_cutoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    method_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    research_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     version: Mapped[str] = mapped_column(String(40), nullable=False)
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     cancel_requested: Mapped[bool] = mapped_column(
@@ -202,6 +212,34 @@ class DecisionRecord(Base):
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ResearchNodeRecord(Base):
+    """The role extension for a successful post-redesign Run."""
+
+    __tablename__ = "research_nodes"
+
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    research_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    full_baseline_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="RESTRICT"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class PrimaryResearchCycleRecord(Base):
+    """The sole mutable pointer of a derived instrument Timeline."""
+
+    __tablename__ = "primary_research_cycles"
+
+    instrument: Mapped[str] = mapped_column(String(64), primary_key=True)
+    full_run_id: Mapped[str] = mapped_column(
+        ForeignKey("research_nodes.run_id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 def create_sqlite_engine(path: Path, *, busy_timeout_ms: int = 5000) -> Engine:

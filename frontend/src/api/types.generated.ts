@@ -415,6 +415,17 @@ export interface components {
       unresolved_questions?: string[];
       valuation_assessment?: components["schemas"]["ValuationAssessment"] | null;
     };
+    ResearchNodeView: {
+      analysis_date: string;
+      cycle_id: string;
+      id: string;
+      information_cutoff_at: string;
+      instrument: string;
+      is_primary: boolean;
+      method_snapshot: Record<string, unknown>;
+      research_schema_version: string;
+      trashed_at?: string | null;
+    };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
     ResearchScenario: {
       core_assumptions: string[];
@@ -424,6 +435,11 @@ export interface components {
       reference_ranges?: components["schemas"]["ScenarioReferenceRange"][];
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
+    ResearchTimeline: {
+      instrument: string;
+      nodes?: components["schemas"]["ResearchNodeView"][];
+      primary_cycle_id?: string | null;
+    };
     ResearchWarning: {
       code?: string;
       evidence_ref?: string | null;
@@ -531,11 +547,14 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
+      information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
       research_rating?: components["schemas"]["ResearchRating"] | null;
+      research_schema_version?: string | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
@@ -552,10 +571,13 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
+      information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_schema_version?: string | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
@@ -583,6 +605,9 @@ export interface components {
       validation_issue_codes?: string[];
     };
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
+    TimelineDetail: {
+      timeline: components["schemas"]["ResearchTimeline"];
+    };
     ValidationError: {
       ctx?: {
       };

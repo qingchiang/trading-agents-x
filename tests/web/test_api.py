@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import date
+from datetime import UTC, date, datetime
 
 import httpx2 as httpx
 import pytest
@@ -64,6 +64,66 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
     assert repeated.json()["id"] == first.json()["id"]
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.anyio
+async def test_timeline_api_exposes_first_same_identity_full_node(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
+    run, _ = web_repository.create_run(
+        request,
+        web_settings.resolve_run(request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
+        research_kind="full",
+    )
+    web_repository.claim_run(run.id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fixture",
+        requested_date=request.analysis_date,
+        effective_date=request.analysis_date,
+        content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=request.ticker, analysis_date=request.analysis_date, items=(item,)
+    )
+    web_repository.seal_evidence(run.id, evidence)
+    web_repository.complete(
+        run.id,
+        AnalysisResult(
+            run_id=run.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(item.ref,)),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+
+    response = await web_client.get("/api/v1/timelines/NVDA")
+
+    assert response.status_code == 200
+    payload = response.json()["timeline"]
+    assert payload["primary_cycle_id"] == run.id
+    assert payload["nodes"] == [
+        {
+            "id": run.id,
+            "cycle_id": run.id,
+            "instrument": "NVDA",
+            "analysis_date": "2026-07-24",
+            "research_schema_version": "1",
+            "information_cutoff_at": "2026-07-24T23:59:59Z",
+            "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
+            "is_primary": True,
+            "trashed_at": None,
+        }
+    ]
 
 
 @pytest.mark.anyio

@@ -370,6 +370,15 @@ export default function Runs() {
                         )}
                       </td>
                       <td className="right">
+                        {run.research_schema_version &&
+                          run.status === "succeeded" && (
+                            <Link
+                              className="text-link"
+                              to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
+                            >
+                              Timeline
+                            </Link>
+                          )}
                         <Link className="text-link" to={`/runs/${run.id}`}>
                           {t("open")} →
                         </Link>

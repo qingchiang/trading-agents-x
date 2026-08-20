@@ -12,6 +12,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
+    ResearchTimeline,
     RunAttemptView,
     RunView,
 )
@@ -64,6 +65,10 @@ class RunDetail(ApiModel):
     result: AnalysisResult | None = None
     attempts: tuple[RunAttemptView, ...] = ()
     evidence_status: EvidenceSealView
+
+
+class TimelineDetail(ApiModel):
+    timeline: ResearchTimeline
 
 
 class RunCreateRequest(AnalysisRequest):

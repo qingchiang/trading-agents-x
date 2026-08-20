@@ -19,6 +19,9 @@ function makeRun(
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
     instrument_local_name: null,
+    research_schema_version: status === "succeeded" ? "1" : null,
+    information_cutoff_at: status === "succeeded" ? "2026-07-24T23:59:59Z" : null,
+    method_snapshot: status === "succeeded" ? { llm_provider: "openai" } : null,
     research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
@@ -340,6 +343,33 @@ test("runs, templates, trash, and restores local research", async ({
         })),
       });
     }
+    const timelineMatch = path.match(/^\/api\/v1\/timelines\/([^/]+)$/);
+    if (timelineMatch) {
+      const instrument = decodeURIComponent(timelineMatch[1]);
+      const nodes = [...runs.values()]
+        .filter((run) => run.request.ticker === instrument)
+        .filter((run) => run.status === "succeeded" && run.research_schema_version)
+        .map((run) => ({
+          id: run.id,
+          cycle_id: run.id,
+          instrument,
+          analysis_date: run.request.analysis_date,
+          research_schema_version: run.research_schema_version,
+          information_cutoff_at: run.information_cutoff_at,
+          method_snapshot: run.method_snapshot,
+          is_primary: run.id === "run-report",
+          trashed_at: run.trashed_at,
+        }));
+      return route.fulfill({
+        json: {
+          timeline: {
+            instrument,
+            primary_cycle_id: nodes[0]?.id ?? null,
+            nodes,
+          },
+        },
+      });
+    }
     if (path === "/api/v1/runs" && request.method() === "GET") {
       const trashState = url.searchParams.get("trash_state") ?? "active";
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -584,6 +614,13 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),
   ).toBeVisible();
+
+  await page.goto("/timelines/NVDA");
+  await expect(page.getByText("Primary Cycle")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open operational Run →" })).toHaveAttribute(
+    "href",
+    "/runs/run-report",
+  );
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });

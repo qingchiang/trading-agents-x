@@ -2932,6 +2932,71 @@
         "title": "ResearchDecision",
         "type": "object"
       },
+      "ResearchNodeView": {
+        "additionalProperties": false,
+        "description": "A Run-backed Full node; it deliberately owns no duplicate research data.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "information_cutoff_at": {
+            "format": "date-time",
+            "title": "Information Cutoff At",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "is_primary": {
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "method_snapshot": {
+            "additionalProperties": true,
+            "title": "Method Snapshot",
+            "type": "object"
+          },
+          "research_schema_version": {
+            "title": "Research Schema Version",
+            "type": "string"
+          },
+          "trashed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trashed At"
+          }
+        },
+        "required": [
+          "id",
+          "cycle_id",
+          "instrument",
+          "analysis_date",
+          "research_schema_version",
+          "information_cutoff_at",
+          "method_snapshot",
+          "is_primary"
+        ],
+        "title": "ResearchNodeView",
+        "type": "object"
+      },
       "ResearchRating": {
         "enum": [
           "Buy",
@@ -2995,6 +3060,39 @@
         ],
         "title": "ResearchScenarioKind",
         "type": "string"
+      },
+      "ResearchTimeline": {
+        "additionalProperties": false,
+        "properties": {
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "nodes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeView"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "primary_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Cycle Id"
+          }
+        },
+        "required": [
+          "instrument"
+        ],
+        "title": "ResearchTimeline",
+        "type": "object"
       },
       "ResearchWarning": {
         "additionalProperties": false,
@@ -3779,6 +3877,18 @@
             "title": "Id",
             "type": "string"
           },
+          "information_cutoff_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Cutoff At"
+          },
           "instrument_local_name": {
             "anyOf": [
               {
@@ -3800,6 +3910,18 @@
               }
             ],
             "title": "Instrument Name"
+          },
+          "method_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Snapshot"
           },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
@@ -3824,6 +3946,17 @@
                 "type": "null"
               }
             ]
+          },
+          "research_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Schema Version"
           },
           "source_run_id": {
             "anyOf": [
@@ -3950,6 +4083,18 @@
             "title": "Id",
             "type": "string"
           },
+          "information_cutoff_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Cutoff At"
+          },
           "instrument_local_name": {
             "anyOf": [
               {
@@ -3972,6 +4117,18 @@
             ],
             "title": "Instrument Name"
           },
+          "method_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Snapshot"
+          },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
@@ -3985,6 +4142,17 @@
               }
             ],
             "title": "Request"
+          },
+          "research_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Schema Version"
           },
           "source_run_id": {
             "anyOf": [
@@ -4183,6 +4351,19 @@
         ],
         "title": "TableDataType",
         "type": "string"
+      },
+      "TimelineDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "timeline": {
+            "$ref": "#/components/schemas/ResearchTimeline"
+          }
+        },
+        "required": [
+          "timeline"
+        ],
+        "title": "TimelineDetail",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -5064,6 +5245,45 @@
           }
         },
         "summary": "Retry Run"
+      }
+    },
+    "/api/v1/timelines/{instrument}": {
+      "get": {
+        "operationId": "get_timeline_api_v1_timelines__instrument__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instrument",
+            "required": true,
+            "schema": {
+              "title": "Instrument",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Timeline"
       }
     }
   }

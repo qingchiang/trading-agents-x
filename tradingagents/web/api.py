@@ -66,6 +66,7 @@ from .models import (
     RunBatchResult,
     RunCreateRequest,
     RunDetail,
+    TimelineDetail,
 )
 
 API_PREFIX = "/api/v1"
@@ -332,6 +333,13 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ):
         return repository.recent_instruments(limit=limit)
+
+    @app.get(
+        f"{API_PREFIX}/timelines/{{instrument}}",
+        response_model=TimelineDetail,
+    )
+    def get_timeline(instrument: str):
+        return TimelineDetail(timeline=repository.get_timeline(instrument))
 
     @app.post(
         f"{API_PREFIX}/runs/trash",

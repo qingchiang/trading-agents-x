@@ -7,6 +7,7 @@ export type RunSummaryView = components["schemas"]["RunSummaryView"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
+export type TimelineDetail = components["schemas"]["TimelineDetail"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
 export type ResearchArtifact = components["schemas"]["ResearchArtifact"];
@@ -116,6 +117,8 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  timeline: (instrument: string) =>
+    request<TimelineDetail>(`/api/v1/timelines/${encodeURIComponent(instrument)}`),
   evidence: (id: string) =>
     request<EvidenceBundle>(`/api/v1/runs/${id}/evidence`),
   artifacts: (id: string, attempt?: number) =>

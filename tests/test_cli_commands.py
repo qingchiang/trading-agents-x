@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime
+from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from alembic import command as alembic_command
+from alembic.config import Config
 from typer.testing import CliRunner
 
 import cli.main as cli
@@ -597,13 +600,24 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
     cli_settings: AppSettings,
     tmp_path: Path,
 ) -> None:
-    upgrade_database(cli_settings, revision="0004_instrument_local_name")
+    upgrade_database(cli_settings)
     repository = RunRepository(cli_settings)
     request = cli.AnalysisRequest(
         ticker="NVDA",
         analysis_date="2026-07-24",
     )
     run, _ = repository.create_run(request, {"fixture": True})
+    repository.engine.dispose()
+    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
+    with resources.as_file(migration_root) as script_location:
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+        config.set_main_option(
+            "sqlalchemy.url", f"sqlite+pysqlite:///{cli_settings.database_path}"
+        )
+        config.attributes["busy_timeout_ms"] = cli_settings.busy_timeout_ms
+        alembic_command.downgrade(config, "0004_instrument_local_name")
+    repository = RunRepository(cli_settings)
     with repository.engine.begin() as connection:
         decision_id = connection.exec_driver_sql(
             "INSERT INTO decisions "
@@ -673,7 +687,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute(
                 "SELECT version_num FROM alembic_version"
-            ).fetchone() == ("0005_remove_legacy_memory",)
+            ).fetchone() == ("0006_run_backed_full_nodes",)
             assert upgraded.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"

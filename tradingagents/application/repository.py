@@ -35,7 +35,9 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchCase,
     ResearchDecision,
+    ResearchNodeView,
     ResearchRating,
+    ResearchTimeline,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
@@ -52,6 +54,8 @@ from .contracts import (
 from .database import (
     Base,
     DecisionRecord,
+    PrimaryResearchCycleRecord,
+    ResearchNodeRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
@@ -180,6 +184,10 @@ class RunRepository:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
+        research_schema_version: str | None = None,
+        information_cutoff_at: datetime | None = None,
+        method_snapshot: dict[str, Any] | None = None,
+        research_kind: str | None = None,
     ) -> tuple[RunView, bool]:
         if not isinstance(request, AnalysisRequest):
             raise TypeError(
@@ -223,6 +231,16 @@ class RunRepository:
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
                     config_json=_sanitize_payload(config_snapshot),
+                    research_schema_version=research_schema_version,
+                    information_cutoff_at=(
+                        information_cutoff_at.astimezone(UTC).replace(tzinfo=None)
+                        if information_cutoff_at and information_cutoff_at.tzinfo
+                        else information_cutoff_at
+                    ),
+                    method_snapshot_json=_sanitize_payload(method_snapshot)
+                    if method_snapshot is not None
+                    else None,
+                    research_kind=research_kind,
                     version=__version__,
                     current_attempt=1,
                     cancel_requested=False,
@@ -1243,6 +1261,12 @@ class RunRepository:
                 raise EvidenceConflictError(
                     "completed result does not match the sealed evidence"
                 )
+            is_post_redesign_full = (
+                record.research_schema_version is not None
+                and record.research_kind == "full"
+            )
+            if is_post_redesign_full and result.decision is None:
+                raise ValueError("Full Research Node requires a complete Research Decision")
             if result.decision is not None:
                 request = RunRequestSnapshot.model_validate(record.request_json)
                 market = self.market_bucket(request.ticker)
@@ -1264,6 +1288,25 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
+            if is_post_redesign_full:
+                node = ResearchNodeRecord(
+                    run_id=run_id,
+                    research_kind="full",
+                    full_baseline_run_id=None,
+                    created_at=now,
+                )
+                session.add(node)
+                request = RunRequestSnapshot.model_validate(record.request_json)
+                primary = session.get(PrimaryResearchCycleRecord, request.ticker)
+                if primary is None:
+                    session.add(
+                        PrimaryResearchCycleRecord(
+                            instrument=request.ticker,
+                            full_run_id=run_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1276,6 +1319,43 @@ class RunRepository:
             attempt.lease_expires_at = None
             aggregate = self._merge_metrics(record, attempt, result.metrics)
         return aggregate
+
+    def get_timeline(self, instrument: str) -> ResearchTimeline:
+        """Return retained Full nodes without turning Execution History into a copy."""
+        with self.sessions() as session:
+            primary = session.get(PrimaryResearchCycleRecord, instrument)
+            rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(
+                        func.json_extract(RunRecord.request_json, "$.ticker")
+                        == instrument,
+                        ResearchNodeRecord.research_kind == "full",
+                    )
+                    .order_by(RunRecord.request_json["analysis_date"], RunRecord.id)
+                )
+            )
+        return ResearchTimeline(
+            instrument=instrument,
+            primary_cycle_id=primary.full_run_id if primary else None,
+            nodes=tuple(
+                ResearchNodeView(
+                    id=run.id,
+                    cycle_id=run.id,
+                    instrument=instrument,
+                    analysis_date=RunRequestSnapshot.model_validate(
+                        run.request_json
+                    ).analysis_date,
+                    research_schema_version=run.research_schema_version,
+                    information_cutoff_at=_aware(run.information_cutoff_at),
+                    method_snapshot=run.method_snapshot_json or {},
+                    is_primary=primary is not None and primary.full_run_id == run.id,
+                    trashed_at=_aware(run.trashed_at),
+                )
+                for run, _node in rows
+            ),
+        )
 
     def fail(
         self,
@@ -1550,6 +1630,9 @@ class RunRepository:
         return RunView(
             id=record.id,
             source_run_id=record.source_run_id,
+            research_schema_version=record.research_schema_version,
+            information_cutoff_at=_aware(record.information_cutoff_at),
+            method_snapshot=record.method_snapshot_json,
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
             status=RunStatus(record.status),

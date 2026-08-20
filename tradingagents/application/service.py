@@ -6,6 +6,7 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -22,8 +23,10 @@ from tradingagents.dataflows.interface import (
     resolve_instrument_eligibility,
     validate_market_routing,
 )
+from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
 from tradingagents.persistence import upgrade_database
+from tradingagents.version import __version__
 
 from .contracts import (
     AnalysisRequest,
@@ -91,6 +94,7 @@ class AnalysisService:
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
             resolve_local_instrument_name
         ),
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
         if repository is None:
@@ -103,6 +107,7 @@ class AnalysisService:
             raise TypeError("eligibility_resolver is required")
         self.eligibility_resolver = eligibility_resolver
         self.local_name_resolver = local_name_resolver
+        self.now = now
 
     def enqueue(
         self,
@@ -134,11 +139,17 @@ class AnalysisService:
             request,
             run_settings=run_settings,
         )
+        information_cutoff_at = self._information_cutoff_at(request)
+        method_snapshot = self._method_snapshot(run_settings)
         view, created = self.repository.create_run(
             request,
             run_settings.snapshot(),
             idempotency_key=idempotency_key,
             source_run_id=source_run_id,
+            research_schema_version="1",
+            information_cutoff_at=information_cutoff_at,
+            method_snapshot=method_snapshot,
+            research_kind="full",
         )
         if created:
             self.repository.append_event(
@@ -151,6 +162,39 @@ class AnalysisService:
                 },
             )
         return view
+
+    def _information_cutoff_at(self, request: AnalysisRequest) -> datetime:
+        """Freeze the one PIT boundary before the Run becomes durable."""
+        now = self.now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        zone = market_timezone(request.ticker)
+        market_now = now.astimezone(zone)
+        if request.analysis_date > market_now.date():
+            raise ValueError("future analysis cutoff is not allowed")
+        if request.analysis_date == market_now.date():
+            return now.astimezone(UTC)
+        return datetime.combine(
+            request.analysis_date,
+            time.max,
+            tzinfo=zone,
+        ).astimezone(UTC)
+
+    @staticmethod
+    def _method_snapshot(run_settings: RunSettings) -> dict[str, Any]:
+        """Persist audit-relevant, redacted method choices without replay claims."""
+        snapshot = run_settings.snapshot()
+        return {
+            "schema_version": "1",
+            "application_version": __version__,
+            "llm_provider": snapshot["llm_provider"],
+            "quick_model": snapshot["quick_model"],
+            "deep_model": snapshot["deep_model"],
+            "quick_reasoning_effort": snapshot["quick_reasoning_effort"],
+            "deep_reasoning_effort": snapshot["deep_reasoning_effort"],
+            "output_language": snapshot["output_language"],
+            "data_routes": snapshot["data_config"].get("data_vendors", {}),
+        }
 
     def _validate_instrument_eligibility(
         self,
@@ -228,6 +272,10 @@ class AnalysisService:
 
         with self._heartbeat(run.id, worker_id):
             try:
+                if run.research_schema_version is None:
+                    raise ValueError(
+                        "legacy runs cannot cross the Research Timeline execution boundary"
+                    )
                 # Run views expose a tolerant retained snapshot.  Execution
                 # must cross the current creation contract explicitly so a
                 # future admission change also gates already-queued legacy

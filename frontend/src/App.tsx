@@ -6,6 +6,7 @@ import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
 import Settings from "./pages/Settings";
+import Timeline from "./pages/Timeline";
 import { usePathname } from "./router";
 
 export default function App() {
@@ -23,6 +24,8 @@ export default function App() {
       <NewRun />
     ) : pathname === "/runs" ? (
       <Runs />
+    ) : /^\/timelines\/[^/]+\/?$/.test(pathname) ? (
+      <Timeline />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (
       <RunDetail />
     ) : pathname === "/settings" ? (

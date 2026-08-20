@@ -1657,6 +1657,9 @@ class EvidenceSealView(FrozenModel):
 class RunView(FrozenModel):
     id: str
     source_run_id: str | None = None
+    research_schema_version: str | None = None
+    information_cutoff_at: datetime | None = None
+    method_snapshot: dict[str, Any] | None = None
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     status: RunStatus
@@ -1685,6 +1688,26 @@ class RunView(FrozenModel):
         if isinstance(value, AnalysisRequest):
             return value.model_dump(mode="python")
         return value
+
+
+class ResearchNodeView(FrozenModel):
+    """A Run-backed Full node; it deliberately owns no duplicate research data."""
+
+    id: str
+    cycle_id: str
+    instrument: str
+    analysis_date: date
+    research_schema_version: str
+    information_cutoff_at: datetime
+    method_snapshot: dict[str, Any]
+    is_primary: bool
+    trashed_at: datetime | None = None
+
+
+class ResearchTimeline(FrozenModel):
+    instrument: str
+    primary_cycle_id: str | None = None
+    nodes: tuple[ResearchNodeView, ...] = ()
 
 
 class RunAttemptView(FrozenModel):

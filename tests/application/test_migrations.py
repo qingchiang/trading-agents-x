@@ -83,7 +83,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0005_remove_legacy_memory"
+    assert revision == "0006_run_backed_full_nodes"
     assert {
         "id",
         "run_id",
@@ -120,6 +120,12 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "legacy_imports" not in table_names
     assert "trashed_at" in run_columns
     assert "instrument_local_name" in run_columns
+    assert {
+        "research_schema_version",
+        "information_cutoff_at",
+        "method_snapshot_json",
+        "research_kind",
+    } <= run_columns
     assert "ix_runs_trash" in run_indexes
     assert "outcomes" not in table_names
     assert "reflections" not in table_names
@@ -130,10 +136,10 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
     app_settings,
     tmp_path,
 ) -> None:
-    # Branch 3's released predecessor is the exact migration boundary for the
-    # compatibility break. Seed against that schema, without adding/removing
-    # columns to make the current ORM fit an older revision.
-    upgrade_database(app_settings, revision="0004_instrument_local_name")
+    # Create retained execution history with the current mapper, then move the
+    # real database back to the released predecessor before adding retired
+    # review rows. This keeps the fixture independent of newer ORM columns.
+    upgrade_database(app_settings)
     repository = RunRepository(app_settings)
     fixtures: dict[str, tuple] = {}
     for ticker in ("NVDA", "AAPL"):
@@ -197,6 +203,11 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
             "analysts": ["market", "social", "news"],
         }
 
+    repository.engine.dispose()
+    config = _alembic_config(app_settings)
+    command.downgrade(config, "0004_instrument_local_name")
+    repository = RunRepository(app_settings)
+
     # Seed both review states and their child reflections at the predecessor
     # head. The migration must intentionally discard all four rows.
     with repository.engine.begin() as connection:
@@ -242,7 +253,8 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
     try:
         inspector = inspect(engine)
         table_names = set(inspector.get_table_names())
-        assert "research_nodes" not in table_names
+        assert "research_nodes" in table_names
+        assert "primary_research_cycles" in table_names
         assert "research_timelines" not in table_names
         assert "outcomes" not in table_names
         assert "reflections" not in table_names
@@ -260,6 +272,11 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
                     connection.scalar(text(f"SELECT count(*) FROM {table}"))
                     == expected_count
                 )
+            assert connection.scalar(text("SELECT count(*) FROM research_nodes")) == 0
+            assert (
+                connection.scalar(text("SELECT count(*) FROM primary_research_cycles"))
+                == 0
+            )
     finally:
         engine.dispose()
 
