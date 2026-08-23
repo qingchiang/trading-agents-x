@@ -64,9 +64,9 @@ _Avoid_: Incremental summary, rating only
 
 **Decision Component**:
 A reviewable part of a Research Decision with a stable identifier scoped to its
-own Research Node. Research Reassessment and Outcome Review may refer to Full
-Baseline component identifiers, but those identifiers do not create global
-Claims or cross-node lifecycle objects.
+own Research Node. Research Reassessment may refer to Full Baseline component
+identifiers, but those identifiers do not create global Claims or cross-node
+lifecycle objects.
 _Avoid_: Global claim, question object
 
 **Atomic Research Commit**:
@@ -99,14 +99,14 @@ Baseline.
 _Avoid_: Initial node, anchor
 
 **Incremental Research Node**:
-A Research Node produced from a Full Baseline, all eligible information after
-that baseline through a later Analysis Cutoff, a Research Reassessment, a
-complete current Research Decision, and any then-observable Outcome Review. It
-is a direct child of the baseline, does not consume sibling Incremental Research
-Nodes, and cannot establish a Full Baseline. Its fixed product data also
-includes a Collection Manifest, Research Coverage, Performance Observation,
-Full Research Required result, Method Snapshot, and explicit status for any
-nonblocking Outcome Review failure or omission.
+A Research Node produced from a Full Baseline, genuinely new admitted
+information, a Research Reassessment, and a complete current Research Decision.
+The new information may be PIT Evidence, Near-live Advisory Evidence, or a newly
+completed stock session used by the current product. The Node is a direct child
+of the baseline, does not consume siblings, and cannot establish a Full
+Baseline; its fixed products also include Collection Summary, Research
+Availability, Performance Observation, Full Research Required, and Method
+Snapshot.
 _Avoid_: Delta, patch, memory update
 
 **Cycle Head**:
@@ -157,19 +157,32 @@ Incremental Research Nodes are produced.
 _Avoid_: Cycle head, previous node
 
 **Research Reassessment**:
-The required evaluation of how information available after a Full Baseline
-affects each of its Decision Components. Every baseline component is classified
-as reaffirmed, strengthened, weakened, overturned, or unresolved, with reasons
-and Evidence or Collection Manifest references. An overturned core thesis is
-one deterministic Full Research Required trigger.
+The required evaluation of how newly admitted information affects each Full
+Baseline Decision Component. Every baseline component is classified as
+reaffirmed, strengthened, weakened, overturned, or unresolved, with a concise
+reason grounded in admitted information and disclosed limitations. An
+overturned core thesis is one Full Research Required trigger.
 _Avoid_: Outcome review, reflection
 
 **Incremental Evidence**:
-Evidence first available after a Full Baseline and no later than an Incremental
-Research Node's Analysis Cutoff, including later corrections or restatements of
-earlier effective periods. Its provenance is explicit and is not restricted at
-the domain level to a data-vendor origin.
-_Avoid_: Recent data, delta snapshot
+New Evidence admitted for one Incremental Research Node. It is either strict
+PIT Evidence inside the Full-Baseline-to-target information window or explicitly
+bounded Near-live Advisory Evidence; its provenance and temporal basis remain
+visible.
+_Avoid_: Recent data, delta snapshot, historical replay
+
+**PIT Evidence**:
+Evidence whose reliable availability semantics establish that it was publicly
+knowable no later than the Research Run's Information Cutoff At. A later
+correction may qualify even when its Effective Date precedes the Full Baseline.
+_Avoid_: Retrieval-time snapshot, period-end-only data
+
+**Near-live Advisory Evidence**:
+An explicitly non-PIT retrieval-time observation admitted only when the target
+Analysis Cutoff is between zero and five market-local calendar days old. It may
+inform research but cannot prove historical completeness, historical absence,
+or strict historical availability for its domain.
+_Avoid_: PIT Evidence, historical snapshot, replayable evidence
 
 **Evidence Available At**:
 The earliest reliably established instant at which Evidence was publicly
@@ -190,68 +203,39 @@ bundle; Incremental research may reference only its own bundle and its Full
 Baseline's bundle, never a sibling Node or unsealed Evidence.
 _Avoid_: Best-effort citation, cross-cycle evidence link
 
-**Collection Manifest**:
-The deterministic audit of one Incremental Research Run's requested sources and
-domains, planned and observed scan intervals, collection outcomes, source
-watermarks, sanitized failure classes, and produced Evidence references. It is
-the collection record from which Research Coverage is assessed, not the
-coverage judgment itself. A source outcome is complete with records, complete
-and empty, partial, unavailable, failed, not queried, or not applicable; an
-empty result is complete only when the scanned interval is proven.
-_Avoid_: Research coverage, source state machine
+**Collection Summary**:
+The immutable account of the data sources actually used by one Incremental
+Research Run, the observations admitted from them, and their material
+limitations or failures. It describes actual results rather than certifying
+every configured provider, an exhaustive scan, or historical absence.
+_Avoid_: Collection Manifest, provider attempt ledger, completeness proof
 
 **Information Advancement**:
-New admissible input sufficient to justify an Incremental Research Node. It may
-be new Evidence, a proven complete source scan with no matching records, or a
-Full Baseline component that has newly become reviewable; Performance is a
-derived result rather than a separate advancement, and unavailable, failed, or
-unqueried results alone do not advance information.
-_Avoid_: Nonempty evidence, elapsed time
+New admissible information sufficient to justify an Incremental Research Node:
+at least one new PIT or qualified Near-live Advisory observation, or a newly
+completed stock-market session used by the current research product. Elapsed
+time, a repeated observation changed only by retrieval time, provider failure,
+and an unproven empty feed do not advance information.
+_Avoid_: Complete-empty proof, elapsed time, successful request alone
 
-**Research Coverage**:
-The explicit account of which required research domains and sources were or
-were not represented by admissible Evidence or proven collection. Each
-domain is Required or Advisory and is classified as complete, limited, missing,
-or not applicable. Limited or missing Required coverage produces a
-deterministic Full Research Required reason; Advisory gaps do not do so alone.
-_Avoid_: Data availability, confidence
-
-**Outcome Review**:
-A retrospective LLM evaluation of existing Full Baseline Decision Components
-using current Incremental Evidence and Performance Observation, without
-consuming sibling conclusions or inventing criteria absent from the baseline.
-Each reviewed component is supported, contradicted, mixed, not yet observable,
-or not evaluable, with the reason for any inconclusive state.
-_Avoid_: Research reassessment, memory, settlement
+**Research Availability**:
+The disclosed breadth of usable information obtained for one Research Run,
+classified by research domain as available, limited, or missing. It communicates
+input limitations without claiming exhaustive provider or historical coverage.
+_Avoid_: Research Coverage, source certification, confidence score
 
 **Performance Observation**:
-A deterministic measurement of a Listed Instrument's Vendor-adjusted Return,
-its Benchmark Price-index Returns, and their Reported Benchmark Differences
-over an explicitly bounded interval. It records requested cutoffs and the
-latest completed market sessions whose valid closes were available by the Run's
-Information Cutoff At; each benchmark is independently available, and the
-result may inform Outcome Review and Incremental Synthesis without becoming
-external Evidence.
+A deterministic measurement of a Listed Instrument's Vendor-adjusted Return
+over an explicitly bounded interval, with independently optional Benchmark
+Context. It records the actual completed market sessions and price-series basis
+and may inform Incremental Synthesis without becoming external Evidence.
 _Avoid_: Reflection, verdict
 
 **Performance Calculation Record**:
-The immutable account of a Performance Observation's exact endpoint values,
-price bases, relevant adjustments or corporate actions, formula, unrounded
-results, provider identities, and retrieval times. It closes the calculation's
-audit trail without requiring a copy of the complete daily price series.
+The immutable account of a Performance Observation's endpoint values, sessions,
+price basis, formula, provider identity, retrieval time, and result. It preserves
+the calculation's provenance without requiring a copy of the complete series.
 _Avoid_: Rounded display value, full price history
-
-**Performance Reference**:
-A typed reference from a Decision Component, Research Reassessment, or Outcome
-Review to a Performance Calculation Record. It is distinct from an Evidence
-reference and cannot satisfy Research Coverage.
-_Avoid_: Evidence reference, embedded calculation
-
-**Performance Reference Closure**:
-The requirement that every committed Performance Reference resolves to the
-same Research Node's sealed and successful Performance Calculation Record. A
-closure violation prevents Atomic Research Commit.
-_Avoid_: Cross-node calculation reference, dangling performance reference
 
 **Not Yet Observable Performance**:
 The Performance Observation state in which its start and end cutoffs resolve
@@ -260,10 +244,9 @@ does not by itself constitute Information Advancement.
 _Avoid_: Zero return, unavailable performance
 
 **Performance Component Status**:
-The state of one Vendor-adjusted Return, Benchmark Price-index Return, or
-Reported Benchmark Difference: calculated, not yet observable, unavailable, or
-failed. The Performance Observation is complete, partial, or unavailable as
-derived from its component states rather than from an ambiguous empty value.
+The state of the stock return or one optional benchmark context: calculated,
+not yet observable, or unavailable. A transport or provider failure is retained
+as a limitation and makes only its affected component unavailable.
 _Avoid_: Null result, overall run status
 
 **Research Market Series**:
@@ -282,40 +265,21 @@ _Avoid_: Price return, total return, raw return
 
 **Adjustment Vintage**:
 The provider, adjustment basis, and retrieval instance shared by both endpoint
-prices of one Vendor-adjusted Return. An explicitly disclosed fallback may
-select the vintage, but endpoint stitching or mid-interval basis changes are
-invalid.
+prices of one Vendor-adjusted Return. A broader series may be truncated locally,
+but endpoint stitching or mid-interval basis changes are invalid.
 _Avoid_: Mixed-provider series, baseline price snapshot
 
-**Performance Benchmark**:
-A named price index used to contextualize a Listed Instrument's Vendor-adjusted
-Return. Its stable product identity is independent of provider symbols and
-routes; every supported market has one Core Benchmark and one Focus Benchmark,
-with independent availability and no ETF substitution or cross-provider series
-stitching.
-_Avoid_: Provider ticker, ETF proxy, total-return index
-
-**Core Benchmark**:
-The broad-market Performance Benchmark: TOPIX for Japan, the S&P 500 for the
-United States, and the CSI 800 for mainland China.
-_Avoid_: Focus benchmark, universal benchmark
-
-**Focus Benchmark**:
-The secondary Performance Benchmark representing a narrower segment or style:
-the JPX Prime 150 for Japan, the Nasdaq 100 for the United States, and the CSI
-STAR & CHINEXT 50 for mainland China. It complements rather than replaces the
-Core Benchmark.
-_Avoid_: Core benchmark, peer group, sector benchmark
-
-**Benchmark Price-index Return**:
-The change in a Performance Benchmark's official price-index level over the
-same actual sessions selected for the Listed Instrument.
-_Avoid_: Total-return index return, ETF return
+**Benchmark Context**:
+An optional named index return displayed beside a Listed Instrument's
+Vendor-adjusted Return for the same interval where compatible endpoints are
+available. It is independently unavailable and is not required for an
+Incremental Research Node.
+_Avoid_: Required benchmark, peer ranking, ETF substitution
 
 **Reported Benchmark Difference**:
-The arithmetic difference between a Vendor-adjusted Return and a Benchmark
-Price-index Return over the same actual sessions. It is descriptive, may mix
-adjustment bases, and is neither Alpha nor a like-for-like excess return.
+The optional arithmetic difference between a Vendor-adjusted Return and a
+Benchmark Context over compatible actual sessions. It is descriptive and is
+neither Alpha nor a like-for-like excess return.
 _Avoid_: Alpha, benchmark-relative return, excess return
 
 **Full Research Required**:
@@ -323,10 +287,10 @@ An explicit warning on an Incremental Research Node that an independent Full
 Research Node is needed because incremental interpretation is no longer a
 sufficient foundation. The warning does not prevent the node from being a Cycle
 Head or its decision from being Primary Research, and it does not grant Full
-Baseline eligibility. Its structured reasons are the union of non-removable
-deterministic reasons and semantic reasons added by Incremental Synthesis, with
-each reason carrying its origin and supporting Evidence or Collection Manifest
-references.
+Baseline eligibility. Its structured reasons explain a material thesis change,
+identity uncertainty, unreliable attribution, or another limitation that makes
+the bounded update insufficient; missing optional data alone is not such a
+reason.
 _Avoid_: Automatic escalation, failed update
 
 **Cycle Warning**:
@@ -341,19 +305,20 @@ altering cycle or node warnings.
 _Avoid_: Cycle warning, inherited node warning, baseline failure
 
 **Analysis Cutoff**:
-The market-local date beyond which information is inadmissible to a Research
-Node. A Research Cycle contains at most one active Incremental Research Node
-for that date, while different cycles may contain nodes at the same cutoff and
-multiple Full Research Nodes may independently share a cutoff. Creating an
-Incremental Research Node does not require a cutoff later than the Cycle Head.
+The market-local target date of a Research Node. Strict PIT Evidence must be
+knowable by its corresponding Information Cutoff At; explicitly bounded
+Near-live Advisory Evidence is the only non-PIT exception. A Research Cycle
+contains at most one active Incremental Research Node for that date, while
+different cycles may contain nodes at the same cutoff and multiple Full Nodes
+may independently share a cutoff.
 _Avoid_: Run time, creation time
 
 **Information Cutoff At**:
-The single precise instant bounding every admissible input to a Research Run,
-including Evidence and market closes. It is market-local day-end for a
-historical Analysis Cutoff or is fixed immediately before current-date research
-begins; Performance sessions derive from it rather than introducing another
-cutoff, and a future Analysis Cutoff is invalid.
+The precise instant bounding strict PIT inputs and completed market sessions
+for a Research Run. It is market-local day-end for a historical Analysis Cutoff
+or is fixed immediately before current-date research begins; a future Analysis
+Cutoff is invalid. Near-live Advisory Evidence retains its later retrieval time
+and never masquerades as PIT Evidence at this cutoff.
 _Avoid_: Performance cutoff, run completion time
 
 **Manual Update Request**:
@@ -364,9 +329,9 @@ _Avoid_: Schedule, settlement job
 **Method Snapshot**:
 The immutable, non-secret account of the research schema, application and
 prompt versions, model and provider settings, enabled roles, data-routing and
-coverage policy, language, thresholds, and configuration fingerprint used by a
-Research Node. It supports audit and comparison without promising exact
-replay.
+data-availability policy, language, thresholds, and configuration fingerprint
+used by a Research Node. It supports audit and comparison without promising
+exact replay.
 _Avoid_: Secret-bearing config, reproducibility guarantee
 
 **Execution History**:

@@ -39,7 +39,7 @@ or portfolio rebalancing.
 ## Product surface
 
 - **Dashboard:** queued and recent runs with ticker display names and statuses.
-- **New Run:** instrument, point-in-time date, analysts, profile,
+- **New Run:** instrument, market-local analysis date, analysts, profile,
   provider/models, reasoning effort, report language, and recent-instrument
   suggestions.
 - **Runs:** active/trash filters, search, pagination, and recoverable batch
@@ -323,9 +323,12 @@ admission boundary before requeueing a retained Run.
 
 Historical analysis uses the instrument market's local calendar. Evidence keeps
 its requested date, effective date, timezone-aware availability, actual source,
-quality, fallback flag, and provenance. Future-visible evidence is rejected
-when the bundle is sealed. Missing coverage is unknown, not a neutral or bearish
-signal.
+quality, fallback flag, and provenance. Strict PIT Evidence rejects information
+visible only after the cutoff. The bounded exception is explicitly non-PIT
+Near-live Advisory Evidence for today and the preceding five market-local
+calendar dates; it retains retrieval-time provenance and cannot prove
+historical completeness or absence. Missing information is unknown, not a
+neutral or bearish signal.
 
 Execution History preserves runs, attempts, events, reports, sealed Evidence,
 Research Decisions, exports, and Trash state for audit and recovery. It is not a

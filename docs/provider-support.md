@@ -37,7 +37,9 @@ it does not prove end-to-end Research Graph compatibility.
 After a provider response has passed the typed boundary, the following
 application rules are the same for every provider:
 
-- Evidence sealing, provenance, point-in-time checks, and future-data rejection.
+- Evidence sealing, provenance, strict point-in-time checks, future-data
+  rejection, and the explicitly non-PIT zero-to-five-day Near-live Advisory
+  exception.
 - Local Pydantic and semantic validation.
 - Evidence reference allowlists.
 - Restricted formula evaluation, numeric-date resolution, and audit status.

@@ -254,7 +254,7 @@ Alembic manages application tables:
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
-| `research_nodes` | same-identity successful Run role and direct Full-baseline relation |
+| `research_nodes` | same-identity successful Run role, direct Full-baseline relation, and Node-owned Incremental product JSON |
 | `primary_research_cycles` | the only mutable per-instrument Timeline pointer |
 
 LangGraph saver tables live in the same database file but remain owned by its
@@ -501,6 +501,49 @@ remain available through Execution History. Retained pre-redesign Decision JSON
 may contain a `memory_refs` field; hydration drops that field while preserving
 the current core Decision contract.
 
+## Incremental research boundary
+
+Incremental Research is a bounded update to one explicitly selected Full
+Baseline, not a strict historical backtest or a chained revision. It receives
+no sibling Incremental conclusion, seals only its own newly admitted Evidence,
+performs one required synthesis into the complete current `ResearchDecision`,
+and commits its Evidence, Reassessment, Decision, Node role, and fixed products
+atomically. Its direct Full Baseline bundle is referenceable but is never
+copied into the current Node.
+
+The Incremental collector reuses the Run's configured routers and existing
+market assemblers. A provider may receive an exact interval or a broader range
+that the producer truncates locally. The product records actual selected
+sources, admitted observations, material limitations, and sanitized failures;
+it does not mirror the configured chain into a second provider registry, model
+every unattempted fallback as a product result, or certify an exhaustive scan
+when the provider exposes only a bounded feed.
+
+Information Advancement requires genuine new information: newly admitted PIT
+Evidence, qualified Near-live Advisory Evidence, or a newly completed stock
+session used by the current research product. Elapsed time, provider success
+without usable information, a repeated observation whose only change is its
+retrieval time, and an unproven empty response do not advance a Run. A thin
+Research Availability summary discloses which research domains were available,
+limited, or missing without claiming historical or provider completeness.
+Missing optional inputs do not by themselves require a new Full Research Run.
+
+Stock Vendor-adjusted Return is the deterministic v1 Performance requirement.
+Its two endpoints come from one disclosed provider/adjustment/retrieval series;
+that series may also supply market Evidence. Named benchmark returns are
+independent optional context and never block a calculated stock return or an
+otherwise valid Incremental Node. The stock component itself is always recorded
+but may be Not Yet Observable or unavailable; an unavailable result does not
+block a Node that has other genuine Information Advancement. Stock-minus-
+benchmark arithmetic, when shown, is a Reported Benchmark Difference and never
+Alpha.
+
+[ADR 0005](adr/0005-bounded-best-effort-incremental-data.md)
+supersedes the original complete-empty advancement, mandatory source-level
+Coverage audit, dual-benchmark parity, and v1 Outcome Review design.
+Full-rooted Cycle, slot uniqueness, Evidence ownership, reference closure, and
+atomic lifecycle invariants remain unchanged.
+
 ## Data routing and point-in-time contracts
 
 ### Symbols and market dates
@@ -537,12 +580,17 @@ The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
 
-Sources truncate observations to the cutoff. A disclosure/update source uses
-the conservative visibility boundary. Live-only values are withheld from
-historical runs; absence remains unknown rather than becoming a neutral or
-bearish signal. When a live-only response is cached, its producer-owned
-retrieval timestamp is cached with the payload and reused by consumers; cache
-hits are never restamped at assembly time.
+Sources truncate strict PIT observations to the cutoff. A disclosure/update
+source uses the conservative visibility boundary. Retrieval-time snapshots may
+be admitted only as explicitly non-PIT Near-live Advisory Evidence when the
+Analysis Cutoff is today or one of the preceding five market-local calendar
+dates. They may inform research but cannot prove historical completeness,
+historical absence, or strict historical availability for their domain; older
+live-only values are withheld. Absence remains unknown rather than becoming
+neutral or bearish.
+When a live-only response is cached, its producer-owned retrieval timestamp is
+cached with the payload and reused by consumers; cache hits are never restamped
+at assembly time.
 
 ### Vendor chains and assemblers
 
