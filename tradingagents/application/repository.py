@@ -1482,10 +1482,6 @@ class RunRepository:
                     )
             allowed_evidence_refs = set(baseline_items)
             allowed_evidence_refs.update(item.ref for item in evidence.items)
-            manifest_refs = {
-                f"manifest:{entry.domain}:{entry.source}"
-                for entry in products.collection_manifest.entries
-            }
             if not set(result.decision.evidence_refs).issubset(allowed_evidence_refs):
                 raise EvidenceConflictError("Incremental Decision references evidence outside its closure")
             for entry in products.reassessment.entries:
@@ -1493,22 +1489,10 @@ class RunRepository:
                     raise EvidenceConflictError(
                         "Incremental Reassessment references evidence outside its closure"
                     )
-                if not set(entry.manifest_entry_refs).issubset(manifest_refs):
-                    raise EvidenceConflictError(
-                        "Incremental Reassessment references another Collection Manifest"
-                    )
             for reason in products.full_research_required_reasons:
-                if not reason.evidence_refs and not reason.manifest_entry_refs:
-                    raise EvidenceConflictError(
-                        "Full Research Required reasons require reference closure"
-                    )
                 if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
                     raise EvidenceConflictError(
                         "Full Research Required references evidence outside its closure"
-                    )
-                if not set(reason.manifest_entry_refs).issubset(manifest_refs):
-                    raise EvidenceConflictError(
-                        "Full Research Required references another Collection Manifest"
                     )
             session.add(
                 RunEvidenceRecord(
@@ -1724,13 +1708,15 @@ class RunRepository:
                     ),
                     is_active=run.trashed_at is None,
                     trashed_at=_aware(run.trashed_at),
-                    collection_manifest=(
-                        products_by_id[run.id].collection_manifest
+                    collection_summary=(
+                        products_by_id[run.id].collection_summary
                         if products_by_id[run.id]
                         else None
                     ),
-                    research_coverage=(
-                        products_by_id[run.id].research_coverage if products_by_id[run.id] else None
+                    research_availability=(
+                        products_by_id[run.id].research_availability
+                        if products_by_id[run.id]
+                        else None
                     ),
                     information_advancement=(
                         products_by_id[run.id].information_advancement
@@ -1739,11 +1725,6 @@ class RunRepository:
                     ),
                     performance=(
                         products_by_id[run.id].performance if products_by_id[run.id] else None
-                    ),
-                    outcome_review_status=(
-                        products_by_id[run.id].outcome_review_status
-                        if products_by_id[run.id]
-                        else None
                     ),
                     reassessment=(
                         products_by_id[run.id].reassessment if products_by_id[run.id] else None

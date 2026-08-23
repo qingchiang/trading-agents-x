@@ -1,4 +1,4 @@
-"""Persist committed complete-empty Incremental Node products.
+"""Persist committed Incremental Node products.
 
 Revision ID: 0008_incremental_node_products
 Revises: 0007_incremental_request_slots

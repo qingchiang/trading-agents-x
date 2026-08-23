@@ -162,18 +162,19 @@ export default function Timeline() {
               </dd>
             </div>
           </dl>
-          {node.collection_manifest && (
+          {node.collection_summary && (
             <details>
-              <summary>Incremental Manifest</summary>
+              <summary>Collection Summary</summary>
               <ul>
-                {node.collection_manifest.entries.map((entry) => (
-                  <li key={`${entry.domain}:${entry.source}`}>
-                    {entry.domain} / {entry.source}: {entry.outcome}
-                    {entry.source_watermark ? ` (${entry.source_watermark})` : ""}
-                    {entry.evidence_refs?.length ? (
+                {node.collection_summary.domains.map((result) => (
+                  <li key={result.domain}>
+                    {result.domain} / {result.source ?? "unavailable"}: {result.state}
+                    {result.fallback ? " (fallback)" : ""}
+                    {result.diagnostic ? ` [${result.diagnostic.code}]` : ""}
+                    {result.evidence_refs?.length ? (
                       <>
                         {" · "}
-                        {entry.evidence_refs.map((ref, index) => (
+                        {result.evidence_refs.map((ref, index) => (
                           <span key={ref}>
                             {index > 0 ? ", " : ""}
                             <code>{ref}</code>
@@ -186,13 +187,13 @@ export default function Timeline() {
               </ul>
             </details>
           )}
-          {node.research_coverage && (
+          {node.research_availability && (
             <details>
-              <summary>Coverage</summary>
+              <summary>Research Availability</summary>
               <ul>
-                {node.research_coverage.domains.map((domain) => (
+                {node.research_availability.domains.map((domain) => (
                   <li key={domain.domain}>
-                    {domain.domain}: {domain.requirement} / {domain.status}
+                    {domain.domain}: {domain.status}
                   </li>
                 ))}
               </ul>
@@ -227,10 +228,30 @@ export default function Timeline() {
             </section>
           )}
           {node.performance && (
-            <p>Performance: {node.performance.status} — {node.performance.reason}</p>
+            <details>
+              <summary>Performance</summary>
+              <ul>
+                <li>
+                  Stock: {node.performance.stock.status}
+                  {node.performance.stock.reason
+                    ? ` — ${node.performance.stock.reason}`
+                    : node.performance.stock.calculation
+                      ? ` — ${node.performance.stock.calculation.start_session} to ${node.performance.stock.calculation.end_session}: ${node.performance.stock.calculation.unrounded_return}`
+                      : ""}
+                </li>
+                {(node.performance.benchmarks ?? []).map((benchmark) => (
+                  <li key={benchmark.name}>
+                    {benchmark.name}: {benchmark.component.status}
+                    {benchmark.component.reason
+                      ? ` — ${benchmark.component.reason}`
+                      : benchmark.component.calculation
+                        ? ` — ${benchmark.component.calculation.unrounded_return}`
+                        : ""}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
-          {node.outcome_review_status === "omitted" && <p>{t("outcomeReviewOmitted")}</p>}
-          {node.outcome_review_status === "failed" && <p>Outcome review failed</p>}
           {node.cycle_warning && <p className="alert">Cycle warning</p>}
           {node.full_research_required_reasons?.map((reason) => (
             <p className="alert" key={reason.code}>{reason.message}</p>

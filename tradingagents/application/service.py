@@ -37,11 +37,10 @@ from .contracts import (
     AnalysisResult,
     EvidenceBundle,
     FullResearchRequiredReason,
-    IncrementalCollectionResult,
+    IncrementalCollectionPreflight,
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
-    PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
     ResearchReassessment,
@@ -63,12 +62,13 @@ from .exporting import (
 )
 from .incremental_collection import (
     IncrementalCollector,
-    admit_incremental_evidence,
-    assess_incremental_collection,
-    build_incremental_collection_plan,
+    assess_information_advancement,
+    build_incremental_collection_request,
+    calculate_stock_performance,
     default_incremental_collector,
+    derive_research_availability,
     incremental_market_identity,
-    remap_incremental_manifest_evidence_refs,
+    normalize_incremental_collection,
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
@@ -129,30 +129,13 @@ def default_incremental_synthesizer(
                 ResearchReassessmentEntry(
                     component_id=component_id,
                     disposition=ReassessmentDisposition.REAFFIRMED,
-                    reason="A complete-empty collection scan found no new matching record.",
-                    manifest_entry_refs=(_first_manifest_entry_ref(synthesis_input.collection_manifest),),
+                    reason="The bounded update does not change this baseline component.",
                 )
                 for component_id in _baseline_component_ids(synthesis_input.full_baseline_decision)
             )
         ),
         decision=synthesis_input.full_baseline_decision,
     )
-
-
-def _manifest_entry_refs(manifest) -> tuple[str, ...]:
-    return tuple(f"manifest:{entry.domain}:{entry.source}" for entry in manifest.entries)
-
-
-def _manifest_entry_refs_for_domain(manifest, domain: str) -> tuple[str, ...]:
-    return tuple(
-        f"manifest:{entry.domain}:{entry.source}"
-        for entry in manifest.entries
-        if entry.domain == domain
-    )
-
-
-def _first_manifest_entry_ref(manifest) -> str:
-    return _manifest_entry_refs(manifest)[0]
 
 
 class AnalysisService:
@@ -331,10 +314,9 @@ class AnalysisService:
                 "tool_vendors": data_config.get("tool_vendors", {}),
                 "data_vendors_by_market": data_config.get("data_vendors_by_market", {}),
             },
-            "coverage_policy": {
+            "data_availability_policy": {
                 "version": "1",
-                "required_domains": ["fundamentals", "market", "news"],
-                "advisory_domains": ["social"],
+                "near_live_max_age_days": 5,
             },
             "thresholds": {
                 key: data_config.get(key)
@@ -455,7 +437,12 @@ class AnalysisService:
                         request,
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
-                    collection, evidence_items = self._collect_incremental_preflight(
+                    baseline_evidence = self.repository.get_evidence(baseline.id)
+                    collection, evidence_items, performance, sealed_at = self._collect_incremental_preflight(
+                        instrument=request.ticker,
+                        baseline_analysis_cutoff=baseline.request.analysis_date,
+                        analysis_cutoff=request.analysis_date,
+                        baseline_evidence=baseline_evidence,
                         baseline_information_cutoff_at=baseline.information_cutoff_at,
                         target_information_cutoff_at=run.information_cutoff_at,
                         method_snapshot=run.method_snapshot,
@@ -472,7 +459,9 @@ class AnalysisService:
                             "incremental.no_advancement",
                             payload={
                                 "reason": "no_admissible_information_advancement",
-                                "coverage_policy_version": collection.research_coverage.policy_version,
+                                "availability_policy_version": (
+                                    collection.research_availability.version
+                                ),
                                 "diagnostics": [
                                     item.model_dump(mode="json") for item in collection.diagnostics
                                 ],
@@ -495,19 +484,15 @@ class AnalysisService:
                         raise ValueError(
                             "Incremental synthesis requires a complete Full Baseline Decision"
                         )
-                    baseline_evidence = self.repository.get_evidence(baseline.id)
                     incremental_evidence = EvidenceBundle(
                         instrument=request.ticker,
                         analysis_date=request.analysis_date,
                         items=evidence_items,
+                        sealed_at=sealed_at,
                     )
                     self._validate_incremental_bundle_ownership(
                         incremental_evidence,
                         baseline_evidence,
-                    )
-                    performance = PerformanceObservation(
-                        status="not_yet_observable",
-                        reason="Performance calculation is not yet observable in the complete-empty tracer.",
                     )
                     synthesis_input = IncrementalSynthesisInput(
                         full_baseline_run_id=baseline.id,
@@ -516,11 +501,10 @@ class AnalysisService:
                             item.ref for item in baseline_evidence.items
                         ),
                         incremental_evidence=incremental_evidence,
-                        collection_manifest=collection.collection_manifest,
-                        research_coverage=collection.research_coverage,
+                        collection_summary=collection.collection_summary,
+                        research_availability=collection.research_availability,
                         information_advancement=collection.information_advancement,
                         performance=performance,
-                        outcome_review_status="omitted",
                         method_snapshot=run.method_snapshot,
                     )
                     self._emit(
@@ -528,7 +512,6 @@ class AnalysisService:
                         "incremental.synthesis_started",
                         payload={
                             "full_baseline_run_id": baseline.id,
-                            "outcome_review_status": "omitted",
                         },
                         on_event=on_event,
                     )
@@ -556,30 +539,14 @@ class AnalysisService:
                             "Incremental decisions may reference only the Full Baseline or current Evidence"
                         )
                     self._validate_reassessment_closure(synthesis, synthesis_input)
-                    deterministic_reasons = tuple(
-                        FullResearchRequiredReason(
-                            code=f"required_coverage.{domain.domain}",
-                            message=f"Required {domain.domain} coverage is {domain.status.value}.",
-                            origin="deterministic",
-                            manifest_entry_refs=_manifest_entry_refs_for_domain(
-                                collection.collection_manifest,
-                                domain.domain,
-                            ),
-                        )
-                        for domain in collection.research_coverage.domains
-                        if domain.requirement.value == "required"
-                        and domain.status.value in {"limited", "missing"}
-                    )
                     products = IncrementalNodeProducts(
-                        collection_manifest=collection.collection_manifest,
-                        research_coverage=collection.research_coverage,
+                        collection_summary=collection.collection_summary,
+                        research_availability=collection.research_availability,
                         information_advancement=collection.information_advancement,
                         performance=performance,
-                        outcome_review_status="omitted",
                         reassessment=synthesis.reassessment,
                         full_research_required_reasons=(
-                            *synthesis.full_research_required_reasons,
-                            *deterministic_reasons,
+                            synthesis.full_research_required_reasons
                         ),
                     )
                     self._validate_full_research_required_reason_closure(
@@ -836,6 +803,10 @@ class AnalysisService:
     def _collect_incremental_preflight(
         self,
         *,
+        instrument: str,
+        baseline_analysis_cutoff,
+        analysis_cutoff,
+        baseline_evidence: EvidenceBundle,
         baseline_information_cutoff_at: datetime | None,
         target_information_cutoff_at: datetime | None,
         method_snapshot: dict[str, Any],
@@ -843,31 +814,56 @@ class AnalysisService:
         """Build and assess the deterministic collection gate before semantic work."""
         if baseline_information_cutoff_at is None or target_information_cutoff_at is None:
             raise ValueError("Incremental collection requires frozen information cutoffs")
-        plan = build_incremental_collection_plan(
+        request = build_incremental_collection_request(
+            instrument=instrument,
+            baseline_analysis_cutoff=baseline_analysis_cutoff,
+            analysis_cutoff=analysis_cutoff,
             market_identity=method_snapshot["market_identity"],
             data_routes=method_snapshot["data_routes"],
-            coverage_policy=method_snapshot["coverage_policy"],
+            data_availability_policy=method_snapshot["data_availability_policy"],
+            enabled_domains=tuple(method_snapshot["enabled_roles"]),
             window_start=baseline_information_cutoff_at,
             window_end=target_information_cutoff_at,
         )
-        collected = self.incremental_collector(plan)
-        if isinstance(collected, IncrementalCollectionResult):
-            manifest = remap_incremental_manifest_evidence_refs(
-                plan,
-                collected.collection_manifest,
-                collected.evidence,
+        collected = self.incremental_collector(request)
+        sealed_at = self.now()
+        if collected.stock_series is not None and collected.stock_series.retrieved_at > sealed_at:
+            raise ValueError("stock market-series retrieval cannot be after sealing")
+        for benchmark in collected.benchmarks:
+            calculation = benchmark.component.calculation
+            if calculation is not None and calculation.retrieved_at > sealed_at:
+                raise ValueError("benchmark retrieval cannot be after sealing")
+        collection_summary, evidence_items = normalize_incremental_collection(
+            request,
+            collected,
+            sealed_at=sealed_at,
+        )
+        performance = calculate_stock_performance(request, collected.stock_series)
+        if collected.benchmarks:
+            performance = performance.model_copy(
+                update={"benchmarks": collected.benchmarks}
             )
-            evidence_items = admit_incremental_evidence(plan, collected.evidence)
-        else:
-            manifest = collected
-            evidence_items = ()
+        research_availability = derive_research_availability(collection_summary)
+        information_advancement = assess_information_advancement(
+            baseline_items=baseline_evidence.items,
+            current_items=evidence_items,
+            performance=performance,
+        )
+        diagnostics = tuple(
+            result.diagnostic
+            for result in collection_summary.domains
+            if result.diagnostic is not None
+        )
         return (
-            assess_incremental_collection(
-                plan,
-                manifest,
-                evidence_items=evidence_items,
+            IncrementalCollectionPreflight(
+                collection_summary=collection_summary,
+                research_availability=research_availability,
+                information_advancement=information_advancement,
+                diagnostics=diagnostics,
             ),
             evidence_items,
+            performance,
+            sealed_at,
         )
 
     def cancel(self, run_id: str) -> RunView:
@@ -1011,8 +1007,8 @@ class AnalysisService:
         semantic_brief = getattr(semantic_response, "content", semantic_response)
         serializer_prompt = (
             "Serialize a complete IncrementalSynthesis from this semantic brief and the "
-            "typed bounded input. Every reassessment entry must include at least one "
-            "allowed Evidence reference or Collection Manifest entry reference. Write all "
+            "typed bounded input. Every reassessment entry requires a concise reason; "
+            "include Evidence references only when the permitted bundles support them. Write all "
             f"human-readable prose in {output_language}.\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
@@ -1024,7 +1020,6 @@ class AnalysisService:
                         "component_id": "thesis",
                         "disposition": "reaffirmed",
                         "reason": "Explain the bounded reassessment.",
-                        "manifest_entry_refs": [_first_manifest_entry_ref(synthesis_input.collection_manifest)],
                     }
                 ]
             },
@@ -1044,7 +1039,7 @@ class AnalysisService:
                 repair_instructions=(
                     "Write all human-readable prose in "
                     f"{output_language}. Preserve IDs, enums, Evidence refs, and "
-                    "Collection Manifest refs exactly."
+                    "typed collection limitations exactly."
                 ),
             ).invoke(
                 serializer_prompt,
@@ -1079,12 +1074,9 @@ class AnalysisService:
     ) -> None:
         allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
         allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
-        allowed_manifest_refs = set(_manifest_entry_refs(synthesis_input.collection_manifest))
         for entry in synthesis.reassessment.entries:
             if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
                 raise ValueError("Reassessment Evidence references must close over the baseline or current bundle")
-            if not set(entry.manifest_entry_refs).issubset(allowed_manifest_refs):
-                raise ValueError("Reassessment Manifest references must close over the current Collection Manifest")
 
     @staticmethod
     def _validate_full_research_required_reason_closure(
@@ -1093,17 +1085,10 @@ class AnalysisService:
     ) -> None:
         allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
         allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
-        allowed_manifest_refs = set(_manifest_entry_refs(synthesis_input.collection_manifest))
         for reason in reasons:
-            if not reason.evidence_refs and not reason.manifest_entry_refs:
-                raise ValueError("Full Research Required reasons require reference closure")
             if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
                 raise ValueError(
                     "Full Research Required Evidence references must close over the baseline or current bundle"
-                )
-            if not set(reason.manifest_entry_refs).issubset(allowed_manifest_refs):
-                raise ValueError(
-                    "Full Research Required Manifest references must close over the current Collection Manifest"
                 )
 
     def _persist_graph_event(

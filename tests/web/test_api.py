@@ -17,12 +17,12 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     ArtifactGenerationMethod,
     ArtifactGenerationObservation,
-    CollectionManifest,
-    CollectionManifestEntry,
-    CollectionOutcome,
+    CollectionDiagnostic,
+    CollectionDomainResult,
+    CollectionSummary,
     EvidenceBundle,
     EvidenceItem,
-    IncrementalCollectionPlan,
+    IncrementalCollectionRequest,
     IncrementalCollectionResult,
     IncrementalEvidenceCandidate,
     ResearchArtifactDraft,
@@ -47,7 +47,7 @@ def _payload(ticker: str = "NVDA") -> dict:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600000.SS"])
-async def test_evidence_bearing_incremental_nodes_read_back_through_all_market_api_audits(
+async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_products(
     web_client: httpx.AsyncClient,
     web_repository,
     web_settings,
@@ -95,39 +95,27 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_all_market_a
         content=f"admissible {ticker} evidence",
     )
 
-    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
-        entries = tuple(
-            CollectionManifestEntry(
-                domain=source.domain,
-                source=source.source,
-                provider_identity=source.provider_identity,
-                chain_position=source.chain_position,
-                retrieved_at=plan.window_end if source.configured else None,
-                planned_from=plan.window_start,
-                planned_through=plan.window_end,
-                scanned_from=plan.window_start if source.configured else None,
-                scanned_through=plan.window_end if source.configured else None,
-                source_watermark="fixture-watermark" if source.configured else None,
-                outcome=(
-                    CollectionOutcome.COMPLETE_WITH_RECORDS
-                    if source.configured and source.domain == "news"
-                    else (
-                        CollectionOutcome.COMPLETE_EMPTY
-                        if source.configured
-                        else CollectionOutcome.NOT_APPLICABLE
-                    )
-                ),
-                evidence_refs=(candidate.ref,)
-                if source.configured and source.domain == "news"
-                else (),
-            )
-            for source in plan.sources
-        )
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
-            collection_manifest=CollectionManifest(
-                plan_version=plan.version,
-                market=plan.market,
-                entries=entries,
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=tuple(
+                    CollectionDomainResult(
+                        domain=domain,
+                        state=("data" if domain == "news" else "unavailable"),
+                        source="fixture.news" if domain == "news" else None,
+                        retrieved_at=request.window_end if domain == "news" else None,
+                        temporal_bases=("pit",) if domain == "news" else (),
+                        evidence_refs=(candidate.ref,) if domain == "news" else (),
+                        diagnostic=(
+                            None
+                            if domain == "news"
+                            else CollectionDiagnostic(code="not_configured")
+                        ),
+                    )
+                    for domain in request.enabled_domains
+                ),
             ),
             evidence=(
                 IncrementalEvidenceCandidate(
@@ -176,13 +164,13 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_all_market_a
     assert timeline.status_code == detail.status_code == evidence.status_code == 200
     node = next(item for item in timeline.json()["timeline"]["nodes"] if item["id"] == result.run_id)
     assert node["full_baseline_run_id"] == baseline.id
-    assert "admissible_evidence" in node["information_advancement"]["reasons"]
-    assert node["research_coverage"]["domains"]
+    assert "admissible_observation" in node["information_advancement"]["reasons"]
+    assert node["research_availability"]["domains"]
     assert node["reassessment"]["entries"]
     assert node["decision"]["evidence_refs"] == [baseline_item.ref, final_ref]
     assert {
         ref
-        for entry in node["collection_manifest"]["entries"]
+        for entry in node["collection_summary"]["domains"]
         for ref in entry["evidence_refs"]
     } == {final_ref}
     assert detail.json()["result"]["decision"]["evidence_refs"] == [
@@ -510,11 +498,10 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "is_primary": True,
             "is_active": True,
             "trashed_at": None,
-            "collection_manifest": None,
-            "research_coverage": None,
+            "collection_summary": None,
+            "research_availability": None,
             "information_advancement": None,
             "performance": None,
-            "outcome_review_status": None,
             "reassessment": None,
             "decision": research_decision(evidence_refs=(item.ref,)).model_dump(mode="json"),
             "full_research_required_reasons": [],

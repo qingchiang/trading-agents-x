@@ -1697,11 +1697,10 @@ class ResearchNodeView(FrozenModel):
     is_primary: bool
     is_active: bool
     trashed_at: datetime | None = None
-    collection_manifest: CollectionManifest | None = None
-    research_coverage: ResearchCoverage | None = None
+    collection_summary: CollectionSummary | None = None
+    research_availability: ResearchAvailability | None = None
     information_advancement: InformationAdvancement | None = None
     performance: PerformanceObservation | None = None
-    outcome_review_status: Literal["omitted", "failed"] | None = None
     reassessment: ResearchReassessment | None = None
     decision: ResearchDecision | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
@@ -1733,90 +1732,39 @@ class ResearchTimelinePage(FrozenModel):
     offset: int = Field(ge=0)
 
 
-class CollectionOutcome(_StableStrEnum):
-    """One terminal observation for a planned Incremental source scan."""
-
-    COMPLETE_WITH_RECORDS = "complete_with_records"
-    COMPLETE_EMPTY = "complete_empty"
-    PARTIAL = "partial"
-    UNAVAILABLE = "unavailable"
-    FAILED = "failed"
-    NOT_QUERIED = "not_queried"
-    NOT_APPLICABLE = "not_applicable"
-
-
-class CoverageRequirement(_StableStrEnum):
-    REQUIRED = "required"
-    ADVISORY = "advisory"
-
-
-class CoverageStatus(_StableStrEnum):
-    COMPLETE = "complete"
-    LIMITED = "limited"
-    MISSING = "missing"
-    NOT_APPLICABLE = "not_applicable"
-
-
-class IncrementalCollectionSource(FrozenModel):
-    """One configured source planned for a deterministic collection domain."""
-
-    domain: Literal["fundamentals", "market", "news", "social"]
-    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    chain_position: int = Field(default=0, ge=0)
-    configured: bool
-
-
 class CollectionDiagnostic(FrozenModel):
     """A stable, secret-free collection failure class safe for Run events."""
 
     code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
 
 
-class IncrementalCollectionPlan(FrozenModel):
-    """Market-local deterministic input to one Incremental collection pass."""
+class CollectionResultState(_StableStrEnum):
+    """Truthful result state for one enabled Incremental research domain."""
 
-    version: str = Field(pattern=r"^[0-9]+$")
-    market: Literal["united_states", "japan", "mainland_china"]
-    window_start: datetime
-    window_end: datetime
-    required_domains: tuple[Literal["fundamentals", "market", "news"], ...]
-    advisory_domains: tuple[Literal["social"], ...]
-    sources: tuple[IncrementalCollectionSource, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_window(self) -> IncrementalCollectionPlan:
-        if self.window_start >= self.window_end:
-            raise ValueError("Incremental collection window must advance")
-        planned_domains = set(self.required_domains) | set(self.advisory_domains)
-        if any(source.domain not in planned_domains for source in self.sources):
-            raise ValueError("collection sources must belong to planned domains")
-        source_keys = tuple((source.domain, source.source) for source in self.sources)
-        if len(source_keys) != len(set(source_keys)):
-            raise ValueError("collection source identities must be unique per domain")
-        for domain in planned_domains:
-            positions = [
-                source.chain_position for source in self.sources if source.domain == domain
-            ]
-            if positions != list(range(len(positions))):
-                raise ValueError("collection fallback chains must have ordered chain positions")
-        return self
+    DATA = "data"
+    EMPTY = "empty"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
 
 
-class CollectionManifestEntry(FrozenModel):
-    """Observed result for one deterministic source/domain scan."""
+class CollectionTemporalBasis(_StableStrEnum):
+    """Temporal basis actually represented by admitted domain observations."""
+
+    PIT = "pit"
+    NEAR_LIVE_ADVISORY = "near_live_advisory"
+
+
+class CollectionDomainResult(FrozenModel):
+    """One actual domain result without a configured-provider attempt ledger."""
 
     domain: Literal["fundamentals", "market", "news", "social"]
-    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    chain_position: int = Field(default=0, ge=0)
+    state: CollectionResultState
+    source: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")
+    fallback: bool = False
     retrieved_at: datetime | None = None
-    planned_from: datetime
-    planned_through: datetime
-    scanned_from: datetime | None = None
-    scanned_through: datetime | None = None
-    source_watermark: str | None = Field(default=None, max_length=200)
-    outcome: CollectionOutcome
+    observed_from: datetime | None = None
+    observed_through: datetime | None = None
+    temporal_bases: tuple[CollectionTemporalBasis, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     diagnostic: CollectionDiagnostic | None = None
 
@@ -1826,92 +1774,115 @@ class CollectionManifestEntry(FrozenModel):
         return _unique_evidence_refs(value)
 
     @model_validator(mode="after")
-    def validate_terminal_observation(self) -> CollectionManifestEntry:
-        if self.planned_from >= self.planned_through:
-            raise ValueError("collection interval must be non-empty")
+    def validate_truthful_result(self) -> CollectionDomainResult:
+        for field_name in ("retrieved_at", "observed_from", "observed_through"):
+            value = getattr(self, field_name)
+            if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+                raise ValueError(f"{field_name} must include a timezone")
+        observed = (self.observed_from, self.observed_through)
+        if any(value is not None for value in observed) and any(
+            value is None for value in observed
+        ):
+            raise ValueError("observed window must be complete")
         if (
-            self.outcome
-            in {
-                CollectionOutcome.COMPLETE_EMPTY,
-                CollectionOutcome.UNAVAILABLE,
-                CollectionOutcome.FAILED,
-                CollectionOutcome.NOT_QUERIED,
-                CollectionOutcome.NOT_APPLICABLE,
-            }
-            and self.evidence_refs
+            self.observed_from is not None
+            and self.observed_through is not None
+            and self.observed_from > self.observed_through
         ):
-            raise ValueError("this collection outcome cannot report evidence references")
-        scanned = (self.scanned_from, self.scanned_through)
-        if any(item is not None for item in scanned) and any(item is None for item in scanned):
-            raise ValueError("scanned interval must be complete when recorded")
-        if self.scanned_from is not None and (
-            self.scanned_from > self.scanned_through
-            or self.scanned_from < self.planned_from
-            or self.scanned_through > self.planned_through
-        ):
-            raise ValueError("scanned interval must remain within the planned interval")
-        if self.outcome is CollectionOutcome.PARTIAL:
-            if self.scanned_from is None or self.scanned_through is None:
-                raise ValueError("partial outcomes require a scanned interval")
-            if self.scanned_from >= self.scanned_through:
-                raise ValueError("partial outcomes require a non-empty scanned interval")
-        if self.outcome is CollectionOutcome.COMPLETE_EMPTY:
-            if scanned != (self.planned_from, self.planned_through):
-                raise ValueError("complete-empty requires proof of the full planned scan")
-            if not self.source_watermark:
-                raise ValueError("complete-empty requires a source watermark")
-            if self.evidence_refs:
-                raise ValueError("complete-empty must not produce evidence references")
-        if self.outcome is CollectionOutcome.COMPLETE_WITH_RECORDS:
-            if scanned != (self.planned_from, self.planned_through):
-                raise ValueError("complete records require proof of the full planned scan")
-            if not self.evidence_refs:
-                raise ValueError("complete records require evidence references")
-        if self.outcome is CollectionOutcome.NOT_APPLICABLE and (
-            self.evidence_refs or self.diagnostic is not None
-        ):
-            raise ValueError("not-applicable sources cannot report evidence or a diagnostic")
-        if (
-            self.outcome
-            in {
-                CollectionOutcome.UNAVAILABLE,
-                CollectionOutcome.FAILED,
-            }
-            and self.diagnostic is None
-        ):
-            raise ValueError("terminal collection failures require a sanitized diagnostic")
-        if self.outcome is CollectionOutcome.NOT_QUERIED and self.diagnostic is not None:
-            raise ValueError("unqueried sources cannot report a diagnostic")
-        if self.outcome in {
-            CollectionOutcome.NOT_QUERIED,
-            CollectionOutcome.NOT_APPLICABLE,
-        }:
-            if self.retrieved_at is not None:
-                raise ValueError("unqueried sources cannot report a retrieval time")
-        elif self.retrieved_at is None:
-            raise ValueError("queried sources require a retrieval time")
+            raise ValueError("observed window must be ordered")
+        if self.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}:
+            if not self.evidence_refs or not self.temporal_bases:
+                raise ValueError(
+                    "data and partial results require Evidence and a temporal basis"
+                )
+        elif self.evidence_refs or self.temporal_bases:
+            raise ValueError(
+                "empty and unavailable results cannot report Evidence or a temporal basis"
+            )
+        if self.state is CollectionResultState.UNAVAILABLE:
+            if self.diagnostic is None:
+                raise ValueError("unavailable results require a sanitized diagnostic")
+        elif self.state is CollectionResultState.PARTIAL and self.diagnostic is None:
+            raise ValueError("partial results require a sanitized limitation")
+        elif self.source is None or self.retrieved_at is None:
+            raise ValueError("queried collection results require source and retrieved_at")
+        if self.fallback and self.source is None:
+            raise ValueError("fallback results require an actual source")
+        if len(self.temporal_bases) != len(set(self.temporal_bases)):
+            raise ValueError("collection temporal bases must be unique")
         return self
 
 
-class CollectionManifest(FrozenModel):
-    """The deterministic source-level audit for one Incremental request."""
+class CollectionSummary(FrozenModel):
+    """Actual Incremental collection results and disclosed limitations."""
 
-    plan_version: str = Field(pattern=r"^[0-9]+$")
+    version: str = Field(pattern=r"^[0-9]+$")
     market: Literal["united_states", "japan", "mainland_china"]
-    entries: tuple[CollectionManifestEntry, ...] = Field(min_length=1)
-    newly_reviewable_baseline_component_ids: tuple[str, ...] = ()
+    domains: tuple[CollectionDomainResult, ...] = Field(min_length=1)
 
-    @field_validator("newly_reviewable_baseline_component_ids")
-    @classmethod
-    def validate_newly_reviewable_component_ids(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        if len(value) != len(set(value)):
-            raise ValueError("newly reviewable baseline component IDs must be unique")
-        if any(not component_id.strip() for component_id in value):
-            raise ValueError("newly reviewable baseline component IDs must be non-empty")
-        return value
+    @model_validator(mode="after")
+    def validate_unique_domains(self) -> CollectionSummary:
+        domains = tuple(item.domain for item in self.domains)
+        if len(domains) != len(set(domains)):
+            raise ValueError("collection summary domains must be unique")
+        return self
+
+
+class ResearchAvailabilityStatus(_StableStrEnum):
+    AVAILABLE = "available"
+    LIMITED = "limited"
+    MISSING = "missing"
+
+
+class ResearchAvailabilityDomain(FrozenModel):
+    domain: Literal["fundamentals", "market", "news", "social"]
+    status: ResearchAvailabilityStatus
+
+
+class ResearchAvailability(FrozenModel):
+    """Descriptive breadth of actual inputs, without source certification."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    domains: tuple[ResearchAvailabilityDomain, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_domains(self) -> ResearchAvailability:
+        domains = tuple(item.domain for item in self.domains)
+        if len(domains) != len(set(domains)):
+            raise ValueError("research availability domains must be unique")
+        return self
+
+
+class IncrementalCollectionRequest(FrozenModel):
+    """Frozen common request passed to one configured market collection seam."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    instrument: str = Field(min_length=1)
+    market: Literal["united_states", "japan", "mainland_china"]
+    route_suffix: str
+    baseline_analysis_cutoff: date
+    analysis_cutoff: date
+    window_start: datetime
+    window_end: datetime
+    enabled_domains: tuple[Literal["fundamentals", "market", "news", "social"], ...] = (
+        Field(min_length=1)
+    )
+    configured_routes: dict[str, Any]
+    near_live_max_age_days: int = Field(default=5, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def validate_collection_boundary(self) -> IncrementalCollectionRequest:
+        if self.baseline_analysis_cutoff >= self.analysis_cutoff:
+            raise ValueError("Incremental analysis cutoff must follow the Full Baseline")
+        if self.window_start >= self.window_end:
+            raise ValueError("Incremental collection window must advance")
+        for field_name in ("window_start", "window_end"):
+            value = getattr(self, field_name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone")
+        if len(self.enabled_domains) != len(set(self.enabled_domains)):
+            raise ValueError("enabled collection domains must be unique")
+        return self
 
 
 class IncrementalEvidenceCandidate(FrozenModel):
@@ -1935,21 +1906,10 @@ class IncrementalEvidenceCandidate(FrozenModel):
 class IncrementalCollectionResult(FrozenModel):
     """Deterministic collection observations plus unsealed new Evidence."""
 
-    collection_manifest: CollectionManifest
+    collection_summary: CollectionSummary
     evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
-
-
-class ResearchCoverageDomain(FrozenModel):
-    domain: Literal["fundamentals", "market", "news", "social"]
-    requirement: CoverageRequirement
-    status: CoverageStatus
-
-
-class ResearchCoverage(FrozenModel):
-    """Versioned policy assessment derived from a Collection Manifest."""
-
-    policy_version: str = Field(pattern=r"^[0-9]+$")
-    domains: tuple[ResearchCoverageDomain, ...] = Field(min_length=1)
+    stock_series: MarketSeriesResult | None = None
+    benchmarks: tuple[BenchmarkContext, ...] = ()
 
 
 class InformationAdvancement(FrozenModel):
@@ -1958,36 +1918,30 @@ class InformationAdvancement(FrozenModel):
     advanced: bool
     reasons: tuple[
         Literal[
-            "complete_empty_scan",
-            "admissible_evidence",
-            "newly_reviewable_baseline_component",
+            "admissible_observation",
+            "completed_stock_session",
         ],
         ...,
     ] = ()
-    newly_reviewable_baseline_component_ids: tuple[str, ...] = ()
+    observation_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_advancement_inputs(self) -> InformationAdvancement:
         if self.advanced != bool(self.reasons):
             raise ValueError("information advancement must agree with its reasons")
-        has_reviewable_components = bool(self.newly_reviewable_baseline_component_ids)
-        has_component_reason = "newly_reviewable_baseline_component" in self.reasons
-        if has_reviewable_components != has_component_reason:
-            raise ValueError(
-                "newly reviewable baseline components require their advancement reason"
-            )
-        if len(self.newly_reviewable_baseline_component_ids) != len(
-            set(self.newly_reviewable_baseline_component_ids)
-        ):
-            raise ValueError("newly reviewable baseline component IDs must be unique")
+        has_observations = bool(self.observation_ids)
+        if has_observations != ("admissible_observation" in self.reasons):
+            raise ValueError("new observation identities must agree with advancement reasons")
+        if len(self.observation_ids) != len(set(self.observation_ids)):
+            raise ValueError("new observation identities must be unique")
         return self
 
 
 class IncrementalCollectionPreflight(FrozenModel):
-    """Structured Ticket 05 gate result, safe to persist in sanitized events."""
+    """Simplified deterministic gate result, safe to persist in sanitized events."""
 
-    collection_manifest: CollectionManifest
-    research_coverage: ResearchCoverage
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
     information_advancement: InformationAdvancement
     diagnostics: tuple[CollectionDiagnostic, ...] = ()
 
@@ -2005,28 +1959,11 @@ class ResearchReassessmentEntry(FrozenModel):
     disposition: ReassessmentDisposition
     reason: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
-    manifest_entry_refs: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
     def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
-
-    @field_validator("manifest_entry_refs")
-    @classmethod
-    def validate_manifest_entry_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(value) != len(set(value)):
-            raise ValueError("reassessment manifest references must be unique")
-        if any(not item.startswith("manifest:") for item in value):
-            raise ValueError("reassessment manifest references must use the manifest namespace")
-        return value
-
-    @model_validator(mode="after")
-    def validate_auditable_reference(self) -> ResearchReassessmentEntry:
-        if not self.evidence_refs and not self.manifest_entry_refs:
-            raise ValueError("reassessment entries require Evidence or Collection Manifest references")
-        return self
-
 
 class ResearchReassessment(FrozenModel):
     entries: tuple[ResearchReassessmentEntry, ...] = Field(min_length=1)
@@ -2038,9 +1975,113 @@ class ResearchReassessment(FrozenModel):
         return self
 
 
+class MarketSeriesPoint(FrozenModel):
+    session: date
+    completed_at: datetime
+    adjusted_close: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_completed_at(self) -> MarketSeriesPoint:
+        if self.completed_at.tzinfo is None or self.completed_at.utcoffset() is None:
+            raise ValueError("market-series completed_at must include a timezone")
+        return self
+
+
+class MarketSeriesResult(FrozenModel):
+    """One completed-session series from a single provider and retrieval vintage."""
+
+    instrument: str = Field(min_length=1)
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    adjustment_basis: str = Field(min_length=1, max_length=120)
+    retrieved_at: datetime
+    fallback: bool = False
+    points: tuple[MarketSeriesPoint, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_series(self) -> MarketSeriesResult:
+        if self.retrieved_at.tzinfo is None or self.retrieved_at.utcoffset() is None:
+            raise ValueError("market-series retrieved_at must include a timezone")
+        sessions = tuple(point.session for point in self.points)
+        if sessions != tuple(sorted(set(sessions))):
+            raise ValueError("market-series sessions must be unique and ordered")
+        completions = tuple(point.completed_at for point in self.points)
+        if completions != tuple(sorted(completions)):
+            raise ValueError("market-series completion times must be ordered")
+        if any(completed_at > self.retrieved_at for completed_at in completions):
+            raise ValueError("market-series sessions must complete before retrieval")
+        return self
+
+
+class PerformanceComponentStatus(_StableStrEnum):
+    CALCULATED = "calculated"
+    NOT_YET_OBSERVABLE = "not_yet_observable"
+    UNAVAILABLE = "unavailable"
+
+
+class PerformanceCalculationRecord(FrozenModel):
+    provider: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    adjustment_basis: str = Field(min_length=1, max_length=120)
+    retrieved_at: datetime
+    baseline_information_cutoff_at: datetime
+    target_information_cutoff_at: datetime
+    start_session: date
+    end_session: date
+    start_value: float = Field(gt=0, allow_inf_nan=False)
+    end_value: float = Field(gt=0, allow_inf_nan=False)
+    formula: Literal["(end_value / start_value) - 1"] = (
+        "(end_value / start_value) - 1"
+    )
+    unrounded_return: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_calculation_boundary(self) -> PerformanceCalculationRecord:
+        for field_name in (
+            "retrieved_at",
+            "baseline_information_cutoff_at",
+            "target_information_cutoff_at",
+        ):
+            value = getattr(self, field_name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone")
+        if self.baseline_information_cutoff_at >= self.target_information_cutoff_at:
+            raise ValueError("Performance information cutoffs must advance")
+        if self.start_session >= self.end_session:
+            raise ValueError("calculated Performance sessions must advance")
+        return self
+
+
+class PerformanceComponent(FrozenModel):
+    status: PerformanceComponentStatus
+    reason: str | None = Field(default=None, min_length=1)
+    calculation: PerformanceCalculationRecord | None = None
+
+    @model_validator(mode="after")
+    def validate_component_state(self) -> PerformanceComponent:
+        if self.status is PerformanceComponentStatus.CALCULATED:
+            if self.calculation is None:
+                raise ValueError("calculated Performance requires a calculation record")
+        elif self.calculation is not None or self.reason is None:
+            raise ValueError(
+                "non-calculated Performance requires a reason and no calculation record"
+            )
+        return self
+
+
+class BenchmarkContext(FrozenModel):
+    name: str = Field(min_length=1, max_length=120)
+    component: PerformanceComponent
+
+
 class PerformanceObservation(FrozenModel):
-    status: Literal["not_yet_observable", "unavailable"]
-    reason: str = Field(min_length=1)
+    stock: PerformanceComponent
+    benchmarks: tuple[BenchmarkContext, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_unique_benchmarks(self) -> PerformanceObservation:
+        names = tuple(item.name for item in self.benchmarks)
+        if len(names) != len(set(names)):
+            raise ValueError("Benchmark Context names must be unique")
+        return self
 
 
 class FullResearchRequiredReason(FrozenModel):
@@ -2048,43 +2089,21 @@ class FullResearchRequiredReason(FrozenModel):
     message: str = Field(min_length=1)
     origin: Literal["deterministic", "semantic"]
     evidence_refs: tuple[str, ...] = ()
-    manifest_entry_refs: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
     def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-    @field_validator("manifest_entry_refs")
-    @classmethod
-    def validate_manifest_entry_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(value) != len(set(value)):
-            raise ValueError("Full Research Required manifest references must be unique")
-        if any(not item.startswith("manifest:") for item in value):
-            raise ValueError(
-                "Full Research Required manifest references must use the manifest namespace"
-            )
-        return value
-
-    @model_validator(mode="after")
-    def validate_auditable_reference(self) -> FullResearchRequiredReason:
-        if not self.evidence_refs and not self.manifest_entry_refs:
-            raise ValueError(
-                "Full Research Required reasons require Evidence or Collection Manifest references"
-            )
-        return self
-
-
 class IncrementalSynthesisInput(FrozenModel):
     full_baseline_run_id: str = Field(min_length=1, max_length=36)
     full_baseline_decision: ResearchDecision
     permitted_baseline_evidence_refs: tuple[str, ...] = ()
     incremental_evidence: EvidenceBundle
-    collection_manifest: CollectionManifest
-    research_coverage: ResearchCoverage
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
     information_advancement: InformationAdvancement
     performance: PerformanceObservation
-    outcome_review_status: Literal["omitted", "failed"] = "omitted"
     method_snapshot: dict[str, Any]
 
 
@@ -2095,11 +2114,10 @@ class IncrementalSynthesis(FrozenModel):
 
 
 class IncrementalNodeProducts(FrozenModel):
-    collection_manifest: CollectionManifest
-    research_coverage: ResearchCoverage
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
     information_advancement: InformationAdvancement
     performance: PerformanceObservation
-    outcome_review_status: Literal["omitted", "failed"]
     reassessment: ResearchReassessment
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 

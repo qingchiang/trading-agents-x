@@ -769,9 +769,9 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
         method_snapshot: { llm_provider: "fixture" }, research_kind: "full",
         full_baseline_run_id: null, is_baseline_compatible: true,
         is_cycle_head: stage !== "incremental", is_primary: true, is_active: true,
-        trashed_at: null, collection_manifest: null, research_coverage: null,
+        trashed_at: null, collection_summary: null, research_availability: null,
         reassessment: null, decision: result("full-journey").decision,
-        performance: null, outcome_review_status: null, cycle_warning: stage === "incremental",
+        performance: null, cycle_warning: stage === "incremental",
         full_research_required_reasons: [],
       };
       const incremental = {
@@ -780,19 +780,21 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
         information_cutoff_at: timestamp, method_snapshot: { llm_provider: "fixture" },
         research_kind: "incremental", full_baseline_run_id: "full-journey",
         is_baseline_compatible: false, is_cycle_head: true, is_primary: true,
-        is_active: true, trashed_at: null, outcome_review_status: "omitted",
-        collection_manifest: { entries: [{ domain: "news", source: "fixture",
-          outcome: "complete_empty", source_watermark: "fixture-watermark" }] },
-        research_coverage: { domains: [{ domain: "news", requirement: "required", status: "missing" }] },
+        is_active: true, trashed_at: null,
+        collection_summary: { version: "1", market: "united_states", domains: [{
+          domain: "news", source: "fixture", state: "empty", fallback: false,
+          retrieved_at: timestamp, temporal_bases: [], evidence_refs: [],
+        }] },
+        research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
         reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed",
-          reason: "The complete scan found no new matching record.",
-          manifest_entry_refs: ["manifest:news:fixture"] }] },
+          reason: "The bounded update did not change the thesis.", evidence_refs: [] }] },
         decision: { rating: "Hold", thesis: "Current complete decision" },
-        performance: { status: "not_yet_observable", reason: "No completed interval." },
+        performance: { stock: { status: "not_yet_observable",
+          reason: "No completed interval." }, benchmarks: [] },
         cycle_warning: true,
-        full_research_required_reasons: [{ code: "required_coverage.news",
-          message: "Required news coverage is missing.", origin: "deterministic",
-          evidence_refs: [], manifest_entry_refs: ["manifest:news:fixture"] }],
+        full_research_required_reasons: [{ code: "attribution.unresolved",
+          message: "The bounded update cannot resolve attribution.", origin: "semantic",
+          evidence_refs: [] }],
       };
       return route.fulfill({ json: { timeline: {
         instrument: "NVDA", primary_cycle_id: stage === "none" ? null : "full-journey",
@@ -836,8 +838,8 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
   await page.goto("/timelines/NVDA");
   await expect(page.getByText(/Full Research Node|完整研究节点/)).toBeVisible();
   await expect(page.getByText(/Incremental Research Node|增量研究节点/)).toBeVisible();
-  await expect(page.getByText("Incremental Manifest")).toBeVisible();
+  await expect(page.getByText("Collection Summary")).toBeVisible();
   await expect(page.getByText("Current complete decision")).toBeVisible();
-  await expect(page.getByText("Required news coverage is missing.")).toBeVisible();
+  await expect(page.getByText("The bounded update cannot resolve attribution.")).toBeVisible();
   await expect(page.getByText(/Full research recommended|建议进行完整研究/)).toBeVisible();
 });

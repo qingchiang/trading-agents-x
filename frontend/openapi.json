@@ -485,6 +485,26 @@
         "title": "AuditedRangeEndpoint",
         "type": "object"
       },
+      "BenchmarkContext": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "$ref": "#/components/schemas/PerformanceComponent"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "component"
+        ],
+        "title": "BenchmarkContext",
+        "type": "object"
+      },
       "CalculationRecord": {
         "additionalProperties": false,
         "description": "A decision-critical calculation, not a presentation-table cell.",
@@ -724,59 +744,10 @@
         "title": "CollectionDiagnostic",
         "type": "object"
       },
-      "CollectionManifest": {
+      "CollectionDomainResult": {
         "additionalProperties": false,
-        "description": "The deterministic source-level audit for one Incremental request.",
+        "description": "One actual domain result without a configured-provider attempt ledger.",
         "properties": {
-          "entries": {
-            "items": {
-              "$ref": "#/components/schemas/CollectionManifestEntry"
-            },
-            "minItems": 1,
-            "title": "Entries",
-            "type": "array"
-          },
-          "market": {
-            "enum": [
-              "united_states",
-              "japan",
-              "mainland_china"
-            ],
-            "title": "Market",
-            "type": "string"
-          },
-          "newly_reviewable_baseline_component_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Newly Reviewable Baseline Component Ids",
-            "type": "array"
-          },
-          "plan_version": {
-            "pattern": "^[0-9]+$",
-            "title": "Plan Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "plan_version",
-          "market",
-          "entries"
-        ],
-        "title": "CollectionManifest",
-        "type": "object"
-      },
-      "CollectionManifestEntry": {
-        "additionalProperties": false,
-        "description": "Observed result for one deterministic source/domain scan.",
-        "properties": {
-          "chain_position": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Chain Position",
-            "type": "integer"
-          },
           "diagnostic": {
             "anyOf": [
               {
@@ -805,23 +776,34 @@
             "title": "Evidence Refs",
             "type": "array"
           },
-          "outcome": {
-            "$ref": "#/components/schemas/CollectionOutcome"
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
           },
-          "planned_from": {
-            "format": "date-time",
-            "title": "Planned From",
-            "type": "string"
+          "observed_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed From"
           },
-          "planned_through": {
-            "format": "date-time",
-            "title": "Planned Through",
-            "type": "string"
-          },
-          "provider_identity": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Provider Identity",
-            "type": "string"
+          "observed_through": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Through"
           },
           "retrieved_at": {
             "anyOf": [
@@ -835,89 +817,90 @@
             ],
             "title": "Retrieved At"
           },
-          "scanned_from": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scanned From"
-          },
-          "scanned_through": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scanned Through"
-          },
           "source": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Source",
-            "type": "string"
-          },
-          "source_watermark": {
             "anyOf": [
               {
-                "maxLength": 200,
+                "pattern": "^[a-z][a-z0-9_.-]*$",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Source Watermark"
+            "title": "Source"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CollectionResultState"
+          },
+          "temporal_bases": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CollectionTemporalBasis"
+            },
+            "title": "Temporal Bases",
+            "type": "array"
           }
         },
         "required": [
           "domain",
-          "source",
-          "provider_identity",
-          "planned_from",
-          "planned_through",
-          "outcome"
+          "state"
         ],
-        "title": "CollectionManifestEntry",
+        "title": "CollectionDomainResult",
         "type": "object"
       },
-      "CollectionOutcome": {
-        "description": "One terminal observation for a planned Incremental source scan.",
+      "CollectionResultState": {
+        "description": "Truthful result state for one enabled Incremental research domain.",
         "enum": [
-          "complete_with_records",
-          "complete_empty",
+          "data",
+          "empty",
           "partial",
-          "unavailable",
-          "failed",
-          "not_queried",
-          "not_applicable"
+          "unavailable"
         ],
-        "title": "CollectionOutcome",
+        "title": "CollectionResultState",
         "type": "string"
       },
-      "CoverageRequirement": {
-        "enum": [
-          "required",
-          "advisory"
+      "CollectionSummary": {
+        "additionalProperties": false,
+        "description": "Actual Incremental collection results and disclosed limitations.",
+        "properties": {
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionDomainResult"
+            },
+            "minItems": 1,
+            "title": "Domains",
+            "type": "array"
+          },
+          "market": {
+            "enum": [
+              "united_states",
+              "japan",
+              "mainland_china"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^[0-9]+$",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "market",
+          "domains"
         ],
-        "title": "CoverageRequirement",
-        "type": "string"
+        "title": "CollectionSummary",
+        "type": "object"
       },
-      "CoverageStatus": {
+      "CollectionTemporalBasis": {
+        "description": "Temporal basis actually represented by admitted domain observations.",
         "enum": [
-          "complete",
-          "limited",
-          "missing",
-          "not_applicable"
+          "pit",
+          "near_live_advisory"
         ],
-        "title": "CoverageStatus",
+        "title": "CollectionTemporalBasis",
         "type": "string"
       },
       "DebateAgenda": {
@@ -1736,14 +1719,6 @@
             "title": "Evidence Refs",
             "type": "array"
           },
-          "manifest_entry_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Manifest Entry Refs",
-            "type": "array"
-          },
           "message": {
             "minLength": 1,
             "title": "Message",
@@ -1823,21 +1798,20 @@
             "title": "Advanced",
             "type": "boolean"
           },
-          "newly_reviewable_baseline_component_ids": {
+          "observation_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Newly Reviewable Baseline Component Ids",
+            "title": "Observation Ids",
             "type": "array"
           },
           "reasons": {
             "default": [],
             "items": {
               "enum": [
-                "complete_empty_scan",
-                "admissible_evidence",
-                "newly_reviewable_baseline_component"
+                "admissible_observation",
+                "completed_stock_session"
               ],
               "type": "string"
             },
@@ -2640,26 +2614,142 @@
         "title": "NumericTemporalBasis",
         "type": "string"
       },
-      "PerformanceObservation": {
+      "PerformanceCalculationRecord": {
         "additionalProperties": false,
         "properties": {
-          "reason": {
+          "adjustment_basis": {
+            "maxLength": 120,
             "minLength": 1,
-            "title": "Reason",
+            "title": "Adjustment Basis",
             "type": "string"
           },
-          "status": {
-            "enum": [
-              "not_yet_observable",
-              "unavailable"
-            ],
-            "title": "Status",
+          "baseline_information_cutoff_at": {
+            "format": "date-time",
+            "title": "Baseline Information Cutoff At",
             "type": "string"
+          },
+          "end_session": {
+            "format": "date",
+            "title": "End Session",
+            "type": "string"
+          },
+          "end_value": {
+            "exclusiveMinimum": 0.0,
+            "title": "End Value",
+            "type": "number"
+          },
+          "formula": {
+            "const": "(end_value / start_value) - 1",
+            "default": "(end_value / start_value) - 1",
+            "title": "Formula",
+            "type": "string"
+          },
+          "provider": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          },
+          "start_session": {
+            "format": "date",
+            "title": "Start Session",
+            "type": "string"
+          },
+          "start_value": {
+            "exclusiveMinimum": 0.0,
+            "title": "Start Value",
+            "type": "number"
+          },
+          "target_information_cutoff_at": {
+            "format": "date-time",
+            "title": "Target Information Cutoff At",
+            "type": "string"
+          },
+          "unrounded_return": {
+            "title": "Unrounded Return",
+            "type": "number"
           }
         },
         "required": [
-          "status",
-          "reason"
+          "provider",
+          "adjustment_basis",
+          "retrieved_at",
+          "baseline_information_cutoff_at",
+          "target_information_cutoff_at",
+          "start_session",
+          "end_session",
+          "start_value",
+          "end_value",
+          "unrounded_return"
+        ],
+        "title": "PerformanceCalculationRecord",
+        "type": "object"
+      },
+      "PerformanceComponent": {
+        "additionalProperties": false,
+        "properties": {
+          "calculation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerformanceCalculationRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PerformanceComponentStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PerformanceComponent",
+        "type": "object"
+      },
+      "PerformanceComponentStatus": {
+        "enum": [
+          "calculated",
+          "not_yet_observable",
+          "unavailable"
+        ],
+        "title": "PerformanceComponentStatus",
+        "type": "string"
+      },
+      "PerformanceObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmarks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkContext"
+            },
+            "title": "Benchmarks",
+            "type": "array"
+          },
+          "stock": {
+            "$ref": "#/components/schemas/PerformanceComponent"
+          }
+        },
+        "required": [
+          "stock"
         ],
         "title": "PerformanceObservation",
         "type": "object"
@@ -3150,6 +3240,64 @@
         "title": "ResearchArtifact",
         "type": "object"
       },
+      "ResearchAvailability": {
+        "additionalProperties": false,
+        "description": "Descriptive breadth of actual inputs, without source certification.",
+        "properties": {
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchAvailabilityDomain"
+            },
+            "minItems": 1,
+            "title": "Domains",
+            "type": "array"
+          },
+          "version": {
+            "pattern": "^[0-9]+$",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "domains"
+        ],
+        "title": "ResearchAvailability",
+        "type": "object"
+      },
+      "ResearchAvailabilityDomain": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "enum": [
+              "fundamentals",
+              "market",
+              "news",
+              "social"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResearchAvailabilityStatus"
+          }
+        },
+        "required": [
+          "domain",
+          "status"
+        ],
+        "title": "ResearchAvailabilityDomain",
+        "type": "object"
+      },
+      "ResearchAvailabilityStatus": {
+        "enum": [
+          "available",
+          "limited",
+          "missing"
+        ],
+        "title": "ResearchAvailabilityStatus",
+        "type": "string"
+      },
       "ResearchCase": {
         "additionalProperties": false,
         "description": "A readable constructive or skeptical research case.",
@@ -3173,59 +3321,6 @@
           "markdown"
         ],
         "title": "ResearchCase",
-        "type": "object"
-      },
-      "ResearchCoverage": {
-        "additionalProperties": false,
-        "description": "Versioned policy assessment derived from a Collection Manifest.",
-        "properties": {
-          "domains": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchCoverageDomain"
-            },
-            "minItems": 1,
-            "title": "Domains",
-            "type": "array"
-          },
-          "policy_version": {
-            "pattern": "^[0-9]+$",
-            "title": "Policy Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "policy_version",
-          "domains"
-        ],
-        "title": "ResearchCoverage",
-        "type": "object"
-      },
-      "ResearchCoverageDomain": {
-        "additionalProperties": false,
-        "properties": {
-          "domain": {
-            "enum": [
-              "fundamentals",
-              "market",
-              "news",
-              "social"
-            ],
-            "title": "Domain",
-            "type": "string"
-          },
-          "requirement": {
-            "$ref": "#/components/schemas/CoverageRequirement"
-          },
-          "status": {
-            "$ref": "#/components/schemas/CoverageStatus"
-          }
-        },
-        "required": [
-          "domain",
-          "requirement",
-          "status"
-        ],
-        "title": "ResearchCoverageDomain",
         "type": "object"
       },
       "ResearchDecision": {
@@ -3372,10 +3467,10 @@
             "title": "Analysis Date",
             "type": "string"
           },
-          "collection_manifest": {
+          "collection_summary": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CollectionManifest"
+                "$ref": "#/components/schemas/CollectionSummary"
               },
               {
                 "type": "null"
@@ -3464,21 +3559,6 @@
             "title": "Method Snapshot",
             "type": "object"
           },
-          "outcome_review_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "omitted",
-                  "failed"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome Review Status"
-          },
           "performance": {
             "anyOf": [
               {
@@ -3499,10 +3579,10 @@
               }
             ]
           },
-          "research_coverage": {
+          "research_availability": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ResearchCoverage"
+                "$ref": "#/components/schemas/ResearchAvailability"
               },
               {
                 "type": "null"
@@ -3597,14 +3677,6 @@
               "type": "string"
             },
             "title": "Evidence Refs",
-            "type": "array"
-          },
-          "manifest_entry_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Manifest Entry Refs",
             "type": "array"
           },
           "reason": {

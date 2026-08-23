@@ -63,21 +63,23 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
       research_kind: "incremental", full_baseline_run_id: "full-1",
       is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
-      outcome_review_status: "omitted", cycle_warning: true,
-      collection_manifest: { entries: [{ domain: "news", source: "fixture", outcome: "complete_empty", source_watermark: "fixture-watermark" }] },
-      research_coverage: { domains: [{ domain: "news", requirement: "required", status: "missing" }] },
+      cycle_warning: true,
+      collection_summary: { version: "1", market: "united_states", domains: [{
+        domain: "news", source: "fixture", state: "empty", fallback: false,
+        retrieved_at: "2026-07-24T20:00:00Z", temporal_bases: [], evidence_refs: [],
+      }] },
+      research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
       reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed", reason: "No new record." }] },
       decision: { rating: "bullish", thesis: "Current complete decision" },
-      performance: { status: "not_yet_observable", reason: "No completed interval." },
+      performance: { stock: { status: "not_yet_observable", reason: "No completed interval." }, benchmarks: [] },
       full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
     }],
   } } as never);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
   expect(await screen.findByText("Incremental Research Node")).toBeVisible();
   expect(screen.getByText("Full research recommended")).toBeVisible();
-  expect(screen.getByText("Outcome review omitted")).toBeVisible();
-  expect(screen.getByText("Incremental Manifest")).toBeVisible();
-  expect(screen.getByText("Coverage")).toBeVisible();
+  expect(screen.getByText("Collection Summary")).toBeVisible();
+  expect(screen.getByText("Research Availability")).toBeVisible();
   expect(screen.getByText("Reassessment")).toBeVisible();
   expect(screen.getByRole("heading", { name: "Current Decision" })).toBeVisible();
   expect(screen.getByText("Cycle warning")).toBeVisible();
@@ -92,8 +94,9 @@ test("shows evidence-based Information Advancement in the Timeline audit", async
       research_kind: "incremental", full_baseline_run_id: "full-1",
       is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
       information_advancement: {
-        advanced: true, reasons: ["admissible_evidence"],
+        advanced: true, reasons: ["admissible_observation"],
         newly_reviewable_baseline_component_ids: [],
+        observation_ids: ["obs-1"],
       },
     }],
   } } as never);
@@ -102,7 +105,7 @@ test("shows evidence-based Information Advancement in the Timeline audit", async
 
   expect(await screen.findByText("Information Advancement")).toBeVisible();
   fireEvent.click(screen.getByText("Information Advancement"));
-  expect(screen.getByText("admissible_evidence")).toBeVisible();
+  expect(screen.getByText("admissible_observation")).toBeVisible();
 });
 
 test.each([
@@ -120,11 +123,13 @@ test.each([
         research_kind: "incremental", full_baseline_run_id: "full-1",
         is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
         information_advancement: {
-          advanced: true, reasons: ["admissible_evidence"],
+          advanced: true, reasons: ["admissible_observation"],
           newly_reviewable_baseline_component_ids: [],
+          observation_ids: ["obs-1"],
         },
-        collection_manifest: { entries: [{
-          domain: "news", source: "fixture.news", outcome: "complete_with_records",
+        collection_summary: { version: "1", market: "united_states", domains: [{
+          domain: "news", source: "fixture.news", state: "data", fallback: false,
+          retrieved_at: "2026-07-24T20:00:00Z", temporal_bases: ["pit"],
           evidence_refs: [evidenceRef],
         }] },
       }],
@@ -132,7 +137,7 @@ test.each([
 
     render(<Router initialPath={`/timelines/${instrument}`}><Timeline /></Router>);
 
-    fireEvent.click(await screen.findByText("Incremental Manifest"));
+    fireEvent.click(await screen.findByText("Collection Summary"));
     expect(screen.getByText(evidenceRef)).toBeVisible();
   },
 );
