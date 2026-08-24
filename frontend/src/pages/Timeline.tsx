@@ -192,9 +192,20 @@ export default function Timeline() {
               <ul>
                 {node.collection_summary.domains.map((result) => (
                   <li key={result.domain}>
-                    {result.domain} / {result.source ?? "unavailable"}: {result.state}
-                    {result.fallback ? " (fallback)" : ""}
+                    {result.domain}: {result.state}
                     {result.diagnostic ? ` [${result.diagnostic.code}]` : ""}
+                    {(result.sources?.length ?? 0) > 0 && (
+                      <ul>
+                        {(result.sources ?? []).map((source) => (
+                          <li key={source.source}>
+                            {source.source}{source.fallback ? " (fallback)" : ""}
+                            <dl className="definition-list">
+                              <div><dt>Retrieved at</dt><dd>{source.retrieved_at}</dd></div>
+                            </dl>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {result.evidence_refs?.length ? (
                       <>
                         {" · "}
@@ -207,9 +218,6 @@ export default function Timeline() {
                       </>
                     ) : null}
                     <dl className="definition-list">
-                      {result.retrieved_at && (
-                        <div><dt>Retrieved at</dt><dd>{result.retrieved_at}</dd></div>
-                      )}
                       {result.observed_from && result.observed_through && (
                         <div>
                           <dt>Observed window</dt>

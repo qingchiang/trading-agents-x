@@ -9,6 +9,7 @@ from tradingagents.application.contracts import (
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionResultState,
+    CollectionSourceProvenance,
     CollectionSummary,
     CollectionTemporalBasis,
     EvidenceItem,
@@ -39,8 +40,7 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
     news = CollectionDomainResult(
         domain="news",
         state=CollectionResultState.EMPTY,
-        source="yahoo",
-        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+        sources=_sources("yahoo", datetime(2026, 7, 24, 12, tzinfo=UTC)),
         observed_from=datetime(2026, 7, 24, 10, tzinfo=UTC),
         observed_through=datetime(2026, 7, 24, 12, tzinfo=UTC),
     )
@@ -58,9 +58,13 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
             {
                 "domain": "news",
                 "state": "empty",
-                "source": "yahoo",
-                "fallback": False,
-                "retrieved_at": "2026-07-24T12:00:00Z",
+                "sources": [
+                    {
+                        "source": "yahoo",
+                        "fallback": False,
+                        "retrieved_at": "2026-07-24T12:00:00Z",
+                    }
+                ],
                 "observed_from": "2026-07-24T10:00:00Z",
                 "observed_through": "2026-07-24T12:00:00Z",
                 "temporal_bases": [],
@@ -81,6 +85,37 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
         )
 
 
+def test_collection_summary_preserves_multiple_actual_assembler_sources() -> None:
+    summary = CollectionSummary(
+        version="1",
+        market="japan",
+        domains=(
+            CollectionDomainResult(
+                domain="news",
+                state="data",
+                sources=(
+                    CollectionSourceProvenance(
+                        source="edinet",
+                        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+                    ),
+                    CollectionSourceProvenance(
+                        source="tdnet",
+                        fallback=True,
+                        retrieved_at=datetime(2026, 7, 24, 12, 1, tzinfo=UTC),
+                    ),
+                ),
+                temporal_bases=("pit",),
+                evidence_refs=("ev_111111111111", "ev_222222222222"),
+            ),
+        ),
+    )
+
+    assert tuple(source.source for source in summary.domains[0].sources) == (
+        "edinet",
+        "tdnet",
+    )
+
+
 def test_incremental_collection_request_deeply_freezes_configured_routes() -> None:
     request = _collection_request(analysis_cutoff="2026-07-24")
 
@@ -93,8 +128,7 @@ def test_collection_domain_result_requires_truthful_state_provenance() -> None:
         CollectionDomainResult(
             domain="news",
             state="data",
-            source="yahoo",
-            retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+            sources=_sources("yahoo", datetime(2026, 7, 24, 12, tzinfo=UTC)),
             temporal_bases=(CollectionTemporalBasis.PIT,),
         )
 
@@ -102,8 +136,7 @@ def test_collection_domain_result_requires_truthful_state_provenance() -> None:
         CollectionDomainResult(
             domain="news",
             state="empty",
-            source="yahoo",
-            retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+            sources=_sources("yahoo", datetime(2026, 7, 24, 12, tzinfo=UTC)),
             evidence_refs=("ev_111111111111",),
         )
 
@@ -114,8 +147,7 @@ def test_collection_domain_result_requires_truthful_state_provenance() -> None:
         CollectionDomainResult(
             domain="social",
             state="partial",
-            source="stocktwits",
-            retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+            sources=_sources("stocktwits", datetime(2026, 7, 24, 12, tzinfo=UTC)),
             temporal_bases=("near_live_advisory",),
             evidence_refs=("ev_111111111111",),
         )
@@ -125,8 +157,7 @@ def test_collection_domain_result_requires_truthful_state_provenance() -> None:
         state="unavailable",
         diagnostic=CollectionDiagnostic(code="not_configured"),
     )
-    assert unavailable.source is None
-    assert unavailable.retrieved_at is None
+    assert unavailable.sources == ()
 
 
 def test_collection_domain_result_rejects_ambiguous_observed_windows() -> None:
@@ -134,16 +165,14 @@ def test_collection_domain_result_rejects_ambiguous_observed_windows() -> None:
         CollectionDomainResult(
             domain="news",
             state="empty",
-            source="yahoo",
-            retrieved_at=datetime(2026, 7, 24, 12),
+            sources=_sources("yahoo", datetime(2026, 7, 24, 12)),
         )
 
     with pytest.raises(ValidationError, match="observed window must be complete"):
         CollectionDomainResult(
             domain="news",
             state="empty",
-            source="yahoo",
-            retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+            sources=_sources("yahoo", datetime(2026, 7, 24, 12, tzinfo=UTC)),
             observed_from=datetime(2026, 7, 24, 10, tzinfo=UTC),
         )
 
@@ -151,8 +180,7 @@ def test_collection_domain_result_rejects_ambiguous_observed_windows() -> None:
         CollectionDomainResult(
             domain="news",
             state="empty",
-            source="yahoo",
-            retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+            sources=_sources("yahoo", datetime(2026, 7, 24, 12, tzinfo=UTC)),
             observed_from=datetime(2026, 7, 24, 13, tzinfo=UTC),
             observed_through=datetime(2026, 7, 24, 12, tzinfo=UTC),
         )
@@ -167,22 +195,19 @@ def test_research_availability_describes_actual_domain_breadth() -> None:
             CollectionDomainResult(
                 domain="fundamentals",
                 state="data",
-                source="sec",
-                retrieved_at=retrieved_at,
+                sources=_sources("sec", retrieved_at),
                 temporal_bases=("pit",),
                 evidence_refs=("ev_111111111111",),
             ),
             CollectionDomainResult(
                 domain="news",
                 state="empty",
-                source="yahoo",
-                retrieved_at=retrieved_at,
+                sources=_sources("yahoo", retrieved_at),
             ),
             CollectionDomainResult(
                 domain="social",
                 state="partial",
-                source="stocktwits",
-                retrieved_at=retrieved_at,
+                sources=_sources("stocktwits", retrieved_at),
                 temporal_bases=("near_live_advisory",),
                 evidence_refs=("ev_222222222222",),
                 diagnostic=CollectionDiagnostic(code="bounded_feed"),
@@ -190,8 +215,7 @@ def test_research_availability_describes_actual_domain_breadth() -> None:
             CollectionDomainResult(
                 domain="market",
                 state="unavailable",
-                source="yahoo",
-                retrieved_at=retrieved_at,
+                sources=_sources("yahoo", retrieved_at),
                 diagnostic=CollectionDiagnostic(code="transport_timeout"),
             ),
         ),
@@ -243,9 +267,11 @@ def test_collection_normalization_preserves_actual_fallback_provenance() -> None
                 CollectionDomainResult(
                     domain="news",
                     state="data",
-                    source="fallback.news",
-                    fallback=True,
-                    retrieved_at=datetime(2026, 7, 24, 18, tzinfo=UTC),
+                    sources=_sources(
+                        "fallback.news",
+                        datetime(2026, 7, 24, 18, tzinfo=UTC),
+                        fallback=True,
+                    ),
                     temporal_bases=("pit",),
                     evidence_refs=(candidate.evidence.ref,),
                 ),
@@ -260,8 +286,8 @@ def test_collection_normalization_preserves_actual_fallback_provenance() -> None
         sealed_at=datetime(2026, 7, 24, 19, tzinfo=UTC),
     )
 
-    assert summary.domains[0].source == "fallback.news"
-    assert summary.domains[0].fallback is True
+    assert summary.domains[0].sources[0].source == "fallback.news"
+    assert summary.domains[0].sources[0].fallback is True
     assert evidence[0].fallback is True
 
 
@@ -294,9 +320,11 @@ def test_collection_normalization_rejects_inconsistent_source_provenance(
                 CollectionDomainResult(
                     domain="news",
                     state="data",
-                    source=reported_source,
-                    fallback=reported_fallback,
-                    retrieved_at=datetime(2026, 7, 24, 18, tzinfo=UTC),
+                    sources=_sources(
+                        reported_source,
+                        datetime(2026, 7, 24, 18, tzinfo=UTC),
+                        fallback=reported_fallback,
+                    ),
                     temporal_bases=("pit",),
                     evidence_refs=(candidate.evidence.ref,),
                 ),
@@ -323,16 +351,16 @@ def test_collection_normalization_rejects_domain_retrieval_after_sealing() -> No
                 CollectionDomainResult(
                     domain=domain,
                     state="empty" if domain == "news" else "unavailable",
-                    source="fixture.news" if domain == "news" else None,
-                    retrieved_at=(
-                        datetime(2026, 7, 24, 19, 1, tzinfo=UTC)
+                    sources=(
+                        _sources(
+                            "fixture.news",
+                            datetime(2026, 7, 24, 19, 1, tzinfo=UTC),
+                        )
                         if domain == "news"
-                        else None
+                        else ()
                     ),
                     diagnostic=(
-                        None
-                        if domain == "news"
-                        else CollectionDiagnostic(code="not_configured")
+                        None if domain == "news" else CollectionDiagnostic(code="not_configured")
                     ),
                 )
                 for domain in request.enabled_domains
@@ -368,8 +396,10 @@ def test_collection_normalization_rejects_same_reference_with_different_payload(
                 CollectionDomainResult(
                     domain="news",
                     state="data",
-                    source="fixture.news",
-                    retrieved_at=datetime(2026, 7, 24, 18, tzinfo=UTC),
+                    sources=_sources(
+                        "fixture.news",
+                        datetime(2026, 7, 24, 18, tzinfo=UTC),
+                    ),
                     temporal_bases=("pit",),
                     evidence_refs=(first.ref,),
                 ),
@@ -747,4 +777,19 @@ def _collection_request(*, analysis_cutoff: str) -> IncrementalCollectionRequest
         enabled_domains=("fundamentals", "market", "news", "social"),
         configured_routes={"data_vendors": {"fundamentals": "yfinance"}},
         near_live_max_age_days=5,
+    )
+
+
+def _sources(
+    source: str,
+    retrieved_at: datetime,
+    *,
+    fallback: bool = False,
+) -> tuple[CollectionSourceProvenance, ...]:
+    return (
+        CollectionSourceProvenance(
+            source=source,
+            fallback=fallback,
+            retrieved_at=retrieved_at,
+        ),
     )

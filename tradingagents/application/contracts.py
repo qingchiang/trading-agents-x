@@ -68,9 +68,7 @@ def _deeply_frozen_value(value: Any) -> Any:
 
 
 def _deeply_frozen_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
-    return MappingProxyType(
-        {key: _deeply_frozen_value(item) for key, item in value.items()}
-    )
+    return MappingProxyType({key: _deeply_frozen_value(item) for key, item in value.items()})
 
 
 class FrozenModel(BaseModel):
@@ -1771,14 +1769,26 @@ class CollectionTemporalBasis(_StableStrEnum):
     NEAR_LIVE_ADVISORY = "near_live_advisory"
 
 
+class CollectionSourceProvenance(FrozenModel):
+    """One actual source used or attempted for a domain result."""
+
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    fallback: bool = False
+    retrieved_at: datetime
+
+    @model_validator(mode="after")
+    def validate_retrieval_time(self) -> CollectionSourceProvenance:
+        if self.retrieved_at.tzinfo is None or self.retrieved_at.utcoffset() is None:
+            raise ValueError("source retrieved_at must include a timezone")
+        return self
+
+
 class CollectionDomainResult(FrozenModel):
     """One actual domain result without a configured-provider attempt ledger."""
 
     domain: Literal["fundamentals", "market", "news", "social"]
     state: CollectionResultState
-    source: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")
-    fallback: bool = False
-    retrieved_at: datetime | None = None
+    sources: tuple[CollectionSourceProvenance, ...] = ()
     observed_from: datetime | None = None
     observed_through: datetime | None = None
     temporal_bases: tuple[CollectionTemporalBasis, ...] = ()
@@ -1792,7 +1802,7 @@ class CollectionDomainResult(FrozenModel):
 
     @model_validator(mode="after")
     def validate_truthful_result(self) -> CollectionDomainResult:
-        for field_name in ("retrieved_at", "observed_from", "observed_through"):
+        for field_name in ("observed_from", "observed_through"):
             value = getattr(self, field_name)
             if value is not None and (value.tzinfo is None or value.utcoffset() is None):
                 raise ValueError(f"{field_name} must include a timezone")
@@ -1809,9 +1819,7 @@ class CollectionDomainResult(FrozenModel):
             raise ValueError("observed window must be ordered")
         if self.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}:
             if not self.evidence_refs or not self.temporal_bases:
-                raise ValueError(
-                    "data and partial results require Evidence and a temporal basis"
-                )
+                raise ValueError("data and partial results require Evidence and a temporal basis")
         elif self.evidence_refs or self.temporal_bases:
             raise ValueError(
                 "empty and unavailable results cannot report Evidence or a temporal basis"
@@ -1821,10 +1829,11 @@ class CollectionDomainResult(FrozenModel):
                 raise ValueError("unavailable results require a sanitized diagnostic")
         elif self.state is CollectionResultState.PARTIAL and self.diagnostic is None:
             raise ValueError("partial results require a sanitized limitation")
-        elif self.source is None or self.retrieved_at is None:
-            raise ValueError("queried collection results require source and retrieved_at")
-        if self.fallback and self.source is None:
-            raise ValueError("fallback results require an actual source")
+        elif not self.sources:
+            raise ValueError("queried collection results require actual sources")
+        source_names = tuple(source.source for source in self.sources)
+        if len(source_names) != len(set(source_names)):
+            raise ValueError("collection result sources must be unique")
         if len(self.temporal_bases) != len(set(self.temporal_bases)):
             raise ValueError("collection temporal bases must be unique")
         return self
@@ -1881,8 +1890,8 @@ class IncrementalCollectionRequest(FrozenModel):
     analysis_cutoff: date
     window_start: datetime
     window_end: datetime
-    enabled_domains: tuple[Literal["fundamentals", "market", "news", "social"], ...] = (
-        Field(min_length=1)
+    enabled_domains: tuple[Literal["fundamentals", "market", "news", "social"], ...] = Field(
+        min_length=1
     )
     configured_routes: Mapping[str, Any]
     near_live_max_age_days: int = Field(default=5, ge=0, le=5)
@@ -1933,25 +1942,6 @@ class IncrementalEvidenceBinding(FrozenModel):
 
     candidate_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
     admitted_ref: str | None = Field(default=None, pattern=r"^ev_[a-f0-9]{12}$")
-
-
-class IncrementalCollectionResult(FrozenModel):
-    """Deterministic collection observations plus unsealed new Evidence."""
-
-    collection_summary: CollectionSummary
-    evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
-    stock_series: MarketSeriesResult | None = None
-    stock_series_evidence_ref: str | None = Field(
-        default=None,
-        pattern=r"^ev_[a-f0-9]{12}$",
-    )
-    benchmarks: tuple[BenchmarkContext, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_stock_series_link(self) -> IncrementalCollectionResult:
-        if self.stock_series is None and self.stock_series_evidence_ref is not None:
-            raise ValueError("stock-series Evidence link requires a stock series")
-        return self
 
 
 class InformationAdvancement(FrozenModel):
@@ -2007,6 +1997,7 @@ class ResearchReassessmentEntry(FrozenModel):
     def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
+
 class ResearchReassessment(FrozenModel):
     entries: tuple[ResearchReassessmentEntry, ...] = Field(min_length=1)
 
@@ -2054,6 +2045,44 @@ class MarketSeriesResult(FrozenModel):
         return self
 
 
+class BenchmarkSeriesResult(FrozenModel):
+    """One benchmark's collected series or truthful unavailability."""
+
+    name: str = Field(min_length=1, max_length=120)
+    series: MarketSeriesResult | None = None
+    unavailable_reason: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_result_state(self) -> BenchmarkSeriesResult:
+        if (self.series is None) == (self.unavailable_reason is None):
+            raise ValueError(
+                "benchmark collection requires either a series or an unavailable reason"
+            )
+        return self
+
+
+class IncrementalCollectionResult(FrozenModel):
+    """Deterministic collection observations plus unsealed new Evidence."""
+
+    collection_summary: CollectionSummary
+    evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
+    stock_series: MarketSeriesResult | None = None
+    stock_series_evidence_ref: str | None = Field(
+        default=None,
+        pattern=r"^ev_[a-f0-9]{12}$",
+    )
+    benchmark_series: tuple[BenchmarkSeriesResult, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_collection_links(self) -> IncrementalCollectionResult:
+        if self.stock_series is None and self.stock_series_evidence_ref is not None:
+            raise ValueError("stock-series Evidence link requires a stock series")
+        names = tuple(item.name for item in self.benchmark_series)
+        if len(names) != len(set(names)):
+            raise ValueError("benchmark series names must be unique")
+        return self
+
+
 class PerformanceComponentStatus(_StableStrEnum):
     CALCULATED = "calculated"
     NOT_YET_OBSERVABLE = "not_yet_observable"
@@ -2070,9 +2099,7 @@ class PerformanceCalculationRecord(FrozenModel):
     end_session: date
     start_value: float = Field(gt=0, allow_inf_nan=False)
     end_value: float = Field(gt=0, allow_inf_nan=False)
-    formula: Literal["(end_value / start_value) - 1"] = (
-        "(end_value / start_value) - 1"
-    )
+    formula: Literal["(end_value / start_value) - 1"] = "(end_value / start_value) - 1"
     unrounded_return: float = Field(allow_inf_nan=False)
 
     @model_validator(mode="after")
@@ -2144,6 +2171,7 @@ class FullResearchRequiredReason(FrozenModel):
     @classmethod
     def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
 
 class IncrementalSynthesisInput(FrozenModel):
     full_baseline_run_id: str = Field(min_length=1, max_length=36)

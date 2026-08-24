@@ -7,9 +7,10 @@ import pytest
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tradingagents.application.contracts import (
     AnalysisRequest,
-    BenchmarkContext,
+    BenchmarkSeriesResult,
     CollectionDiagnostic,
     CollectionDomainResult,
+    CollectionSourceProvenance,
     CollectionSummary,
     EvidenceItem,
     EvidenceOrigin,
@@ -19,8 +20,6 @@ from tradingagents.application.contracts import (
     IncrementalEvidenceCandidate,
     MarketSeriesPoint,
     MarketSeriesResult,
-    PerformanceCalculationRecord,
-    PerformanceComponent,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -44,6 +43,21 @@ def _unavailable_domains(request: IncrementalCollectionRequest):
             diagnostic=CollectionDiagnostic(code="not_configured"),
         )
         for domain in request.enabled_domains
+    )
+
+
+def _sources(
+    source: str,
+    retrieved_at: datetime,
+    *,
+    fallback: bool = False,
+) -> tuple[CollectionSourceProvenance, ...]:
+    return (
+        CollectionSourceProvenance(
+            source=source,
+            fallback=fallback,
+            retrieved_at=retrieved_at,
+        ),
     )
 
 
@@ -80,9 +94,11 @@ def _pit_collection(
     domains[index] = CollectionDomainResult(
         domain=domain,
         state="data",
-        source=candidate.evidence.source,
-        fallback=candidate.evidence.fallback,
-        retrieved_at=request.window_end,
+        sources=_sources(
+            candidate.evidence.source,
+            request.window_end,
+            fallback=candidate.evidence.fallback,
+        ),
         temporal_bases=("pit",),
         evidence_refs=(candidate.evidence.ref,),
     )
@@ -122,8 +138,7 @@ def test_incremental_service_commits_simplified_actual_result_products(
                     CollectionDomainResult(
                         domain="news",
                         state="data",
-                        source="fixture.news",
-                        retrieved_at=request.window_end,
+                        sources=_sources("fixture.news", request.window_end),
                         temporal_bases=("pit",),
                         evidence_refs=(candidate.evidence.ref,),
                     )
@@ -171,9 +186,7 @@ def test_incremental_service_commits_simplified_actual_result_products(
         "news": "data",
         "social": "unavailable",
     }
-    assert {
-        item.domain: item.status.value for item in node.research_availability.domains
-    } == {
+    assert {item.domain: item.status.value for item in node.research_availability.domains} == {
         "fundamentals": "missing",
         "market": "missing",
         "news": "available",
@@ -224,9 +237,7 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     assert synthesized == []
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
-        baseline.run_id,
-    )
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
     assert any(
         event.event_type == "incremental.no_advancement"
         for event in repository.list_events(failed[0].id)
@@ -258,8 +269,10 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         domains[market] = CollectionDomainResult(
             domain="market",
             state="data",
-            source="fixture.market",
-            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            sources=_sources(
+                "fixture.market",
+                datetime(2026, 7, 24, 21, tzinfo=UTC),
+            ),
             temporal_bases=("pit",),
             evidence_refs=(market_evidence.evidence.ref,),
         )
@@ -371,62 +384,72 @@ def test_incremental_service_rejects_unadmitted_stock_series_advancement(
         )
 
 
-def test_incremental_service_rejects_benchmark_from_another_frozen_interval(
+def test_incremental_service_calculates_benchmark_from_its_actual_series(
     app_settings,
     repository,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A new filing that advances the bounded update.",
+        )
+    )
 
     def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
-        calculation = PerformanceCalculationRecord(
-            provider="fixture.benchmark",
-            adjustment_basis="adjusted_close",
-            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
-            baseline_information_cutoff_at=datetime(2026, 7, 18, 20, tzinfo=UTC),
-            target_information_cutoff_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
-            start_session=date(2026, 7, 17),
-            end_session=date(2026, 7, 24),
-            start_value=100,
-            end_value=105,
-            unrounded_return=0.05,
-        )
-        return IncrementalCollectionResult(
-            collection_summary=CollectionSummary(
-                version=request.version,
-                market=request.market,
-                domains=_unavailable_domains(request),
-            ),
-            benchmarks=(
-                BenchmarkContext(
-                    name="S&P 500",
-                    component=PerformanceComponent(
-                        status="calculated",
-                        calculation=calculation,
+        return _pit_collection(request, candidate).model_copy(
+            update={
+                "benchmark_series": (
+                    BenchmarkSeriesResult(
+                        name="S&P 500",
+                        series=MarketSeriesResult(
+                            instrument="^GSPC",
+                            source="fixture.benchmark",
+                            adjustment_basis="adjusted_close",
+                            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+                            points=(
+                                MarketSeriesPoint(
+                                    session="2026-07-20",
+                                    completed_at="2026-07-20T20:00:00Z",
+                                    adjusted_close=100,
+                                ),
+                                MarketSeriesPoint(
+                                    session="2026-07-24",
+                                    completed_at="2026-07-24T20:00:00Z",
+                                    adjusted_close=105,
+                                ),
+                            ),
+                        ),
                     ),
                 ),
-            ),
+            }
         )
 
-    with pytest.raises(ValueError, match="benchmark cutoffs must match the frozen request"):
-        _incremental_service(
-            app_settings,
-            repository,
-            collector=collect,
-            now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
-        ).run(
-            AnalysisRequest(
-                ticker="NVDA",
-                analysis_date=date(2026, 7, 24),
-                research_kind="incremental",
-                full_baseline_run_id=baseline.run_id,
-            )
+    result = _incremental_service(
+        app_settings,
+        repository,
+        collector=collect,
+        now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
         )
-
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
-        baseline.run_id,
     )
+
+    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    calculation = node.performance.benchmarks[0].component.calculation
+    assert calculation is not None
+    assert calculation.start_session == date(2026, 7, 20)
+    assert calculation.end_session == date(2026, 7, 24)
+    assert calculation.unrounded_return == pytest.approx(0.05)
 
 
 def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
@@ -459,8 +482,10 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         domains[fundamentals] = CollectionDomainResult(
             domain="fundamentals",
             state="data",
-            source="fixture.snapshot",
-            retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+            sources=_sources(
+                "fixture.snapshot",
+                datetime(2026, 7, 29, 15, tzinfo=UTC),
+            ),
             temporal_bases=("near_live_advisory",),
             evidence_refs=(candidate.evidence.ref,),
         )
@@ -562,8 +587,10 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
             "fundamentals": CollectionDomainResult(
                 domain="fundamentals",
                 state="partial",
-                source="fixture.snapshot",
-                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                sources=_sources(
+                    "fixture.snapshot",
+                    datetime(2026, 7, 29, 15, tzinfo=UTC),
+                ),
                 temporal_bases=("near_live_advisory",),
                 evidence_refs=(partial.evidence.ref,),
                 diagnostic=CollectionDiagnostic(code="bounded_snapshot"),
@@ -571,8 +598,10 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
             "market": CollectionDomainResult(
                 domain="market",
                 state="partial",
-                source="fixture.market",
-                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                sources=_sources(
+                    "fixture.market",
+                    datetime(2026, 7, 29, 15, tzinfo=UTC),
+                ),
                 temporal_bases=("pit",),
                 evidence_refs=(market_evidence.evidence.ref,),
                 diagnostic=CollectionDiagnostic(code="provider_failure"),
@@ -580,17 +609,21 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
             "news": CollectionDomainResult(
                 domain="news",
                 state="data",
-                source="fallback.news",
-                fallback=True,
-                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                sources=_sources(
+                    "fallback.news",
+                    datetime(2026, 7, 29, 15, tzinfo=UTC),
+                    fallback=True,
+                ),
                 temporal_bases=("pit",),
                 evidence_refs=(fallback.evidence.ref,),
             ),
             "social": CollectionDomainResult(
                 domain="social",
                 state="data",
-                source="fixture.social",
-                retrieved_at=datetime(2026, 7, 30, 15, tzinfo=UTC),
+                sources=_sources(
+                    "fixture.social",
+                    datetime(2026, 7, 30, 15, tzinfo=UTC),
+                ),
                 temporal_bases=("near_live_advisory",),
                 evidence_refs=(stale.evidence.ref,),
             ),
@@ -647,13 +680,11 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    node = next(
-        item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id
-    )
+    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
     domains = {item.domain: item for item in node.collection_summary.domains}
     assert domains["fundamentals"].state.value == "partial"
     assert domains["market"].diagnostic.code == "provider_failure"
-    assert domains["news"].fallback is True
+    assert domains["news"].sources[0].fallback is True
     assert domains["social"].state.value == "empty"
     assert domains["social"].diagnostic.code == "outside_temporal_boundary"
     assert {item.ref for item in result.evidence.items} == {
@@ -661,9 +692,7 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         market_evidence.evidence.ref,
         fallback.evidence.ref,
     }
-    assert {
-        item.domain: item.status.value for item in node.research_availability.domains
-    } == {
+    assert {item.domain: item.status.value for item in node.research_availability.domains} == {
         "fundamentals": "limited",
         "market": "limited",
         "news": "available",
@@ -698,8 +727,7 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
         domains[news] = CollectionDomainResult(
             domain="news",
             state="data",
-            source="fixture.news",
-            retrieved_at=request.window_end,
+            sources=_sources("fixture.news", request.window_end),
             temporal_bases=("pit",),
             evidence_refs=(candidate.evidence.ref,),
         )
@@ -735,9 +763,7 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
-        baseline.run_id,
-    )
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
     with repository.sessions() as session:
         assert session.query(DecisionRecord).count() == 1
         assert session.query(ResearchNodeRecord).count() == 1
@@ -774,8 +800,7 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
         domains[news] = CollectionDomainResult(
             domain="news",
             state="data",
-            source="fixture.news",
-            retrieved_at=request.window_end,
+            sources=_sources("fixture.news", request.window_end),
             temporal_bases=("pit",),
             evidence_refs=(candidate.evidence.ref,),
         )
@@ -809,9 +834,7 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
         synthesis = default_incremental_synthesizer(input_)
         return synthesis.model_copy(
             update={
-                "decision": synthesis.decision.model_copy(
-                    update={"evidence_refs": (sibling_ref,)}
-                )
+                "decision": synthesis.decision.model_copy(update={"evidence_refs": (sibling_ref,)})
             }
         )
 
@@ -833,9 +856,7 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
 
     assert len(synthesis_inputs) == 1
     assert sibling_ref not in synthesis_inputs[0].permitted_baseline_evidence_refs
-    assert sibling_ref not in {
-        item.ref for item in synthesis_inputs[0].incremental_evidence.items
-    }
+    assert sibling_ref not in {item.ref for item in synthesis_inputs[0].incremental_evidence.items}
     assert {node.id for node in repository.get_timeline("NVDA").nodes} == {
         baseline.run_id,
         first.run_id,
@@ -882,9 +903,70 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
-        baseline.run_id,
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+
+
+def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
+    baseline_ref = repository.get_evidence(baseline.run_id).items[0].ref
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A current filing for the Incremental bundle.",
+        )
+    )
+    original_complete = repository.complete_incremental
+
+    def complete_with_stale_summary(run_id, result, *, evidence, products):
+        domains = tuple(
+            domain.model_copy(update={"evidence_refs": (baseline_ref,)})
+            if domain.domain == "news"
+            else domain
+            for domain in products.collection_summary.domains
+        )
+        invalid_products = products.model_copy(
+            update={
+                "collection_summary": products.collection_summary.model_copy(
+                    update={"domains": domains}
+                )
+            }
+        )
+        return original_complete(
+            run_id,
+            result,
+            evidence=evidence,
+            products=invalid_products,
+        )
+
+    monkeypatch.setattr(repository, "complete_incremental", complete_with_stale_summary)
+
+    with pytest.raises(
+        EvidenceConflictError,
+        match="Collection Summary references evidence outside the current Incremental bundle",
+    ):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=lambda request: _pit_collection(request, candidate),
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
 
 
 @pytest.mark.parametrize("mutation_phase", ["collection", "synthesis"])
@@ -967,9 +1049,7 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
                         code="attribution.unresolved",
                         message="The bounded update cannot resolve attribution.",
                         origin="semantic",
-                        evidence_refs=("ev_000000000000",)
-                        if warning_has_dangling_ref
-                        else (),
+                        evidence_refs=("ev_000000000000",) if warning_has_dangling_ref else (),
                     ),
                 )
             }

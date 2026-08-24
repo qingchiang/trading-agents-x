@@ -107,15 +107,18 @@ export interface components {
       diagnostic?: components["schemas"]["CollectionDiagnostic"] | null;
       domain: "fundamentals" | "market" | "news" | "social";
       evidence_refs?: string[];
-      fallback?: boolean;
       observed_from?: string | null;
       observed_through?: string | null;
-      retrieved_at?: string | null;
-      source?: string | null;
+      sources?: components["schemas"]["CollectionSourceProvenance"][];
       state: components["schemas"]["CollectionResultState"];
       temporal_bases?: components["schemas"]["CollectionTemporalBasis"][];
     };
     CollectionResultState: "data" | "empty" | "partial" | "unavailable";
+    CollectionSourceProvenance: {
+      fallback?: boolean;
+      retrieved_at: string;
+      source: string;
+    };
     CollectionSummary: {
       domains: components["schemas"]["CollectionDomainResult"][];
       market: "united_states" | "japan" | "mainland_china";

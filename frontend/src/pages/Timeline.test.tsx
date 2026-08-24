@@ -65,8 +65,9 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
       cycle_warning: true,
       collection_summary: { version: "1", market: "united_states", domains: [{
-        domain: "news", source: "fixture", state: "empty", fallback: false,
-        retrieved_at: "2026-07-24T20:00:00Z",
+        domain: "news", state: "empty", sources: [{
+          source: "fixture", fallback: false, retrieved_at: "2026-07-24T20:00:00Z",
+        }],
         observed_from: "2026-07-24T18:00:00Z",
         observed_through: "2026-07-24T20:00:00Z",
         temporal_bases: ["near_live_advisory"], evidence_refs: [],
@@ -148,8 +149,9 @@ test.each([
           observation_ids: ["obs-1"],
         },
         collection_summary: { version: "1", market: "united_states", domains: [{
-          domain: "news", source: "fixture.news", state: "data", fallback: false,
-          retrieved_at: "2026-07-24T20:00:00Z", temporal_bases: ["pit"],
+          domain: "news", state: "data", sources: [{
+            source: "fixture.news", fallback: false, retrieved_at: "2026-07-24T20:00:00Z",
+          }], temporal_bases: ["pit"],
           evidence_refs: [evidenceRef],
         }] },
       }],

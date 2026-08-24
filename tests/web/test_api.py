@@ -19,6 +19,7 @@ from tradingagents.application.contracts import (
     ArtifactGenerationObservation,
     CollectionDiagnostic,
     CollectionDomainResult,
+    CollectionSourceProvenance,
     CollectionSummary,
     EvidenceBundle,
     EvidenceItem,
@@ -104,8 +105,16 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
                     CollectionDomainResult(
                         domain=domain,
                         state=("data" if domain == "news" else "unavailable"),
-                        source="fixture.news" if domain == "news" else None,
-                        retrieved_at=request.window_end if domain == "news" else None,
+                        sources=(
+                            (
+                                CollectionSourceProvenance(
+                                    source="fixture.news",
+                                    retrieved_at=request.window_end,
+                                ),
+                            )
+                            if domain == "news"
+                            else ()
+                        ),
                         temporal_bases=("pit",) if domain == "news" else (),
                         evidence_refs=(candidate.ref,) if domain == "news" else (),
                         diagnostic=(
@@ -131,9 +140,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_collector=collect,
-        incremental_synthesizer=lambda input_: default_incremental_synthesizer(
-            input_
-        ).model_copy(
+        incremental_synthesizer=lambda input_: default_incremental_synthesizer(input_).model_copy(
             update={
                 "decision": input_.full_baseline_decision.model_copy(
                     update={
@@ -162,16 +169,16 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
 
     assert timeline.status_code == detail.status_code == evidence.status_code == 200
-    node = next(item for item in timeline.json()["timeline"]["nodes"] if item["id"] == result.run_id)
+    node = next(
+        item for item in timeline.json()["timeline"]["nodes"] if item["id"] == result.run_id
+    )
     assert node["full_baseline_run_id"] == baseline.id
     assert "admissible_observation" in node["information_advancement"]["reasons"]
     assert node["research_availability"]["domains"]
     assert node["reassessment"]["entries"]
     assert node["decision"]["evidence_refs"] == [baseline_item.ref, final_ref]
     assert {
-        ref
-        for entry in node["collection_summary"]["domains"]
-        for ref in entry["evidence_refs"]
+        ref for entry in node["collection_summary"]["domains"] for ref in entry["evidence_refs"]
     } == {final_ref}
     assert detail.json()["result"]["decision"]["evidence_refs"] == [
         baseline_item.ref,

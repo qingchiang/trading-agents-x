@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 from tradingagents.dataflows.symbol_utils import match_exchange_suffix, normalize_symbol
 
 from .contracts import (
+    BenchmarkContext,
+    BenchmarkSeriesResult,
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionResultState,
@@ -33,9 +35,7 @@ from .contracts import (
     ResearchAvailabilityStatus,
 )
 
-IncrementalCollector = Callable[
-    [IncrementalCollectionRequest], IncrementalCollectionResult
-]
+IncrementalCollector = Callable[[IncrementalCollectionRequest], IncrementalCollectionResult]
 
 _MARKET_IDENTITIES = {
     ".T": ("japan", ".T"),
@@ -61,8 +61,7 @@ def derive_research_availability(summary: CollectionSummary) -> ResearchAvailabi
                 and result.diagnostic is None
                 else (
                     ResearchAvailabilityStatus.LIMITED
-                    if result.state
-                    in {CollectionResultState.DATA, CollectionResultState.PARTIAL}
+                    if result.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}
                     else ResearchAvailabilityStatus.MISSING
                 )
             ),
@@ -86,12 +85,9 @@ def admit_incremental_observations(
         item = candidate.evidence
         if item.available_at is not None or candidate.available_on is not None:
             if item.origins and any(
-                origin.temporal_scope.value != "point_in_time"
-                for origin in item.origins
+                origin.temporal_scope.value != "point_in_time" for origin in item.origins
             ):
-                raise ValueError(
-                    "live-only observations cannot claim PIT availability"
-                )
+                raise ValueError("live-only observations cannot claim PIT availability")
             resolved = _resolve_incremental_evidence(request, candidate)
             if not request.window_start < resolved.available_at <= request.window_end:
                 raise ValueError(
@@ -153,8 +149,7 @@ def normalize_incremental_collection(
     if tuple(result.domain for result in summary.domains) != request.enabled_domains:
         raise ValueError("Collection Summary must contain each enabled domain exactly once")
     if any(
-        result.retrieved_at is not None and result.retrieved_at > sealed_at
-        for result in summary.domains
+        source.retrieved_at > sealed_at for result in summary.domains for source in result.sources
     ):
         raise ValueError("domain retrieval cannot be after sealing")
 
@@ -188,15 +183,18 @@ def normalize_incremental_collection(
         final_refs = tuple(dict.fromkeys(item.ref for item in final_items))
         assigned_refs.extend(final_refs)
         if final_items:
-            actual_sources = {item.source for item in final_items}
-            material_fallback = any(
-                item.fallback or any(origin.fallback for origin in item.origins)
-                for item in final_items
-            )
-            if actual_sources != {result.source} or result.fallback != material_fallback:
-                raise ValueError(
-                    "collection source and fallback must match admitted Evidence"
+            actual_fallback_by_source: dict[str, bool] = {}
+            for item in final_items:
+                actual_fallback_by_source[item.source] = (
+                    actual_fallback_by_source.get(item.source, False)
+                    or item.fallback
+                    or any(origin.fallback for origin in item.origins)
                 )
+            reported_fallback_by_source = {
+                source.source: source.fallback for source in result.sources
+            }
+            if actual_fallback_by_source != reported_fallback_by_source:
+                raise ValueError("collection source and fallback must match admitted Evidence")
         temporal_bases = tuple(
             dict.fromkeys(
                 CollectionTemporalBasis.PIT
@@ -214,9 +212,7 @@ def normalize_incremental_collection(
             CollectionDomainResult(
                 domain=result.domain,
                 state=state,
-                source=result.source,
-                fallback=result.fallback,
-                retrieved_at=result.retrieved_at,
+                sources=result.sources,
                 observed_from=result.observed_from,
                 observed_through=result.observed_through,
                 temporal_bases=temporal_bases,
@@ -259,44 +255,64 @@ def calculate_stock_performance(
         )
     if series.instrument != request.instrument:
         raise ValueError("stock market series instrument does not match its frozen request")
+    return PerformanceObservation(stock=_calculate_performance_component(request, series))
+
+
+def calculate_benchmark_performance(
+    request: IncrementalCollectionRequest,
+    benchmarks: tuple[BenchmarkSeriesResult, ...],
+) -> tuple[BenchmarkContext, ...]:
+    """Calculate benchmark endpoints from the actual collected series."""
+    return tuple(
+        BenchmarkContext(
+            name=benchmark.name,
+            component=(
+                _calculate_performance_component(request, benchmark.series)
+                if benchmark.series is not None
+                else PerformanceComponent(
+                    status=PerformanceComponentStatus.UNAVAILABLE,
+                    reason=benchmark.unavailable_reason,
+                )
+            ),
+        )
+        for benchmark in benchmarks
+    )
+
+
+def _calculate_performance_component(
+    request: IncrementalCollectionRequest,
+    series: MarketSeriesResult,
+) -> PerformanceComponent:
     start_points = tuple(
         point for point in series.points if point.completed_at <= request.window_start
     )
-    end_points = tuple(
-        point for point in series.points if point.completed_at <= request.window_end
-    )
+    end_points = tuple(point for point in series.points if point.completed_at <= request.window_end)
     if not start_points or not end_points:
-        return PerformanceObservation(
-            stock=PerformanceComponent(
-                status=PerformanceComponentStatus.UNAVAILABLE,
-                reason="The stock series does not contain both eligible endpoint sessions.",
-            )
+        return PerformanceComponent(
+            status=PerformanceComponentStatus.UNAVAILABLE,
+            reason="The series does not contain both eligible endpoint sessions.",
         )
     start = start_points[-1]
     end = end_points[-1]
     if start.session == end.session:
-        return PerformanceObservation(
-            stock=PerformanceComponent(
-                status=PerformanceComponentStatus.NOT_YET_OBSERVABLE,
-                reason="Both cutoffs resolve to the same completed stock session.",
-            )
+        return PerformanceComponent(
+            status=PerformanceComponentStatus.NOT_YET_OBSERVABLE,
+            reason="Both cutoffs resolve to the same completed session.",
         )
-    return PerformanceObservation(
-        stock=PerformanceComponent(
-            status=PerformanceComponentStatus.CALCULATED,
-            calculation=PerformanceCalculationRecord(
-                provider=series.source,
-                adjustment_basis=series.adjustment_basis,
-                retrieved_at=series.retrieved_at,
-                baseline_information_cutoff_at=request.window_start,
-                target_information_cutoff_at=request.window_end,
-                start_session=start.session,
-                end_session=end.session,
-                start_value=start.adjusted_close,
-                end_value=end.adjusted_close,
-                unrounded_return=(end.adjusted_close / start.adjusted_close) - 1,
-            ),
-        )
+    return PerformanceComponent(
+        status=PerformanceComponentStatus.CALCULATED,
+        calculation=PerformanceCalculationRecord(
+            provider=series.source,
+            adjustment_basis=series.adjustment_basis,
+            retrieved_at=series.retrieved_at,
+            baseline_information_cutoff_at=request.window_start,
+            target_information_cutoff_at=request.window_end,
+            start_session=start.session,
+            end_session=end.session,
+            start_value=start.adjusted_close,
+            end_value=end.adjusted_close,
+            unrounded_return=(end.adjusted_close / start.adjusted_close) - 1,
+        ),
     )
 
 
@@ -319,10 +335,7 @@ def assess_information_advancement(
     reasons = []
     if observation_ids:
         reasons.append("admissible_observation")
-    if (
-        performance.stock.status is PerformanceComponentStatus.CALCULATED
-        and stock_series_admitted
-    ):
+    if performance.stock.status is PerformanceComponentStatus.CALCULATED and stock_series_admitted:
         reasons.append("completed_stock_session")
     return InformationAdvancement(
         advanced=bool(reasons),

@@ -1482,8 +1482,17 @@ class RunRepository:
                     )
             allowed_evidence_refs = set(baseline_items)
             allowed_evidence_refs.update(item.ref for item in evidence.items)
+            current_evidence_refs = {item.ref for item in evidence.items}
+            for domain in products.collection_summary.domains:
+                if not set(domain.evidence_refs).issubset(current_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Collection Summary references evidence outside the current "
+                        "Incremental bundle"
+                    )
             if not set(result.decision.evidence_refs).issubset(allowed_evidence_refs):
-                raise EvidenceConflictError("Incremental Decision references evidence outside its closure")
+                raise EvidenceConflictError(
+                    "Incremental Decision references evidence outside its closure"
+                )
             for entry in products.reassessment.entries:
                 if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
                     raise EvidenceConflictError(

@@ -782,8 +782,9 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
         is_baseline_compatible: false, is_cycle_head: true, is_primary: true,
         is_active: true, trashed_at: null,
         collection_summary: { version: "1", market: "united_states", domains: [{
-          domain: "news", source: "fixture", state: "empty", fallback: false,
-          retrieved_at: timestamp, temporal_bases: [], evidence_refs: [],
+          domain: "news", state: "empty", sources: [{
+            source: "fixture", fallback: false, retrieved_at: timestamp,
+          }], temporal_bases: [], evidence_refs: [],
         }] },
         research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
         reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed",

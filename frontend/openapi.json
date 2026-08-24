@@ -776,11 +776,6 @@
             "title": "Evidence Refs",
             "type": "array"
           },
-          "fallback": {
-            "default": false,
-            "title": "Fallback",
-            "type": "boolean"
-          },
           "observed_from": {
             "anyOf": [
               {
@@ -805,29 +800,13 @@
             ],
             "title": "Observed Through"
           },
-          "retrieved_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Retrieved At"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "pattern": "^[a-z][a-z0-9_.-]*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
+          "sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CollectionSourceProvenance"
+            },
+            "title": "Sources",
+            "type": "array"
           },
           "state": {
             "$ref": "#/components/schemas/CollectionResultState"
@@ -858,6 +837,33 @@
         ],
         "title": "CollectionResultState",
         "type": "string"
+      },
+      "CollectionSourceProvenance": {
+        "additionalProperties": false,
+        "description": "One actual source used or attempted for a domain result.",
+        "properties": {
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          },
+          "source": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "retrieved_at"
+        ],
+        "title": "CollectionSourceProvenance",
+        "type": "object"
       },
       "CollectionSummary": {
         "additionalProperties": false,

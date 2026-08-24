@@ -41,6 +41,7 @@ from .contracts import (
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
+    PerformanceComponentStatus,
     PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
@@ -65,6 +66,7 @@ from .incremental_collection import (
     IncrementalCollector,
     assess_information_advancement,
     build_incremental_collection_request,
+    calculate_benchmark_performance,
     calculate_stock_performance,
     default_incremental_collector,
     derive_research_availability,
@@ -439,14 +441,16 @@ class AnalysisService:
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
                     baseline_evidence = self.repository.get_evidence(baseline.id)
-                    collection, evidence_items, performance, sealed_at = self._collect_incremental_preflight(
-                        instrument=request.ticker,
-                        baseline_analysis_cutoff=baseline.request.analysis_date,
-                        analysis_cutoff=request.analysis_date,
-                        baseline_evidence=baseline_evidence,
-                        baseline_information_cutoff_at=baseline.information_cutoff_at,
-                        target_information_cutoff_at=run.information_cutoff_at,
-                        method_snapshot=run.method_snapshot,
+                    collection, evidence_items, performance, sealed_at = (
+                        self._collect_incremental_preflight(
+                            instrument=request.ticker,
+                            baseline_analysis_cutoff=baseline.request.analysis_date,
+                            analysis_cutoff=request.analysis_date,
+                            baseline_evidence=baseline_evidence,
+                            baseline_information_cutoff_at=baseline.information_cutoff_at,
+                            target_information_cutoff_at=run.information_cutoff_at,
+                            method_snapshot=run.method_snapshot,
+                        )
                     )
                     self._emit(
                         run.id,
@@ -546,9 +550,7 @@ class AnalysisService:
                         information_advancement=collection.information_advancement,
                         performance=performance,
                         reassessment=synthesis.reassessment,
-                        full_research_required_reasons=(
-                            synthesis.full_research_required_reasons
-                        ),
+                        full_research_required_reasons=(synthesis.full_research_required_reasons),
                     )
                     self._validate_full_research_required_reason_closure(
                         products.full_research_required_reasons,
@@ -830,18 +832,11 @@ class AnalysisService:
         sealed_at = self.now()
         if collected.stock_series is not None and collected.stock_series.retrieved_at > sealed_at:
             raise ValueError("stock market-series retrieval cannot be after sealing")
-        for benchmark in collected.benchmarks:
-            calculation = benchmark.component.calculation
-            if calculation is not None:
-                if calculation.retrieved_at > sealed_at:
-                    raise ValueError("benchmark retrieval cannot be after sealing")
-                if (
-                    calculation.baseline_information_cutoff_at != request.window_start
-                    or calculation.target_information_cutoff_at != request.window_end
-                ):
-                    raise ValueError(
-                        "benchmark cutoffs must match the frozen request"
-                    )
+        if any(
+            benchmark.series is not None and benchmark.series.retrieved_at > sealed_at
+            for benchmark in collected.benchmark_series
+        ):
+            raise ValueError("benchmark retrieval cannot be after sealing")
         (
             collection_summary,
             evidence_items,
@@ -853,27 +848,25 @@ class AnalysisService:
         )
         performance = calculate_stock_performance(request, collected.stock_series)
         stock_series_admitted = False
-        if performance.stock.status.value == "calculated":
+        if performance.stock.status is PerformanceComponentStatus.CALCULATED:
             market_result = next(
-                result
-                for result in collection_summary.domains
-                if result.domain == "market"
+                result for result in collection_summary.domains if result.domain == "market"
             )
             binding_by_candidate_ref = {
-                binding.candidate_ref: binding.admitted_ref
-                for binding in evidence_bindings
+                binding.candidate_ref: binding.admitted_ref for binding in evidence_bindings
             }
-            linked_ref = binding_by_candidate_ref.get(
-                collected.stock_series_evidence_ref
-            )
+            linked_ref = binding_by_candidate_ref.get(collected.stock_series_evidence_ref)
             admitted_refs = {item.ref for item in evidence_items}
             if (
                 linked_ref is None
                 or linked_ref not in admitted_refs
                 or linked_ref not in market_result.evidence_refs
                 or collected.stock_series is None
-                or market_result.source != collected.stock_series.source
-                or market_result.retrieved_at != collected.stock_series.retrieved_at
+                or not any(
+                    source.source == collected.stock_series.source
+                    and source.retrieved_at == collected.stock_series.retrieved_at
+                    for source in market_result.sources
+                )
             ):
                 raise ValueError(
                     "stock series advancement requires admitted current market Evidence"
@@ -881,7 +874,10 @@ class AnalysisService:
             stock_series_admitted = True
         performance = PerformanceObservation(
             stock=performance.stock,
-            benchmarks=collected.benchmarks,
+            benchmarks=calculate_benchmark_performance(
+                request,
+                collected.benchmark_series,
+            ),
         )
         research_availability = derive_research_availability(collection_summary)
         information_advancement = assess_information_advancement(
@@ -1030,8 +1026,10 @@ class AnalysisService:
         else:
             _quick_llm, semantic_llm = llms
             serializer_llm = semantic_llm
+
         def event_writer(raw: dict[str, Any]) -> None:
             self._persist_graph_event(run_id, raw, on_event)
+
         output_language = report_language_prompt_label(run_settings.output_language)
         semantic_prompt = (
             "Perform the required Incremental Research synthesis. Assess every Full "
@@ -1074,9 +1072,7 @@ class AnalysisService:
                 validator=lambda value: value,
                 node="incremental.synthesis.serialize",
                 event_writer=event_writer,
-                invoke_config={
-                    "metadata": {"research_node": "incremental.synthesis.serialize"}
-                },
+                invoke_config={"metadata": {"research_node": "incremental.synthesis.serialize"}},
                 repair_instructions=(
                     "Write all human-readable prose in "
                     f"{output_language}. Preserve IDs, enums, Evidence refs, and "
@@ -1114,10 +1110,14 @@ class AnalysisService:
         synthesis_input: IncrementalSynthesisInput,
     ) -> None:
         allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
-        allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
+        allowed_evidence_refs.update(
+            item.ref for item in synthesis_input.incremental_evidence.items
+        )
         for entry in synthesis.reassessment.entries:
             if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
-                raise ValueError("Reassessment Evidence references must close over the baseline or current bundle")
+                raise ValueError(
+                    "Reassessment Evidence references must close over the baseline or current bundle"
+                )
 
     @staticmethod
     def _validate_full_research_required_reason_closure(
@@ -1125,7 +1125,9 @@ class AnalysisService:
         synthesis_input: IncrementalSynthesisInput,
     ) -> None:
         allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
-        allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
+        allowed_evidence_refs.update(
+            item.ref for item in synthesis_input.incremental_evidence.items
+        )
         for reason in reasons:
             if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
                 raise ValueError(
