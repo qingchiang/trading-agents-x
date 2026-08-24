@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tradingagents.application.contracts import (
@@ -1336,7 +1337,7 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
             update={
                 "full_research_required_reasons": (
                     FullResearchRequiredReason(
-                        code="attribution.unresolved",
+                        code="attribution.unreliable",
                         message="The bounded update cannot resolve attribution.",
                         origin="semantic",
                         evidence_refs=("ev_000000000000",) if warning_has_dangling_ref else (),
@@ -1368,53 +1369,19 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
         assert node.full_research_required_reasons[0].evidence_refs == ()
 
 
-def test_missing_optional_availability_cannot_restore_required_coverage_warnings(
-    app_settings,
-    repository,
-) -> None:
-    baseline = _service(app_settings, repository).run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
-    candidate = IncrementalEvidenceCandidate(
-        evidence=EvidenceItem.create(
-            source="fixture.news",
-            evidence_type="filing",
-            requested_date=date(2026, 7, 24),
-            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
-            content="One admitted filing while optional social data remains missing.",
+@pytest.mark.parametrize(
+    "code",
+    (
+        "required_coverage",
+        "required_coverage.social",
+        "availability.social_missing",
+        "coverage.required.social",
+    ),
+)
+def test_missing_optional_availability_has_no_full_research_reason_code(code) -> None:
+    with pytest.raises(ValidationError, match="FullResearchRequiredReason"):
+        FullResearchRequiredReason(
+            code=code,
+            message="Optional social coverage is missing.",
+            origin="deterministic",
         )
-    )
-
-    def synthesize(input_):
-        synthesis = default_incremental_synthesizer(input_)
-        return synthesis.model_copy(
-            update={
-                "full_research_required_reasons": (
-                    FullResearchRequiredReason(
-                        code="required_coverage.social",
-                        message="Optional social coverage is missing.",
-                        origin="deterministic",
-                    ),
-                )
-            }
-        )
-
-    with pytest.raises(
-        ValueError,
-        match="Optional Research Availability cannot create Required Coverage warnings",
-    ):
-        _incremental_service(
-            app_settings,
-            repository,
-            collector=lambda request: _pit_collection(request, candidate),
-            synthesizer=synthesize,
-        ).run(
-            AnalysisRequest(
-                ticker="NVDA",
-                analysis_date=date(2026, 7, 24),
-                research_kind="incremental",
-                full_baseline_run_id=baseline.run_id,
-            )
-        )
-
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)

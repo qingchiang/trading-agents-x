@@ -85,7 +85,7 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
         start_value: 100, end_value: 110,
         formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
       } }, benchmarks: [] },
-      full_research_required_reasons: [{ code: "attribution.unresolved", message: "The bounded update cannot resolve attribution.", origin: "semantic" }],
+      full_research_required_reasons: [{ code: "attribution.unreliable", message: "The bounded update cannot resolve attribution.", origin: "semantic" }],
     }],
   } } as never);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);

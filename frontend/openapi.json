@@ -1723,7 +1723,12 @@
         "additionalProperties": false,
         "properties": {
           "code": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "enum": [
+              "thesis.material_reversal",
+              "identity.uncertain",
+              "attribution.unreliable",
+              "evidence.material_conflict"
+            ],
             "title": "Code",
             "type": "string"
           },

@@ -181,12 +181,15 @@ def normalize_incremental_collection(
     normalized_domains = []
     for result in summary.domains:
         final_items = []
+        omitted_refs = []
         for ref in result.evidence_refs:
             if ref not in ref_map:
                 raise ValueError("Collection Summary references uncollected Evidence")
             item = ref_map[ref]
             if item is not None:
                 final_items.append(item)
+            else:
+                omitted_refs.append(ref)
         final_refs = tuple(dict.fromkeys(item.ref for item in final_items))
         assigned_refs.extend(final_refs)
         if final_items:
@@ -244,6 +247,9 @@ def normalize_incremental_collection(
         diagnostic = result.diagnostic
         if state in {CollectionResultState.DATA, CollectionResultState.PARTIAL} and not final_refs:
             state = CollectionResultState.EMPTY
+            diagnostic = diagnostic or CollectionDiagnostic(code="outside_temporal_boundary")
+        elif final_refs and omitted_refs:
+            state = CollectionResultState.PARTIAL
             diagnostic = diagnostic or CollectionDiagnostic(code="outside_temporal_boundary")
         normalized_domains.append(
             CollectionDomainResult(

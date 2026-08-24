@@ -239,7 +239,7 @@ export interface components {
       table_id?: string | null;
     };
     FullResearchRequiredReason: {
-      code: string;
+      code: "thesis.material_reversal" | "identity.uncertain" | "attribution.unreliable" | "evidence.material_conflict";
       evidence_refs?: string[];
       message: string;
       origin: "deterministic" | "semantic";

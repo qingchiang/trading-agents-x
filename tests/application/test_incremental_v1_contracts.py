@@ -715,6 +715,76 @@ def test_near_live_admission_omits_six_day_snapshot_and_rejects_future_retrieval
         )
 
 
+def test_mixed_domain_discloses_an_observation_omitted_by_the_temporal_boundary() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-23").model_copy(
+        update={"enabled_domains": ("fundamentals",)}
+    )
+    pit = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.filing",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 23),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="One admissible filing.",
+        )
+    )
+    stale = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="yfinance",
+            evidence_type="fundamentals_snapshot",
+            requested_date=date(2026, 7, 23),
+            content="A six-day snapshot that must be omitted.",
+            origins=(
+                EvidenceOrigin(
+                    source="yfinance",
+                    evidence_type="fundamentals_snapshot",
+                    retrieved_at="2026-07-29T15:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+    collected = IncrementalCollectionResult(
+        collection_summary=CollectionSummary(
+            version=request.version,
+            market=request.market,
+            domains=(
+                CollectionDomainResult(
+                    domain="fundamentals",
+                    state="data",
+                    sources=(
+                        CollectionSourceProvenance(
+                            source="fixture.filing",
+                            retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                        ),
+                        CollectionSourceProvenance(
+                            source="yfinance",
+                            retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                            diagnostic=CollectionDiagnostic(code="outside_temporal_boundary"),
+                        ),
+                    ),
+                    temporal_bases=("pit", "near_live_advisory"),
+                    evidence_refs=(pit.evidence.ref, stale.evidence.ref),
+                ),
+            ),
+        ),
+        evidence=(pit, stale),
+    )
+
+    summary, evidence, _bindings = normalize_incremental_collection(
+        request,
+        collected,
+        sealed_at=datetime(2026, 7, 29, 15, 1, tzinfo=UTC),
+    )
+
+    assert evidence == (pit.evidence,)
+    assert summary.domains[0].state is CollectionResultState.PARTIAL
+    assert summary.domains[0].diagnostic == CollectionDiagnostic(code="outside_temporal_boundary")
+    assert derive_research_availability(summary).domains[0].status is (
+        ResearchAvailabilityStatus.LIMITED
+    )
+
+
 def test_stock_performance_truncates_one_broader_adjusted_series() -> None:
     retrieved_at = datetime(2026, 7, 26, 12, tzinfo=UTC)
     series = MarketSeriesResult(

@@ -1096,7 +1096,9 @@ class AnalysisService:
             "typed bounded input. Every reassessment entry requires a concise reason; "
             "include Evidence references only when the permitted bundles support them. "
             "Limited or missing optional Research Availability alone must not create a Full "
-            "Research Required reason, and required_coverage codes are forbidden. Write all "
+            "Research Required reason, and required_coverage codes are forbidden. "
+            "Use only the typed v1 reason codes for material thesis reversal, identity "
+            "uncertainty, unreliable attribution, or material Evidence conflict. Write all "
             f"human-readable prose in {output_language}.\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
@@ -1178,10 +1180,6 @@ class AnalysisService:
             item.ref for item in synthesis_input.incremental_evidence.items
         )
         for reason in reasons:
-            if reason.code.startswith("required_coverage."):
-                raise ValueError(
-                    "Optional Research Availability cannot create Required Coverage warnings"
-                )
             if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
                 raise ValueError(
                     "Full Research Required Evidence references must close over the baseline or current bundle"

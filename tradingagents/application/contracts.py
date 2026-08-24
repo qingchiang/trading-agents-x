@@ -2164,7 +2164,12 @@ class PerformanceObservation(FrozenModel):
 
 
 class FullResearchRequiredReason(FrozenModel):
-    code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    code: Literal[
+        "thesis.material_reversal",
+        "identity.uncertain",
+        "attribution.unreliable",
+        "evidence.material_conflict",
+    ]
     message: str = Field(min_length=1)
     origin: Literal["deterministic", "semantic"]
     evidence_refs: tuple[str, ...] = ()
