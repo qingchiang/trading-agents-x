@@ -219,6 +219,184 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
     assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
 
 
+def _full_fundamentals_graph(content: str):
+    class FullFundamentalsGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, **_kwargs):
+            baseline_item = EvidenceItem.create(
+                source="yfinance",
+                evidence_type="get_fundamentals",
+                requested_date=context.request.analysis_date,
+                content=content,
+                origins=(
+                    EvidenceOrigin(
+                        source="yfinance",
+                        evidence_type="get_fundamentals",
+                        timing="legacy live .info retrieval",
+                        retrieved_at="2026-07-20T20:00:00Z",
+                        temporal_scope="live_only",
+                    ),
+                ),
+            )
+            bundle = EvidenceBundle(
+                instrument=context.request.ticker,
+                analysis_date=context.request.analysis_date,
+                items=(baseline_item,),
+            )
+            report = analyst_report(analyst="fundamentals", evidence_ref=baseline_item.ref)
+            decision = research_decision(evidence_refs=(baseline_item.ref,))
+            return GraphExecution(
+                state={}, evidence=bundle, reports={"fundamentals": report}, decision=decision
+            )
+
+    return FullFundamentalsGraph
+
+
+def _fundamentals_collection(
+    request: IncrementalCollectionRequest,
+    candidate: IncrementalEvidenceCandidate,
+) -> IncrementalCollectionResult:
+    domains = list(_unavailable_domains(request))
+    domains[request.enabled_domains.index("fundamentals")] = CollectionDomainResult(
+        domain="fundamentals",
+        state="partial",
+        sources=_sources("yfinance", datetime(2026, 7, 24, 20, tzinfo=UTC)),
+        temporal_bases=("near_live_advisory",),
+        evidence_refs=(candidate.evidence.ref,),
+        diagnostic=CollectionDiagnostic(code="near_live_snapshot"),
+    )
+    return IncrementalCollectionResult(
+        collection_summary=CollectionSummary(
+            version=request.version, market=request.market, domains=tuple(domains)
+        ),
+        evidence=(candidate,),
+    )
+
+
+def test_real_full_fundamentals_observation_does_not_advance_for_retrieval_headers_or_type(
+    app_settings,
+    repository,
+) -> None:
+    baseline_content = """# Company Fundamentals for NVDA (live yfinance snapshot)
+# Requested analysis date: 2026-07-20
+# Retrieved at: 2026-07-20 20:00:00
+# Not point-in-time historical data.
+
+Market Cap: 123
+PE Ratio (TTM): 42"""
+    current_content = """# Company Fundamentals for NVDA (live yfinance snapshot)
+# Requested analysis date: 2026-07-24
+# Retrieved at: 2026-07-24 20:00:00
+# Not point-in-time historical data.
+
+Market Cap: 123
+PE Ratio (TTM): 42"""
+    baseline = _service(
+        app_settings, repository, graph_factory=_full_fundamentals_graph(baseline_content)
+    ).run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="yfinance",
+            evidence_type="fundamentals_snapshot",
+            requested_date=date(2026, 7, 24),
+            content=current_content,
+            origins=(
+                EvidenceOrigin(
+                    source="yfinance",
+                    evidence_type="fundamentals_snapshot",
+                    timing="live retrieval-time snapshot",
+                    retrieved_at="2026-07-24T20:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+    synthesis_inputs = []
+    service = _incremental_service(
+        app_settings,
+        repository,
+        collector=lambda request: _fundamentals_collection(request, candidate),
+        synthesizer=lambda input_: synthesis_inputs.append(input_),
+    )
+
+    with pytest.raises(NoInformationAdvancementError):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert synthesis_inputs == []
+    assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+
+
+def test_real_full_fundamentals_field_change_advances_information(
+    app_settings,
+    repository,
+) -> None:
+    baseline_content = """# Company Fundamentals for NVDA (live yfinance snapshot)
+# Requested analysis date: 2026-07-20
+# Retrieved at: 2026-07-20 20:00:00
+
+Market Cap: 123"""
+    changed_content = """# Company Fundamentals for NVDA (live yfinance snapshot)
+# Requested analysis date: 2026-07-24
+# Retrieved at: 2026-07-24 20:00:00
+
+Market Cap: 456"""
+    baseline = _service(
+        app_settings, repository, graph_factory=_full_fundamentals_graph(baseline_content)
+    ).run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="yfinance",
+            evidence_type="fundamentals_snapshot",
+            requested_date=date(2026, 7, 24),
+            content=changed_content,
+            origins=(
+                EvidenceOrigin(
+                    source="yfinance",
+                    evidence_type="fundamentals_snapshot",
+                    timing="live retrieval-time snapshot",
+                    retrieved_at="2026-07-24T20:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+    synthesis_inputs = []
+
+    def synthesize(input_):
+        synthesis_inputs.append(input_)
+        return default_incremental_synthesizer(input_)
+
+    result = _incremental_service(
+        app_settings,
+        repository,
+        collector=lambda request: _fundamentals_collection(request, candidate),
+        synthesizer=synthesize,
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    assert len(synthesis_inputs) == 1
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+        baseline.run_id,
+        result.run_id,
+    )
+
+
 def test_incremental_service_commits_simplified_actual_result_products(
     app_settings,
     repository,

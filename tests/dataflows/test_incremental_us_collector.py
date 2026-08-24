@@ -12,7 +12,8 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.incremental_collection import normalize_incremental_collection
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
-from tradingagents.dataflows import incremental_us
+from tradingagents.dataflows import incremental_us, interface, y_finance as yf_data
+from tradingagents.dataflows.config import bind_config, reset_config
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.incremental_us import collect_us_incremental
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_requested
@@ -224,6 +225,40 @@ def test_us_collector_stops_the_journey_on_rate_limit_before_news_or_benchmarks(
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
         )
     assert calls == ["get_stock_data"]
+
+
+def test_us_collector_stops_after_a_focused_fundamentals_info_rate_limit() -> None:
+    calls = []
+
+    class RateLimitedTicker:
+        @property
+        def info(self):
+            calls.append("info")
+            from yfinance.exceptions import YFRateLimitError
+
+            raise YFRateLimitError()
+
+    def get_fundamentals(*args, **kwargs):
+        calls.append("get_fundamentals")
+        return yf_data.get_fundamentals(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(yf_data, "is_near_live", lambda *_args: True)
+        monkeypatch.setattr(yf_data.yf, "Ticker", lambda *_args: RateLimitedTicker())
+        monkeypatch.setitem(
+            interface.VENDOR_METHODS["get_fundamentals"], "yfinance", get_fundamentals
+        )
+        token = bind_config({"data_vendors": {"fundamental_data": "yfinance"}})
+        try:
+            with pytest.raises(VendorRateLimitError, match="Yahoo Finance rate limited"):
+                collect_us_incremental(
+                    _request(enabled_domains=("fundamentals", "news", "market")),
+                    now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+                )
+        finally:
+            reset_config(token)
+
+    assert calls == ["get_fundamentals", "info"]
 
 
 def test_us_collector_stops_on_stocktwits_rate_limit_before_later_domains() -> None:

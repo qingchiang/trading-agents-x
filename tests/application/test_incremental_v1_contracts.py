@@ -970,6 +970,36 @@ def test_source_fallback_change_alone_does_not_advance_information() -> None:
     assert advancement == InformationAdvancement(advanced=False)
 
 
+def test_fundamentals_identity_retains_publication_time_when_normalizing_retrieval_headers() -> None:
+    baseline = EvidenceItem.create(
+        source="yfinance",
+        evidence_type="get_fundamentals",
+        requested_date=date(2026, 7, 24),
+        available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+        content="# Requested analysis date: 2026-07-24\n# Retrieved at: 12:00\nMarket Cap: 123",
+    )
+    current = EvidenceItem.create(
+        source="yfinance",
+        evidence_type="fundamentals_snapshot",
+        requested_date=date(2026, 7, 24),
+        available_at=datetime(2026, 7, 23, 12, tzinfo=UTC),
+        content="# Requested analysis date: 2026-07-24\n# Retrieved at: 18:00\nMarket Cap: 123",
+    )
+
+    advancement = assess_information_advancement(
+        baseline_items=(baseline,),
+        current_items=(current,),
+        performance=calculate_stock_performance(
+            _collection_request(analysis_cutoff="2026-07-24"),
+            None,
+        ),
+        stock_series_admitted=False,
+    )
+
+    assert advancement.advanced is True
+    assert advancement.reasons == ("admissible_observation",)
+
+
 def test_distinct_observation_types_with_the_same_payload_advance_information() -> None:
     baseline = _near_live_item(
         retrieved_at="2026-07-24T15:00:00Z",

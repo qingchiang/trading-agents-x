@@ -48,6 +48,11 @@ _MARKET_TIMEZONES = {
     "mainland_china": ZoneInfo("Asia/Shanghai"),
 }
 _SOCIAL_OBSERVATION_TYPES = frozenset({"retail social messages", "social_snapshot"})
+_FUNDAMENTALS_OBSERVATION_TYPES = frozenset({"get_fundamentals", "fundamentals_snapshot"})
+_FUNDAMENTALS_RETRIEVAL_HEADERS = (
+    "# requested analysis date:",
+    "# retrieved at:",
+)
 
 
 def derive_research_availability(summary: CollectionSummary) -> ResearchAvailability:
@@ -423,9 +428,13 @@ def _incremental_observation_identity(item: EvidenceItem) -> str:
         "observation_kind": (
             "social"
             if item.evidence_type.casefold() in _SOCIAL_OBSERVATION_TYPES
-            else item.evidence_type
+            else (
+                "fundamentals"
+                if item.evidence_type.casefold() in _FUNDAMENTALS_OBSERVATION_TYPES
+                else item.evidence_type
+            )
         ),
-        "content": item.content,
+        "content": _observation_content(item),
         "value": item.value,
         "measurement_kind": item.measurement_kind.value,
         "unit": item.unit,
@@ -435,6 +444,17 @@ def _incremental_observation_identity(item: EvidenceItem) -> str:
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return f"ob_{digest[:16]}"
+
+
+def _observation_content(item: EvidenceItem) -> str:
+    """Discard transport-time fundamentals headers while retaining reported values."""
+    if item.evidence_type.casefold() not in _FUNDAMENTALS_OBSERVATION_TYPES:
+        return item.content
+    return "\n".join(
+        line
+        for line in item.content.splitlines()
+        if not line.casefold().startswith(_FUNDAMENTALS_RETRIEVAL_HEADERS)
+    )
 
 
 def incremental_market_identity(ticker: str) -> dict[str, str]:
