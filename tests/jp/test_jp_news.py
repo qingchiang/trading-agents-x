@@ -5,8 +5,13 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
+from tradingagents.dataflows.errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
 from tradingagents.dataflows.jp import jp_news
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_provenance
 
 _EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"
@@ -160,6 +165,29 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].source, "EDINET")
         self.assertEqual(records[0].timing, "unavailable")
+
+    def test_unscoped_rate_limit_still_degrades_to_other_feeds(self):
+        out = _run(VendorRateLimitError("slow down"), _MEDIA_DATA)
+
+        self.assertIn("決算を発表", out)
+        self.assertIn("<EDINET unavailable: VendorRateLimitError>", out)
+
+    def test_scoped_rate_limit_stops_before_later_subfeeds(self):
+        edinet = mock.Mock(side_effect=VendorRateLimitError("slow down"))
+        tdnet = mock.Mock(return_value=_TDNET_DATA)
+        media = mock.Mock(return_value=_MEDIA_DATA)
+        with (
+            mock.patch.object(jp_news, "_edinet_news", edinet),
+            mock.patch.object(jp_news, "_tdnet_news", tdnet),
+            mock.patch.object(jp_news, "_google_news", media),
+            stop_on_rate_limit_scope(True),
+            self.assertRaises(VendorRateLimitError),
+        ):
+            jp_news.get_news("4568.T", "2026-06-20", "2026-06-22")
+
+        edinet.assert_called_once()
+        tdnet.assert_not_called()
+        media.assert_not_called()
 
 
 if __name__ == "__main__":

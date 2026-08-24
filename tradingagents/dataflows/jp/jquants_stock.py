@@ -22,10 +22,13 @@ _records_cache: dict[tuple[str, str, str], list[dict]] = {}
 def _fetch_daily_bars(code: str, start_date: str, end_date: str) -> list[dict]:
     """Fetch daily bars for ``code`` over the range, memoized per (code, from, to)."""
     return memoized_fetch(
-        _records_cache, (code, start_date, end_date),
+        _records_cache,
+        (code, start_date, end_date),
         "/equities/bars/daily",
-        {"code": code, "from": start_date, "to": end_date}, "data",
+        {"code": code, "from": start_date, "to": end_date},
+        "data",
     )
+
 
 # J-Quants v2 /equities/bars/daily carries both raw (O/H/L/C/Vo) and
 # split/dividend-adjusted (AdjO/AdjH/AdjL/AdjC/AdjVo) prices. Prefer adjusted
@@ -53,9 +56,7 @@ def _fetch_ohlcv_frame(symbol: str, start_date: str, end_date: str) -> pd.DataFr
     canonical = from_jquants_code(code)
     records = _fetch_daily_bars(code, start_date, end_date)
     if not records:
-        raise NoMarketDataError(
-            symbol, canonical, f"no rows between {start_date} and {end_date}"
-        )
+        raise NoMarketDataError(symbol, canonical, f"no rows between {start_date} and {end_date}")
 
     rows = [
         {
@@ -95,8 +96,11 @@ def fetch_topix_closes(start_date: str, end_date: str) -> pd.DataFrame:
     NoMarketDataError when J-Quants returns no usable rows for the range.
     """
     records = memoized_fetch(
-        _topix_cache, (start_date, end_date),
-        "/indices/bars/daily/topix", {"from": start_date, "to": end_date}, "data",
+        _topix_cache,
+        (start_date, end_date),
+        "/indices/bars/daily/topix",
+        {"from": start_date, "to": end_date},
+        "data",
     )
     if not records:
         raise NoMarketDataError(
@@ -112,15 +116,31 @@ def fetch_topix_closes(start_date: str, end_date: str) -> pd.DataFrame:
     return df
 
 
-def get_stock(symbol: str, start_date: str, end_date: str) -> str:
-    """Return daily OHLCV for ``symbol`` over the range as a CSV string."""
+def get_stock(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    *,
+    require_adjusted: bool = False,
+) -> str:
+    """Return daily OHLCV for ``symbol`` over the range as a CSV string.
+
+    ``require_adjusted`` is reserved for bounded Incremental routing. Ordinary
+    Full callers retain the documented raw-close fallback when J-Quants omits
+    ``AdjC``.
+    """
     df = _fetch_ohlcv_frame(symbol, start_date, end_date)
     canonical = from_jquants_code(to_jquants_code(symbol))
     all_adjusted_closes = all(
-        record.get("AdjC") not in (None, "") for record in _fetch_daily_bars(
-            to_jquants_code(symbol), start_date, end_date
-        )
+        record.get("AdjC") not in (None, "")
+        for record in _fetch_daily_bars(to_jquants_code(symbol), start_date, end_date)
     )
+    if require_adjusted and not all_adjusted_closes:
+        raise NoMarketDataError(
+            symbol,
+            canonical,
+            "J-Quants adjusted close (AdjC) unavailable for bounded Incremental collection",
+        )
 
     out = df.copy()
     for col in ("Open", "High", "Low", "Close"):

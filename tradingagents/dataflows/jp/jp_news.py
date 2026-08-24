@@ -31,11 +31,16 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 
 from ..config import get_config
-from ..errors import NoMarketDataError
+from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_quality import canonical_headline
+from ..rate_limit import stop_on_rate_limit_requested
 from .edinet_news import get_news as _edinet_news
 from .google_news import get_news as _google_news
 from .tdnet_news import get_news as _tdnet_news
@@ -139,7 +144,15 @@ def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_Merge
     return merged, counts
 
 
-def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
+def _safe_feed(
+    source: str,
+    fetch,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    stop_on_rate_limit: bool = False,
+) -> str:
     """Run one sub-feed, degrading any failure to an availability note.
 
     An unguarded EDINET error (e.g. ``EDINET_API_KEY`` unset — expected on a
@@ -148,6 +161,11 @@ def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) 
     """
     try:
         return fetch(ticker, start_date, end_date)
+    except VendorRateLimitError:
+        if stop_on_rate_limit:
+            raise
+        logger.warning("news sub-feed %s rate-limited for %s", source, ticker)
+        return f"<{source} unavailable: VendorRateLimitError>"
     except Exception as exc:
         logger.warning(
             "news sub-feed %s failed for %s: %s",
@@ -184,20 +202,43 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         ("TDnet", _tdnet_news, _tdnet_start_date(start_date, end_date), end_date),
         ("Google News", _google_news, start_date, end_date),
     )
-    # Fan out the independent network fetches; ``map`` yields results in feed
-    # order, so the rendered blocks keep that statutory → timely → media order.
-    with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
-        rendered = pool.map(
-            lambda request: _safe_feed(request[0], request[1], ticker, request[2], request[3]),
-            feed_requests,
-        )
-    rendered = list(rendered)
+    # ContextVars do not cross the worker boundary. Read the bounded-route
+    # decision here; that scope must stop after a 429, so execute in order and
+    # re-raise the typed error before later feeds can begin. Full requests keep
+    # the normal concurrent, best-effort composition behavior.
+    scoped_stop = stop_on_rate_limit_requested()
+    if scoped_stop:
+        rendered = [
+            _safe_feed(
+                source,
+                fetch,
+                ticker,
+                effective_start,
+                effective_end,
+                stop_on_rate_limit=True,
+            )
+            for source, fetch, effective_start, effective_end in feed_requests
+        ]
+    else:
+        # Fan out the independent network fetches; ``map`` yields results in
+        # feed order, so the rendered blocks preserve statutory → timely → media.
+        with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
+            rendered = list(
+                pool.map(
+                    lambda request: _safe_feed(
+                        request[0], request[1], ticker, request[2], request[3]
+                    ),
+                    feed_requests,
+                )
+            )
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
     limit = max(1, int(get_config()["news_article_limit"]))
     blocks, merged_counts = _merge_blocks(data_blocks, limit)
-    records = []
     notes: list[tuple[str, ProvenanceRecord]] = []
+    omitted_data_records: list[ProvenanceRecord] = []
+    bound_blocks: list[str] = []
     data_count_index = 0
+    merged_index = 0
     for (source, _fetch, effective_start, effective_end), block in zip(
         feed_requests, rendered, strict=True
     ):
@@ -224,21 +265,34 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             effective=f"{effective_start} to {effective_end}",
             timing=timing,
         )
-        records.append(record)
         if block.startswith(_NOTE_PREFIX):
             notes.append((block, record))
+        elif block.startswith(_DATA_PREFIX) and counts.kept:
+            bound_blocks.append(
+                attach_evidence_span(
+                    attach_provenance(blocks[merged_index], record),
+                    temporal_scope="point_in_time",
+                )
+            )
+            merged_index += 1
+        elif block.startswith(_DATA_PREFIX):
+            # Retain the auditable cap/duplicate disposition without binding a
+            # non-rendered item to this source's evidence span.
+            omitted_data_records.append(record)
 
-    if not blocks:
+    if not bound_blocks:
         raise NoMarketDataError(
             ticker,
             detail="no EDINET/TDnet disclosures or media news in the window",
-            availability_notes=(
-                attach_provenance(note, record) for note, record in notes
-            ),
+            availability_notes=(attach_provenance(note, record) for note, record in notes),
         )
     if notes:
-        blocks.append(
-            "### Source availability notes\n"
-            + "\n".join(note for note, _record in notes)
+        bound_blocks.append(
+            attach_provenance(
+                "### Source availability notes\n" + "\n".join(note for note, _record in notes),
+                *(record for _note, record in notes),
+            )
         )
-    return attach_provenance("\n\n".join(blocks), *records)
+    if omitted_data_records:
+        bound_blocks.append(attach_provenance("", *omitted_data_records))
+    return "\n\n".join(bound_blocks)
