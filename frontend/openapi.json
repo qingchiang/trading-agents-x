@@ -2654,6 +2654,11 @@
             "title": "End Value",
             "type": "number"
           },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
           "formula": {
             "const": "(end_value / start_value) - 1",
             "default": "(end_value / start_value) - 1",

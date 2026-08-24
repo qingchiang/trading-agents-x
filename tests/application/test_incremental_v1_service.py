@@ -447,6 +447,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             effective_date=date(2026, 7, 24),
             value=110,
             content="The completed 2026-07-24 adjusted close.",
+            fallback=True,
         ),
         available_on=date(2026, 7, 24),
     )
@@ -460,6 +461,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             sources=_sources(
                 "fixture.market",
                 datetime(2026, 7, 24, 21, tzinfo=UTC),
+                fallback=True,
             ),
             temporal_bases=("pit",),
             evidence_refs=(market_evidence.evidence.ref,),
@@ -474,6 +476,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             stock_series=MarketSeriesResult(
                 instrument=request.instrument,
                 source="fixture.market",
+                fallback=True,
                 adjustment_basis="adjusted_close",
                 retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
                 points=(
@@ -516,6 +519,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     assert calculation.start_session == date(2026, 7, 20)
     assert calculation.end_session == date(2026, 7, 24)
     assert calculation.unrounded_return == pytest.approx(0.1)
+    assert calculation.fallback is True
 
 
 def test_completed_stock_session_rejects_unrelated_market_evidence(

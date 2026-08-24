@@ -365,7 +365,18 @@ def test_research_availability_describes_actual_domain_breadth() -> None:
             CollectionDomainResult(
                 domain="fundamentals",
                 state="data",
-                sources=_sources("sec", retrieved_at),
+                sources=(
+                    CollectionSourceProvenance(
+                        source="sec",
+                        retrieved_at=retrieved_at,
+                    ),
+                    CollectionSourceProvenance(
+                        source="fallback.fundamentals",
+                        fallback=True,
+                        retrieved_at=retrieved_at,
+                        diagnostic=CollectionDiagnostic(code="transport_failure"),
+                    ),
+                ),
                 temporal_bases=("pit",),
                 evidence_refs=("ev_111111111111",),
             ),
@@ -396,7 +407,7 @@ def test_research_availability_describes_actual_domain_breadth() -> None:
         domains=(
             ResearchAvailabilityDomain(
                 domain="fundamentals",
-                status=ResearchAvailabilityStatus.AVAILABLE,
+                status=ResearchAvailabilityStatus.LIMITED,
             ),
             ResearchAvailabilityDomain(
                 domain="news",
@@ -747,6 +758,7 @@ def test_stock_performance_truncates_one_broader_adjusted_series() -> None:
     assert performance.stock.calculation.start_value == 100
     assert performance.stock.calculation.end_value == 110
     assert performance.stock.calculation.unrounded_return == pytest.approx(0.1)
+    assert performance.stock.calculation.fallback is False
     assert performance.benchmarks == ()
     assert "points" not in performance.model_dump_json()
 

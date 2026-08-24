@@ -884,6 +884,7 @@ class AnalysisService:
                 or not any(
                     source.source == collected.stock_series.source
                     and source.retrieved_at == collected.stock_series.retrieved_at
+                    and source.fallback == collected.stock_series.fallback
                     for source in market_result.sources
                 )
                 or linked_item.source != collected.stock_series.source
@@ -952,9 +953,9 @@ class AnalysisService:
         retained_dataflow_config = retained_settings.dataflow_config(self.settings)
         retained_vendors = retained_dataflow_config.setdefault("data_vendors", {})
         if "instrument_eligibility" not in retained_vendors:
-            current_vendors = self.settings.default_run_settings.dataflow_config(
-                self.settings
-            ).get("data_vendors", {})
+            current_vendors = self.settings.default_run_settings.dataflow_config(self.settings).get(
+                "data_vendors", {}
+            )
             if "instrument_eligibility" in current_vendors:
                 retained_vendors["instrument_eligibility"] = current_vendors[
                     "instrument_eligibility"

@@ -59,6 +59,7 @@ def derive_research_availability(summary: CollectionSummary) -> ResearchAvailabi
                 if result.state is CollectionResultState.DATA
                 and result.temporal_bases == (CollectionTemporalBasis.PIT,)
                 and result.diagnostic is None
+                and not any(source.diagnostic is not None for source in result.sources)
                 else (
                     ResearchAvailabilityStatus.LIMITED
                     if result.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}
@@ -358,6 +359,7 @@ def _calculate_performance_component(
         status=PerformanceComponentStatus.CALCULATED,
         calculation=PerformanceCalculationRecord(
             provider=series.source,
+            fallback=series.fallback,
             adjustment_basis=series.adjustment_basis,
             retrieved_at=series.retrieved_at,
             baseline_information_cutoff_at=request.window_start,

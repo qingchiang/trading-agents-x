@@ -372,6 +372,7 @@ export interface components {
       baseline_information_cutoff_at: string;
       end_session: string;
       end_value: number;
+      fallback?: boolean;
       formula?: string;
       provider: string;
       retrieved_at: string;

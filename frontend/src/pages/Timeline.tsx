@@ -16,6 +16,7 @@ function PerformanceCalculationAudit({
   return (
     <dl className="definition-list">
       <div><dt>Provider</dt><dd>{calculation.provider}</dd></div>
+      <div><dt>Fallback</dt><dd>{calculation.fallback ? "yes" : "no"}</dd></div>
       <div><dt>Adjustment basis</dt><dd>{calculation.adjustment_basis}</dd></div>
       <div><dt>Retrieved at</dt><dd>{calculation.retrieved_at}</dd></div>
       <div>
@@ -199,6 +200,7 @@ export default function Timeline() {
                         {(result.sources ?? []).map((source) => (
                           <li key={source.source}>
                             {source.source}{source.fallback ? " (fallback)" : ""}
+                            {source.diagnostic ? ` [${source.diagnostic.code}]` : ""}
                             <dl className="definition-list">
                               <div><dt>Retrieved at</dt><dd>{source.retrieved_at}</dd></div>
                             </dl>

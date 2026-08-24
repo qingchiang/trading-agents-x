@@ -2092,6 +2092,7 @@ class PerformanceComponentStatus(_StableStrEnum):
 
 class PerformanceCalculationRecord(FrozenModel):
     provider: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    fallback: bool = False
     adjustment_basis: str = Field(min_length=1, max_length=120)
     retrieved_at: datetime
     baseline_information_cutoff_at: datetime

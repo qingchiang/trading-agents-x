@@ -66,7 +66,8 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       cycle_warning: true,
       collection_summary: { version: "1", market: "united_states", domains: [{
         domain: "news", state: "empty", sources: [{
-          source: "fixture", fallback: false, retrieved_at: "2026-07-24T20:00:00Z",
+          source: "fixture", fallback: true, retrieved_at: "2026-07-24T20:00:00Z",
+          diagnostic: { code: "transport_failure" },
         }],
         observed_from: "2026-07-24T18:00:00Z",
         observed_through: "2026-07-24T20:00:00Z",
@@ -76,7 +77,7 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed", reason: "No new record." }] },
       decision: { rating: "bullish", thesis: "Current complete decision" },
       performance: { stock: { status: "calculated", calculation: {
-        provider: "fixture.market", adjustment_basis: "adjusted_close",
+        provider: "fixture.market", fallback: true, adjustment_basis: "adjusted_close",
         retrieved_at: "2026-07-24T21:00:00Z",
         baseline_information_cutoff_at: "2026-07-21T03:59:59Z",
         target_information_cutoff_at: "2026-07-25T03:59:59Z",
@@ -93,6 +94,7 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
   expect(screen.getByText("Collection Summary")).toBeVisible();
   fireEvent.click(screen.getByText("Collection Summary"));
   expect(screen.getByText("2026-07-24T20:00:00Z")).toBeVisible();
+  expect(screen.getByText("fixture (fallback) [transport_failure]")).toBeVisible();
   expect(screen.getByText("2026-07-24T18:00:00Z → 2026-07-24T20:00:00Z")).toBeVisible();
   expect(screen.getByText("near_live_advisory")).toBeVisible();
   expect(screen.getByText("Research Availability")).toBeVisible();
@@ -100,6 +102,7 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
   expect(screen.getByRole("heading", { name: "Current Decision" })).toBeVisible();
   fireEvent.click(screen.getByText("Performance"));
   expect(screen.getByText("fixture.market")).toBeVisible();
+  expect(screen.getByText("yes")).toBeVisible();
   expect(screen.getByText("adjusted_close")).toBeVisible();
   expect(screen.getByText("100 → 110")).toBeVisible();
   expect(screen.getByText("(end_value / start_value) - 1")).toBeVisible();
