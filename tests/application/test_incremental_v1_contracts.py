@@ -254,7 +254,7 @@ def test_collection_normalization_preserves_actual_fallback_provenance() -> None
         evidence=(candidate,),
     )
 
-    summary, evidence = normalize_incremental_collection(
+    summary, evidence, _bindings = normalize_incremental_collection(
         request,
         collected,
         sealed_at=datetime(2026, 7, 24, 19, tzinfo=UTC),
@@ -263,6 +263,54 @@ def test_collection_normalization_preserves_actual_fallback_provenance() -> None
     assert summary.domains[0].source == "fallback.news"
     assert summary.domains[0].fallback is True
     assert evidence[0].fallback is True
+
+
+@pytest.mark.parametrize(
+    ("reported_source", "reported_fallback"),
+    [("wrong.news", True), ("fallback.news", False)],
+)
+def test_collection_normalization_rejects_inconsistent_source_provenance(
+    reported_source,
+    reported_fallback,
+) -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24").model_copy(
+        update={"enabled_domains": ("news",)}
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fallback.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A filing from the configured fallback.",
+            fallback=True,
+        )
+    )
+    collected = IncrementalCollectionResult(
+        collection_summary=CollectionSummary(
+            version=request.version,
+            market=request.market,
+            domains=(
+                CollectionDomainResult(
+                    domain="news",
+                    state="data",
+                    source=reported_source,
+                    fallback=reported_fallback,
+                    retrieved_at=datetime(2026, 7, 24, 18, tzinfo=UTC),
+                    temporal_bases=("pit",),
+                    evidence_refs=(candidate.evidence.ref,),
+                ),
+            ),
+        ),
+        evidence=(candidate,),
+    )
+
+    with pytest.raises(ValueError, match="source and fallback must match admitted Evidence"):
+        normalize_incremental_collection(
+            request,
+            collected,
+            sealed_at=datetime(2026, 7, 24, 19, tzinfo=UTC),
+        )
 
 
 def test_collection_normalization_rejects_domain_retrieval_after_sealing() -> None:
@@ -637,21 +685,48 @@ def test_source_fallback_change_alone_does_not_advance_information() -> None:
     assert advancement == InformationAdvancement(advanced=False)
 
 
+def test_distinct_observation_types_with_the_same_payload_advance_information() -> None:
+    baseline = _near_live_item(
+        retrieved_at="2026-07-24T15:00:00Z",
+        content="Neutral",
+        evidence_type="rating_snapshot",
+    )
+    current = _near_live_item(
+        retrieved_at="2026-07-25T15:00:00Z",
+        content="Neutral",
+        evidence_type="fundamentals_snapshot",
+    )
+
+    advancement = assess_information_advancement(
+        baseline_items=(baseline,),
+        current_items=(current,),
+        performance=calculate_stock_performance(
+            _collection_request(analysis_cutoff="2026-07-24"),
+            None,
+        ),
+        stock_series_admitted=False,
+    )
+
+    assert advancement.advanced is True
+    assert advancement.reasons == ("admissible_observation",)
+
+
 def _near_live_item(
     *,
     retrieved_at: str,
     content: str,
     source: str = "yfinance",
+    evidence_type: str = "fundamentals_snapshot",
 ) -> EvidenceItem:
     return EvidenceItem.create(
         source=source,
-        evidence_type="fundamentals_snapshot",
+        evidence_type=evidence_type,
         requested_date=date(2026, 7, 24),
         content=content,
         origins=(
             EvidenceOrigin(
                 source=source,
-                evidence_type="fundamentals_snapshot",
+                evidence_type=evidence_type,
                 retrieved_at=retrieved_at,
                 temporal_scope="live_only",
             ),

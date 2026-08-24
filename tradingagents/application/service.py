@@ -842,7 +842,11 @@ class AnalysisService:
                     raise ValueError(
                         "benchmark cutoffs must match the frozen request"
                     )
-        collection_summary, evidence_items = normalize_incremental_collection(
+        (
+            collection_summary,
+            evidence_items,
+            evidence_bindings,
+        ) = normalize_incremental_collection(
             request,
             collected,
             sealed_at=sealed_at,
@@ -855,7 +859,13 @@ class AnalysisService:
                 for result in collection_summary.domains
                 if result.domain == "market"
             )
-            linked_ref = collected.stock_series_evidence_ref
+            binding_by_candidate_ref = {
+                binding.candidate_ref: binding.admitted_ref
+                for binding in evidence_bindings
+            }
+            linked_ref = binding_by_candidate_ref.get(
+                collected.stock_series_evidence_ref
+            )
             admitted_refs = {item.ref for item in evidence_items}
             if (
                 linked_ref is None

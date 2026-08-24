@@ -1928,6 +1928,13 @@ class IncrementalEvidenceCandidate(FrozenModel):
         return self
 
 
+class IncrementalEvidenceBinding(FrozenModel):
+    """Resolution from a collector-owned ref to the admitted sealed ref."""
+
+    candidate_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
+    admitted_ref: str | None = Field(default=None, pattern=r"^ev_[a-f0-9]{12}$")
+
+
 class IncrementalCollectionResult(FrozenModel):
     """Deterministic collection observations plus unsealed new Evidence."""
 

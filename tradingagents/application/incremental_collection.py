@@ -20,6 +20,7 @@ from .contracts import (
     EvidenceItem,
     IncrementalCollectionRequest,
     IncrementalCollectionResult,
+    IncrementalEvidenceBinding,
     IncrementalEvidenceCandidate,
     InformationAdvancement,
     MarketSeriesResult,
@@ -140,7 +141,11 @@ def normalize_incremental_collection(
     collected: IncrementalCollectionResult,
     *,
     sealed_at: datetime,
-) -> tuple[CollectionSummary, tuple[EvidenceItem, ...]]:
+) -> tuple[
+    CollectionSummary,
+    tuple[EvidenceItem, ...],
+    tuple[IncrementalEvidenceBinding, ...],
+]:
     """Resolve final Evidence identities and align the actual-result summary."""
     summary = collected.collection_summary
     if summary.version != request.version or summary.market != request.market:
@@ -182,6 +187,16 @@ def normalize_incremental_collection(
                 final_items.append(item)
         final_refs = tuple(dict.fromkeys(item.ref for item in final_items))
         assigned_refs.extend(final_refs)
+        if final_items:
+            actual_sources = {item.source for item in final_items}
+            material_fallback = any(
+                item.fallback or any(origin.fallback for origin in item.origins)
+                for item in final_items
+            )
+            if actual_sources != {result.source} or result.fallback != material_fallback:
+                raise ValueError(
+                    "collection source and fallback must match admitted Evidence"
+                )
         temporal_bases = tuple(
             dict.fromkeys(
                 CollectionTemporalBasis.PIT
@@ -220,6 +235,13 @@ def normalize_incremental_collection(
             domains=tuple(normalized_domains),
         ),
         tuple(admitted_by_ref.values()),
+        tuple(
+            IncrementalEvidenceBinding(
+                candidate_ref=candidate_ref,
+                admitted_ref=item.ref if item is not None else None,
+            )
+            for candidate_ref, item in ref_map.items()
+        ),
     )
 
 
@@ -321,6 +343,7 @@ def _incremental_observation_identity(item: EvidenceItem) -> str:
         for origin in item.origins
     ]
     payload = {
+        "evidence_type": item.evidence_type,
         "effective_date": item.effective_date.isoformat() if item.effective_date else None,
         "available_at": item.available_at.isoformat() if item.available_at else None,
         "content": item.content,

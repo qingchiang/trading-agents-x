@@ -245,11 +245,11 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             source="fixture.market",
             evidence_type="adjusted_close",
             requested_date=date(2026, 7, 24),
-            available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
             effective_date=date(2026, 7, 24),
             value=110,
             content="The completed 2026-07-24 adjusted close.",
-        )
+        ),
+        available_on=date(2026, 7, 24),
     )
 
     def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
@@ -295,7 +295,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         app_settings,
         repository,
         collector=collect,
-        now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
+        now=lambda: datetime(2026, 7, 25, 5, tzinfo=UTC),
     ).run(
         AnalysisRequest(
             ticker="NVDA",
