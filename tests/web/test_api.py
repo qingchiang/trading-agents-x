@@ -277,7 +277,7 @@ Date,Open,High,Low,Close,Volume
     ]
     fundamentals = domains["fundamentals"]
     assert fundamentals["state"] == "partial"
-    assert fundamentals["diagnostic"] == {"code": "mixed_pit_and_near_live_fundamentals"}
+    assert fundamentals["diagnostic"] == {"code": "near_live_snapshot"}
     assert fundamentals["sources"] == [
         {
             "source": "yfinance",

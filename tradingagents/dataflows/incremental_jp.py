@@ -521,7 +521,12 @@ def _collect_fundamentals(request, routed, now):
                         code=(
                             "fundamentals_temporal_scope_limited"
                             if temporal_limited_sources
-                            else "mixed_pit_and_near_live_fundamentals"
+                            else (
+                                "near_live_snapshot"
+                                if temporal_bases
+                                == (CollectionTemporalBasis.NEAR_LIVE_ADVISORY,)
+                                else "mixed_pit_and_near_live_fundamentals"
+                            )
                         )
                     )
                 ),

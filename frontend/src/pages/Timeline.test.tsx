@@ -212,7 +212,7 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
           source: "yfinance", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
           diagnostic: { code: "near_live_snapshot" },
         }], temporal_bases: ["near_live_advisory"], evidence_refs: ["ev_japan_fundamentals"],
-          diagnostic: { code: "mixed_pit_and_near_live_fundamentals" } },
+          diagnostic: { code: "near_live_snapshot" } },
       ] },
       research_availability: { version: "1", domains: [
         { domain: "market", status: "available" }, { domain: "news", status: "missing" },
@@ -238,7 +238,7 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
   expect(screen.getByText(/news: empty/)).toHaveTextContent("bounded_feed_no_observed_records");
   expect(screen.getByText("edinet")).toBeVisible();
   expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
-    "mixed_pit_and_near_live_fundamentals",
+    "near_live_snapshot",
   );
   expect(screen.getByText("yfinance [near_live_snapshot]")).toBeVisible();
   fireEvent.click(screen.getByText("Research Availability"));

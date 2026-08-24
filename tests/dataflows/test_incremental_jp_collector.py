@@ -952,6 +952,9 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
     )
+    assert collected.collection_summary.domains[0].state.value == "partial"
+    assert collected.collection_summary.domains[0].diagnostic is not None
+    assert collected.collection_summary.domains[0].diagnostic.code == "near_live_snapshot"
     summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 30, 0, 1, tzinfo=UTC)
     )
@@ -1043,6 +1046,8 @@ Effective period: 2026-03-31
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
     )
+    assert collected.collection_summary.domains[0].state.value == "data"
+    assert collected.collection_summary.domains[0].diagnostic is None
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
     )
@@ -1127,6 +1132,12 @@ Official correction published after the Full Baseline.
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
+    )
+    assert collected.collection_summary.domains[0].state.value == "partial"
+    assert collected.collection_summary.domains[0].diagnostic is not None
+    assert (
+        collected.collection_summary.domains[0].diagnostic.code
+        == "mixed_pit_and_near_live_fundamentals"
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 30, 0, 1, tzinfo=UTC)
