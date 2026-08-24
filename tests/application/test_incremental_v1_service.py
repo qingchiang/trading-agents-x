@@ -1366,3 +1366,55 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
             item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id
         )
         assert node.full_research_required_reasons[0].evidence_refs == ()
+
+
+def test_missing_optional_availability_cannot_restore_required_coverage_warnings(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="One admitted filing while optional social data remains missing.",
+        )
+    )
+
+    def synthesize(input_):
+        synthesis = default_incremental_synthesizer(input_)
+        return synthesis.model_copy(
+            update={
+                "full_research_required_reasons": (
+                    FullResearchRequiredReason(
+                        code="required_coverage.social",
+                        message="Optional social coverage is missing.",
+                        origin="deterministic",
+                    ),
+                )
+            }
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Optional Research Availability cannot create Required Coverage warnings",
+    ):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=lambda request: _pit_collection(request, candidate),
+            synthesizer=synthesize,
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)

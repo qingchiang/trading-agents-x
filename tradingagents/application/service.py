@@ -1079,7 +1079,9 @@ class AnalysisService:
         semantic_prompt = (
             "Perform the required Incremental Research synthesis. Assess every Full "
             "Baseline Decision Component using only the typed input. Do not use sibling "
-            "Incremental Nodes or invent Evidence. Produce a concise analysis brief for "
+            "Incremental Nodes or invent Evidence. Limited or missing optional Research "
+            "Availability alone must not create a Full Research Required reason; do not "
+            "reintroduce required-coverage certification. Produce a concise analysis brief for "
             f"the strict serializer. Write all human-readable prose in {output_language}.\n\n"
             + synthesis_input.model_dump_json(indent=2)
         )
@@ -1092,7 +1094,9 @@ class AnalysisService:
         serializer_prompt = (
             "Serialize a complete IncrementalSynthesis from this semantic brief and the "
             "typed bounded input. Every reassessment entry requires a concise reason; "
-            "include Evidence references only when the permitted bundles support them. Write all "
+            "include Evidence references only when the permitted bundles support them. "
+            "Limited or missing optional Research Availability alone must not create a Full "
+            "Research Required reason, and required_coverage codes are forbidden. Write all "
             f"human-readable prose in {output_language}.\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
@@ -1174,6 +1178,10 @@ class AnalysisService:
             item.ref for item in synthesis_input.incremental_evidence.items
         )
         for reason in reasons:
+            if reason.code.startswith("required_coverage."):
+                raise ValueError(
+                    "Optional Research Availability cannot create Required Coverage warnings"
+                )
             if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
                 raise ValueError(
                     "Full Research Required Evidence references must close over the baseline or current bundle"
