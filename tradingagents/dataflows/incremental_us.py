@@ -13,8 +13,12 @@ import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
+from functools import lru_cache
 from io import StringIO
 from zoneinfo import ZoneInfo
+
+import exchange_calendars as xcals
+import pandas as pd
 
 from tradingagents.application.contracts import (
     BenchmarkSeriesResult,
@@ -34,6 +38,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.dataflows.stocktwits import (
     fetch_stocktwits_messages as _default_stocktwits_fetch,
 )
@@ -393,12 +398,13 @@ def _collect_social(
 ) -> tuple[CollectionDomainResult, IncrementalEvidenceCandidate | None]:
     retrieved_at = _aware_now(now)
     try:
-        body = fetch_stocktwits_messages(
-            request.instrument,
-            limit=30,
-            start_date=request.baseline_analysis_cutoff.isoformat(),
-            end_date=request.analysis_cutoff.isoformat(),
-        )
+        with stop_on_rate_limit_scope(True):
+            body = fetch_stocktwits_messages(
+                request.instrument,
+                limit=30,
+                start_date=_social_start_date(request).isoformat(),
+                end_date=request.window_end.astimezone(_NEW_YORK).date().isoformat(),
+            )
     except VendorRateLimitError:
         raise
     except Exception:
@@ -478,14 +484,15 @@ def _market_series(
             session = date.fromisoformat(str(row["Date"]).strip())
             raw_value = row.get("Close") or row.get("Adj Close")
             value = float(raw_value) if raw_value is not None else math.nan
-            completed_at = _market_close_at(session)
             if (
                 not math.isfinite(value)
                 or value <= 0
                 or not _is_nyse_session(session)
-                or session > request.analysis_cutoff
-                or completed_at > request.window_end
             ):
+                omitted = True
+                continue
+            completed_at = _market_close_at(session)
+            if session > request.analysis_cutoff or completed_at > request.window_end:
                 omitted = True
                 continue
             points.append(
@@ -605,70 +612,24 @@ def _expanded_market_start(baseline: date) -> date:
     return baseline - timedelta(days=7)
 
 
+def _social_start_date(request: IncrementalCollectionRequest) -> date:
+    """Start after the sealed baseline market date (the collection window is open)."""
+    return request.window_start.astimezone(_NEW_YORK).date() + timedelta(days=1)
+
+
+@lru_cache(maxsize=1)
+def _xnys_calendar():
+    """Return the vendored, offline XNYS schedule with ad-hoc closures and early closes."""
+    return xcals.get_calendar("XNYS")
+
+
 def _is_nyse_session(value: date) -> bool:
-    """Return whether a date is a regular NYSE session, excluding standard closures."""
-    if value.weekday() >= 5:
+    """Return whether the authoritative XNYS schedule has a complete session."""
+    calendar = _xnys_calendar()
+    session = pd.Timestamp(value)
+    if session < calendar.first_session or session > calendar.last_session:
         return False
-    return value not in _nyse_holidays(value.year)
-
-
-def _nyse_holidays(year: int) -> frozenset[date]:
-    """Regular NYSE full-day closures used for daily-bar eligibility.
-
-    This deliberately rejects rows that a provider labels with arbitrary calendar
-    dates.  It covers recurring exchange closures rather than one-off emergency
-    suspensions, which cannot be inferred from an offline provider response.
-    """
-    def observed(value: date, *, friday_for_saturday: bool = True) -> date:
-        if value.weekday() == 5 and friday_for_saturday:
-            return value - timedelta(days=1)
-        if value.weekday() == 6:
-            return value + timedelta(days=1)
-        return value
-
-    good_friday = _easter_sunday(year) - timedelta(days=2)
-    new_year = date(year, 1, 1)
-    holidays = {
-        observed(new_year, friday_for_saturday=False),
-        _nth_weekday(year, 1, 0, 3),  # Martin Luther King Jr. Day
-        _nth_weekday(year, 2, 0, 3),  # Presidents Day
-        good_friday,
-        _last_weekday(year, 5, 0),  # Memorial Day
-        observed(date(year, 7, 4)),
-        _nth_weekday(year, 9, 0, 1),  # Labor Day
-        _nth_weekday(year, 11, 3, 4),  # Thanksgiving
-        observed(date(year, 12, 25)),
-    }
-    if year >= 2021:
-        holidays.add(observed(date(year, 6, 19)))
-    return frozenset(holidays)
-
-
-def _easter_sunday(year: int) -> date:
-    """Gregorian computus, retained locally to avoid a second calendar dependency."""
-    a = year % 19
-    b, c = divmod(year, 100)
-    d, e = divmod(b, 4)
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i, k = divmod(c, 4)
-    correction = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * correction) // 451
-    month = (h + correction - 7 * m + 114) // 31
-    day = (h + correction - 7 * m + 114) % 31 + 1
-    return date(year, month, day)
-
-
-def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> date:
-    first = date(year, month, 1)
-    offset = (weekday - first.weekday()) % 7
-    return first + timedelta(days=offset + 7 * (occurrence - 1))
-
-
-def _last_weekday(year: int, month: int, weekday: int) -> date:
-    last = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
-    return last - timedelta(days=(last.weekday() - weekday) % 7)
+    return calendar.is_session(session)
 
 
 def _market_day_end(value: date) -> datetime:
@@ -676,8 +637,13 @@ def _market_day_end(value: date) -> datetime:
 
 
 def _market_close_at(value: date) -> datetime:
-    """Use the regular-session close; a cutoff earlier than this cannot admit it."""
-    return datetime.combine(value, time(16), tzinfo=_NEW_YORK).astimezone(UTC)
+    """Return XNYS's scheduled close, including early closes, or fail closed."""
+    if not _is_nyse_session(value):
+        raise ValueError(f"{value.isoformat()} is not an eligible XNYS session")
+    close = _xnys_calendar().session_close(pd.Timestamp(value)).to_pydatetime()
+    if close.tzinfo is None or close.utcoffset() is None:
+        raise ValueError("XNYS schedule returned a naive session close")
+    return close.astimezone(UTC)
 
 
 def _parse_retrieved_at(value: str) -> datetime:

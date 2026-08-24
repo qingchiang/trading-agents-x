@@ -47,6 +47,7 @@ _MARKET_TIMEZONES = {
     "japan": ZoneInfo("Asia/Tokyo"),
     "mainland_china": ZoneInfo("Asia/Shanghai"),
 }
+_SOCIAL_OBSERVATION_TYPES = frozenset({"retail social messages", "social_snapshot"})
 
 
 def derive_research_availability(summary: CollectionSummary) -> ResearchAvailability:
@@ -412,25 +413,23 @@ def assess_information_advancement(
 
 
 def _incremental_observation_identity(item: EvidenceItem) -> str:
-    origins = [
-        {
-            "effective": origin.effective,
-            "effective_date": (
-                origin.effective_date.isoformat() if origin.effective_date else None
-            ),
-            "timing": origin.timing,
-        }
-        for origin in item.origins
-    ]
+    """Return a stable identity for the observation, not its retrieval rendering."""
+    temporal_identity: dict[str, str] = {}
+    if item.effective_date is not None:
+        temporal_identity["effective_date"] = item.effective_date.isoformat()
+    elif item.available_at is not None:
+        temporal_identity["publication_at"] = item.available_at.isoformat()
     payload = {
-        "evidence_type": item.evidence_type,
-        "effective_date": item.effective_date.isoformat() if item.effective_date else None,
-        "available_at": item.available_at.isoformat() if item.available_at else None,
+        "observation_kind": (
+            "social"
+            if item.evidence_type.casefold() in _SOCIAL_OBSERVATION_TYPES
+            else item.evidence_type
+        ),
         "content": item.content,
         "value": item.value,
         "measurement_kind": item.measurement_kind.value,
         "unit": item.unit,
-        "origins": origins,
+        "temporal_identity": temporal_identity,
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

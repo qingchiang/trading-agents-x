@@ -7,9 +7,9 @@ user-labeled sentiment field (``Bullish``/``Bearish``/null), the message
 body, timestamp, and posting user.
 
 The function is deliberately self-contained: short timeout and graceful
-degradation for transport or parse failures. A real HTTP 429 is the sole
-exception: it surfaces as a typed stop signal so a bounded collection run can
-end before it spends more provider budget.
+degradation for transport or parse failures. A real HTTP 429 surfaces as a
+typed stop signal only inside the focused bounded-collection scope; ordinary
+Full sentiment calls retain their sanitized placeholder behavior.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from tradingagents.version import IDENTIFIED_USER_AGENT
 
 from .errors import VendorRateLimitError
+from .rate_limit import stop_on_rate_limit_requested
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ def fetch_stocktwits_messages(
 
     Returns a placeholder string when the endpoint is unreachable, the
     symbol has no messages, or the response shape is unexpected. HTTP 429
-    raises :class:`VendorRateLimitError` for bounded callers.
+    raises :class:`VendorRateLimitError` only for bounded callers.
     """
     url = _API.format(ticker=_stocktwits_symbol(ticker))
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
@@ -83,7 +84,11 @@ def fetch_stocktwits_messages(
         with urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
     except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
-        if isinstance(exc, HTTPError) and exc.code == 429:
+        if (
+            isinstance(exc, HTTPError)
+            and exc.code == 429
+            and stop_on_rate_limit_requested()
+        ):
             raise VendorRateLimitError("StockTwits rate limited the request.") from exc
         # OSError covers URLError/TimeoutError/connection resets; HTTPException
         # covers chunked-transfer errors (IncompleteRead/BadStatusLine, #1024).

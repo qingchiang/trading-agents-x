@@ -15,6 +15,7 @@ from tradingagents.application.service import AnalysisService, default_increment
 from tradingagents.dataflows import incremental_us
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.incremental_us import collect_us_incremental
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_requested
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
@@ -235,6 +236,48 @@ def test_us_collector_stops_on_stocktwits_rate_limit_before_later_domains() -> N
             ),
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
         )
+
+
+def test_us_collector_enters_the_bounded_stocktwits_rate_limit_scope(monkeypatch) -> None:
+    def rate_limited(*_args, **_kwargs):
+        assert stop_on_rate_limit_requested()
+        raise VendorRateLimitError("StockTwits rate limited")
+
+    monkeypatch.setattr(incremental_us, "DEFAULT_STOCKTWITS_FETCH", rate_limited)
+    with pytest.raises(VendorRateLimitError):
+        collect_us_incremental(
+            _request(enabled_domains=("social", "market")),
+            route_to_vendor=lambda *_args, **_kwargs: _market_response(),
+            now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        )
+
+
+def test_us_collector_starts_social_query_after_the_baseline_market_date() -> None:
+    calls = []
+    result = collect_us_incremental(
+        _request(enabled_domains=("social",)),
+        route_to_vendor=lambda *_args, **_kwargs: "unused",
+        fetch_stocktwits_messages=lambda *args, **kwargs: calls.append((args, kwargs)) or (
+            "<no StockTwits messages found>"
+        ),
+        now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+    )
+
+    assert result.collection_summary.domains[0].state.value == "empty"
+    assert calls[0][1]["start_date"] == "2026-07-21"
+    assert calls[0][1]["end_date"] == "2026-07-24"
+
+
+def test_xnys_schedule_handles_regular_holidays_early_close_and_adhoc_closure() -> None:
+    assert incremental_us._market_close_at(date(2026, 7, 2)) == datetime(
+        2026, 7, 2, 20, tzinfo=UTC
+    )
+    assert not incremental_us._is_nyse_session(date(2026, 7, 3))
+    assert not incremental_us._is_nyse_session(date(2026, 7, 4))
+    assert incremental_us._market_close_at(date(2026, 11, 27)) == datetime(
+        2026, 11, 27, 18, tzinfo=UTC
+    )
+    assert not incremental_us._is_nyse_session(date(2018, 12, 5))
 
 
 def test_us_collector_admits_dated_yahoo_news_and_retains_selected_fallback() -> None:

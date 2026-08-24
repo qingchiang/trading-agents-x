@@ -863,6 +863,10 @@ class AnalysisService:
             collected,
             sealed_at=sealed_at,
         )
+        if {item.ref for item in evidence_items} & {item.ref for item in baseline_evidence.items}:
+            raise EvidenceConflictError(
+                "Incremental Evidence bundle must not copy Full Baseline Evidence references"
+            )
         performance = calculate_stock_performance(request, collected.stock_series)
         stock_series_admitted = False
         if performance.stock.status is PerformanceComponentStatus.CALCULATED:

@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     BenchmarkSeriesResult,
@@ -14,6 +15,7 @@ from tradingagents.application.contracts import (
     CollectionDomainResult,
     CollectionSourceProvenance,
     CollectionSummary,
+    EvidenceBundle,
     EvidenceItem,
     EvidenceOrigin,
     FullResearchRequiredReason,
@@ -38,6 +40,7 @@ from tradingagents.application.errors import (
 from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.dataflows.config import get_config
+from tradingagents.graph.research_graph import GraphExecution
 
 
 def _unavailable_domains(request: IncrementalCollectionRequest):
@@ -116,6 +119,104 @@ def _pit_collection(
         ),
         evidence=(candidate,),
     )
+
+
+def test_real_full_social_observation_does_not_advance_for_incremental_retrieval_spelling(
+    app_settings,
+    repository,
+) -> None:
+    content = "Bullish: 1 (100%)\n\n[2026-07-20 12:00:00 EDT · @user · Bullish] same post"
+
+    class FullSocialGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, **_kwargs):
+            baseline_item = EvidenceItem.create(
+                source="StockTwits",
+                evidence_type="retail social messages",
+                requested_date=date(2026, 7, 20),
+                content=content,
+                origins=(
+                    EvidenceOrigin(
+                        source="StockTwits",
+                        evidence_type="retail social messages",
+                        effective="2026-07-13 to 2026-07-20",
+                        timing="live source; market-calendar window filtered",
+                        retrieved_at="2026-07-20T20:00:00Z",
+                        temporal_scope="live_only",
+                    ),
+                ),
+            )
+            bundle = EvidenceBundle(
+                instrument=context.request.ticker,
+                analysis_date=context.request.analysis_date,
+                items=(baseline_item,),
+            )
+            report = analyst_report(analyst="social", evidence_ref=baseline_item.ref)
+            decision = research_decision(evidence_refs=(baseline_item.ref,))
+            return GraphExecution(
+                state={}, evidence=bundle, reports={"social": report}, decision=decision
+            )
+
+    baseline = _service(app_settings, repository, graph_factory=FullSocialGraph).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="stocktwits",
+            evidence_type="social_snapshot",
+            requested_date=date(2026, 7, 24),
+            content=content,
+            origins=(
+                EvidenceOrigin(
+                    source="stocktwits",
+                    evidence_type="social_snapshot",
+                    timing="live retrieval-time snapshot",
+                    retrieved_at="2026-07-24T20:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        domains = list(_unavailable_domains(request))
+        domains[request.enabled_domains.index("social")] = CollectionDomainResult(
+            domain="social",
+            state="partial",
+            sources=_sources("stocktwits", datetime(2026, 7, 24, 20, tzinfo=UTC)),
+            temporal_bases=("near_live_advisory",),
+            evidence_refs=(candidate.evidence.ref,),
+            diagnostic=CollectionDiagnostic(code="bounded_current_social_feed"),
+        )
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version, market=request.market, domains=tuple(domains)
+            ),
+            evidence=(candidate,),
+        )
+
+    synthesis_inputs = []
+    service = _incremental_service(
+        app_settings,
+        repository,
+        collector=collect,
+        synthesizer=lambda input_: synthesis_inputs.append(input_),
+    )
+    with pytest.raises(NoInformationAdvancementError):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert synthesis_inputs == []
+    assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
 
 
 def test_incremental_service_commits_simplified_actual_result_products(
