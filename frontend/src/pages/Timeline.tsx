@@ -2,9 +2,33 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api, type ResearchTimelinePage, type TimelineDetail } from "../api/client";
+import type { components } from "../api/types.generated";
 import { Link, usePathname } from "../router";
 
 const NODE_PAGE_SIZE = 20;
+type PerformanceCalculation = components["schemas"]["PerformanceCalculationRecord"];
+
+function PerformanceCalculationAudit({
+  calculation,
+}: {
+  calculation: PerformanceCalculation;
+}) {
+  return (
+    <dl className="definition-list">
+      <div><dt>Provider</dt><dd>{calculation.provider}</dd></div>
+      <div><dt>Adjustment basis</dt><dd>{calculation.adjustment_basis}</dd></div>
+      <div><dt>Retrieved at</dt><dd>{calculation.retrieved_at}</dd></div>
+      <div>
+        <dt>Information cutoffs</dt>
+        <dd>{calculation.baseline_information_cutoff_at} → {calculation.target_information_cutoff_at}</dd>
+      </div>
+      <div><dt>Endpoint sessions</dt><dd>{calculation.start_session} → {calculation.end_session}</dd></div>
+      <div><dt>Endpoint values</dt><dd>{calculation.start_value} → {calculation.end_value}</dd></div>
+      <div><dt>Formula</dt><dd>{calculation.formula}</dd></div>
+      <div><dt>Unrounded return</dt><dd>{calculation.unrounded_return}</dd></div>
+    </dl>
+  );
+}
 
 export default function Timeline() {
   const { t } = useTranslation();
@@ -182,6 +206,23 @@ export default function Timeline() {
                         ))}
                       </>
                     ) : null}
+                    <dl className="definition-list">
+                      {result.retrieved_at && (
+                        <div><dt>Retrieved at</dt><dd>{result.retrieved_at}</dd></div>
+                      )}
+                      {result.observed_from && result.observed_through && (
+                        <div>
+                          <dt>Observed window</dt>
+                          <dd>{result.observed_from} → {result.observed_through}</dd>
+                        </div>
+                      )}
+                      {(result.temporal_bases?.length ?? 0) > 0 && (
+                        <div>
+                          <dt>Temporal basis</dt>
+                          <dd>{result.temporal_bases?.join(", ")}</dd>
+                        </div>
+                      )}
+                    </dl>
                   </li>
                 ))}
               </ul>
@@ -238,6 +279,9 @@ export default function Timeline() {
                     : node.performance.stock.calculation
                       ? ` — ${node.performance.stock.calculation.start_session} to ${node.performance.stock.calculation.end_session}: ${node.performance.stock.calculation.unrounded_return}`
                       : ""}
+                  {node.performance.stock.calculation && (
+                    <PerformanceCalculationAudit calculation={node.performance.stock.calculation} />
+                  )}
                 </li>
                 {(node.performance.benchmarks ?? []).map((benchmark) => (
                   <li key={benchmark.name}>
@@ -247,6 +291,9 @@ export default function Timeline() {
                       : benchmark.component.calculation
                         ? ` — ${benchmark.component.calculation.unrounded_return}`
                         : ""}
+                    {benchmark.component.calculation && (
+                      <PerformanceCalculationAudit calculation={benchmark.component.calculation} />
+                    )}
                   </li>
                 ))}
               </ul>

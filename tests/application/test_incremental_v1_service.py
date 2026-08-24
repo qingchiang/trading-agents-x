@@ -240,6 +240,90 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
+    market_evidence = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.market",
+            evidence_type="adjusted_close",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+            effective_date=date(2026, 7, 24),
+            value=110,
+            content="The completed 2026-07-24 adjusted close.",
+        )
+    )
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        domains = list(_unavailable_domains(request))
+        market = request.enabled_domains.index("market")
+        domains[market] = CollectionDomainResult(
+            domain="market",
+            state="data",
+            source="fixture.market",
+            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            temporal_bases=("pit",),
+            evidence_refs=(market_evidence.evidence.ref,),
+        )
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=tuple(domains),
+            ),
+            evidence=(market_evidence,),
+            stock_series=MarketSeriesResult(
+                instrument=request.instrument,
+                source="fixture.market",
+                adjustment_basis="adjusted_close",
+                retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+                points=(
+                    MarketSeriesPoint(
+                        session="2026-07-20",
+                        completed_at="2026-07-20T20:00:00Z",
+                        adjusted_close=100,
+                    ),
+                    MarketSeriesPoint(
+                        session="2026-07-24",
+                        completed_at="2026-07-24T20:00:00Z",
+                        adjusted_close=110,
+                    ),
+                ),
+            ),
+            stock_series_evidence_ref=market_evidence.evidence.ref,
+        )
+
+    result = _incremental_service(
+        app_settings,
+        repository,
+        collector=collect,
+        now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    assert node.information_advancement.reasons == (
+        "admissible_observation",
+        "completed_stock_session",
+    )
+    calculation = node.performance.stock.calculation
+    assert calculation is not None
+    assert calculation.start_session == date(2026, 7, 20)
+    assert calculation.end_session == date(2026, 7, 24)
+    assert calculation.unrounded_return == pytest.approx(0.1)
+
+
+def test_incremental_service_rejects_unadmitted_stock_series_advancement(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
 
     def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
@@ -268,27 +352,23 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             ),
         )
 
-    result = _incremental_service(
-        app_settings,
-        repository,
-        collector=collect,
-        now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
-    ).run(
-        AnalysisRequest(
-            ticker="NVDA",
-            analysis_date=date(2026, 7, 24),
-            research_kind="incremental",
-            full_baseline_run_id=baseline.run_id,
+    with pytest.raises(
+        ValueError,
+        match="stock series advancement requires admitted current market Evidence",
+    ):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=collect,
+            now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
         )
-    )
-
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
-    assert node.information_advancement.reasons == ("completed_stock_session",)
-    calculation = node.performance.stock.calculation
-    assert calculation is not None
-    assert calculation.start_session == date(2026, 7, 20)
-    assert calculation.end_session == date(2026, 7, 24)
-    assert calculation.unrounded_return == pytest.approx(0.1)
 
 
 def test_incremental_service_rejects_benchmark_from_another_frozen_interval(
@@ -465,6 +545,17 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
             ),
         )
     )
+    market_evidence = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.market",
+            evidence_type="adjusted_close",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+            effective_date=date(2026, 7, 24),
+            value=110,
+            content="The completed 2026-07-24 adjusted close.",
+        )
+    )
 
     def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
         domains = {
@@ -479,9 +570,11 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
             ),
             "market": CollectionDomainResult(
                 domain="market",
-                state="unavailable",
+                state="partial",
                 source="fixture.market",
                 retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                temporal_bases=("pit",),
+                evidence_refs=(market_evidence.evidence.ref,),
                 diagnostic=CollectionDiagnostic(code="provider_failure"),
             ),
             "news": CollectionDomainResult(
@@ -508,7 +601,7 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
                 market=request.market,
                 domains=tuple(domains[domain] for domain in request.enabled_domains),
             ),
-            evidence=(partial, fallback, stale),
+            evidence=(partial, market_evidence, fallback, stale),
             stock_series=MarketSeriesResult(
                 instrument=request.instrument,
                 source="fixture.market",
@@ -537,6 +630,7 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
                     ),
                 ),
             ),
+            stock_series_evidence_ref=market_evidence.evidence.ref,
         )
 
     result = _incremental_service(
@@ -564,13 +658,14 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
     assert domains["social"].diagnostic.code == "outside_temporal_boundary"
     assert {item.ref for item in result.evidence.items} == {
         partial.evidence.ref,
+        market_evidence.evidence.ref,
         fallback.evidence.ref,
     }
     assert {
         item.domain: item.status.value for item in node.research_availability.domains
     } == {
         "fundamentals": "limited",
-        "market": "missing",
+        "market": "limited",
         "news": "available",
         "social": "missing",
     }

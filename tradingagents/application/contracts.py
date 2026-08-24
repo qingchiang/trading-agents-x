@@ -6,8 +6,10 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from enum import Enum, StrEnum
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import (
@@ -55,6 +57,20 @@ def _unique_research_ids(value: tuple[str, ...]) -> tuple[str, ...]:
 def utc_now() -> datetime:
     """Return an aware UTC timestamp for public contracts."""
     return datetime.now(UTC)
+
+
+def _deeply_frozen_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _deeply_frozen_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_deeply_frozen_value(item) for item in value)
+    return value
+
+
+def _deeply_frozen_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType(
+        {key: _deeply_frozen_value(item) for key, item in value.items()}
+    )
 
 
 class FrozenModel(BaseModel):
@@ -1868,8 +1884,16 @@ class IncrementalCollectionRequest(FrozenModel):
     enabled_domains: tuple[Literal["fundamentals", "market", "news", "social"], ...] = (
         Field(min_length=1)
     )
-    configured_routes: dict[str, Any]
+    configured_routes: Mapping[str, Any]
     near_live_max_age_days: int = Field(default=5, ge=0, le=5)
+
+    @field_validator("configured_routes", mode="after")
+    @classmethod
+    def freeze_configured_routes(
+        cls,
+        value: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        return _deeply_frozen_mapping(value)
 
     @model_validator(mode="after")
     def validate_collection_boundary(self) -> IncrementalCollectionRequest:
@@ -1910,7 +1934,17 @@ class IncrementalCollectionResult(FrozenModel):
     collection_summary: CollectionSummary
     evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
     stock_series: MarketSeriesResult | None = None
+    stock_series_evidence_ref: str | None = Field(
+        default=None,
+        pattern=r"^ev_[a-f0-9]{12}$",
+    )
     benchmarks: tuple[BenchmarkContext, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_stock_series_link(self) -> IncrementalCollectionResult:
+        if self.stock_series is None and self.stock_series_evidence_ref is not None:
+            raise ValueError("stock-series Evidence link requires a stock series")
+        return self
 
 
 class InformationAdvancement(FrozenModel):

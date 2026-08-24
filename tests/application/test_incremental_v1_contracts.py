@@ -81,6 +81,13 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
         )
 
 
+def test_incremental_collection_request_deeply_freezes_configured_routes() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24")
+
+    with pytest.raises(TypeError):
+        request.configured_routes["data_vendors"]["fundamentals"] = "other"
+
+
 def test_collection_domain_result_requires_truthful_state_provenance() -> None:
     with pytest.raises(ValidationError, match="data and partial results require Evidence"):
         CollectionDomainResult(
@@ -592,11 +599,13 @@ def test_retrieval_time_only_refresh_does_not_advance_information() -> None:
         baseline_items=(baseline,),
         current_items=(refreshed,),
         performance=unavailable_performance,
+        stock_series_admitted=False,
     ) == InformationAdvancement(advanced=False)
     advanced = assess_information_advancement(
         baseline_items=(baseline,),
         current_items=(changed,),
         performance=unavailable_performance,
+        stock_series_admitted=False,
     )
     assert advanced.advanced is True
     assert advanced.reasons == ("admissible_observation",)
@@ -622,6 +631,7 @@ def test_source_fallback_change_alone_does_not_advance_information() -> None:
             _collection_request(analysis_cutoff="2026-07-24"),
             None,
         ),
+        stock_series_admitted=False,
     )
 
     assert advancement == InformationAdvancement(advanced=False)

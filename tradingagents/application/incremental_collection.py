@@ -283,6 +283,7 @@ def assess_information_advancement(
     baseline_items: tuple[EvidenceItem, ...],
     current_items: tuple[EvidenceItem, ...],
     performance: PerformanceObservation,
+    stock_series_admitted: bool,
 ) -> InformationAdvancement:
     """Detect new observations without treating retrieval-only refresh as information."""
     baseline_ids = {_incremental_observation_identity(item) for item in baseline_items}
@@ -296,7 +297,10 @@ def assess_information_advancement(
     reasons = []
     if observation_ids:
         reasons.append("admissible_observation")
-    if performance.stock.status is PerformanceComponentStatus.CALCULATED:
+    if (
+        performance.stock.status is PerformanceComponentStatus.CALCULATED
+        and stock_series_admitted
+    ):
         reasons.append("completed_stock_session")
     return InformationAdvancement(
         advanced=bool(reasons),

@@ -66,12 +66,23 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       cycle_warning: true,
       collection_summary: { version: "1", market: "united_states", domains: [{
         domain: "news", source: "fixture", state: "empty", fallback: false,
-        retrieved_at: "2026-07-24T20:00:00Z", temporal_bases: [], evidence_refs: [],
+        retrieved_at: "2026-07-24T20:00:00Z",
+        observed_from: "2026-07-24T18:00:00Z",
+        observed_through: "2026-07-24T20:00:00Z",
+        temporal_bases: ["near_live_advisory"], evidence_refs: [],
       }] },
       research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
       reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed", reason: "No new record." }] },
       decision: { rating: "bullish", thesis: "Current complete decision" },
-      performance: { stock: { status: "not_yet_observable", reason: "No completed interval." }, benchmarks: [] },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "fixture.market", adjustment_basis: "adjusted_close",
+        retrieved_at: "2026-07-24T21:00:00Z",
+        baseline_information_cutoff_at: "2026-07-21T03:59:59Z",
+        target_information_cutoff_at: "2026-07-25T03:59:59Z",
+        start_session: "2026-07-20", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
       full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
     }],
   } } as never);
@@ -79,9 +90,18 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
   expect(await screen.findByText("Incremental Research Node")).toBeVisible();
   expect(screen.getByText("Full research recommended")).toBeVisible();
   expect(screen.getByText("Collection Summary")).toBeVisible();
+  fireEvent.click(screen.getByText("Collection Summary"));
+  expect(screen.getByText("2026-07-24T20:00:00Z")).toBeVisible();
+  expect(screen.getByText("2026-07-24T18:00:00Z → 2026-07-24T20:00:00Z")).toBeVisible();
+  expect(screen.getByText("near_live_advisory")).toBeVisible();
   expect(screen.getByText("Research Availability")).toBeVisible();
   expect(screen.getByText("Reassessment")).toBeVisible();
   expect(screen.getByRole("heading", { name: "Current Decision" })).toBeVisible();
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("fixture.market")).toBeVisible();
+  expect(screen.getByText("adjusted_close")).toBeVisible();
+  expect(screen.getByText("100 → 110")).toBeVisible();
+  expect(screen.getByText("(end_value / start_value) - 1")).toBeVisible();
   expect(screen.getByText("Cycle warning")).toBeVisible();
 });
 

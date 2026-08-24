@@ -848,6 +848,27 @@ class AnalysisService:
             sealed_at=sealed_at,
         )
         performance = calculate_stock_performance(request, collected.stock_series)
+        stock_series_admitted = False
+        if performance.stock.status.value == "calculated":
+            market_result = next(
+                result
+                for result in collection_summary.domains
+                if result.domain == "market"
+            )
+            linked_ref = collected.stock_series_evidence_ref
+            admitted_refs = {item.ref for item in evidence_items}
+            if (
+                linked_ref is None
+                or linked_ref not in admitted_refs
+                or linked_ref not in market_result.evidence_refs
+                or collected.stock_series is None
+                or market_result.source != collected.stock_series.source
+                or market_result.retrieved_at != collected.stock_series.retrieved_at
+            ):
+                raise ValueError(
+                    "stock series advancement requires admitted current market Evidence"
+                )
+            stock_series_admitted = True
         performance = PerformanceObservation(
             stock=performance.stock,
             benchmarks=collected.benchmarks,
@@ -857,6 +878,7 @@ class AnalysisService:
             baseline_items=baseline_evidence.items,
             current_items=evidence_items,
             performance=performance,
+            stock_series_admitted=stock_series_admitted,
         )
         diagnostics = tuple(
             result.diagnostic
