@@ -192,6 +192,46 @@ test("discloses temporal omissions without replacing the domain diagnostic", asy
   );
 });
 
+test("shows Japanese adjusted-stock provenance and an optional missing domain", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "7203.T", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "7203.T",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T14:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "japan", domains: [
+        { domain: "market", state: "data", sources: [{
+          source: "jquants", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
+        }], temporal_bases: ["pit"], evidence_refs: ["ev_japan_close"] },
+        { domain: "news", state: "unavailable", sources: [], temporal_bases: [],
+          evidence_refs: [], diagnostic: { code: "news_retrieval_failed" } },
+      ] },
+      research_availability: { version: "1", domains: [
+        { domain: "market", status: "available" }, { domain: "news", status: "missing" },
+      ] },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "jquants", fallback: false,
+        adjustment_basis: "jquants_split_dividend_adjusted_close",
+        retrieved_at: "2026-07-24T15:00:00Z",
+        baseline_information_cutoff_at: "2026-07-17T14:59:59Z",
+        target_information_cutoff_at: "2026-07-24T14:59:59Z",
+        start_session: "2026-07-17", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/7203.T"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getAllByText("jquants")).not.toHaveLength(0);
+  expect(screen.getByText(/news: unavailable/)).toHaveTextContent("news_retrieval_failed");
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("jquants_split_dividend_adjusted_close")).toBeVisible();
+});
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

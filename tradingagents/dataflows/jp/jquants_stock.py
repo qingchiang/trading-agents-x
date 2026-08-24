@@ -116,6 +116,11 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
     """Return daily OHLCV for ``symbol`` over the range as a CSV string."""
     df = _fetch_ohlcv_frame(symbol, start_date, end_date)
     canonical = from_jquants_code(to_jquants_code(symbol))
+    all_adjusted_closes = all(
+        record.get("AdjC") not in (None, "") for record in _fetch_daily_bars(
+            to_jquants_code(symbol), start_date, end_date
+        )
+    )
 
     out = df.copy()
     for col in ("Open", "High", "Low", "Close"):
@@ -125,7 +130,13 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
     label = canonical if canonical == symbol.upper() else f"{canonical} (from {symbol})"
     header = (
         f"# Stock data for {label} from {start_date} to {end_date}\n"
-        f"# Total records: {len(out)}\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        "# Price adjustment: "
+        + (
+            "J-Quants split/dividend-adjusted close (AdjC)\n"
+            if all_adjusted_closes
+            else "raw J-Quants close (adjusted close unavailable)\n"
+        )
+        + f"# Total records: {len(out)}\n"
+        + f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
     return header + csv_string
