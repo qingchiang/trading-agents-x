@@ -197,6 +197,7 @@ def _collect_news(request, routed, now):
             return _unavailable("news", "news_retrieval_failed", sources=sources), ()
         if _is_empty(body):
             return _bounded_empty("news", sources), ()
+        limited_sources = _news_availability_sources(extract_provenance(response), now)
         candidates: list[IncrementalEvidenceCandidate] = []
         observed = []
         used_sources: dict[str, CollectionSourceProvenance] = {}
@@ -253,12 +254,21 @@ def _collect_news(request, routed, now):
             CollectionDomainResult(
                 domain="news",
                 state=CollectionResultState.PARTIAL,
-                sources=tuple(used_sources.values()),
+                sources=tuple({
+                    source.source: source
+                    for source in (*used_sources.values(), *limited_sources)
+                }.values()),
                 observed_from=min(observed),
                 observed_through=max(observed),
                 temporal_bases=(CollectionTemporalBasis.PIT,),
                 evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
-                diagnostic=CollectionDiagnostic(code="bounded_japanese_news_feed"),
+                diagnostic=CollectionDiagnostic(
+                    code=(
+                        "bounded_japanese_news_feed_with_upstream_unavailable"
+                        if limited_sources
+                        else "bounded_japanese_news_feed"
+                    )
+                ),
             ),
             tuple(candidates),
         )
@@ -518,11 +528,25 @@ def _fundamentals_effective_date(body):
 def _fundamentals_available_on(records, disclosed):
     observed_dates = [disclosed]
     for record in records:
-        observed_dates.extend(
-            date.fromisoformat(value)
-            for value in re.findall(r"\d{4}-\d{2}-\d{2}", record.effective)
-        )
+        observed_dates.extend(_reliable_record_observation_dates(record))
     return max(observed_dates)
+
+
+def _reliable_record_observation_dates(record):
+    """Return dates that identify observed composition, never query bounds."""
+    timing = record.timing.casefold()
+    effective = record.effective.strip()
+    if "market-date filtered" in timing:
+        return tuple(
+            date.fromisoformat(value)
+            for value in re.findall(r"\d{4}-\d{2}-\d{2}", effective)
+        )
+    if "publication" in timing or "disclosure-date" in timing:
+        try:
+            return (date.fromisoformat(effective),)
+        except ValueError:
+            return ()
+    return ()
 
 
 def _fundamentals_spans(response, body):
@@ -544,6 +568,17 @@ def _news_spans(response, body):
     if spans:
         return tuple(spans)
     records = tuple(extract_provenance(response))
+    selected_fallback = tuple(
+        record for record in records if "fallback vendor selected" in record.timing.casefold()
+    )
+    if selected_fallback:
+        return (
+            EvidenceSpan(
+                content=body,
+                records=selected_fallback,
+                temporal_scope=temporal_scope_from_records(selected_fallback),
+            ),
+        )
     return (
         EvidenceSpan(
             content=body,
@@ -551,6 +586,18 @@ def _news_spans(response, body):
             temporal_scope=temporal_scope_from_records(records),
         ),
     )
+
+
+def _news_availability_sources(records, now):
+    unavailable = {}
+    for record, source in zip(records, _sources_from_records(records, now), strict=True):
+        timing = record.timing.casefold()
+        if "fallback vendor selected" in timing or "unavailable" not in timing:
+            continue
+        unavailable[source.source] = source.model_copy(
+            update={"diagnostic": CollectionDiagnostic(code="upstream_source_unavailable")}
+        )
+    return tuple(unavailable.values())
 
 
 def _source_id(value):

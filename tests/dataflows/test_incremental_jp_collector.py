@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from unittest import mock
 
 from tradingagents.application.contracts import IncrementalCollectionRequest
 from tradingagents.application.incremental_collection import (
     default_incremental_collector,
     normalize_incremental_collection,
 )
+from tradingagents.dataflows import interface
+from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.incremental_jp import collect_japan_incremental
 from tradingagents.dataflows.jp import jp_news
 from tradingagents.provenance import (
@@ -329,6 +332,62 @@ New guidance was published in the Incremental window.
     assert evidence[0].fallback is True
 
 
+def test_japan_collector_keeps_yfinance_fallback_items_with_upstream_availability_note() -> None:
+    upstream_note = attach_provenance(
+        "<EDINET unavailable: VendorNotConfiguredError>",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="edinet_news",
+            requested="2026-07-17 to 2026-07-24",
+            effective="—",
+            timing="unavailable",
+        ),
+    )
+    primary = mock.Mock(
+        side_effect=NoMarketDataError("7203.T", availability_notes=(upstream_note,))
+    )
+    fallback = mock.Mock(
+        return_value="""### [direct] Toyota raises outlook
+Published: 2026-07-22T01:00:00Z
+"""
+    )
+    with (
+        mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_news": {"edinet_news": primary, "yfinance": fallback}},
+            clear=False,
+        ),
+        mock.patch.object(interface, "get_vendor", return_value="edinet_news,yfinance"),
+    ):
+        response = interface.route_to_vendor(
+            "get_news",
+            "7203.T",
+            "2026-07-17",
+            "2026-07-24",
+            _provenance=True,
+        )
+
+    request = _request(enabled_domains=("news",))
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+    _summary, evidence, _bindings = normalize_incremental_collection(
+        request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
+    )
+
+    assert [item.source for item in evidence] == ["yfinance"]
+    assert evidence[0].fallback is True
+    domain = collected.collection_summary.domains[0]
+    assert domain.diagnostic is not None
+    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_upstream_unavailable"
+    sources = {source.source: source for source in domain.sources}
+    assert sources["yfinance"].fallback is True
+    assert sources["edinet_news"].diagnostic is not None
+    assert sources["edinet_news"].diagnostic.code == "upstream_source_unavailable"
+
+
 def test_japan_collector_binds_news_items_from_structured_assembler_spans(
     monkeypatch,
 ) -> None:
@@ -490,6 +549,48 @@ Effective period: 2026-03-31
     assert origins["j-quants_adjusted_ohlcv"].requested == "2026-07-17 to 2026-07-24"
     assert origins["j-quants_adjusted_ohlcv"].effective == "2026-07-24"
     assert origins["j-quants_adjusted_ohlcv"].timing == "market-date filtered"
+
+
+def test_japan_collector_does_not_treat_summary_cutoff_as_current_market_observation() -> None:
+    response = attach_evidence_span(
+        attach_provenance(
+            """# Fundamentals overview for 7203.T
+Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)
+Effective period: 2026-03-31
+""",
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants official summary",
+                requested="2026-07-24",
+                effective="disclosures <= 2026-07-24",
+                timing="disclosure-date filtered",
+                retrieved_at="2026-07-24T03:00:00Z",
+            ),
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants adjusted OHLCV",
+                requested="2026-07-17 to 2026-07-24",
+                effective="2026-07-23",
+                timing="market-date filtered",
+                retrieved_at="2026-07-24T03:00:00Z",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    request = _request(enabled_domains=("fundamentals",)).model_copy(
+        update={"window_end": datetime(2026, 7, 24, 3, 0, tzinfo=UTC)}
+    )
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 3, 1, tzinfo=UTC),
+    )
+    _summary, evidence, _bindings = normalize_incremental_collection(
+        request, collected, sealed_at=datetime(2026, 7, 24, 3, 1, tzinfo=UTC)
+    )
+
+    assert evidence[0].effective_date == date(2026, 3, 31)
+    assert evidence[0].available_at == datetime(2026, 7, 23, 14, 59, 59, 999999, tzinfo=UTC)
 
 
 def test_japan_collector_keeps_pit_fundamentals_when_a_nested_live_span_ages_out() -> None:
