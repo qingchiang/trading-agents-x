@@ -165,6 +165,56 @@ Effective period: 2026-03-31
     assert evidence[0].available_at == datetime(2026, 7, 22, 1, tzinfo=UTC)
 
 
+def test_japan_collector_admits_naive_edinet_publication_with_other_assembler_feeds(
+    monkeypatch,
+) -> None:
+    """EDINET's real ``submitDateTime`` is a Tokyo-local naive timestamp."""
+    monkeypatch.setattr(
+        jp_news,
+        "_edinet_news",
+        lambda *_args: """## EDINET
+
+### Statutory correction (filer: Toyota)
+Submitted: 2026-07-22 10:00
+Effective period: 2026-03-31
+""",
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_tdnet_news",
+        lambda *_args: """## TDnet
+
+### Timely guidance revision
+Disclosed: 2026-07-22 11:00 JST
+""",
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_google_news",
+        lambda *_args: """## Google News
+
+### Media coverage
+Published: 2026-07-22T03:00:00Z
+""",
+    )
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    request = _request(enabled_domains=("news",))
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+    _summary, evidence, _bindings = normalize_incremental_collection(
+        request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
+    )
+
+    assert {item.source for item in evidence} == {"edinet", "tdnet", "google_news"}
+    assert next(item for item in evidence if item.source == "edinet").available_at == datetime(
+        2026, 7, 22, 1, tzinfo=UTC
+    )
+    assert collected.collection_summary.domains[0].state.value == "partial"
+
+
 def test_japan_collector_keeps_actual_edinet_and_tdnet_provenance_without_empty_subfeeds() -> None:
     response = "\n\n".join(
         (
@@ -419,7 +469,9 @@ Effective period: 2026-03-31
         ),
         temporal_scope="point_in_time",
     )
-    request = _request(enabled_domains=("fundamentals",))
+    request = _request(enabled_domains=("fundamentals",)).model_copy(
+        update={"window_end": datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)}
+    )
     collected = collect_japan_incremental(
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
@@ -430,7 +482,7 @@ Effective period: 2026-03-31
     )
 
     assert evidence[0].effective_date == date(2026, 3, 31)
-    assert evidence[0].available_at == datetime(2026, 7, 22, 14, 59, 59, 999999, tzinfo=UTC)
+    assert evidence[0].available_at == datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)
     origins = {origin.source: origin for origin in evidence[0].origins}
     assert origins["j-quants_official_summary"].requested == "2026-07-24"
     assert origins["j-quants_official_summary"].effective == "2026-07-22"

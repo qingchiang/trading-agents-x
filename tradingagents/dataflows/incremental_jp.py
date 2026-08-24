@@ -46,7 +46,7 @@ _TOKYO = ZoneInfo("Asia/Tokyo")
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
 _NEWS_ITEM = re.compile(r"^### (?P<title>.+?)\n(?P<body>.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
 _DISCLOSED_AT = re.compile(
-    r"^(?:Submitted|Disclosed|Published):\s*(?P<value>\d{4}-\d{2}-\d{2}"
+    r"^(?P<label>Submitted|Disclosed|Published):\s*(?P<value>\d{4}-\d{2}-\d{2}"
     r"(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2}|\s+JST)?)?)",
     re.MULTILINE,
 )
@@ -211,7 +211,7 @@ def _collect_news(request, routed, now):
             )
             for match in _NEWS_ITEM.finditer(span.content):
                 content = f"{match.group('title').strip()}\n{match.group('body').strip()}".strip()
-                available_at, available_on = _publication_time(content)
+                available_at, available_on = _publication_time(content, source=source)
                 if available_at is not None:
                     if not request.window_start < available_at <= request.window_end:
                         continue
@@ -318,7 +318,8 @@ def _collect_fundamentals(request, routed, now):
             disclosed = _fundamentals_disclosure_date(span.content)
             if disclosed is None:
                 continue
-            available_at = _market_day_end(disclosed)
+            available_on = _fundamentals_available_on(span.records, disclosed)
+            available_at = _market_day_end(available_on)
             if not request.window_start < available_at <= request.window_end:
                 continue
             effective = _fundamentals_effective_date(span.content) or disclosed
@@ -340,7 +341,7 @@ def _collect_fundamentals(request, routed, now):
                     for record, actual_source in zip(span.records, span_sources, strict=True)
                 ),
             )
-            candidates.append(IncrementalEvidenceCandidate(evidence=item, available_on=disclosed))
+            candidates.append(IncrementalEvidenceCandidate(evidence=item, available_on=available_on))
             reported_sources.update({source.source: source for source in span_sources})
             bases.append(CollectionTemporalBasis.PIT)
         if not candidates:
@@ -469,26 +470,33 @@ def _market_series(request, source, body):
     ), omitted
 
 
-def _publication_time(content):
+def _publication_time(content, *, source):
     timestamp = _DISCLOSED_AT.search(content)
     if timestamp is not None:
         value = timestamp.group("value")
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
             return None, date.fromisoformat(value)
-        available_at = _parse_datetime(value)
+        available_at = _parse_datetime(
+            value,
+            allow_naive_tokyo=(
+                timestamp.group("label") == "Submitted" and source.source == "edinet"
+            ),
+        )
         return available_at, available_at.astimezone(_TOKYO).date()
     date_line = _DATE_LINE.search(content)
     return (None, date.fromisoformat(date_line.group(0))) if date_line else (None, None)
 
 
-def _parse_datetime(value):
+def _parse_datetime(value, *, allow_naive_tokyo=False):
     rendered = value.replace("JST", "+09:00").strip()
     try:
         parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
     except ValueError as exc:
         raise _Unavailable("invalid_disclosure_publication_time") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise _Unavailable("invalid_disclosure_publication_time")
+        if not allow_naive_tokyo:
+            raise _Unavailable("invalid_disclosure_publication_time")
+        parsed = parsed.replace(tzinfo=_TOKYO)
     return parsed.astimezone(UTC)
 
 
@@ -505,6 +513,16 @@ def _fundamentals_disclosure_date(body):
 def _fundamentals_effective_date(body):
     match = _EFFECTIVE_DATE.search(body) or _FUNDAMENTAL_PERIOD_END.search(body)
     return date.fromisoformat(match.group("value")) if match else None
+
+
+def _fundamentals_available_on(records, disclosed):
+    observed_dates = [disclosed]
+    for record in records:
+        observed_dates.extend(
+            date.fromisoformat(value)
+            for value in re.findall(r"\d{4}-\d{2}-\d{2}", record.effective)
+        )
+    return max(observed_dates)
 
 
 def _fundamentals_spans(response, body):
