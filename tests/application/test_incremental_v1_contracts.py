@@ -20,6 +20,7 @@ from tradingagents.application.contracts import (
     InformationAdvancement,
     MarketSeriesPoint,
     MarketSeriesResult,
+    PerformanceCalculationRecord,
     PerformanceComponentStatus,
     ResearchAvailability,
     ResearchAvailabilityDomain,
@@ -257,6 +258,41 @@ def test_collection_normalization_preserves_actual_fallback_provenance() -> None
     assert evidence[0].fallback is True
 
 
+def test_collection_normalization_rejects_domain_retrieval_after_sealing() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24")
+    collected = IncrementalCollectionResult(
+        collection_summary=CollectionSummary(
+            version=request.version,
+            market=request.market,
+            domains=tuple(
+                CollectionDomainResult(
+                    domain=domain,
+                    state="empty" if domain == "news" else "unavailable",
+                    source="fixture.news" if domain == "news" else None,
+                    retrieved_at=(
+                        datetime(2026, 7, 24, 19, 1, tzinfo=UTC)
+                        if domain == "news"
+                        else None
+                    ),
+                    diagnostic=(
+                        None
+                        if domain == "news"
+                        else CollectionDiagnostic(code="not_configured")
+                    ),
+                )
+                for domain in request.enabled_domains
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="domain retrieval cannot be after sealing"):
+        normalize_incremental_collection(
+            request,
+            collected,
+            sealed_at=datetime(2026, 7, 24, 19, tzinfo=UTC),
+        )
+
+
 def test_collection_normalization_rejects_same_reference_with_different_payload() -> None:
     request = _collection_request(analysis_cutoff="2026-07-24").model_copy(
         update={"enabled_domains": ("news",)}
@@ -326,6 +362,33 @@ def test_near_live_admission_preserves_retrieval_time_without_fabricating_availa
     assert admitted == (candidate.evidence,)
     assert admitted[0].available_at is None
     assert admitted[0].origins[0].retrieved_at == "2026-07-29T15:00:00Z"
+
+
+def test_live_only_observation_cannot_be_promoted_to_pit_by_available_at() -> None:
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="snapshot.vendor",
+            evidence_type="fundamentals_snapshot",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A retrieval-time snapshot with an invalid PIT claim.",
+            origins=(
+                EvidenceOrigin(
+                    source="snapshot.vendor",
+                    evidence_type="fundamentals_snapshot",
+                    retrieved_at="2026-07-24T18:00:00Z",
+                    temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="live-only observations cannot claim PIT availability"):
+        admit_incremental_observations(
+            _collection_request(analysis_cutoff="2026-07-24"),
+            (candidate,),
+            sealed_at=datetime(2026, 7, 24, 19, tzinfo=UTC),
+        )
 
 
 def test_strict_pit_backfill_is_admitted_by_publication_not_effective_date() -> None:
@@ -433,6 +496,22 @@ def test_stock_performance_truncates_one_broader_adjusted_series() -> None:
     assert "points" not in performance.model_dump_json()
 
 
+def test_performance_calculation_rejects_a_vendor_supplied_wrong_result() -> None:
+    with pytest.raises(ValidationError, match="unrounded return must match endpoint values"):
+        PerformanceCalculationRecord(
+            provider="fixture.market",
+            adjustment_basis="adjusted_close",
+            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            baseline_information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
+            target_information_cutoff_at=datetime(2026, 7, 25, 3, 59, 59, tzinfo=UTC),
+            start_session=date(2026, 7, 20),
+            end_session=date(2026, 7, 24),
+            start_value=100,
+            end_value=110,
+            unrounded_return=0.5,
+        )
+
+
 def test_stock_performance_reports_not_yet_observable_for_one_selected_session() -> None:
     performance = calculate_stock_performance(
         _collection_request(analysis_cutoff="2026-07-24"),
@@ -524,15 +603,44 @@ def test_retrieval_time_only_refresh_does_not_advance_information() -> None:
     assert len(advanced.observation_ids) == 1
 
 
-def _near_live_item(*, retrieved_at: str, content: str) -> EvidenceItem:
+def test_source_fallback_change_alone_does_not_advance_information() -> None:
+    baseline = _near_live_item(
+        retrieved_at="2026-07-24T15:00:00Z",
+        content="Stable snapshot.",
+        source="primary.vendor",
+    )
+    fallback = _near_live_item(
+        retrieved_at="2026-07-25T15:00:00Z",
+        content="Stable snapshot.",
+        source="fallback.vendor",
+    )
+
+    advancement = assess_information_advancement(
+        baseline_items=(baseline,),
+        current_items=(fallback,),
+        performance=calculate_stock_performance(
+            _collection_request(analysis_cutoff="2026-07-24"),
+            None,
+        ),
+    )
+
+    assert advancement == InformationAdvancement(advanced=False)
+
+
+def _near_live_item(
+    *,
+    retrieved_at: str,
+    content: str,
+    source: str = "yfinance",
+) -> EvidenceItem:
     return EvidenceItem.create(
-        source="yfinance",
+        source=source,
         evidence_type="fundamentals_snapshot",
         requested_date=date(2026, 7, 24),
         content=content,
         origins=(
             EvidenceOrigin(
-                source="yfinance",
+                source=source,
                 evidence_type="fundamentals_snapshot",
                 retrieved_at=retrieved_at,
                 temporal_scope="live_only",

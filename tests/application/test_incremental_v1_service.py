@@ -7,6 +7,7 @@ import pytest
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    BenchmarkContext,
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionSummary,
@@ -18,6 +19,8 @@ from tradingagents.application.contracts import (
     IncrementalEvidenceCandidate,
     MarketSeriesPoint,
     MarketSeriesResult,
+    PerformanceCalculationRecord,
+    PerformanceComponent,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -288,6 +291,64 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     assert calculation.unrounded_return == pytest.approx(0.1)
 
 
+def test_incremental_service_rejects_benchmark_from_another_frozen_interval(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        calculation = PerformanceCalculationRecord(
+            provider="fixture.benchmark",
+            adjustment_basis="adjusted_close",
+            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            baseline_information_cutoff_at=datetime(2026, 7, 18, 20, tzinfo=UTC),
+            target_information_cutoff_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+            start_session=date(2026, 7, 17),
+            end_session=date(2026, 7, 24),
+            start_value=100,
+            end_value=105,
+            unrounded_return=0.05,
+        )
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=_unavailable_domains(request),
+            ),
+            benchmarks=(
+                BenchmarkContext(
+                    name="S&P 500",
+                    component=PerformanceComponent(
+                        status="calculated",
+                        calculation=calculation,
+                    ),
+                ),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="benchmark cutoffs must match the frozen request"):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=collect,
+            now=lambda: datetime(2026, 7, 24, 22, tzinfo=UTC),
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+        baseline.run_id,
+    )
+
+
 def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
     app_settings,
     repository,
@@ -353,6 +414,170 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
     assert fundamentals.temporal_bases == ("near_live_advisory",)
     assert result.evidence.items[0].available_at is None
     assert result.evidence.items[0].origins[0].retrieved_at == "2026-07-29T15:00:00Z"
+
+
+def test_incremental_service_persists_bounded_best_effort_collection_states(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    partial = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.snapshot",
+            evidence_type="fundamentals_snapshot",
+            requested_date=date(2026, 7, 24),
+            content="A bounded current fundamentals snapshot.",
+            origins=(
+                EvidenceOrigin(
+                    source="fixture.snapshot",
+                    evidence_type="fundamentals_snapshot",
+                    retrieved_at="2026-07-29T15:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+    fallback = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fallback.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A filing observed through the configured fallback.",
+            fallback=True,
+        )
+    )
+    stale = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.social",
+            evidence_type="social_snapshot",
+            requested_date=date(2026, 7, 24),
+            content="A six-day snapshot that must be omitted.",
+            origins=(
+                EvidenceOrigin(
+                    source="fixture.social",
+                    evidence_type="social_snapshot",
+                    retrieved_at="2026-07-30T15:00:00Z",
+                    temporal_scope="live_only",
+                ),
+            ),
+        )
+    )
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        domains = {
+            "fundamentals": CollectionDomainResult(
+                domain="fundamentals",
+                state="partial",
+                source="fixture.snapshot",
+                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                temporal_bases=("near_live_advisory",),
+                evidence_refs=(partial.evidence.ref,),
+                diagnostic=CollectionDiagnostic(code="bounded_snapshot"),
+            ),
+            "market": CollectionDomainResult(
+                domain="market",
+                state="unavailable",
+                source="fixture.market",
+                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                diagnostic=CollectionDiagnostic(code="provider_failure"),
+            ),
+            "news": CollectionDomainResult(
+                domain="news",
+                state="data",
+                source="fallback.news",
+                fallback=True,
+                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                temporal_bases=("pit",),
+                evidence_refs=(fallback.evidence.ref,),
+            ),
+            "social": CollectionDomainResult(
+                domain="social",
+                state="data",
+                source="fixture.social",
+                retrieved_at=datetime(2026, 7, 30, 15, tzinfo=UTC),
+                temporal_bases=("near_live_advisory",),
+                evidence_refs=(stale.evidence.ref,),
+            ),
+        }
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=tuple(domains[domain] for domain in request.enabled_domains),
+            ),
+            evidence=(partial, fallback, stale),
+            stock_series=MarketSeriesResult(
+                instrument=request.instrument,
+                source="fixture.market",
+                adjustment_basis="adjusted_close",
+                retrieved_at=datetime(2026, 7, 29, 15, tzinfo=UTC),
+                points=(
+                    MarketSeriesPoint(
+                        session="2026-07-17",
+                        completed_at="2026-07-17T20:00:00Z",
+                        adjusted_close=90,
+                    ),
+                    MarketSeriesPoint(
+                        session="2026-07-20",
+                        completed_at="2026-07-20T20:00:00Z",
+                        adjusted_close=100,
+                    ),
+                    MarketSeriesPoint(
+                        session="2026-07-24",
+                        completed_at="2026-07-24T20:00:00Z",
+                        adjusted_close=110,
+                    ),
+                    MarketSeriesPoint(
+                        session="2026-07-25",
+                        completed_at="2026-07-25T20:00:00Z",
+                        adjusted_close=120,
+                    ),
+                ),
+            ),
+        )
+
+    result = _incremental_service(
+        app_settings,
+        repository,
+        collector=collect,
+        now=lambda: datetime(2026, 7, 30, 15, 1, tzinfo=UTC),
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    node = next(
+        item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id
+    )
+    domains = {item.domain: item for item in node.collection_summary.domains}
+    assert domains["fundamentals"].state.value == "partial"
+    assert domains["market"].diagnostic.code == "provider_failure"
+    assert domains["news"].fallback is True
+    assert domains["social"].state.value == "empty"
+    assert domains["social"].diagnostic.code == "outside_temporal_boundary"
+    assert {item.ref for item in result.evidence.items} == {
+        partial.evidence.ref,
+        fallback.evidence.ref,
+    }
+    assert {
+        item.domain: item.status.value for item in node.research_availability.domains
+    } == {
+        "fundamentals": "limited",
+        "market": "missing",
+        "news": "available",
+        "social": "missing",
+    }
+    calculation = node.performance.stock.calculation
+    assert calculation is not None
+    assert calculation.start_session == date(2026, 7, 20)
+    assert calculation.end_session == date(2026, 7, 24)
 
 
 def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(

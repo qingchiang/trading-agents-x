@@ -84,6 +84,13 @@ def admit_incremental_observations(
     for candidate in candidates:
         item = candidate.evidence
         if item.available_at is not None or candidate.available_on is not None:
+            if item.origins and any(
+                origin.temporal_scope.value != "point_in_time"
+                for origin in item.origins
+            ):
+                raise ValueError(
+                    "live-only observations cannot claim PIT availability"
+                )
             resolved = _resolve_incremental_evidence(request, candidate)
             if not request.window_start < resolved.available_at <= request.window_end:
                 raise ValueError(
@@ -140,6 +147,11 @@ def normalize_incremental_collection(
         raise ValueError("Collection Summary does not match its frozen request")
     if tuple(result.domain for result in summary.domains) != request.enabled_domains:
         raise ValueError("Collection Summary must contain each enabled domain exactly once")
+    if any(
+        result.retrieved_at is not None and result.retrieved_at > sealed_at
+        for result in summary.domains
+    ):
+        raise ValueError("domain retrieval cannot be after sealing")
 
     ref_map: dict[str, EvidenceItem | None] = {}
     admitted_by_ref: dict[str, EvidenceItem] = {}
@@ -296,20 +308,15 @@ def assess_information_advancement(
 def _incremental_observation_identity(item: EvidenceItem) -> str:
     origins = [
         {
-            "source": origin.source,
-            "evidence_type": origin.evidence_type,
             "effective": origin.effective,
             "effective_date": (
                 origin.effective_date.isoformat() if origin.effective_date else None
             ),
             "timing": origin.timing,
-            "temporal_scope": origin.temporal_scope.value,
         }
         for origin in item.origins
     ]
     payload = {
-        "source": item.source,
-        "evidence_type": item.evidence_type,
         "effective_date": item.effective_date.isoformat() if item.effective_date else None,
         "available_at": item.available_at.isoformat() if item.available_at else None,
         "content": item.content,

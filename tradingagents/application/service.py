@@ -41,6 +41,7 @@ from .contracts import (
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
+    PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
     ResearchReassessment,
@@ -831,18 +832,26 @@ class AnalysisService:
             raise ValueError("stock market-series retrieval cannot be after sealing")
         for benchmark in collected.benchmarks:
             calculation = benchmark.component.calculation
-            if calculation is not None and calculation.retrieved_at > sealed_at:
-                raise ValueError("benchmark retrieval cannot be after sealing")
+            if calculation is not None:
+                if calculation.retrieved_at > sealed_at:
+                    raise ValueError("benchmark retrieval cannot be after sealing")
+                if (
+                    calculation.baseline_information_cutoff_at != request.window_start
+                    or calculation.target_information_cutoff_at != request.window_end
+                ):
+                    raise ValueError(
+                        "benchmark cutoffs must match the frozen request"
+                    )
         collection_summary, evidence_items = normalize_incremental_collection(
             request,
             collected,
             sealed_at=sealed_at,
         )
         performance = calculate_stock_performance(request, collected.stock_series)
-        if collected.benchmarks:
-            performance = performance.model_copy(
-                update={"benchmarks": collected.benchmarks}
-            )
+        performance = PerformanceObservation(
+            stock=performance.stock,
+            benchmarks=collected.benchmarks,
+        )
         research_availability = derive_research_availability(collection_summary)
         information_advancement = assess_information_advancement(
             baseline_items=baseline_evidence.items,

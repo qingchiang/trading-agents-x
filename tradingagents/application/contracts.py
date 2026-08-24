@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import UTC, date, datetime
 from enum import Enum, StrEnum
@@ -2047,6 +2048,14 @@ class PerformanceCalculationRecord(FrozenModel):
             raise ValueError("Performance information cutoffs must advance")
         if self.start_session >= self.end_session:
             raise ValueError("calculated Performance sessions must advance")
+        expected_return = (self.end_value / self.start_value) - 1
+        if not math.isclose(
+            self.unrounded_return,
+            expected_return,
+            rel_tol=1e-12,
+            abs_tol=1e-15,
+        ):
+            raise ValueError("unrounded return must match endpoint values")
         return self
 
 
