@@ -197,7 +197,9 @@ def _collect_news(request, routed, now):
             return _unavailable("news", "news_retrieval_failed", sources=sources), ()
         if _is_empty(body):
             return _bounded_empty("news", sources), ()
-        limited_sources = _news_availability_sources(extract_provenance(response), now)
+        records = extract_provenance(response)
+        limited_sources = _news_availability_sources(records, now)
+        cap_limited_sources = _news_global_cap_sources(records, now)
         candidates: list[IncrementalEvidenceCandidate] = []
         observed = []
         used_sources: dict[str, CollectionSourceProvenance] = {}
@@ -258,7 +260,7 @@ def _collect_news(request, routed, now):
                 state=CollectionResultState.PARTIAL,
                 sources=tuple({
                     source.source: source
-                    for source in (*used_sources.values(), *limited_sources)
+                    for source in (*used_sources.values(), *limited_sources, *cap_limited_sources)
                 }.values()),
                 observed_from=min(observed),
                 observed_through=max(observed),
@@ -268,7 +270,11 @@ def _collect_news(request, routed, now):
                     code=(
                         "bounded_japanese_news_feed_with_upstream_unavailable"
                         if limited_sources
-                        else "bounded_japanese_news_feed"
+                        else (
+                            "bounded_japanese_news_feed_with_global_cap"
+                            if cap_limited_sources
+                            else "bounded_japanese_news_feed"
+                        )
                     )
                 ),
             ),
@@ -292,6 +298,8 @@ def _collect_fundamentals(request, routed, now):
             _stop_on_rate_limit=True,
         )
         sources, body = _routed_sources(response, now)
+        if _is_failure(body):
+            return _unavailable("fundamentals", "fundamentals_retrieval_failed", sources=sources), ()
         if _is_empty(body):
             return _bounded_empty("fundamentals", sources), ()
         spans = _fundamentals_spans(response, body)
@@ -601,9 +609,25 @@ def _news_availability_sources(records, now):
     return tuple(unavailable.values())
 
 
+def _news_global_cap_sources(records, now):
+    omitted = {}
+    for record, source in zip(records, _sources_from_records(records, now), strict=True):
+        if not _is_news_global_cap_record(record):
+            continue
+        omitted[source.source] = source.model_copy(
+            update={"diagnostic": CollectionDiagnostic(code="truncated_by_global_cap")}
+        )
+    return tuple(omitted.values())
+
+
 def _is_news_availability_record(record):
     timing = record.timing.casefold()
     return "fallback vendor selected" not in timing and "unavailable" in timing
+
+
+def _is_news_global_cap_record(record):
+    timing = record.timing.casefold()
+    return "truncated_by_global_cap=" in timing and "kept_items=0" in timing
 
 
 def _source_id(value):

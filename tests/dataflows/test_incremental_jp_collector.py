@@ -488,6 +488,49 @@ Disclosed: 2026-07-22 11:00 JST
     assert derive_research_availability(collected.collection_summary).domains[0].status.value == "limited"
 
 
+def test_japan_collector_retains_source_omitted_by_japanese_news_global_cap(monkeypatch) -> None:
+    monkeypatch.setattr(jp_news, "get_config", lambda: {"news_article_limit": 1})
+    monkeypatch.setattr(
+        jp_news,
+        "_edinet_news",
+        lambda *_args: """## EDINET
+
+### Statutory correction
+Submitted: 2026-07-22 10:00
+""",
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_tdnet_news",
+        lambda *_args: """## TDnet
+
+### Timely guidance revision
+Disclosed: 2026-07-22 11:00 JST
+""",
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_google_news",
+        lambda *_args: "No Google News found for 7203.T between 2026-07-17 and 2026-07-24",
+    )
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+
+    collected = collect_japan_incremental(
+        _request(enabled_domains=("news",)),
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+
+    domain = collected.collection_summary.domains[0]
+    sources = {source.source: source for source in domain.sources}
+    assert [candidate.evidence.source for candidate in collected.evidence] == ["edinet"]
+    assert domain.state.value == "partial"
+    assert domain.diagnostic is not None
+    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_global_cap"
+    assert sources["tdnet"].diagnostic is not None
+    assert sources["tdnet"].diagnostic.code == "truncated_by_global_cap"
+
+
 def test_japan_collector_binds_news_items_from_structured_assembler_spans(
     monkeypatch,
 ) -> None:
@@ -523,6 +566,34 @@ def test_japan_collector_binds_news_items_from_structured_assembler_spans(
         "edinet",
         "tdnet",
     ]
+
+
+def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> None:
+    response = attach_provenance(
+        "Error retrieving fundamentals for 7203.T: Yahoo Finance response unavailable",
+        ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="yfinance",
+            requested="2026-07-24",
+            effective="live retrieval",
+            timing="fallback vendor selected; live non-point-in-time",
+            retrieved_at="2026-07-24T15:00:00Z",
+        ),
+    )
+
+    collected = collect_japan_incremental(
+        _request(enabled_domains=("fundamentals",)),
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+
+    domain = collected.collection_summary.domains[0]
+    assert domain.state.value == "unavailable"
+    assert domain.diagnostic is not None
+    assert domain.diagnostic.code == "fundamentals_retrieval_failed"
+    assert domain.sources[0].source == "yfinance"
+    assert domain.sources[0].fallback is True
+    assert collected.evidence == ()
 
 
 def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after_five_days() -> (

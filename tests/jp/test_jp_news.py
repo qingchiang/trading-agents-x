@@ -3,6 +3,7 @@
 import unittest
 from datetime import date
 from unittest import mock
+from urllib.error import HTTPError
 
 import pytest
 
@@ -11,7 +12,7 @@ from tradingagents.dataflows.errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.dataflows.jp import jp_news, tdnet_news
+from tradingagents.dataflows.jp import http_util, jp_news, tdnet_news
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_provenance
 
@@ -231,6 +232,24 @@ class JpNewsAssemblerTests(unittest.TestCase):
 
         edinet.assert_called_once()
         tdnet.assert_not_called()
+        media.assert_not_called()
+
+    def test_scoped_tdnet_http_429_raises_without_retry_or_later_feed(self):
+        rate_limited = HTTPError("https://example.test", 429, "Too Many", {}, None)
+        media = mock.Mock(return_value=_MEDIA_DATA)
+        with (
+            mock.patch.object(tdnet_news, "tokyo_today", return_value=date(2026, 8, 25)),
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_EMPTY),
+            mock.patch.object(jp_news, "_google_news", media),
+            mock.patch.object(http_util, "urlopen", side_effect=rate_limited) as urlopen,
+            mock.patch.object(http_util.time, "sleep") as sleep,
+            stop_on_rate_limit_scope(True),
+            self.assertRaises(VendorRateLimitError),
+        ):
+            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25")
+
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
         media.assert_not_called()
 
 
