@@ -480,7 +480,11 @@ def build_incremental_collection_request(
 def default_incremental_collector(
     request: IncrementalCollectionRequest,
 ) -> IncrementalCollectionResult:
-    """Return truthful unavailable domains until a market ticket connects routing."""
+    """Dispatch the first configured market path without creating a second router."""
+    if request.market == "united_states":
+        from tradingagents.dataflows.incremental_us import collect_us_incremental
+
+        return collect_us_incremental(request)
     return IncrementalCollectionResult(
         collection_summary=CollectionSummary(
             version=request.version,

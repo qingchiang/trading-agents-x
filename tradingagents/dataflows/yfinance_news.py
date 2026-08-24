@@ -173,6 +173,8 @@ def get_news_yfinance(
         news_str = ""
         for data, tier in kept:
             news_str += f"### [{tier}] {data['title']} (source: {data['publisher']})\n"
+            if data["pub_date"] is not None:
+                news_str += f"Published: {data['pub_date'].astimezone(market_timezone(canonical)).date().isoformat()}\n"
             if data["summary"]:
                 news_str += f"{data['summary']}\n"
             if data["link"]:

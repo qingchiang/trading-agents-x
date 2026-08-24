@@ -32,6 +32,8 @@ from tradingagents.application.contracts import (
 from tradingagents.application.database import RunRecord
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.application.settings import AppSettings
+from tradingagents.dataflows import incremental_us
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
@@ -44,6 +46,100 @@ def _payload(ticker: str = "NVDA") -> dict:
         "analysts": ["market", "news"],
         "output_language": "en",
     }
+
+
+@pytest.mark.anyio
+async def test_default_us_incremental_collector_reads_back_through_asgi_timeline(
+    monkeypatch,
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    baseline_request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 20),
+        analysts=("market",),
+    )
+    baseline, _ = web_repository.create_run(
+        baseline_request,
+        web_settings.resolve_run(baseline_request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    baseline_item = EvidenceItem.create(
+        source="fixture.baseline",
+        evidence_type="baseline",
+        requested_date=baseline_request.analysis_date,
+        content="baseline NVDA",
+    )
+    baseline_evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=baseline_request.analysis_date,
+        items=(baseline_item,),
+    )
+    web_repository.seal_evidence(baseline.id, baseline_evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument="NVDA",
+            reports={},
+            decision=research_decision(evidence_refs=(baseline_item.ref,)),
+            evidence=baseline_evidence,
+        ),
+        evidence=baseline_evidence,
+    )
+    market_response = attach_provenance(
+        """# Stock data for NVDA from 2026-07-20 to 2026-07-24
+# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)
+# Actual data source: yfinance
+
+Date,Open,High,Low,Close,Volume
+2026-07-20,100,102,99,101,1000
+2026-07-24,109,111,108,110,1000
+""",
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="yfinance",
+            requested="2026-07-20 to 2026-07-24",
+            effective="2026-07-20 to 2026-07-24",
+            timing="market-date filtered",
+            retrieved_at="2026-07-25T01:00:00Z",
+        ),
+    )
+    monkeypatch.setattr(
+        incremental_us,
+        "DEFAULT_ROUTE_TO_VENDOR",
+        lambda *_args, **_kwargs: market_response,
+    )
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        incremental_synthesizer=default_incremental_synthesizer,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            analysts=("market",),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.id,
+        )
+    )
+    response = await web_client.get("/api/v1/timelines/NVDA")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert response.status_code == 200
+    node = next(item for item in response.json()["timeline"]["nodes"] if item["id"] == result.run_id)
+    assert node["performance"]["stock"]["status"] == "calculated"
+    assert node["collection_summary"]["domains"][0]["sources"][0]["source"] == "yfinance"
 
 
 @pytest.mark.anyio
