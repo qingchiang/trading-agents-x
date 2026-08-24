@@ -206,9 +206,15 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
         }], temporal_bases: ["pit"], evidence_refs: ["ev_japan_close"] },
         { domain: "news", state: "unavailable", sources: [], temporal_bases: [],
           evidence_refs: [], diagnostic: { code: "news_retrieval_failed" } },
+        { domain: "fundamentals", state: "partial", sources: [{
+          source: "yfinance", fallback: true, retrieved_at: "2026-07-24T15:00:00Z",
+          diagnostic: { code: "near_live_snapshot" },
+        }], temporal_bases: ["near_live_advisory"], evidence_refs: ["ev_japan_fundamentals"],
+          diagnostic: { code: "near_live_snapshot" } },
       ] },
       research_availability: { version: "1", domains: [
         { domain: "market", status: "available" }, { domain: "news", status: "missing" },
+        { domain: "fundamentals", status: "limited" },
       ] },
       performance: { stock: { status: "calculated", calculation: {
         provider: "jquants", fallback: false,
@@ -228,6 +234,9 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
   fireEvent.click(await screen.findByText("Collection Summary"));
   expect(screen.getAllByText("jquants")).not.toHaveLength(0);
   expect(screen.getByText(/news: unavailable/)).toHaveTextContent("news_retrieval_failed");
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent("near_live_snapshot");
+  fireEvent.click(screen.getByText("Research Availability"));
+  expect(screen.getByText(/fundamentals: limited/)).toBeVisible();
   fireEvent.click(screen.getByText("Performance"));
   expect(screen.getByText("jquants_split_dividend_adjusted_close")).toBeVisible();
 });

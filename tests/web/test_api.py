@@ -201,8 +201,38 @@ Date,Open,High,Low,Close,Volume
             retrieved_at="2026-07-24T15:00:00Z",
         ),
     )
+    news_response = attach_provenance(
+        "No EDINET disclosures found for 7203.T between 2026-07-17 and 2026-07-24",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="EDINET",
+            requested="2026-07-17 to 2026-07-24",
+            effective="2026-07-17 to 2026-07-24",
+            timing="available; no relevant items in window",
+            retrieved_at="2026-07-24T15:00:00Z",
+        ),
+    )
+    fundamentals_response = attach_provenance(
+        "Live analyst consensus snapshot for 7203.T",
+        ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="yfinance",
+            requested="2026-07-24",
+            effective="retrieval-time analyst snapshot",
+            timing="live non-point-in-time",
+            retrieved_at="2026-07-24T15:00:00Z",
+        ),
+    )
+
+    def route(method, *_args, **_kwargs):
+        return {
+            "get_stock_data": market_response,
+            "get_news": news_response,
+            "get_fundamentals": fundamentals_response,
+        }[method]
+
     monkeypatch.setattr(
-        incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", lambda *_args, **_kwargs: market_response
+        incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route
     )
     service = AnalysisService(
         web_settings,
@@ -216,7 +246,7 @@ Date,Open,High,Low,Close,Volume
         AnalysisRequest(
             ticker="7203.T",
             analysis_date=date(2026, 7, 24),
-            analysts=("market",),
+            analysts=("market", "news", "fundamentals"),
             research_kind="incremental",
             full_baseline_run_id=baseline.id,
         )
@@ -230,6 +260,14 @@ Date,Open,High,Low,Close,Volume
         "jquants_split_dividend_adjusted_close"
     )
     assert node["collection_summary"]["domains"][0]["sources"][0]["source"] == "jquants"
+    domains = {domain["domain"]: domain for domain in node["collection_summary"]["domains"]}
+    availability = {
+        domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
+    }
+    assert domains["news"]["state"] == "empty"
+    assert domains["fundamentals"]["state"] == "partial"
+    assert availability == {"market": "available", "news": "missing", "fundamentals": "limited"}
+    assert node["performance"]["benchmarks"] == []
 
 
 @pytest.mark.anyio

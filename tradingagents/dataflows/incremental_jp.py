@@ -34,15 +34,28 @@ from tradingagents.application.contracts import (
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.jp.calendar import is_tse_open
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
+from tradingagents.provenance import (
+    EvidenceSpan,
+    extract_evidence_spans,
+    extract_provenance,
+    strip_provenance_markers,
+    temporal_scope_from_records,
+)
 
 _TOKYO = ZoneInfo("Asia/Tokyo")
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
 _NEWS_ITEM = re.compile(r"^### (?P<title>.+?)\n(?P<body>.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
-_DISCLOSED_AT = re.compile(r"^(?:Submitted|Disclosed):\s*(?P<value>[^\n]+)", re.MULTILINE)
+_DISCLOSED_AT = re.compile(
+    r"^(?:Submitted|Disclosed|Published):\s*(?P<value>\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2}|\s+JST)?)?)",
+    re.MULTILINE,
+)
 _EFFECTIVE_DATE = re.compile(r"^Effective period:\s*(?P<value>\d{4}-\d{2}-\d{2})", re.MULTILINE)
 _DATE_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}$", re.MULTILINE)
 _DISCLOSURE_DATE = re.compile(r"\bdisclosed\s+(?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
+_FUNDAMENTAL_PERIOD_END = re.compile(
+    r"\b(?:FY|Q[1-4]) end (?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE
+)
 
 
 class _Unavailable(ValueError):
@@ -78,10 +91,9 @@ def collect_japan_incremental(
             domains.append(result)
             evidence.extend(candidates)
         elif domain == "fundamentals":
-            result, candidate = _collect_fundamentals(request, routed, now)
+            result, candidates = _collect_fundamentals(request, routed, now)
             domains.append(result)
-            if candidate is not None:
-                evidence.append(candidate)
+            evidence.extend(candidates)
         elif domain == "social":
             # The existing JP sentiment tools are analyst-only aggregates, not a
             # configured collection route with auditable observation timestamps.
@@ -228,44 +240,83 @@ def _collect_fundamentals(request, routed, now):
         )
         sources, body = _routed_sources(response, now)
         if _is_empty(body):
-            return _bounded_empty("fundamentals", sources), None
-        source = sources[0]
-        if _is_live_only(response, body):
+            return _bounded_empty("fundamentals", sources), ()
+        spans = _fundamentals_spans(response, body)
+        candidates: list[IncrementalEvidenceCandidate] = []
+        reported_sources: dict[str, CollectionSourceProvenance] = {}
+        bases: list[CollectionTemporalBasis] = []
+        for span in spans:
+            if span.content is None or not span.records:
+                continue
+            span_sources = _sources_from_records(span.records, now)
+            if span.temporal_scope == "live_only":
+                source = span_sources[0]
+                item = EvidenceItem.create(
+                    source=source.source, evidence_type="fundamentals_snapshot",
+                    requested_date=request.analysis_cutoff, content=span.content,
+                    fallback=source.fallback,
+                    origins=(_near_live_origin(source, "fundamentals_snapshot"),),
+                )
+                candidates.append(IncrementalEvidenceCandidate(evidence=item))
+                for actual_source in span_sources:
+                    reported_sources[actual_source.source] = actual_source.model_copy(
+                        update={"diagnostic": CollectionDiagnostic(code="near_live_snapshot")}
+                    )
+                bases.append(CollectionTemporalBasis.NEAR_LIVE_ADVISORY)
+                continue
+            disclosed = _fundamentals_disclosure_date(span.content)
+            if disclosed is None:
+                continue
+            available_at = _market_day_end(disclosed)
+            if not request.window_start < available_at <= request.window_end:
+                continue
+            effective = _fundamentals_effective_date(span.content) or disclosed
+            source = span_sources[0]
             item = EvidenceItem.create(
-                source=source.source, evidence_type="fundamentals_snapshot",
-                requested_date=request.analysis_cutoff, content=body, fallback=source.fallback,
-                origins=(_near_live_origin(source, "fundamentals_snapshot"),),
+                source=source.source, evidence_type="fundamentals_disclosure",
+                requested_date=request.analysis_cutoff, effective_date=effective,
+                content=span.content, fallback=source.fallback,
+                origins=tuple(
+                    _pit_origin(actual_source, "fundamentals_disclosure", effective)
+                    for actual_source in span_sources
+                ),
             )
+            candidates.append(IncrementalEvidenceCandidate(evidence=item, available_on=disclosed))
+            reported_sources.update({source.source: source for source in span_sources})
+            bases.append(CollectionTemporalBasis.PIT)
+        if not candidates:
             return (
                 CollectionDomainResult(
-                    domain="fundamentals", state=CollectionResultState.PARTIAL, sources=(source,),
-                    temporal_bases=(CollectionTemporalBasis.NEAR_LIVE_ADVISORY,), evidence_refs=(item.ref,),
-                    diagnostic=CollectionDiagnostic(code="near_live_snapshot"),
+                    domain="fundamentals", state=CollectionResultState.EMPTY, sources=sources,
+                    diagnostic=CollectionDiagnostic(code="no_admissible_fundamentals_observation"),
                 ),
-                IncrementalEvidenceCandidate(evidence=item),
+                (),
             )
-        disclosed = _fundamentals_disclosure_date(body)
-        if disclosed is None:
-            raise _Unavailable("fundamentals_disclosure_date_unavailable")
-        item = EvidenceItem.create(
-            source=source.source, evidence_type="fundamentals_disclosure",
-            requested_date=request.analysis_cutoff, effective_date=disclosed,
-            content=body, fallback=source.fallback,
-            origins=(_pit_origin(source, "fundamentals_disclosure", disclosed),),
+        temporal_bases = tuple(dict.fromkeys(bases))
+        state = (
+            CollectionResultState.DATA
+            if temporal_bases == (CollectionTemporalBasis.PIT,)
+            else CollectionResultState.PARTIAL
         )
         return (
             CollectionDomainResult(
-                domain="fundamentals", state=CollectionResultState.DATA, sources=(source,),
-                temporal_bases=(CollectionTemporalBasis.PIT,), evidence_refs=(item.ref,),
+                domain="fundamentals", state=state, sources=tuple(reported_sources.values()),
+                temporal_bases=temporal_bases,
+                evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
+                diagnostic=(
+                    None
+                    if state is CollectionResultState.DATA
+                    else CollectionDiagnostic(code="mixed_pit_and_near_live_fundamentals")
+                ),
             ),
-            IncrementalEvidenceCandidate(evidence=item, available_on=disclosed),
+            tuple(candidates),
         )
     except _Unavailable as exc:
-        return _unavailable("fundamentals", exc.code), None
+        return _unavailable("fundamentals", exc.code), ()
     except VendorRateLimitError:
         raise
     except Exception:
-        return _unavailable("fundamentals", "fundamentals_route_failure"), None
+        return _unavailable("fundamentals", "fundamentals_route_failure"), ()
 
 
 def _routed_source(response: object, now):
@@ -283,7 +334,12 @@ def _routed_sources(response: object, now):
     records = extract_provenance(response)
     if not records:
         raise _Unavailable("missing_actual_source_provenance")
-    sources = tuple(
+    sources = _sources_from_records(records, now)
+    return sources, strip_provenance_markers(response).strip()
+
+
+def _sources_from_records(records, now):
+    return tuple(
         CollectionSourceProvenance(
             source=_source_id(record.source),
             fallback="fallback vendor selected" in record.timing.casefold(),
@@ -291,7 +347,6 @@ def _routed_sources(response: object, now):
         )
         for record in records
     )
-    return sources, strip_provenance_markers(response).strip()
 
 
 def _market_series(request, source, body):
@@ -338,7 +393,10 @@ def _market_series(request, source, body):
 def _publication_time(content):
     timestamp = _DISCLOSED_AT.search(content)
     if timestamp is not None:
-        available_at = _parse_datetime(timestamp.group("value"))
+        value = timestamp.group("value")
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            return None, date.fromisoformat(value)
+        available_at = _parse_datetime(value)
         return available_at, available_at.astimezone(_TOKYO).date()
     date_line = _DATE_LINE.search(content)
     return (None, date.fromisoformat(date_line.group(0))) if date_line else (None, None)
@@ -375,16 +433,28 @@ def _fundamentals_disclosure_date(body):
     return date.fromisoformat(match.group("value")) if match else None
 
 
+def _fundamentals_effective_date(body):
+    match = _EFFECTIVE_DATE.search(body) or _FUNDAMENTAL_PERIOD_END.search(body)
+    return date.fromisoformat(match.group("value")) if match else None
+
+
+def _fundamentals_spans(response, body):
+    spans = extract_evidence_spans(response)
+    if spans:
+        return tuple(spans)
+    records = tuple(extract_provenance(response))
+    return (
+        EvidenceSpan(
+            content=body,
+            records=records,
+            temporal_scope=temporal_scope_from_records(records),
+        ),
+    )
+
+
 def _source_id(value):
     """Fit established human provenance names into the public source identifier."""
     return re.sub(r"[^a-z0-9_.-]+", "_", value.casefold()).strip("_")
-
-
-def _is_live_only(response, body):
-    return "live" in body.casefold() or any(
-        "live" in record.timing.casefold() or "not point-in-time" in record.timing.casefold()
-        for record in extract_provenance(response)
-    )
 
 
 def _pit_origin(source, evidence_type, effective_date):
