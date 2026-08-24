@@ -208,7 +208,7 @@ def _collect_news(request, routed, now):
         limited_sources = _news_availability_sources(records, now)
         cap_limited_sources = _news_global_cap_sources(records, now)
         if _is_empty(body):
-            summary_sources = _merge_news_sources(sources, limited_sources, cap_limited_sources)
+            summary_sources = _merge_sources(sources, limited_sources, cap_limited_sources)
             if limited_sources:
                 return (
                     CollectionDomainResult(
@@ -254,11 +254,11 @@ def _collect_news(request, routed, now):
                 continue
             if span.temporal_scope == "live_only":
                 record = span.records[0]
-                if not record.retrieved_at:
+                if _producer_retrieved_at(record.retrieved_at) is None:
                     temporal_limited_sources[source.source] = source.model_copy(
                         update={
                             "diagnostic": CollectionDiagnostic(
-                                code="missing_live_news_retrieval_time"
+                                code="unreliable_live_news_retrieval_time"
                             )
                         }
                     )
@@ -320,7 +320,7 @@ def _collect_news(request, routed, now):
                 used_sources[source.source] = source
                 bases.append(CollectionTemporalBasis.PIT)
         if not candidates:
-            summary_sources = _merge_news_sources(
+            summary_sources = _merge_sources(
                 sources,
                 limited_sources,
                 cap_limited_sources,
@@ -345,7 +345,7 @@ def _collect_news(request, routed, now):
                 ),
                 (),
             )
-        summary_sources = _merge_news_sources(
+        summary_sources = _merge_sources(
             tuple(used_sources.values()),
             limited_sources,
             cap_limited_sources,
@@ -400,12 +400,35 @@ def _collect_fundamentals(request, routed, now):
         spans = _fundamentals_spans(response, body)
         candidates: list[IncrementalEvidenceCandidate] = []
         reported_sources: dict[str, CollectionSourceProvenance] = {}
+        temporal_limited_sources: dict[str, CollectionSourceProvenance] = {}
         bases: list[CollectionTemporalBasis] = []
         for span in spans:
             if span.content is None or not span.records:
                 continue
             span_sources = _sources_from_records(span.records, now)
+            if span.temporal_scope == "unknown":
+                for actual_source in span_sources:
+                    temporal_limited_sources[actual_source.source] = actual_source.model_copy(
+                        update={
+                            "diagnostic": CollectionDiagnostic(
+                                code="unknown_fundamentals_temporal_scope"
+                            )
+                        }
+                    )
+                continue
             if span.temporal_scope == "live_only":
+                if any(
+                    _producer_retrieved_at(record.retrieved_at) is None for record in span.records
+                ):
+                    for actual_source in span_sources:
+                        temporal_limited_sources[actual_source.source] = actual_source.model_copy(
+                            update={
+                                "diagnostic": CollectionDiagnostic(
+                                    code="unreliable_live_fundamentals_retrieval_time"
+                                )
+                            }
+                        )
+                    continue
                 source = span_sources[0]
                 item = EvidenceItem.create(
                     source=source.source,
@@ -460,32 +483,47 @@ def _collect_fundamentals(request, routed, now):
             reported_sources.update({source.source: source for source in span_sources})
             bases.append(CollectionTemporalBasis.PIT)
         if not candidates:
+            summary_sources = _merge_sources(sources, tuple(temporal_limited_sources.values()))
+            temporal_code = _fundamentals_temporal_limitation_code(
+                temporal_limited_sources.values()
+            )
             return (
                 CollectionDomainResult(
                     domain="fundamentals",
                     state=CollectionResultState.EMPTY,
-                    sources=sources,
-                    diagnostic=CollectionDiagnostic(code="no_admissible_fundamentals_observation"),
+                    sources=summary_sources,
+                    diagnostic=CollectionDiagnostic(
+                        code=temporal_code or "no_admissible_fundamentals_observation"
+                    ),
                 ),
                 (),
             )
         temporal_bases = tuple(dict.fromkeys(bases))
         state = (
             CollectionResultState.DATA
-            if temporal_bases == (CollectionTemporalBasis.PIT,)
+            if temporal_bases == (CollectionTemporalBasis.PIT,) and not temporal_limited_sources
             else CollectionResultState.PARTIAL
         )
         return (
             CollectionDomainResult(
                 domain="fundamentals",
                 state=state,
-                sources=tuple(reported_sources.values()),
+                sources=_merge_sources(
+                    tuple(reported_sources.values()),
+                    tuple(temporal_limited_sources.values()),
+                ),
                 temporal_bases=temporal_bases,
                 evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
                 diagnostic=(
                     None
                     if state is CollectionResultState.DATA
-                    else CollectionDiagnostic(code="mixed_pit_and_near_live_fundamentals")
+                    else CollectionDiagnostic(
+                        code=(
+                            "fundamentals_temporal_scope_limited"
+                            if temporal_limited_sources
+                            else "mixed_pit_and_near_live_fundamentals"
+                        )
+                    )
                 ),
             ),
             tuple(candidates),
@@ -522,9 +560,7 @@ def _sources_from_records(records, now):
         CollectionSourceProvenance(
             source=_source_id(record.source),
             fallback="fallback vendor selected" in record.timing.casefold(),
-            retrieved_at=_parse_retrieved_at(record.retrieved_at)
-            if record.retrieved_at
-            else _aware_now(now),
+            retrieved_at=_producer_retrieved_at(record.retrieved_at) or _aware_now(now),
         )
         for record in records
     )
@@ -725,7 +761,7 @@ def _news_global_cap_sources(records, now):
     return tuple(omitted.values())
 
 
-def _merge_news_sources(*source_groups):
+def _merge_sources(*source_groups):
     merged = {}
     for group in source_groups:
         for source in group:
@@ -737,9 +773,18 @@ def _news_temporal_limitation_code(sources):
     diagnostics = {source.diagnostic.code for source in sources if source.diagnostic}
     if diagnostics == {"unknown_news_temporal_scope"}:
         return "unknown_news_temporal_scope"
-    if diagnostics == {"missing_live_news_retrieval_time"}:
-        return "missing_live_news_retrieval_time"
+    if diagnostics == {"unreliable_live_news_retrieval_time"}:
+        return "unreliable_live_news_retrieval_time"
     return "news_temporal_scope_unavailable" if diagnostics else None
+
+
+def _fundamentals_temporal_limitation_code(sources):
+    diagnostics = {source.diagnostic.code for source in sources if source.diagnostic}
+    if diagnostics == {"unknown_fundamentals_temporal_scope"}:
+        return "unknown_fundamentals_temporal_scope"
+    if diagnostics == {"unreliable_live_fundamentals_retrieval_time"}:
+        return "unreliable_live_fundamentals_retrieval_time"
+    return "fundamentals_temporal_scope_unavailable" if diagnostics else None
 
 
 def _is_news_availability_record(record):
@@ -845,13 +890,16 @@ def _market_close_at(value):
     return datetime.combine(value, time(17), tzinfo=_TOKYO).astimezone(UTC)
 
 
-def _parse_retrieved_at(value):
+def _producer_retrieved_at(value):
+    """Return an aware producer timestamp, never substituting collection time."""
+    if not value:
+        return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise _Unavailable("invalid_source_retrieval_time") from exc
+    except (AttributeError, ValueError):
+        return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise _Unavailable("invalid_source_retrieval_time")
+        return None
     return parsed
 
 

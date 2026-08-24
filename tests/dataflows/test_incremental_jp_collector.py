@@ -644,6 +644,37 @@ Published: 2026-07-22T03:00:00Z
     assert domain.sources[0].diagnostic.code == "unknown_news_temporal_scope"
 
 
+def test_japan_collector_omits_live_only_news_without_aware_producer_retrieval() -> None:
+    for retrieved_at in (None, "2026-07-24T15:00:00"):
+        response = attach_evidence_span(
+            attach_provenance(
+                "### Analyst consensus update\nEPS: 100; PE: 12",
+                ProvenanceRecord(
+                    evidence="get_news",
+                    source="yfinance analyst consensus",
+                    requested="2026-07-24",
+                    effective="retrieval-time analyst snapshot",
+                    timing="live non-point-in-time",
+                    retrieved_at=retrieved_at,
+                ),
+            ),
+            temporal_scope="live_only",
+        )
+        collected = collect_japan_incremental(
+            _request(enabled_domains=("news",)),
+            route_to_vendor=lambda *_args, _response=response, **_kwargs: _response,
+            now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        )
+
+        domain = collected.collection_summary.domains[0]
+        assert collected.evidence == ()
+        assert domain.state.value == "empty"
+        assert domain.diagnostic is not None
+        assert domain.diagnostic.code == "unreliable_live_news_retrieval_time"
+        assert domain.sources[0].diagnostic is not None
+        assert domain.sources[0].diagnostic.code == "unreliable_live_news_retrieval_time"
+
+
 def test_japan_collector_keeps_bounded_transport_failure_distinct_from_valid_empty() -> None:
     response = attach_provenance(
         """### Fallback news response
@@ -835,6 +866,72 @@ Effective period: 2026-13-31
     assert domain.sources[0].diagnostic.code == "invalid_fundamentals_effective_period"
 
 
+def test_japan_collector_omits_unknown_fundamentals_temporal_scope_with_disclosure_body() -> None:
+    response = attach_evidence_span(
+        attach_provenance(
+            """# Fundamentals overview for 7203.T
+Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22)
+Effective period: 2026-03-31
+""",
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants official summary",
+                requested="2026-07-24",
+                effective="2026-07-22",
+                timing="disclosure-date filtered",
+                retrieved_at="2026-07-24T15:00:00Z",
+            ),
+        ),
+        temporal_scope="unknown",
+    )
+    collected = collect_japan_incremental(
+        _request(enabled_domains=("fundamentals",)),
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+
+    domain = collected.collection_summary.domains[0]
+    assert collected.evidence == ()
+    assert domain.state.value == "empty"
+    assert domain.diagnostic is not None
+    assert domain.diagnostic.code == "unknown_fundamentals_temporal_scope"
+    assert domain.sources[0].diagnostic is not None
+    assert domain.sources[0].diagnostic.code == "unknown_fundamentals_temporal_scope"
+
+
+def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_retrieval() -> (
+    None
+):
+    for retrieved_at in (None, "2026-07-24T15:00:00"):
+        response = attach_evidence_span(
+            attach_provenance(
+                "Live analyst consensus snapshot: EPS 100; PE 12",
+                ProvenanceRecord(
+                    evidence="get_fundamentals",
+                    source="yfinance analyst consensus",
+                    requested="2026-07-24",
+                    effective="retrieval-time analyst snapshot",
+                    timing="live non-point-in-time",
+                    retrieved_at=retrieved_at,
+                ),
+            ),
+            temporal_scope="live_only",
+        )
+        collected = collect_japan_incremental(
+            _request(enabled_domains=("fundamentals",)),
+            route_to_vendor=lambda *_args, _response=response, **_kwargs: _response,
+            now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        )
+
+        domain = collected.collection_summary.domains[0]
+        assert collected.evidence == ()
+        assert domain.state.value == "empty"
+        assert domain.diagnostic is not None
+        assert domain.diagnostic.code == "unreliable_live_fundamentals_retrieval_time"
+        assert domain.sources[0].diagnostic is not None
+        assert domain.sources[0].diagnostic.code == "unreliable_live_fundamentals_retrieval_time"
+
+
 def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after_five_days() -> (
     None
 ):
@@ -861,7 +958,7 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
     assert summary.domains[0].temporal_bases == ("near_live_advisory",)
     assert len(evidence) == 1
 
-    old_request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 23))
+    old_request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 24))
     old_collected = collect_japan_incremental(
         old_request,
         route_to_vendor=lambda *_args, **_kwargs: response,
