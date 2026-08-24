@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -189,7 +190,11 @@ class AnalysisService:
         # hand the repository an invalid request that would still be durable.
         request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False))
         run_settings = self.settings.resolve_run(request)
-        self._validate_instrument_eligibility(request)
+        request_dataflow_config = run_settings.dataflow_config(self.settings)
+        self._validate_instrument_eligibility(
+            request,
+            dataflow_config=request_dataflow_config,
+        )
         if source_run_id is not None:
             # A retained Run may carry a legacy request that is intentionally
             # readable but no longer admitted as a source for new research.
@@ -347,11 +352,15 @@ class AnalysisService:
     def _validate_instrument_eligibility(
         self,
         request: AnalysisRequest,
+        *,
+        dataflow_config: dict[str, Any] | None = None,
     ) -> None:
         """Fail closed unless one exact resolver result confirms an equity."""
         try:
-            dataflow_config = self.settings.default_run_settings.dataflow_config(self.settings)
-            with use_config(dataflow_config, merge=False):
+            effective_config = dataflow_config or (
+                self.settings.default_run_settings.dataflow_config(self.settings)
+            )
+            with use_config(effective_config, merge=False):
                 result = self.eligibility_resolver(request.ticker)
             validate_instrument_eligibility(request.ticker, result)
         except (
@@ -431,7 +440,10 @@ class AnalysisService:
                 request = self._creation_request_from_history(run.request)
                 run_settings = RunSettings.model_validate(run.config_snapshot)
                 dataflow_config = run_settings.dataflow_config(self.settings)
-                self._validate_instrument_eligibility(request)
+                self._validate_instrument_eligibility(
+                    request,
+                    dataflow_config=dataflow_config,
+                )
                 validate_market_routing(dataflow_config)
                 if run.research_kind == "incremental":
                     assert request.full_baseline_run_id is not None
@@ -441,17 +453,18 @@ class AnalysisService:
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
                     baseline_evidence = self.repository.get_evidence(baseline.id)
-                    collection, evidence_items, performance, sealed_at = (
-                        self._collect_incremental_preflight(
-                            instrument=request.ticker,
-                            baseline_analysis_cutoff=baseline.request.analysis_date,
-                            analysis_cutoff=request.analysis_date,
-                            baseline_evidence=baseline_evidence,
-                            baseline_information_cutoff_at=baseline.information_cutoff_at,
-                            target_information_cutoff_at=run.information_cutoff_at,
-                            method_snapshot=run.method_snapshot,
+                    with use_config(dataflow_config, merge=False):
+                        collection, evidence_items, performance, sealed_at = (
+                            self._collect_incremental_preflight(
+                                instrument=request.ticker,
+                                baseline_analysis_cutoff=baseline.request.analysis_date,
+                                analysis_cutoff=request.analysis_date,
+                                baseline_evidence=baseline_evidence,
+                                baseline_information_cutoff_at=baseline.information_cutoff_at,
+                                target_information_cutoff_at=run.information_cutoff_at,
+                                method_snapshot=run.method_snapshot,
+                            )
                         )
-                    )
                     self._emit(
                         run.id,
                         "incremental.collection_completed",
@@ -573,6 +586,10 @@ class AnalysisService:
                         on_event=on_event,
                     )
                     last_event = self.repository.list_events(run.id)[-1]
+                    self._validate_instrument_eligibility(
+                        request,
+                        dataflow_config=dataflow_config,
+                    )
                     aggregate_metrics = self.repository.complete_incremental(
                         run.id,
                         result,
@@ -856,16 +873,29 @@ class AnalysisService:
                 binding.candidate_ref: binding.admitted_ref for binding in evidence_bindings
             }
             linked_ref = binding_by_candidate_ref.get(collected.stock_series_evidence_ref)
-            admitted_refs = {item.ref for item in evidence_items}
+            admitted_by_ref = {item.ref: item for item in evidence_items}
+            linked_item = admitted_by_ref.get(linked_ref)
+            calculation = performance.stock.calculation
             if (
-                linked_ref is None
-                or linked_ref not in admitted_refs
+                linked_item is None
                 or linked_ref not in market_result.evidence_refs
                 or collected.stock_series is None
+                or calculation is None
                 or not any(
                     source.source == collected.stock_series.source
                     and source.retrieved_at == collected.stock_series.retrieved_at
                     for source in market_result.sources
+                )
+                or linked_item.source != collected.stock_series.source
+                or linked_item.evidence_type != "adjusted_close"
+                or linked_item.effective_date != calculation.end_session
+                or isinstance(linked_item.value, bool)
+                or not isinstance(linked_item.value, (int, float))
+                or not math.isclose(
+                    float(linked_item.value),
+                    calculation.end_value,
+                    rel_tol=1e-12,
+                    abs_tol=1e-15,
                 )
             ):
                 raise ValueError(

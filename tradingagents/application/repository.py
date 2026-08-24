@@ -1475,6 +1475,19 @@ class RunRepository:
                 item.ref: item
                 for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
             }
+            baseline_request = RunRequestSnapshot.model_validate(baseline.request_json)
+            if baseline_request.ticker != request.ticker:
+                raise InvalidIncrementalBaselineError(
+                    "Full Baseline must use the same Instrument Key at commit"
+                )
+            if baseline.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION:
+                raise InvalidIncrementalBaselineError(
+                    "Full Baseline has an incompatible Research Schema Version at commit"
+                )
+            if baseline_request.analysis_date >= request.analysis_date:
+                raise InvalidIncrementalBaselineError(
+                    "Incremental cutoff must remain later than its Full Baseline at commit"
+                )
             for item in evidence.items:
                 if item.ref in baseline_items:
                     raise EvidenceConflictError(

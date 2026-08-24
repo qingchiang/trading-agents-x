@@ -26,13 +26,16 @@ from tradingagents.application.database import (
     DecisionRecord,
     ResearchNodeRecord,
     RunEvidenceRecord,
+    RunRecord,
 )
 from tradingagents.application.errors import (
     InvalidIncrementalBaselineError,
     NoInformationAdvancementError,
+    UnsupportedInstrumentError,
 )
 from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
+from tradingagents.dataflows.config import get_config
 
 
 def _unavailable_domains(request: IncrementalCollectionRequest):
@@ -67,6 +70,7 @@ def _incremental_service(
     *,
     collector,
     synthesizer=default_incremental_synthesizer,
+    eligibility_resolver=_equity_resolver,
     now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
 ) -> AnalysisService:
     return AnalysisService(
@@ -75,7 +79,7 @@ def _incremental_service(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
-        eligibility_resolver=_equity_resolver,
+        eligibility_resolver=eligibility_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
         incremental_collector=collector,
         incremental_synthesizer=synthesizer,
@@ -199,6 +203,138 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
     assert result.metrics.llm_calls == 0
+
+
+def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A filing collected under the frozen Run configuration.",
+        )
+    )
+    observed = []
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        observed.append((get_config(), request))
+        return _pit_collection(request, candidate)
+
+    _incremental_service(
+        app_settings,
+        repository,
+        collector=collect,
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    active_config, collection_request = observed[0]
+    assert active_config["data_vendors"] == dict(
+        collection_request.configured_routes["data_vendors"]
+    )
+
+
+def test_incremental_service_revalidates_eligibility_immediately_before_commit(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A filing collected before eligibility changed.",
+        )
+    )
+    calls = 0
+
+    def eligibility(symbol: str):
+        nonlocal calls
+        calls += 1
+        return {
+            "symbol": symbol,
+            "quote_type": "ETF" if calls == 3 else "EQUITY",
+        }
+
+    with pytest.raises(UnsupportedInstrumentError):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=lambda request: _pit_collection(request, candidate),
+            eligibility_resolver=eligibility,
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert calls == 3
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+
+
+def test_incremental_commit_revalidates_baseline_schema_after_synthesis(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A filing collected before the baseline schema changed.",
+        )
+    )
+
+    def synthesize(input_):
+        with repository.sessions() as session:
+            record = session.get(RunRecord, baseline.run_id)
+            assert record is not None
+            record.research_schema_version = "obsolete"
+            session.commit()
+        return default_incremental_synthesizer(input_)
+
+    with pytest.raises(
+        InvalidIncrementalBaselineError,
+        match="incompatible Research Schema Version at commit",
+    ):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=lambda request: _pit_collection(request, candidate),
+            synthesizer=synthesize,
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
 
 
 def test_incremental_service_rejects_no_information_advancement_before_synthesis(
@@ -328,6 +464,85 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     assert calculation.start_session == date(2026, 7, 20)
     assert calculation.end_session == date(2026, 7, 24)
     assert calculation.unrounded_return == pytest.approx(0.1)
+
+
+def test_completed_stock_session_rejects_unrelated_market_evidence(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    unrelated = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.market",
+            evidence_type="technical_indicator",
+            requested_date=date(2026, 7, 24),
+            effective_date=date(2026, 7, 24),
+            value=110,
+            content="An unrelated indicator from the same retrieval.",
+        ),
+        available_on=date(2026, 7, 24),
+    )
+
+    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        domains = list(_unavailable_domains(request))
+        market = request.enabled_domains.index("market")
+        domains[market] = CollectionDomainResult(
+            domain="market",
+            state="data",
+            sources=_sources(
+                "fixture.market",
+                datetime(2026, 7, 24, 21, tzinfo=UTC),
+            ),
+            temporal_bases=("pit",),
+            evidence_refs=(unrelated.evidence.ref,),
+        )
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=tuple(domains),
+            ),
+            evidence=(unrelated,),
+            stock_series=MarketSeriesResult(
+                instrument=request.instrument,
+                source="fixture.market",
+                adjustment_basis="adjusted_close",
+                retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+                points=(
+                    MarketSeriesPoint(
+                        session="2026-07-20",
+                        completed_at="2026-07-20T20:00:00Z",
+                        adjusted_close=100,
+                    ),
+                    MarketSeriesPoint(
+                        session="2026-07-24",
+                        completed_at="2026-07-24T20:00:00Z",
+                        adjusted_close=110,
+                    ),
+                ),
+            ),
+            stock_series_evidence_ref=unrelated.evidence.ref,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="stock series advancement requires admitted current market Evidence",
+    ):
+        _incremental_service(
+            app_settings,
+            repository,
+            collector=collect,
+            now=lambda: datetime(2026, 7, 25, 5, tzinfo=UTC),
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
 
 
 def test_incremental_service_rejects_unadmitted_stock_series_advancement(
@@ -885,14 +1100,33 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
         }
     )
 
+    def collect_copied(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        domains = list(_unavailable_domains(request))
+        domain = request.enabled_domains.index("news")
+        domains[domain] = CollectionDomainResult(
+            domain="news",
+            state="data",
+            sources=_sources(
+                copied.source,
+                datetime(2026, 7, 24, 18, tzinfo=UTC),
+            ),
+            temporal_bases=("near_live_advisory",),
+            evidence_refs=(copied.ref,),
+        )
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=tuple(domains),
+            ),
+            evidence=(IncrementalEvidenceCandidate(evidence=copied),),
+        )
+
     with pytest.raises(EvidenceConflictError, match="must not copy Full Baseline"):
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(
-                request,
-                IncrementalEvidenceCandidate(evidence=copied),
-            ),
+            collector=collect_copied,
             now=lambda: datetime(2026, 7, 24, 19, tzinfo=UTC),
         ).run(
             AnalysisRequest(

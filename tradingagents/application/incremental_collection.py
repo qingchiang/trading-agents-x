@@ -152,6 +152,12 @@ def normalize_incremental_collection(
         source.retrieved_at > sealed_at for result in summary.domains for source in result.sources
     ):
         raise ValueError("domain retrieval cannot be after sealing")
+    if any(
+        boundary is not None and boundary > sealed_at
+        for result in summary.domains
+        for boundary in (result.observed_from, result.observed_through)
+    ):
+        raise ValueError("observed collection window cannot be after sealing")
 
     ref_map: dict[str, EvidenceItem | None] = {}
     admitted_by_ref: dict[str, EvidenceItem] = {}
@@ -183,18 +189,35 @@ def normalize_incremental_collection(
         final_refs = tuple(dict.fromkeys(item.ref for item in final_items))
         assigned_refs.extend(final_refs)
         if final_items:
-            actual_fallback_by_source: dict[str, bool] = {}
+            actual_source_provenance: dict[str, tuple[bool, datetime | None]] = {}
             for item in final_items:
-                actual_fallback_by_source[item.source] = (
-                    actual_fallback_by_source.get(item.source, False)
-                    or item.fallback
-                    or any(origin.fallback for origin in item.origins)
-                )
-            reported_fallback_by_source = {
-                source.source: source.fallback for source in result.sources
+                for source, fallback, retrieved_at in _item_source_provenance(item):
+                    previous_fallback, previous_retrieval = actual_source_provenance.get(
+                        source,
+                        (False, None),
+                    )
+                    known_retrievals = tuple(
+                        value for value in (previous_retrieval, retrieved_at) if value is not None
+                    )
+                    actual_source_provenance[source] = (
+                        previous_fallback or fallback,
+                        max(known_retrievals) if known_retrievals else None,
+                    )
+            reported_source_provenance = {
+                source.source: (source.fallback, source.retrieved_at) for source in result.sources
             }
-            if actual_fallback_by_source != reported_fallback_by_source:
-                raise ValueError("collection source and fallback must match admitted Evidence")
+            if set(actual_source_provenance) != set(reported_source_provenance) or any(
+                actual_fallback != reported_source_provenance[source][0]
+                or (
+                    actual_retrieval is not None
+                    and actual_retrieval != reported_source_provenance[source][1]
+                )
+                for source, (
+                    actual_fallback,
+                    actual_retrieval,
+                ) in actual_source_provenance.items()
+            ):
+                raise ValueError("collection source provenance must match admitted Evidence")
         temporal_bases = tuple(
             dict.fromkeys(
                 CollectionTemporalBasis.PIT
@@ -239,6 +262,25 @@ def normalize_incremental_collection(
             for candidate_ref, item in ref_map.items()
         ),
     )
+
+
+def _item_source_provenance(
+    item: EvidenceItem,
+) -> tuple[tuple[str, bool, datetime | None], ...]:
+    if not item.origins:
+        return ((item.source, item.fallback, None),)
+    provenance = []
+    for origin in item.origins:
+        retrieved_at = None
+        if origin.retrieved_at is not None:
+            try:
+                retrieved_at = datetime.fromisoformat(origin.retrieved_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Evidence origin retrieval time must be an ISO datetime") from exc
+            if retrieved_at.tzinfo is None or retrieved_at.utcoffset() is None:
+                raise ValueError("Evidence origin retrieval time must include a timezone")
+        provenance.append((origin.source, origin.fallback, retrieved_at))
+    return tuple(provenance)
 
 
 def calculate_stock_performance(

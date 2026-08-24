@@ -116,6 +116,95 @@ def test_collection_summary_preserves_multiple_actual_assembler_sources() -> Non
     )
 
 
+def test_collection_normalization_closes_composite_origin_retrieval_provenance() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24").model_copy(
+        update={"enabled_domains": ("news",)}
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="composite",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="Two assembler sources contributed to this observation.",
+            origins=(
+                EvidenceOrigin(
+                    source="edinet",
+                    evidence_type="filing",
+                    retrieved_at="2026-07-24T12:00:00Z",
+                    temporal_scope="point_in_time",
+                ),
+                EvidenceOrigin(
+                    source="tdnet",
+                    evidence_type="filing",
+                    retrieved_at="2026-07-24T12:01:00Z",
+                    fallback=True,
+                    temporal_scope="point_in_time",
+                ),
+            ),
+        )
+    )
+
+    def collected(*, tdnet_retrieved_at: datetime, observed_through=None):
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=(
+                    CollectionDomainResult(
+                        domain="news",
+                        state="data",
+                        sources=(
+                            CollectionSourceProvenance(
+                                source="edinet",
+                                retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+                            ),
+                            CollectionSourceProvenance(
+                                source="tdnet",
+                                fallback=True,
+                                retrieved_at=tdnet_retrieved_at,
+                            ),
+                        ),
+                        observed_from=datetime(2026, 7, 22, 12, tzinfo=UTC),
+                        observed_through=observed_through
+                        or datetime(2026, 7, 24, 12, 1, tzinfo=UTC),
+                        temporal_bases=("pit",),
+                        evidence_refs=(candidate.evidence.ref,),
+                    ),
+                ),
+            ),
+            evidence=(candidate,),
+        )
+
+    summary, evidence, _bindings = normalize_incremental_collection(
+        request,
+        collected(tdnet_retrieved_at=datetime(2026, 7, 24, 12, 1, tzinfo=UTC)),
+        sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+    )
+    assert tuple(source.source for source in summary.domains[0].sources) == (
+        "edinet",
+        "tdnet",
+    )
+    assert evidence == (candidate.evidence,)
+
+    with pytest.raises(ValueError, match="source provenance must match"):
+        normalize_incremental_collection(
+            request,
+            collected(tdnet_retrieved_at=datetime(2026, 7, 24, 12, 2, tzinfo=UTC)),
+            sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+        )
+
+    with pytest.raises(ValueError, match="observed collection window cannot be after sealing"):
+        normalize_incremental_collection(
+            request,
+            collected(
+                tdnet_retrieved_at=datetime(2026, 7, 24, 12, 1, tzinfo=UTC),
+                observed_through=datetime(2026, 7, 24, 14, tzinfo=UTC),
+            ),
+            sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+        )
+
+
 def test_incremental_collection_request_deeply_freezes_configured_routes() -> None:
     request = _collection_request(analysis_cutoff="2026-07-24")
 
@@ -333,7 +422,7 @@ def test_collection_normalization_rejects_inconsistent_source_provenance(
         evidence=(candidate,),
     )
 
-    with pytest.raises(ValueError, match="source and fallback must match admitted Evidence"):
+    with pytest.raises(ValueError, match="source provenance must match admitted Evidence"):
         normalize_incremental_collection(
             request,
             collected,
