@@ -29,7 +29,6 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -41,9 +40,13 @@ from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_quality import canonical_headline
 from ..rate_limit import stop_on_rate_limit_requested
+from .edinet_common import effective_window as _edinet_effective_window
 from .edinet_news import get_news as _edinet_news
 from .google_news import get_news as _google_news
-from .tdnet_news import get_news as _tdnet_news
+from .tdnet_news import (
+    effective_window as _tdnet_effective_window,
+    get_news as _tdnet_news,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +55,6 @@ logger = logging.getLogger(__name__)
 # re-fetching. Kept in sync with the sub-feeds' headers by their tests.
 _DATA_PREFIX = "## "
 _NOTE_PREFIX = "<"
-
-# The free TDnet search exposes the disclosure date plus the preceding 30
-# calendar dates. Other JP feeds may receive the full 90-date graph window.
-_TDNET_MAX_LOOKBACK_DAYS = 30
 
 _ITEM_START_RE = re.compile(r"(?m)^### ")
 _TIER_PREFIX_RE = re.compile(r"^\[(?:direct|candidate|context)\]\s*", re.I)
@@ -176,16 +175,6 @@ def _safe_feed(
         return f"<{source} unavailable: {type(exc).__name__}>"
 
 
-def _tdnet_start_date(start_date: str, end_date: str) -> str:
-    """Clamp a requested range to TDnet's 31-inclusive-calendar-date limit."""
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        return start_date
-    return max(start, end - timedelta(days=_TDNET_MAX_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-
-
 def get_news(ticker: str, start_date: str, end_date: str) -> str:
     """Return EDINET + TDnet disclosures + Google-News media for ``ticker``.
 
@@ -197,10 +186,32 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     """
     # Sub-feeds in output order (statutory → timely → media); resolved here (not
     # module scope) so tests patching these names take effect.
+    edinet_start, edinet_end, edinet_limited = _edinet_effective_window(start_date, end_date)
+    tdnet_window = _tdnet_effective_window(start_date, end_date)
+    if tdnet_window is None:
+        tdnet_start, tdnet_end, tdnet_limited = start_date, end_date, True
+        tdnet_effective = "outside rolling TDnet archive; no query"
+    else:
+        tdnet_start, tdnet_end, tdnet_limited = tdnet_window
+        tdnet_effective = f"{tdnet_start} to {tdnet_end}"
     feed_requests = (
-        ("EDINET", _edinet_news, start_date, end_date),
-        ("TDnet", _tdnet_news, _tdnet_start_date(start_date, end_date), end_date),
-        ("Google News", _google_news, start_date, end_date),
+        (
+            "EDINET",
+            _edinet_news,
+            edinet_start,
+            edinet_end,
+            f"{edinet_start} to {edinet_end}",
+            edinet_limited,
+        ),
+        ("TDnet", _tdnet_news, tdnet_start, tdnet_end, tdnet_effective, tdnet_limited),
+        (
+            "Google News",
+            _google_news,
+            start_date,
+            end_date,
+            f"{start_date} to {end_date}",
+            False,
+        ),
     )
     # ContextVars do not cross the worker boundary. Read the bounded-route
     # decision here; that scope must stop after a 429, so execute in order and
@@ -217,7 +228,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                 effective_end,
                 stop_on_rate_limit=True,
             )
-            for source, fetch, effective_start, effective_end in feed_requests
+            for source, fetch, effective_start, effective_end, _effective, _limited in feed_requests
         ]
     else:
         # Fan out the independent network fetches; ``map`` yields results in
@@ -239,7 +250,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     bound_blocks: list[str] = []
     data_count_index = 0
     merged_index = 0
-    for (source, _fetch, effective_start, effective_end), block in zip(
+    for (source, _fetch, _effective_start, _effective_end, effective, limited), block in zip(
         feed_requests, rendered, strict=True
     ):
         if block.startswith(_DATA_PREFIX):
@@ -258,11 +269,13 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             timing = "unavailable"
         else:
             timing = "available; no relevant items in window; returned_items=0"
+        if limited:
+            timing += "; source_window_limited"
         record = ProvenanceRecord(
             evidence="get_news",
             source=source,
             requested=f"{start_date} to {end_date}",
-            effective=f"{effective_start} to {effective_end}",
+            effective=effective,
             timing=timing,
         )
         if block.startswith(_NOTE_PREFIX):

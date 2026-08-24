@@ -1,6 +1,7 @@
 """jp_news assembler: EDINET disclosures + Google-News media, combined."""
 
 import unittest
+from datetime import date
 from unittest import mock
 
 import pytest
@@ -10,7 +11,7 @@ from tradingagents.dataflows.errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.dataflows.jp import jp_news
+from tradingagents.dataflows.jp import jp_news, tdnet_news
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_provenance
 
@@ -142,6 +143,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
 
     def test_extended_window_is_clamped_only_for_tdnet(self):
         with (
+            mock.patch.object(tdnet_news, "tokyo_today", return_value=date(2026, 7, 17)),
             mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA) as edinet,
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet,
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media,
@@ -151,6 +153,48 @@ class JpNewsAssemblerTests(unittest.TestCase):
         edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
         tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17")
         media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+
+    def test_edinet_capped_window_is_recorded_as_limited_provenance(self):
+        with (
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA),
+            mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_EMPTY),
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
+        ):
+            out = jp_news.get_news("4568.T", "2020-01-01", "2026-07-17")
+
+        record = next(record for record in extract_provenance(out) if record.source == "EDINET")
+        self.assertEqual(record.effective, "2026-04-19 to 2026-07-17")
+        self.assertIn("source_window_limited", record.timing)
+
+    def test_tdnet_retained_archive_overlap_is_recorded_as_limited_provenance(self):
+        with (
+            mock.patch.object(tdnet_news, "tokyo_today", return_value=date(2026, 7, 12)),
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_EMPTY),
+            mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA),
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
+        ):
+            out = jp_news.get_news("4568.T", "2026-06-01", "2026-07-05")
+
+        record = next(record for record in extract_provenance(out) if record.source == "TDnet")
+        self.assertEqual(record.effective, "2026-06-12 to 2026-07-05")
+        self.assertIn("source_window_limited", record.timing)
+
+    def test_tdnet_expired_archive_is_recorded_as_not_queried(self):
+        with (
+            mock.patch.object(tdnet_news, "tokyo_today", return_value=date(2026, 7, 12)),
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA),
+            mock.patch.object(
+                jp_news,
+                "_tdnet_news",
+                return_value="<TDnet unavailable: requested window is outside the rolling archive>",
+            ),
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
+        ):
+            out = jp_news.get_news("4568.T", "2026-05-01", "2026-06-01")
+
+        record = next(record for record in extract_provenance(out) if record.source == "TDnet")
+        self.assertEqual(record.effective, "outside rolling TDnet archive; no query")
+        self.assertIn("source_window_limited", record.timing)
 
     def test_both_empty_raises_no_market_data(self):
         with self.assertRaises(NoMarketDataError):

@@ -12,7 +12,7 @@ import csv
 import math
 import re
 from collections.abc import Callable
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from io import StringIO
 from zoneinfo import ZoneInfo
 
@@ -33,7 +33,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
-from tradingagents.dataflows.jp.calendar import is_tse_open
+from tradingagents.dataflows.jp.calendar import completed_market_date, is_tse_open
 from tradingagents.provenance import (
     EvidenceSpan,
     extract_evidence_spans,
@@ -116,7 +116,7 @@ def _collect_market(request, routed, now):
         response = routed(
             "get_stock_data",
             request.instrument,
-            (request.baseline_analysis_cutoff - timedelta(days=7)).isoformat(),
+            completed_market_date(request.baseline_analysis_cutoff).isoformat(),
             request.analysis_cutoff.isoformat(),
             _provenance=True,
             _stop_on_rate_limit=True,
@@ -202,6 +202,8 @@ def _collect_news(request, routed, now):
         observed = []
         used_sources: dict[str, CollectionSourceProvenance] = {}
         for span in _news_spans(response, body):
+            if span.records and all(_is_news_availability_record(record) for record in span.records):
+                continue
             if span.content is None or len(span.records) != 1:
                 if span.content and span.records:
                     raise _Unavailable("unbound_news_item_provenance")
@@ -591,13 +593,17 @@ def _news_spans(response, body):
 def _news_availability_sources(records, now):
     unavailable = {}
     for record, source in zip(records, _sources_from_records(records, now), strict=True):
-        timing = record.timing.casefold()
-        if "fallback vendor selected" in timing or "unavailable" not in timing:
+        if not _is_news_availability_record(record):
             continue
         unavailable[source.source] = source.model_copy(
             update={"diagnostic": CollectionDiagnostic(code="upstream_source_unavailable")}
         )
     return tuple(unavailable.values())
+
+
+def _is_news_availability_record(record):
+    timing = record.timing.casefold()
+    return "fallback vendor selected" not in timing and "unavailable" in timing
 
 
 def _source_id(value):

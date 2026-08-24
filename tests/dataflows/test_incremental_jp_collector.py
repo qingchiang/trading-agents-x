@@ -3,9 +3,14 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest import mock
 
-from tradingagents.application.contracts import IncrementalCollectionRequest
+from tradingagents.application.contracts import (
+    IncrementalCollectionRequest,
+    PerformanceComponentStatus,
+)
 from tradingagents.application.incremental_collection import (
+    calculate_stock_performance,
     default_incremental_collector,
+    derive_research_availability,
     normalize_incremental_collection,
 )
 from tradingagents.dataflows import interface
@@ -106,6 +111,57 @@ def test_japan_collector_omits_non_tse_rows_without_losing_the_adjusted_series()
         "2026-07-24",
     ]
     assert collected.collection_summary.domains[0].state.value == "partial"
+
+
+def test_japan_collector_requests_baseline_completed_tse_session_after_golden_week() -> None:
+    request = IncrementalCollectionRequest(
+        version="1",
+        instrument="7203.T",
+        market="japan",
+        route_suffix=".T",
+        baseline_analysis_cutoff=date(2019, 5, 6),
+        analysis_cutoff=date(2019, 5, 8),
+        window_start=datetime(2019, 5, 6, 14, 59, 59, tzinfo=UTC),
+        window_end=datetime(2019, 5, 8, 14, 59, 59, tzinfo=UTC),
+        enabled_domains=("market",),
+        configured_routes={
+            "data_vendors_by_market": {".T": {"core_stock_apis": "jquants,yfinance"}}
+        },
+    )
+    response = attach_provenance(
+        """# Stock data for 7203.T from 2019-04-26 to 2019-05-08
+# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)
+
+Date,Open,High,Low,Close,Volume
+2019-04-26,99,101,98,100,1000
+2019-05-07,100,102,99,101,1000
+2019-05-08,102,104,101,103,1000
+""",
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="jquants",
+            requested="2019-04-26 to 2019-05-08",
+            effective="2019-04-26 to 2019-05-08",
+            timing="market-date filtered",
+            retrieved_at="2019-05-08T15:00:00Z",
+        ),
+    )
+    calls = []
+
+    def configured_route(method, *args, **kwargs):
+        calls.append((method, args, kwargs))
+        return response
+
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=configured_route,
+        now=lambda: datetime(2019, 5, 8, 15, 1, tzinfo=UTC),
+    )
+
+    assert calls[0][1][1] == "2019-04-26"
+    assert calculate_stock_performance(request, collected.stock_series).stock.status is (
+        PerformanceComponentStatus.CALCULATED
+    )
 
 
 def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
@@ -386,6 +442,50 @@ Published: 2026-07-22T01:00:00Z
     assert sources["yfinance"].fallback is True
     assert sources["edinet_news"].diagnostic is not None
     assert sources["edinet_news"].diagnostic.code == "upstream_source_unavailable"
+
+
+def test_japan_collector_keeps_tdnet_items_with_multiple_assembler_failure_notes(
+    monkeypatch,
+) -> None:
+    def unavailable(*_args):
+        raise RuntimeError("fixture failure")
+
+    monkeypatch.setattr(jp_news, "_edinet_news", unavailable)
+    monkeypatch.setattr(
+        jp_news,
+        "_tdnet_news",
+        lambda *_args: """## TDnet
+
+### Timely guidance revision
+Disclosed: 2026-07-22 11:00 JST
+""",
+    )
+    monkeypatch.setattr(jp_news, "_google_news", unavailable)
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    request = _request(enabled_domains=("news",))
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+    )
+    _summary, evidence, _bindings = normalize_incremental_collection(
+        request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
+    )
+
+    assert [item.source for item in evidence] == ["tdnet"]
+    domain = collected.collection_summary.domains[0]
+    assert domain.diagnostic is not None
+    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_upstream_unavailable"
+    diagnostics = {
+        source.source: source.diagnostic.code if source.diagnostic else None
+        for source in domain.sources
+    }
+    assert diagnostics == {
+        "tdnet": None,
+        "edinet": "upstream_source_unavailable",
+        "google_news": "upstream_source_unavailable",
+    }
+    assert derive_research_availability(collected.collection_summary).domains[0].status.value == "limited"
 
 
 def test_japan_collector_binds_news_items_from_structured_assembler_spans(

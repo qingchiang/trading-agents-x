@@ -279,6 +279,20 @@ def documents_on(date_str: str) -> list[dict]:
         return records
 
 
+def effective_window(start_date: str, end_date: str) -> tuple[str, str, bool]:
+    """Return EDINET's actual bounded inclusive query window."""
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return start_date, end_date, False
+    max_offset = MAX_WINDOW_CALENDAR_DAYS - 1
+    limited = (end - start).days > max_offset
+    if limited:
+        start = end - timedelta(days=max_offset)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), limited
+
+
 def iter_window_dates(start_date: str, end_date: str) -> Iterator[str]:
     """Yield each ``YYYY-MM-DD`` from start to end inclusive (capped, oldest first).
 
@@ -286,10 +300,10 @@ def iter_window_dates(start_date: str, end_date: str) -> Iterator[str]:
     :data:`MAX_WINDOW_CALENDAR_DAYS` inclusive dates so an oversized range
     degrades to a bounded number of requests rather than thousands.
     """
-    start = datetime.strptime(start_date, "%Y-%m-%d")
-    end = datetime.strptime(end_date, "%Y-%m-%d")
-    max_offset = MAX_WINDOW_CALENDAR_DAYS - 1
-    if (end - start).days > max_offset:
+    effective_start, effective_end, limited = effective_window(start_date, end_date)
+    start = datetime.strptime(effective_start, "%Y-%m-%d")
+    end = datetime.strptime(effective_end, "%Y-%m-%d")
+    if limited:
         logger.warning(
             "EDINET window %s..%s exceeds %d calendar dates; querying only the last %d.",
             start_date,
@@ -297,7 +311,6 @@ def iter_window_dates(start_date: str, end_date: str) -> Iterator[str]:
             MAX_WINDOW_CALENDAR_DAYS,
             MAX_WINDOW_CALENDAR_DAYS,
         )
-        start = end - timedelta(days=max_offset)
     day = start
     while day <= end:
         yield day.strftime("%Y-%m-%d")

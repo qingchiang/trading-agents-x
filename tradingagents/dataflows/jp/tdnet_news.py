@@ -29,7 +29,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request
 
@@ -60,6 +60,29 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # TDnet renders the timestamp as "YYYY/MM/DD HH:MM"; tolerate an optional :SS tail.
 _TIMESTAMP_FORMATS = ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S")
 _MAX_LOOKBACK_DAYS = 30
+
+
+def effective_window(
+    start_date: str,
+    end_date: str,
+    *,
+    today: date | None = None,
+) -> tuple[str, str, bool] | None:
+    """Return the actual free-archive query window, or ``None`` if absent."""
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+    retained_start = (today or tokyo_today()) - timedelta(days=_MAX_LOOKBACK_DAYS)
+    if end < retained_start:
+        return None
+    effective_start = max(start, end - timedelta(days=_MAX_LOOKBACK_DAYS), retained_start)
+    return (
+        effective_start.strftime("%Y-%m-%d"),
+        end.strftime("%Y-%m-%d"),
+        effective_start != start,
+    )
 
 
 def _clean(text: str) -> str:
@@ -146,26 +169,26 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     outcome — never raises, matching the other news vendors).
     """
     code = to_jquants_code(ticker)
-    try:
-        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end = datetime.strptime(end_date, "%Y-%m-%d").date()
-        today = tokyo_today()
-    except (TypeError, ValueError):
+    window = effective_window(start_date, end_date)
+    if window is None:
+        try:
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            retained_start = tokyo_today() - timedelta(days=_MAX_LOOKBACK_DAYS)
+        except (TypeError, ValueError):
+            return _no_disclosures(ticker, start_date, end_date)
+        if end < retained_start:
+            return (
+                "<TDnet unavailable: the free service exposes only 31 calendar dates "
+                f"including today; requested historical window {start_date} to {end_date} "
+                "is outside the rolling archive>"
+            )
         return _no_disclosures(ticker, start_date, end_date)
-
-    retained_start = today - timedelta(days=_MAX_LOOKBACK_DAYS)
-    if end < retained_start:
-        return (
-            "<TDnet unavailable: the free service exposes only 31 calendar dates "
-            f"including today; requested historical window {start_date} to {end_date} "
-            "is outside the rolling archive>"
-        )
-
     # Clamp both to 31 dates ending on the requested analysis date and to what
     # remains in today's rolling free archive. Headers below use these effective
     # dates so a partial historical window is never presented as complete.
-    start = max(start, end - timedelta(days=_MAX_LOOKBACK_DAYS), retained_start)
-    start_date = start.strftime("%Y-%m-%d")
+    start_date, end_date, _limited = window
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     page = _search(code, start_date.replace("-", ""), end_date.replace("-", ""), timeout)
     rows = _parse_rows(page) if page else []
