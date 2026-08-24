@@ -1775,6 +1775,7 @@ class CollectionSourceProvenance(FrozenModel):
     source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     fallback: bool = False
     retrieved_at: datetime
+    diagnostic: CollectionDiagnostic | None = None
 
     @model_validator(mode="after")
     def validate_retrieval_time(self) -> CollectionSourceProvenance:
@@ -2050,13 +2051,13 @@ class BenchmarkSeriesResult(FrozenModel):
 
     name: str = Field(min_length=1, max_length=120)
     series: MarketSeriesResult | None = None
-    unavailable_reason: str | None = Field(default=None, min_length=1)
+    unavailable_diagnostic: CollectionDiagnostic | None = None
 
     @model_validator(mode="after")
     def validate_result_state(self) -> BenchmarkSeriesResult:
-        if (self.series is None) == (self.unavailable_reason is None):
+        if (self.series is None) == (self.unavailable_diagnostic is None):
             raise ValueError(
-                "benchmark collection requires either a series or an unavailable reason"
+                "benchmark collection requires either a series or an unavailable diagnostic"
             )
         return self
 

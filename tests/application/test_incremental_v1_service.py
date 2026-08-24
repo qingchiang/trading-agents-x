@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import pytest
@@ -289,6 +290,57 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
 
     assert calls == 3
     assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+
+
+def test_incremental_retry_uses_the_retained_run_dataflow_configuration(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    observed_news_routes = []
+
+    def eligibility(symbol: str):
+        observed_news_routes.append(get_config()["data_vendors"]["news_data"])
+        return {"symbol": symbol, "quote_type": "EQUITY"}
+
+    service = _incremental_service(
+        app_settings,
+        repository,
+        collector=lambda request: IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=_unavailable_domains(request),
+            )
+        ),
+        eligibility_resolver=eligibility,
+    )
+    with pytest.raises(NoInformationAdvancementError):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items[0]
+    with repository.sessions() as session:
+        record = session.get(RunRecord, failed.id)
+        assert record is not None
+        retained_config = deepcopy(record.config_json)
+        retained_config["data_config"]["data_vendors"]["news_data"] = "frozen_retry_fixture"
+        record.config_json = retained_config
+        session.commit()
+    observed_news_routes.clear()
+
+    retried = service.retry(failed.id)
+
+    assert retried.id == failed.id
+    assert observed_news_routes == ["frozen_retry_fixture"]
 
 
 def test_incremental_commit_revalidates_baseline_schema_after_synthesis(

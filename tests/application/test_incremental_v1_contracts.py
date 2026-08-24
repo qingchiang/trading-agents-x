@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from tradingagents.application.contracts import (
+    BenchmarkSeriesResult,
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionResultState,
@@ -30,6 +31,7 @@ from tradingagents.application.contracts import (
 from tradingagents.application.incremental_collection import (
     admit_incremental_observations,
     assess_information_advancement,
+    calculate_benchmark_performance,
     calculate_stock_performance,
     derive_research_availability,
     normalize_incremental_collection,
@@ -63,6 +65,7 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
                         "source": "yahoo",
                         "fallback": False,
                         "retrieved_at": "2026-07-24T12:00:00Z",
+                        "diagnostic": None,
                     }
                 ],
                 "observed_from": "2026-07-24T10:00:00Z",
@@ -202,6 +205,84 @@ def test_collection_normalization_closes_composite_origin_retrieval_provenance()
                 observed_through=datetime(2026, 7, 24, 14, tzinfo=UTC),
             ),
             sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+        )
+
+
+def test_partial_collection_retains_an_attempted_failed_fallback() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24").model_copy(
+        update={"enabled_domains": ("news",)}
+    )
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="primary.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="The primary source returned one bounded filing.",
+        )
+    )
+
+    def collected(*, fallback_diagnostic):
+        return IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version=request.version,
+                market=request.market,
+                domains=(
+                    CollectionDomainResult(
+                        domain="news",
+                        state="partial",
+                        sources=(
+                            CollectionSourceProvenance(
+                                source="primary.news",
+                                retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+                            ),
+                            CollectionSourceProvenance(
+                                source="fallback.news",
+                                fallback=True,
+                                retrieved_at=datetime(2026, 7, 24, 12, 1, tzinfo=UTC),
+                                diagnostic=fallback_diagnostic,
+                            ),
+                        ),
+                        temporal_bases=("pit",),
+                        evidence_refs=(candidate.evidence.ref,),
+                        diagnostic=CollectionDiagnostic(code="fallback_failed"),
+                    ),
+                ),
+            ),
+            evidence=(candidate,),
+        )
+
+    summary, _evidence, _bindings = normalize_incremental_collection(
+        request,
+        collected(fallback_diagnostic=CollectionDiagnostic(code="transport_failure")),
+        sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+    )
+    assert summary.domains[0].sources[1].diagnostic == CollectionDiagnostic(
+        code="transport_failure"
+    )
+
+    with pytest.raises(ValueError, match="source provenance must match"):
+        normalize_incremental_collection(
+            request,
+            collected(fallback_diagnostic=None),
+            sealed_at=datetime(2026, 7, 24, 13, tzinfo=UTC),
+        )
+
+
+def test_unavailable_benchmark_uses_only_a_sanitized_diagnostic_code() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24")
+    benchmark = BenchmarkSeriesResult(
+        name="S&P 500",
+        unavailable_diagnostic=CollectionDiagnostic(code="rate_limited"),
+    )
+
+    result = calculate_benchmark_performance(request, (benchmark,))
+
+    assert result[0].component.reason == "Benchmark unavailable: rate_limited."
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        BenchmarkSeriesResult(
+            name="S&P 500",
+            unavailable_reason="Authorization: Bearer secret-value",
         )
 
 
@@ -874,11 +955,13 @@ def _sources(
     retrieved_at: datetime,
     *,
     fallback: bool = False,
+    diagnostic: CollectionDiagnostic | None = None,
 ) -> tuple[CollectionSourceProvenance, ...]:
     return (
         CollectionSourceProvenance(
             source=source,
             fallback=fallback,
             retrieved_at=retrieved_at,
+            diagnostic=diagnostic,
         ),
     )

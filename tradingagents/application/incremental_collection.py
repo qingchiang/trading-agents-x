@@ -204,18 +204,31 @@ def normalize_incremental_collection(
                         max(known_retrievals) if known_retrievals else None,
                     )
             reported_source_provenance = {
-                source.source: (source.fallback, source.retrieved_at) for source in result.sources
-            }
-            if set(actual_source_provenance) != set(reported_source_provenance) or any(
-                actual_fallback != reported_source_provenance[source][0]
-                or (
-                    actual_retrieval is not None
-                    and actual_retrieval != reported_source_provenance[source][1]
+                source.source: (
+                    source.fallback,
+                    source.retrieved_at,
+                    source.diagnostic,
                 )
-                for source, (
-                    actual_fallback,
-                    actual_retrieval,
-                ) in actual_source_provenance.items()
+                for source in result.sources
+            }
+            unrepresented_sources = set(reported_source_provenance) - set(actual_source_provenance)
+            if (
+                not set(actual_source_provenance).issubset(reported_source_provenance)
+                or any(
+                    actual_fallback != reported_source_provenance[source][0]
+                    or (
+                        actual_retrieval is not None
+                        and actual_retrieval != reported_source_provenance[source][1]
+                    )
+                    for source, (
+                        actual_fallback,
+                        actual_retrieval,
+                    ) in actual_source_provenance.items()
+                )
+                or any(
+                    reported_source_provenance[source][2] is None
+                    for source in unrepresented_sources
+                )
             ):
                 raise ValueError("collection source provenance must match admitted Evidence")
         temporal_bases = tuple(
@@ -313,7 +326,7 @@ def calculate_benchmark_performance(
                 if benchmark.series is not None
                 else PerformanceComponent(
                     status=PerformanceComponentStatus.UNAVAILABLE,
-                    reason=benchmark.unavailable_reason,
+                    reason=(f"Benchmark unavailable: {benchmark.unavailable_diagnostic.code}."),
                 )
             ),
         )

@@ -115,6 +115,7 @@ export interface components {
     };
     CollectionResultState: "data" | "empty" | "partial" | "unavailable";
     CollectionSourceProvenance: {
+      diagnostic?: components["schemas"]["CollectionDiagnostic"] | null;
       fallback?: boolean;
       retrieved_at: string;
       source: string;

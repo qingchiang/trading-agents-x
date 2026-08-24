@@ -948,7 +948,21 @@ class AnalysisService:
         # an alternate execution path around current admission rules.
         retained = self.repository.require_retryable(run_id)
         request = self._creation_request_from_history(retained.request)
-        self._validate_instrument_eligibility(request)
+        retained_settings = RunSettings.model_validate(retained.config_snapshot)
+        retained_dataflow_config = retained_settings.dataflow_config(self.settings)
+        retained_vendors = retained_dataflow_config.setdefault("data_vendors", {})
+        if "instrument_eligibility" not in retained_vendors:
+            current_vendors = self.settings.default_run_settings.dataflow_config(
+                self.settings
+            ).get("data_vendors", {})
+            if "instrument_eligibility" in current_vendors:
+                retained_vendors["instrument_eligibility"] = current_vendors[
+                    "instrument_eligibility"
+                ]
+        self._validate_instrument_eligibility(
+            request,
+            dataflow_config=retained_dataflow_config,
+        )
         if request.research_kind == "incremental":
             assert request.full_baseline_run_id is not None
             self.repository.validate_incremental_baseline(

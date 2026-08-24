@@ -842,6 +842,16 @@
         "additionalProperties": false,
         "description": "One actual source used or attempted for a domain result.",
         "properties": {
+          "diagnostic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionDiagnostic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fallback": {
             "default": false,
             "title": "Fallback",
