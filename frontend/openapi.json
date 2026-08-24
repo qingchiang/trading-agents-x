@@ -800,6 +800,11 @@
             ],
             "title": "Observed Through"
           },
+          "omitted_by_temporal_boundary": {
+            "default": false,
+            "title": "Omitted By Temporal Boundary",
+            "type": "boolean"
+          },
           "sources": {
             "default": [],
             "items": {

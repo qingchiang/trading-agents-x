@@ -73,6 +73,7 @@ def test_collection_summary_records_one_actual_result_per_domain() -> None:
                 "temporal_bases": [],
                 "evidence_refs": [],
                 "diagnostic": None,
+                "omitted_by_temporal_boundary": False,
             }
         ],
     }
@@ -765,6 +766,7 @@ def test_mixed_domain_discloses_an_observation_omitted_by_the_temporal_boundary(
                     ),
                     temporal_bases=("pit", "near_live_advisory"),
                     evidence_refs=(pit.evidence.ref, stale.evidence.ref),
+                    diagnostic=CollectionDiagnostic(code="bounded_snapshot"),
                 ),
             ),
         ),
@@ -779,7 +781,8 @@ def test_mixed_domain_discloses_an_observation_omitted_by_the_temporal_boundary(
 
     assert evidence == (pit.evidence,)
     assert summary.domains[0].state is CollectionResultState.PARTIAL
-    assert summary.domains[0].diagnostic == CollectionDiagnostic(code="outside_temporal_boundary")
+    assert summary.domains[0].diagnostic == CollectionDiagnostic(code="bounded_snapshot")
+    assert summary.domains[0].omitted_by_temporal_boundary is True
     assert derive_research_availability(summary).domains[0].status is (
         ResearchAvailabilityStatus.LIMITED
     )

@@ -167,6 +167,31 @@ test.each([
   },
 );
 
+test("discloses temporal omissions without replacing the domain diagnostic", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T20:00:00Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "united_states", domains: [{
+        domain: "fundamentals", state: "partial", sources: [],
+        temporal_bases: ["pit"], evidence_refs: ["ev_0123456789ab"],
+        diagnostic: { code: "bounded_snapshot" },
+        omitted_by_temporal_boundary: true,
+      }] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "[bounded_snapshot] [outside_temporal_boundary]",
+  );
+});
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

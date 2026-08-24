@@ -60,6 +60,7 @@ def derive_research_availability(summary: CollectionSummary) -> ResearchAvailabi
                 and result.temporal_bases == (CollectionTemporalBasis.PIT,)
                 and result.diagnostic is None
                 and not any(source.diagnostic is not None for source in result.sources)
+                and not result.omitted_by_temporal_boundary
                 else (
                     ResearchAvailabilityStatus.LIMITED
                     if result.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}
@@ -261,6 +262,9 @@ def normalize_incremental_collection(
                 temporal_bases=temporal_bases,
                 evidence_refs=final_refs,
                 diagnostic=diagnostic,
+                omitted_by_temporal_boundary=(
+                    result.omitted_by_temporal_boundary or bool(omitted_refs)
+                ),
             )
         )
     if len(assigned_refs) != len(set(assigned_refs)):

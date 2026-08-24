@@ -109,6 +109,7 @@ export interface components {
       evidence_refs?: string[];
       observed_from?: string | null;
       observed_through?: string | null;
+      omitted_by_temporal_boundary?: boolean;
       sources?: components["schemas"]["CollectionSourceProvenance"][];
       state: components["schemas"]["CollectionResultState"];
       temporal_bases?: components["schemas"]["CollectionTemporalBasis"][];

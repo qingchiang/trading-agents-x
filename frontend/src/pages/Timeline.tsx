@@ -195,6 +195,9 @@ export default function Timeline() {
                   <li key={result.domain}>
                     {result.domain}: {result.state}
                     {result.diagnostic ? ` [${result.diagnostic.code}]` : ""}
+                    {result.omitted_by_temporal_boundary
+                      ? " [outside_temporal_boundary]"
+                      : ""}
                     {(result.sources?.length ?? 0) > 0 && (
                       <ul>
                         {(result.sources ?? []).map((source) => (

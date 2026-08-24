@@ -1795,6 +1795,7 @@ class CollectionDomainResult(FrozenModel):
     temporal_bases: tuple[CollectionTemporalBasis, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     diagnostic: CollectionDiagnostic | None = None
+    omitted_by_temporal_boundary: bool = False
 
     @field_validator("evidence_refs")
     @classmethod
