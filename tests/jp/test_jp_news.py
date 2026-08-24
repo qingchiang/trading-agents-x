@@ -252,6 +252,21 @@ class JpNewsAssemblerTests(unittest.TestCase):
         sleep.assert_not_called()
         media.assert_not_called()
 
+    def test_scoped_tdnet_transport_failure_becomes_note_and_keeps_later_feed(self):
+        media = mock.Mock(return_value=_MEDIA_EMPTY)
+        with (
+            mock.patch.object(tdnet_news, "tokyo_today", return_value=date(2026, 8, 25)),
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_EMPTY),
+            mock.patch.object(jp_news, "_google_news", media),
+            mock.patch.object(http_util, "urlopen", side_effect=OSError("fixture transport")),
+            stop_on_rate_limit_scope(True),
+            self.assertRaises(NoMarketDataError) as ctx,
+        ):
+            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25")
+
+        self.assertIn("<TDnet unavailable: VendorTransportError>", ctx.exception.availability_notes[0])
+        media.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

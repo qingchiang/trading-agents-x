@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, time
 from typing import Any
@@ -52,6 +53,12 @@ _FUNDAMENTALS_OBSERVATION_TYPES = frozenset({"get_fundamentals", "fundamentals_s
 _FUNDAMENTALS_RETRIEVAL_HEADERS = (
     "# requested analysis date:",
     "# retrieved at:",
+)
+_FUNDAMENTALS_INLINE_TRANSPORT_FIELD = re.compile(
+    r"(?i)(?:^|[;,|])\s*(?:#\s*)?"
+    r"(?:requested(?:\s+analysis)?(?:\s+date)?|retrieved(?:\s+at)?)"
+    r"\s*(?::|=)?\s*\d{4}-\d{2}-\d{2}"
+    r"(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?"
 )
 
 
@@ -447,14 +454,15 @@ def _incremental_observation_identity(item: EvidenceItem) -> str:
 
 
 def _observation_content(item: EvidenceItem) -> str:
-    """Discard transport-time fundamentals headers while retaining reported values."""
+    """Discard transport-only fundamentals timestamps while retaining reported values."""
     if item.evidence_type.casefold() not in _FUNDAMENTALS_OBSERVATION_TYPES:
         return item.content
-    return "\n".join(
+    content = "\n".join(
         line
         for line in item.content.splitlines()
         if not line.casefold().startswith(_FUNDAMENTALS_RETRIEVAL_HEADERS)
     )
+    return _FUNDAMENTALS_INLINE_TRANSPORT_FIELD.sub("", content)
 
 
 def incremental_market_identity(ticker: str) -> dict[str, str]:

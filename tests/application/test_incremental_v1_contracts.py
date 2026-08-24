@@ -945,6 +945,47 @@ def test_retrieval_time_only_refresh_does_not_advance_information() -> None:
     assert len(advanced.observation_ids) == 1
 
 
+def test_inline_japanese_live_fundamentals_transport_fields_do_not_advance_information() -> None:
+    baseline = _near_live_item(
+        retrieved_at="2026-07-24T15:00:00Z",
+        content=(
+            "Live analyst consensus; requested 2026-07-24, "
+            "retrieved 2026-07-24T15:00:00Z; EPS: 100; PE: 12; growth: 8%; analyst count: 10"
+        ),
+    )
+    refreshed = _near_live_item(
+        retrieved_at="2026-07-25T15:00:00Z",
+        content=(
+            "Live analyst consensus; requested 2026-07-25, "
+            "retrieved 2026-07-25T15:00:00Z; EPS: 100; PE: 12; growth: 8%; analyst count: 10"
+        ),
+    )
+    changed = _near_live_item(
+        retrieved_at="2026-07-25T15:00:00Z",
+        content=(
+            "Live analyst consensus; requested 2026-07-25, "
+            "retrieved 2026-07-25T15:00:00Z; EPS: 101; PE: 12; growth: 8%; analyst count: 10"
+        ),
+    )
+    performance = calculate_stock_performance(
+        _collection_request(analysis_cutoff="2026-07-24"),
+        None,
+    )
+
+    assert assess_information_advancement(
+        baseline_items=(baseline,),
+        current_items=(refreshed,),
+        performance=performance,
+        stock_series_admitted=False,
+    ).advanced is False
+    assert assess_information_advancement(
+        baseline_items=(baseline,),
+        current_items=(changed,),
+        performance=performance,
+        stock_series_admitted=False,
+    ).advanced is True
+
+
 def test_source_fallback_change_alone_does_not_advance_information() -> None:
     baseline = _near_live_item(
         retrieved_at="2026-07-24T15:00:00Z",
