@@ -264,8 +264,28 @@ Date,Open,High,Low,Close,Volume
     availability = {
         domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     }
-    assert domains["news"]["state"] == "empty"
-    assert domains["fundamentals"]["state"] == "partial"
+    news = domains["news"]
+    assert news["state"] == "empty"
+    assert news["diagnostic"] == {"code": "bounded_feed_no_observed_records"}
+    assert news["sources"] == [
+        {
+            "source": "edinet",
+            "fallback": False,
+            "retrieved_at": "2026-07-24T15:00:00Z",
+            "diagnostic": None,
+        }
+    ]
+    fundamentals = domains["fundamentals"]
+    assert fundamentals["state"] == "partial"
+    assert fundamentals["diagnostic"] == {"code": "mixed_pit_and_near_live_fundamentals"}
+    assert fundamentals["sources"] == [
+        {
+            "source": "yfinance",
+            "fallback": False,
+            "retrieved_at": "2026-07-24T15:00:00Z",
+            "diagnostic": {"code": "near_live_snapshot"},
+        }
+    ]
     assert availability == {"market": "available", "news": "missing", "fundamentals": "limited"}
     assert node["performance"]["benchmarks"] == []
 

@@ -204,13 +204,15 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
         { domain: "market", state: "data", sources: [{
           source: "jquants", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
         }], temporal_bases: ["pit"], evidence_refs: ["ev_japan_close"] },
-        { domain: "news", state: "unavailable", sources: [], temporal_bases: [],
-          evidence_refs: [], diagnostic: { code: "news_retrieval_failed" } },
+        { domain: "news", state: "empty", sources: [{
+          source: "edinet", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
+        }], temporal_bases: [], evidence_refs: [],
+          diagnostic: { code: "bounded_feed_no_observed_records" } },
         { domain: "fundamentals", state: "partial", sources: [{
-          source: "yfinance", fallback: true, retrieved_at: "2026-07-24T15:00:00Z",
+          source: "yfinance", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
           diagnostic: { code: "near_live_snapshot" },
         }], temporal_bases: ["near_live_advisory"], evidence_refs: ["ev_japan_fundamentals"],
-          diagnostic: { code: "near_live_snapshot" } },
+          diagnostic: { code: "mixed_pit_and_near_live_fundamentals" } },
       ] },
       research_availability: { version: "1", domains: [
         { domain: "market", status: "available" }, { domain: "news", status: "missing" },
@@ -233,8 +235,12 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
 
   fireEvent.click(await screen.findByText("Collection Summary"));
   expect(screen.getAllByText("jquants")).not.toHaveLength(0);
-  expect(screen.getByText(/news: unavailable/)).toHaveTextContent("news_retrieval_failed");
-  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent("near_live_snapshot");
+  expect(screen.getByText(/news: empty/)).toHaveTextContent("bounded_feed_no_observed_records");
+  expect(screen.getByText("edinet")).toBeVisible();
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "mixed_pit_and_near_live_fundamentals",
+  );
+  expect(screen.getByText("yfinance [near_live_snapshot]")).toBeVisible();
   fireEvent.click(screen.getByText("Research Availability"));
   expect(screen.getByText(/fundamentals: limited/)).toBeVisible();
   fireEvent.click(screen.getByText("Performance"));
