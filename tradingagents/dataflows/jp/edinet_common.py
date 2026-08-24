@@ -332,6 +332,26 @@ def filing_detail_line(record: dict) -> str:
     )
 
 
+def filing_period_detail(record: dict) -> str:
+    """Render EDINET document-list fiscal-period identity when supplied.
+
+    ``periodEnd`` identifies the financial period to which a filing pertains;
+    it is never a substitute for ``submitDateTime`` publication timing. Keep an
+    accompanying ``periodStart`` visible for the period identity without making
+    it the Evidence effective date.
+    """
+    start = record.get("periodStart")
+    end = record.get("periodEnd")
+    details = []
+    if start and end:
+        details.append(f"Financial period: {start} to {end}")
+    elif start:
+        details.append(f"Financial period start: {start}")
+    if end:
+        details.append(f"Effective period: {end}")
+    return "\n".join(details)
+
+
 def render_filings(records: list[dict], format_fn, limit: int) -> str:
     """Sort ``records`` newest-first, cap at ``limit``, and join with blank lines.
 

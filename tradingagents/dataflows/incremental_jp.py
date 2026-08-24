@@ -116,7 +116,10 @@ def _collect_market(request, routed, now):
         response = routed(
             "get_stock_data",
             request.instrument,
-            completed_market_date(request.baseline_analysis_cutoff).isoformat(),
+            completed_market_date(
+                request.baseline_analysis_cutoff,
+                now=request.window_start,
+            ).isoformat(),
             request.analysis_cutoff.isoformat(),
             _provenance=True,
             _stop_on_rate_limit=True,

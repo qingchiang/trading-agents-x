@@ -16,7 +16,7 @@ from tradingagents.application.incremental_collection import (
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.incremental_jp import collect_japan_incremental
-from tradingagents.dataflows.jp import jp_news
+from tradingagents.dataflows.jp import edinet_news, jp_news
 from tradingagents.provenance import (
     ProvenanceRecord,
     attach_evidence_span,
@@ -164,6 +164,50 @@ Date,Open,High,Low,Close,Volume
     )
 
 
+def test_japan_collector_uses_baseline_information_cutoff_before_tse_close() -> None:
+    request = _request(enabled_domains=("market",), target=date(2026, 7, 28)).model_copy(
+        update={
+            "baseline_analysis_cutoff": date(2026, 7, 24),
+            "window_start": datetime(2026, 7, 24, 7, 59, tzinfo=UTC),
+            "window_end": datetime(2026, 7, 28, 15, tzinfo=UTC),
+        }
+    )
+    response = attach_provenance(
+        """# Stock data for 7203.T from 2026-07-23 to 2026-07-28
+# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)
+
+Date,Open,High,Low,Close,Volume
+2026-07-23,99,101,98,100,1000
+2026-07-27,100,102,99,101,1000
+2026-07-28,102,104,101,103,1000
+""",
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="jquants",
+            requested="2026-07-23 to 2026-07-28",
+            effective="2026-07-23 to 2026-07-28",
+            timing="market-date filtered",
+            retrieved_at="2026-07-29T15:00:00Z",
+        ),
+    )
+    calls = []
+
+    def configured_route(method, *args, **kwargs):
+        calls.append((method, args, kwargs))
+        return response
+
+    collected = collect_japan_incremental(
+        request,
+        route_to_vendor=configured_route,
+        now=lambda: datetime(2026, 7, 29, 15, 1, tzinfo=UTC),
+    )
+
+    assert calls[0][1][1] == "2026-07-23"
+    assert calculate_stock_performance(request, collected.stock_series).stock.status is (
+        PerformanceComponentStatus.CALCULATED
+    )
+
+
 def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
     response = attach_provenance(
         _jquants_market_response()
@@ -193,22 +237,27 @@ def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
 
 
 def test_japan_collector_admits_disclosure_correction_by_publication_time() -> None:
-    response = attach_provenance(
-        """## 7203.T EDINET disclosures, from 2026-07-20 to 2026-07-24:
-
-### Earnings correction (filer: Toyota)
-Submitted: 2026-07-22T10:00:00+09:00
-Effective period: 2026-03-31
-""",
-        ProvenanceRecord(
-            evidence="get_news",
-            source="EDINET",
-            requested="2026-07-20 to 2026-07-24",
-            effective="2026-07-20 to 2026-07-24",
-            timing="publication/disclosure-date filtered",
-            retrieved_at="2026-07-24T15:00:00Z",
+    document = {
+        "secCode": "72030",
+        "docDescription": "Earnings correction",
+        "filerName": "Toyota",
+        "submitDateTime": "2026-07-22 10:00",
+        "periodStart": "2025-04-01",
+        "periodEnd": "2026-03-31",
+    }
+    with (
+        mock.patch.object(
+            edinet_news,
+            "documents_on",
+            side_effect=lambda day: [document] if day == "2026-07-22" else [],
         ),
-    )
+        mock.patch.object(jp_news, "_edinet_news", edinet_news.get_news),
+        mock.patch.object(jp_news, "_tdnet_news", return_value="No TDnet disclosures found"),
+        mock.patch.object(jp_news, "_google_news", return_value="No Google News found"),
+    ):
+        response = jp_news.get_news("7203.T", "2026-07-20", "2026-07-24")
+    assert "Financial period: 2025-04-01 to 2026-03-31" in response
+    assert "Effective period: 2026-03-31" in response
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
