@@ -10,6 +10,7 @@ from urllib.error import HTTPError
 import pytest
 
 from tradingagents.dataflows import stocktwits
+from tradingagents.dataflows.errors import VendorRateLimitError
 
 
 def _raise(exc):
@@ -54,6 +55,14 @@ class TestStockTwitsResilience:
             out = stocktwits.fetch_stocktwits_messages("NVDA")
         assert "unavailable" in out.lower()
         assert out.startswith("<stocktwits unavailable")
+
+    def test_http_429_is_a_typed_stop_signal(self):
+        with patch.object(
+            stocktwits,
+            "urlopen",
+            return_value=_raise(HTTPError("url", 429, "slow down", {}, None)),
+        ), pytest.raises(VendorRateLimitError, match="StockTwits rate limited"):
+            stocktwits.fetch_stocktwits_messages("NVDA")
 
     def test_requested_window_uses_us_market_date_and_excludes_future(self):
         payload = {

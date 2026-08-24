@@ -6,10 +6,10 @@ API key, no OAuth, and no registration. Each message includes a
 user-labeled sentiment field (``Bullish``/``Bearish``/null), the message
 body, timestamp, and posting user.
 
-The function is deliberately self-contained: short timeout, graceful
-degradation on any HTTP or parse failure, and a string return type so
-the calling agent gets a uniform interface regardless of whether the
-network call succeeded.
+The function is deliberately self-contained: short timeout and graceful
+degradation for transport or parse failures. A real HTTP 429 is the sole
+exception: it surfaces as a typed stop signal so a bounded collection run can
+end before it spends more provider budget.
 """
 
 from __future__ import annotations
@@ -18,10 +18,13 @@ import http.client
 import json
 import logging
 from datetime import UTC, datetime
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from tradingagents.version import IDENTIFIED_USER_AGENT
+
+from .errors import VendorRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +74,8 @@ def fetch_stocktwits_messages(
     formatted plaintext block ready for prompt injection.
 
     Returns a placeholder string when the endpoint is unreachable, the
-    symbol has no messages, or the response shape is unexpected — the
-    caller never has to special-case None or exceptions.
+    symbol has no messages, or the response shape is unexpected. HTTP 429
+    raises :class:`VendorRateLimitError` for bounded callers.
     """
     url = _API.format(ticker=_stocktwits_symbol(ticker))
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
@@ -80,6 +83,8 @@ def fetch_stocktwits_messages(
         with urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
     except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
+        if isinstance(exc, HTTPError) and exc.code == 429:
+            raise VendorRateLimitError("StockTwits rate limited the request.") from exc
         # OSError covers URLError/TimeoutError/connection resets; HTTPException
         # covers chunked-transfer errors (IncompleteRead/BadStatusLine, #1024).
         logger.warning("StockTwits fetch failed for %s: %s", ticker, exc)

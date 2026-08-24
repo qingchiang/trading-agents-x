@@ -12,7 +12,7 @@ import csv
 import math
 import re
 from collections.abc import Callable
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from io import StringIO
 from zoneinfo import ZoneInfo
 
@@ -32,6 +32,7 @@ from tradingagents.application.contracts import (
     MarketSeriesPoint,
     MarketSeriesResult,
 )
+from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.stocktwits import (
     fetch_stocktwits_messages as _default_stocktwits_fetch,
@@ -44,7 +45,7 @@ DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
 DEFAULT_STOCKTWITS_FETCH = _default_stocktwits_fetch
 _NEWS_ENTRY = re.compile(
     r"^### \[[^]]+\] (?P<title>.+?) \(source: .*?\)\n"
-    r"(?:Published: (?P<published>\d{4}-\d{2}-\d{2})\n)?"
+    r"(?:Published: (?P<published>[^\n]+)\n)?"
     r"(?P<body>.*?)(?=^### \[|\Z)",
     re.MULTILINE | re.DOTALL,
 )
@@ -149,9 +150,10 @@ def _collect_market(
         response = route_to_vendor(
             "get_stock_data",
             instrument,
-            request.baseline_analysis_cutoff.isoformat(),
+            _expanded_market_start(request.baseline_analysis_cutoff).isoformat(),
             request.analysis_cutoff.isoformat(),
             _provenance=True,
+            _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
         series, omitted = _market_series(request, instrument, source, body)
@@ -210,6 +212,8 @@ def _collect_market(
         )
     except _Unavailable as exc:
         return _unavailable_domain("market", exc.code), None, None
+    except VendorRateLimitError:
+        raise
     except Exception:
         return _unavailable_domain("market", "market_route_failure"), None, None
 
@@ -226,9 +230,10 @@ def _collect_benchmark(
         response = route_to_vendor(
             "get_stock_data",
             symbol,
-            request.baseline_analysis_cutoff.isoformat(),
+            _expanded_market_start(request.baseline_analysis_cutoff).isoformat(),
             request.analysis_cutoff.isoformat(),
             _provenance=True,
+            _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
         series, _omitted = _market_series(request, symbol, source, body)
@@ -238,6 +243,8 @@ def _collect_benchmark(
             name=name,
             unavailable_diagnostic=CollectionDiagnostic(code=exc.code),
         )
+    except VendorRateLimitError:
+        raise
     except Exception:
         return BenchmarkSeriesResult(
             name=name,
@@ -258,18 +265,30 @@ def _collect_news(
             request.baseline_analysis_cutoff.isoformat(),
             request.analysis_cutoff.isoformat(),
             _provenance=True,
+            _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
+        if _is_failure_response(body):
+            return _unavailable_domain("news", "news_retrieval_failed", source=source), ()
         if _is_empty_response(body):
             return _bounded_empty("news", source), ()
         candidates = []
-        dates = []
+        observed = []
         for match in _NEWS_ENTRY.finditer(body):
             published = match.group("published")
             if published is None:
                 continue
-            published_on = date.fromisoformat(published)
-            if not request.baseline_analysis_cutoff < published_on <= request.analysis_cutoff:
+            available_at, published_on = _parse_news_publication(published)
+            if available_at is not None:
+                if not request.window_start < available_at <= request.window_end:
+                    continue
+            elif (
+                not request.baseline_analysis_cutoff < published_on <= request.analysis_cutoff
+                or (
+                    published_on == request.analysis_cutoff
+                    and _market_day_end(published_on) > request.window_end
+                )
+            ):
                 continue
             content = f"{match.group('title').strip()}\n{match.group('body').strip()}".strip()
             item = EvidenceItem.create(
@@ -277,12 +296,18 @@ def _collect_news(
                 evidence_type="news_article",
                 requested_date=request.analysis_cutoff,
                 effective_date=published_on,
+                available_at=available_at,
                 content=content,
                 fallback=source.fallback,
                 origins=(_pit_origin(source, "news_article", published_on),),
             )
-            candidates.append(IncrementalEvidenceCandidate(evidence=item, available_on=published_on))
-            dates.append(published_on)
+            candidates.append(
+                IncrementalEvidenceCandidate(
+                    evidence=item,
+                    available_on=published_on if available_at is None else None,
+                )
+            )
+            observed.append(available_at or _market_day_end(published_on))
         if not candidates:
             return (
                 CollectionDomainResult(
@@ -298,8 +323,8 @@ def _collect_news(
                 domain="news",
                 state=CollectionResultState.PARTIAL,
                 sources=(source,),
-                observed_from=_market_day_end(min(dates)),
-                observed_through=_market_day_end(max(dates)),
+                observed_from=min(observed),
+                observed_through=max(observed),
                 temporal_bases=(CollectionTemporalBasis.PIT,),
                 evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
                 diagnostic=CollectionDiagnostic(code="bounded_news_feed"),
@@ -308,6 +333,8 @@ def _collect_news(
         )
     except _Unavailable as exc:
         return _unavailable_domain("news", exc.code), ()
+    except VendorRateLimitError:
+        raise
     except Exception:
         return _unavailable_domain("news", "news_route_failure"), ()
 
@@ -324,6 +351,7 @@ def _collect_fundamentals(
             request.instrument,
             request.analysis_cutoff.isoformat(),
             _provenance=True,
+            _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
         if _is_empty_response(body):
@@ -351,6 +379,8 @@ def _collect_fundamentals(
         )
     except _Unavailable as exc:
         return _unavailable_domain("fundamentals", exc.code), None
+    except VendorRateLimitError:
+        raise
     except Exception:
         return _unavailable_domain("fundamentals", "fundamentals_route_failure"), None
 
@@ -369,6 +399,8 @@ def _collect_social(
             start_date=request.baseline_analysis_cutoff.isoformat(),
             end_date=request.analysis_cutoff.isoformat(),
         )
+    except VendorRateLimitError:
+        raise
     except Exception:
         return _unavailable_domain("social", "stocktwits_transport_failure"), None
     source = CollectionSourceProvenance(source="stocktwits", retrieved_at=retrieved_at)
@@ -429,7 +461,8 @@ def _market_series(
     body: str,
 ) -> tuple[MarketSeriesResult, bool]:
     header = body.casefold()
-    if f"stock data for {instrument.casefold()}" not in header:
+    match = re.search(r"^# Stock data for (?P<instrument>.+?) from ", body, re.MULTILINE)
+    if match is None or match.group("instrument").strip().casefold() != instrument.casefold():
         raise _Unavailable("market_instrument_mismatch")
     if "auto-adjusted" not in header or "yfinance" not in header:
         raise _Unavailable("market_adjustment_basis_unverified")
@@ -449,6 +482,7 @@ def _market_series(
             if (
                 not math.isfinite(value)
                 or value <= 0
+                or not _is_nyse_session(session)
                 or session > request.analysis_cutoff
                 or completed_at > request.window_end
             ):
@@ -539,6 +573,102 @@ def _unavailable_domain(
 def _is_empty_response(body: str) -> bool:
     lowered = body.strip().casefold()
     return not lowered or lowered.startswith(("no ", "<no stocktwits messages"))
+
+
+def _is_failure_response(body: str) -> bool:
+    """Recognize adapter failure prose before it can masquerade as an empty feed."""
+    lowered = body.strip().casefold()
+    return lowered.startswith((
+        "error fetching news",
+        "error retrieving news",
+        "error getting news",
+    ))
+
+
+def _parse_news_publication(value: str) -> tuple[datetime | None, date]:
+    """Keep provider timestamps exact; date-only fixtures remain conservative."""
+    rendered = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", rendered):
+        return None, date.fromisoformat(rendered)
+    try:
+        published = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _Unavailable("invalid_news_publication_time") from exc
+    if published.tzinfo is None or published.utcoffset() is None:
+        raise _Unavailable("invalid_news_publication_time")
+    published = published.astimezone(UTC)
+    return published, published.astimezone(_NEW_YORK).date()
+
+
+def _expanded_market_start(baseline: date) -> date:
+    """Fetch enough history to resolve an off-session baseline to its prior close."""
+    return baseline - timedelta(days=7)
+
+
+def _is_nyse_session(value: date) -> bool:
+    """Return whether a date is a regular NYSE session, excluding standard closures."""
+    if value.weekday() >= 5:
+        return False
+    return value not in _nyse_holidays(value.year)
+
+
+def _nyse_holidays(year: int) -> frozenset[date]:
+    """Regular NYSE full-day closures used for daily-bar eligibility.
+
+    This deliberately rejects rows that a provider labels with arbitrary calendar
+    dates.  It covers recurring exchange closures rather than one-off emergency
+    suspensions, which cannot be inferred from an offline provider response.
+    """
+    def observed(value: date, *, friday_for_saturday: bool = True) -> date:
+        if value.weekday() == 5 and friday_for_saturday:
+            return value - timedelta(days=1)
+        if value.weekday() == 6:
+            return value + timedelta(days=1)
+        return value
+
+    good_friday = _easter_sunday(year) - timedelta(days=2)
+    new_year = date(year, 1, 1)
+    holidays = {
+        observed(new_year, friday_for_saturday=False),
+        _nth_weekday(year, 1, 0, 3),  # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),  # Presidents Day
+        good_friday,
+        _last_weekday(year, 5, 0),  # Memorial Day
+        observed(date(year, 7, 4)),
+        _nth_weekday(year, 9, 0, 1),  # Labor Day
+        _nth_weekday(year, 11, 3, 4),  # Thanksgiving
+        observed(date(year, 12, 25)),
+    }
+    if year >= 2021:
+        holidays.add(observed(date(year, 6, 19)))
+    return frozenset(holidays)
+
+
+def _easter_sunday(year: int) -> date:
+    """Gregorian computus, retained locally to avoid a second calendar dependency."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    correction = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * correction) // 451
+    month = (h + correction - 7 * m + 114) // 31
+    day = (h + correction - 7 * m + 114) % 31 + 1
+    return date(year, month, day)
+
+
+def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> date:
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (occurrence - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    last = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
 
 
 def _market_day_end(value: date) -> datetime:

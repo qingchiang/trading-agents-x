@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+import pytest
+
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tradingagents.application.contracts import (
     AnalysisRequest,
@@ -11,20 +13,28 @@ from tradingagents.application.contracts import (
 from tradingagents.application.incremental_collection import normalize_incremental_collection
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.dataflows import incremental_us
+from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.incremental_us import collect_us_incremental
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
-def _request(*, enabled_domains=("market",)) -> IncrementalCollectionRequest:
+def _request(
+    *,
+    enabled_domains=("market",),
+    baseline=date(2026, 7, 20),
+    target=date(2026, 7, 24),
+    window_start=datetime(2026, 7, 20, 23, 59, tzinfo=UTC),
+    window_end=datetime(2026, 7, 24, 23, 59, tzinfo=UTC),
+) -> IncrementalCollectionRequest:
     return IncrementalCollectionRequest(
         version="1",
         instrument="NVDA",
         market="united_states",
         route_suffix="",
-        baseline_analysis_cutoff=date(2026, 7, 20),
-        analysis_cutoff=date(2026, 7, 24),
-        window_start=datetime(2026, 7, 20, 23, 59, tzinfo=UTC),
-        window_end=datetime(2026, 7, 24, 23, 59, tzinfo=UTC),
+        baseline_analysis_cutoff=baseline,
+        analysis_cutoff=target,
+        window_start=window_start,
+        window_end=window_end,
         enabled_domains=enabled_domains,
         configured_routes={"data_vendors": {"core_stock_apis": "yfinance"}},
     )
@@ -36,7 +46,7 @@ def _market_response() -> str:
 # Actual data source: yfinance
 
 Date,Open,High,Low,Close,Volume
-2026-07-19,99,101,98,100,1000
+2026-07-17,99,101,98,100,1000
 2026-07-20,100,102,99,101,1000
 2026-07-24,109,111,108,110,1000
 2026-07-25,111,112,110,111,1000
@@ -70,7 +80,7 @@ def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -
 
     assert result.stock_series is not None
     assert [point.session.isoformat() for point in result.stock_series.points] == [
-        "2026-07-19",
+        "2026-07-17",
         "2026-07-20",
         "2026-07-24",
     ]
@@ -78,7 +88,153 @@ def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -
     assert result.stock_series.adjustment_basis == "yfinance_auto_adjusted_close"
     assert result.stock_series_evidence_ref == result.evidence[0].evidence.ref
     assert result.collection_summary.domains[0].sources[0].source == "yfinance"
-    assert calls[0][:2] == ("get_stock_data", ("NVDA", "2026-07-20", "2026-07-24"))
+    assert calls[0][:2] == ("get_stock_data", ("NVDA", "2026-07-13", "2026-07-24"))
+
+
+def test_us_collector_uses_exact_instrument_identity_and_only_completed_nyse_sessions() -> None:
+    body = """# Stock data for NVDAA from 2026-06-27 to 2026-07-07
+# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)
+# Actual data source: yfinance
+
+Date,Open,High,Low,Close,Volume
+2026-07-02,99,101,98,100,1000
+2026-07-03,100,102,99,101,1000
+2026-07-04,101,103,100,102,1000
+2026-07-06,102,104,101,103,1000
+2026-07-07,103,105,102,104,1000
+"""
+    response = attach_provenance(
+        body,
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="yfinance",
+            requested="2026-06-27 to 2026-07-07",
+            effective="2026-07-02 to 2026-07-07",
+            timing="market-date filtered",
+            retrieved_at="2026-07-08T01:00:00Z",
+        ),
+    )
+    mismatched = collect_us_incremental(
+        _request(baseline=date(2026, 7, 4), target=date(2026, 7, 7)),
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 8, 2, tzinfo=UTC),
+    )
+    assert mismatched.collection_summary.domains[0].diagnostic.code == "market_instrument_mismatch"
+
+    eligible_body = response.replace("NVDAA", "NVDA")
+    collected = collect_us_incremental(
+        _request(
+            baseline=date(2026, 7, 4),
+            target=date(2026, 7, 7),
+            window_start=datetime(2026, 7, 4, 23, 59, tzinfo=UTC),
+            window_end=datetime(2026, 7, 7, 23, 59, tzinfo=UTC),
+        ),
+        route_to_vendor=lambda *_args, **_kwargs: eligible_body,
+        now=lambda: datetime(2026, 7, 8, 2, tzinfo=UTC),
+    )
+    assert [point.session for point in collected.stock_series.points] == [
+        date(2026, 7, 2),
+        date(2026, 7, 6),
+        date(2026, 7, 7),
+    ]
+
+
+def test_us_collector_omits_same_day_bar_before_new_york_close() -> None:
+    request = _request(
+        baseline=date(2026, 7, 20),
+        target=date(2026, 7, 24),
+        window_end=datetime(2026, 7, 24, 19, tzinfo=UTC),  # 15:00 New York
+    )
+    collected = collect_us_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: _market_response(),
+        now=lambda: datetime(2026, 7, 24, 19, tzinfo=UTC),
+    )
+    assert [point.session for point in collected.stock_series.points] == [
+        date(2026, 7, 17),
+        date(2026, 7, 20),
+    ]
+    assert collected.collection_summary.domains[0].state.value == "empty"
+
+
+def test_us_collector_preserves_precise_yahoo_publication_time_and_omits_later_same_day_news() -> None:
+    request = _request(
+        enabled_domains=("news",),
+        window_end=datetime(2026, 7, 24, 19, tzinfo=UTC),
+    )
+    response = attach_provenance(
+        """### [direct] Before cutoff (source: Example)
+Published: 2026-07-24T18:00:00Z
+inside
+
+### [direct] After cutoff (source: Example)
+Published: 2026-07-24T20:00:00Z
+outside
+""",
+        ProvenanceRecord(
+            evidence="get_news", source="yfinance", requested="window",
+            effective="window", timing="publication-date filtered",
+            retrieved_at="2026-07-24T18:30:00Z",
+        ),
+    )
+    collected = collect_us_incremental(
+        request,
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 24, 18, 30, tzinfo=UTC),
+    )
+    _summary, evidence, _bindings = normalize_incremental_collection(
+        request, collected, sealed_at=datetime(2026, 7, 24, 18, 31, tzinfo=UTC)
+    )
+    assert [item.content.split("\n", 1)[0] for item in evidence] == ["Before cutoff"]
+    assert evidence[0].available_at == datetime(2026, 7, 24, 18, tzinfo=UTC)
+
+
+def test_us_collector_reports_yahoo_error_as_unavailable_with_actual_source() -> None:
+    response = attach_provenance(
+        "Error fetching news for NVDA: upstream unavailable",
+        ProvenanceRecord(
+            evidence="get_news", source="yfinance", requested="window",
+            effective="—", timing="retrieval unavailable",
+            retrieved_at="2026-07-25T01:00:00Z",
+        ),
+    )
+    collected = collect_us_incremental(
+        _request(enabled_domains=("news",)),
+        route_to_vendor=lambda *_args, **_kwargs: response,
+        now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+    )
+    domain = collected.collection_summary.domains[0]
+    assert domain.state.value == "unavailable"
+    assert domain.diagnostic.code == "news_retrieval_failed"
+    assert domain.sources[0].source == "yfinance"
+
+
+def test_us_collector_stops_the_journey_on_rate_limit_before_news_or_benchmarks() -> None:
+    calls = []
+
+    def route(method, *_args, **_kwargs):
+        calls.append(method)
+        raise VendorRateLimitError("Yahoo Finance rate limited")
+
+    with pytest.raises(VendorRateLimitError):
+        collect_us_incremental(
+            _request(enabled_domains=("market", "news")),
+            route_to_vendor=route,
+            now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        )
+    assert calls == ["get_stock_data"]
+
+
+def test_us_collector_stops_on_stocktwits_rate_limit_before_later_domains() -> None:
+    with pytest.raises(VendorRateLimitError):
+        collect_us_incremental(
+            _request(enabled_domains=("social", "market")),
+            route_to_vendor=lambda *_args, **_kwargs: _market_response(),
+            fetch_stocktwits_messages=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                VendorRateLimitError("StockTwits rate limited")
+            ),
+            now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        )
 
 
 def test_us_collector_admits_dated_yahoo_news_and_retains_selected_fallback() -> None:
