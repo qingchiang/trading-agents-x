@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+import pytest
+import requests
+
 from tradingagents.application.contracts import (
     IncrementalCollectionRequest,
     PerformanceComponentStatus,
@@ -12,6 +15,7 @@ from tradingagents.application.incremental_collection import (
     normalize_incremental_collection,
 )
 from tradingagents.dataflows.cn import calendar
+from tradingagents.dataflows.cn.common import AkShareRateLimitError
 from tradingagents.dataflows.incremental_cn import collect_mainland_china_incremental
 from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 
@@ -406,3 +410,31 @@ Date,Open,High,Low,Close,Volume
     assert calls[0][1][1] == "2026-04-03"
     performance = calculate_stock_performance(request, collected.stock_series)
     assert performance.stock.status is PerformanceComponentStatus.NOT_YET_OBSERVABLE
+
+
+def test_mainland_collector_stops_on_calendar_rate_limit_before_market_route(
+    monkeypatch,
+) -> None:
+    calendar_calls = []
+    vendor_calls = []
+
+    def rate_limited_calendar_request(*_args, **_kwargs):
+        calendar_calls.append(None)
+        response = requests.Response()
+        response.status_code = 429
+        raise requests.HTTPError("calendar rate limited", response=response)
+
+    def route(method, *_args, **_kwargs):
+        vendor_calls.append(method)
+        raise AssertionError("market route must not run after calendar rate limit")
+
+    calendar.trading_dates.cache_clear()
+    monkeypatch.setattr(calendar.requests, "get", rate_limited_calendar_request)
+    try:
+        with pytest.raises(AkShareRateLimitError, match="calendar rate limited"):
+            collect_mainland_china_incremental(_request(), route_to_vendor=route)
+    finally:
+        calendar.trading_dates.cache_clear()
+
+    assert calendar_calls == [None]
+    assert vendor_calls == []

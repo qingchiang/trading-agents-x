@@ -28,6 +28,7 @@ from tradingagents.application.contracts import (
 from tradingagents.dataflows.cn import calendar
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import (
     EvidenceSpan,
     extract_evidence_spans,
@@ -115,17 +116,18 @@ def collect_mainland_china_incremental(
 def _collect_market(request, routed, now):
     source = None
     try:
-        response = routed(
-            "get_stock_data",
-            request.instrument,
-            calendar.effective_trade_date(
-                request.baseline_analysis_cutoff,
-                now=request.window_start,
-            ).isoformat(),
-            request.analysis_cutoff.isoformat(),
-            _provenance=True,
-            _stop_on_rate_limit=True,
-        )
+        with stop_on_rate_limit_scope(True):
+            response = routed(
+                "get_stock_data",
+                request.instrument,
+                calendar.effective_trade_date(
+                    request.baseline_analysis_cutoff,
+                    now=request.window_start,
+                ).isoformat(),
+                request.analysis_cutoff.isoformat(),
+                _provenance=True,
+                _stop_on_rate_limit=True,
+            )
         source, body = _routed_source(response, now)
         series, omitted = _market_series(request, source, body)
         current = tuple(
