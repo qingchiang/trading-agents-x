@@ -247,6 +247,69 @@ test("shows Japanese adjusted-stock provenance and an optional missing domain", 
   expect(screen.getByText("jquants_split_dividend_adjusted_close")).toBeVisible();
 });
 
+test("shows mainland qfq provenance and bounded source limitations", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "600519.SS", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "600519.SS",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "mainland_china", domains: [
+        { domain: "market", state: "data", sources: [{
+          source: "akshare_tencent", fallback: false,
+          retrieved_at: "2026-07-24T08:00:00Z",
+        }], temporal_bases: ["pit"], evidence_refs: ["ev_mainland_close"] },
+        { domain: "news", state: "empty", sources: [{
+          source: "cninfo", fallback: false, retrieved_at: "2026-07-24T08:00:00Z",
+        }], temporal_bases: [], evidence_refs: [],
+          diagnostic: { code: "bounded_feed_no_observed_records" } },
+        { domain: "fundamentals", state: "partial", sources: [{
+          source: "akshare_cninfo_company_profile", fallback: false,
+          retrieved_at: "2026-07-24T08:00:00Z",
+          diagnostic: { code: "near_live_snapshot" },
+        }], temporal_bases: ["near_live_advisory"],
+          evidence_refs: ["ev_mainland_fundamentals"],
+          diagnostic: { code: "near_live_snapshot" } },
+      ] },
+      research_availability: { version: "1", domains: [
+        { domain: "market", status: "available" },
+        { domain: "news", status: "missing" },
+        { domain: "fundamentals", status: "limited" },
+      ] },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "akshare_tencent", fallback: false,
+        adjustment_basis: "qfq_forward_adjusted",
+        retrieved_at: "2026-07-24T08:00:00Z",
+        baseline_information_cutoff_at: "2026-07-17T15:59:59Z",
+        target_information_cutoff_at: "2026-07-24T15:59:59Z",
+        start_session: "2026-07-17", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/600519.SS"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getAllByText("akshare_tencent")).not.toHaveLength(0);
+  expect(screen.getByText(/news: empty/)).toHaveTextContent(
+    "bounded_feed_no_observed_records",
+  );
+  expect(screen.getByText("cninfo")).toBeVisible();
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "near_live_snapshot",
+  );
+  expect(
+    screen.getByText("akshare_cninfo_company_profile [near_live_snapshot]"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByText("Research Availability"));
+  expect(screen.getByText(/fundamentals: limited/)).toBeVisible();
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("qfq_forward_adjusted")).toBeVisible();
+});
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

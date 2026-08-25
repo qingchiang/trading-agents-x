@@ -13,11 +13,13 @@ import requests
 
 from tradingagents.version import USER_AGENT
 
+from ..errors import VendorRateLimitError
 from ..news_quality import (
     build_chinese_company_aliases,
     canonical_headline,
     classify_chinese_google_article,
 )
+from ..rate_limit import stop_on_rate_limit_requested
 from .common import REQUEST_TIMEOUT, AkShareSchemaError, call_with_retry, canonical_a_share
 from .company import get_company_profile
 from .news_sources import news_quotas
@@ -90,6 +92,11 @@ def _safe_query(query: str) -> tuple[list[dict], Exception | None]:
     """Keep another name query usable when this independent query fails."""
     try:
         return _fetch_items(query), None
+    except VendorRateLimitError as exc:
+        if stop_on_rate_limit_requested():
+            raise
+        logger.warning("Google News China query rate-limited for %r", query)
+        return [], exc
     except Exception as exc:  # noqa: BLE001 - query-level isolation boundary
         logger.warning("Google News China query failed for %r: %s", query, exc)
         return [], exc
@@ -107,8 +114,11 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     if not query_names:
         return f"No Google News China coverage identity for {ticker}"
     queries = tuple(f'"{name}" {code} 股票' for name in query_names)
-    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
-        query_results = list(pool.map(_safe_query, queries))
+    if stop_on_rate_limit_requested():
+        query_results = [_safe_query(query) for query in queries]
+    else:
+        with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+            query_results = list(pool.map(_safe_query, queries))
     failures = [exc for _items, exc in query_results if exc is not None]
     if len(failures) == len(query_results):
         raise failures[0]

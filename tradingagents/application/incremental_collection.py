@@ -516,6 +516,12 @@ def default_incremental_collector(
         from tradingagents.dataflows.incremental_jp import collect_japan_incremental
 
         return collect_japan_incremental(request)
+    if request.market == "mainland_china":
+        from tradingagents.dataflows.incremental_cn import (
+            collect_mainland_china_incremental,
+        )
+
+        return collect_mainland_china_incremental(request)
     return IncrementalCollectionResult(
         collection_summary=CollectionSummary(
             version=request.version,

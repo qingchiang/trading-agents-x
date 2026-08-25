@@ -14,6 +14,7 @@ from ..errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
+from ..rate_limit import stop_on_rate_limit_requested
 from ..symbol_utils import infer_mainland_equity_suffix, normalize_symbol
 
 REQUEST_TIMEOUT = 15.0
@@ -96,7 +97,11 @@ def call_with_retry(func, /, *args, label: str, **kwargs):
             return func(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - normalize third-party failures
             last_exc = exc
-            if attempt + 1 >= MAX_ATTEMPTS or not _is_retryable(exc):
+            if (
+                attempt + 1 >= MAX_ATTEMPTS
+                or not _is_retryable(exc)
+                or (_is_rate_limit(exc) and stop_on_rate_limit_requested())
+            ):
                 break
             time.sleep(BASE_RETRY_DELAY * (2**attempt))
 

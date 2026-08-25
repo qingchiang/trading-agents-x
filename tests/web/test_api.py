@@ -32,8 +32,13 @@ from tradingagents.application.contracts import (
 from tradingagents.application.database import RunRecord
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.application.settings import AppSettings
-from tradingagents.dataflows import incremental_jp, incremental_us
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.dataflows import incremental_cn, incremental_jp, incremental_us
+from tradingagents.dataflows.cn import calendar as cn_calendar
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
@@ -288,6 +293,172 @@ Date,Open,High,Low,Close,Volume
     ]
     assert availability == {"market": "available", "news": "missing", "fundamentals": "limited"}
     assert node["performance"]["benchmarks"] == []
+
+
+@pytest.mark.anyio
+async def test_default_mainland_incremental_collector_reads_back_through_asgi_timeline(
+    monkeypatch,
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    monkeypatch.setattr(
+        cn_calendar,
+        "trading_dates",
+        lambda: tuple(date(2026, 7, day) for day in (17, 20, 21, 22, 23, 24)),
+    )
+    baseline_request = AnalysisRequest(
+        ticker="600519.SS",
+        analysis_date=date(2026, 7, 17),
+        analysts=("market",),
+    )
+    baseline, _ = web_repository.create_run(
+        baseline_request,
+        web_settings.resolve_run(baseline_request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    baseline_item = EvidenceItem.create(
+        source="fixture.baseline",
+        evidence_type="baseline",
+        requested_date=baseline_request.analysis_date,
+        content="baseline 600519.SS",
+    )
+    baseline_evidence = EvidenceBundle(
+        instrument="600519.SS",
+        analysis_date=baseline_request.analysis_date,
+        items=(baseline_item,),
+    )
+    web_repository.seal_evidence(baseline.id, baseline_evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument="600519.SS",
+            reports={},
+            decision=research_decision(evidence_refs=(baseline_item.ref,)),
+            evidence=baseline_evidence,
+        ),
+        evidence=baseline_evidence,
+    )
+    market_response = attach_provenance(
+        """# Stock data for 600519.SS from 2026-07-17 to 2026-07-24
+# Price adjustment: qfq (forward-adjusted)
+# Actual data source: AkShare / Tencent
+
+Date,Open,High,Low,Close,Volume
+2026-07-17,99,101,98,100,1000
+2026-07-20,100,102,99,101,1000
+2026-07-24,109,111,108,110,1000
+""",
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="AkShare / Tencent",
+            requested="2026-07-17 to 2026-07-24",
+            effective="2026-07-17 to 2026-07-24",
+            timing="market-date filtered; qfq adjusted; future rows excluded",
+            retrieved_at="2026-07-24T08:00:00Z",
+        ),
+    )
+    news_response = attach_provenance(
+        "No CNINFO announcements found for 600519.SS in the bounded window",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="CNINFO",
+            requested="2026-07-17 to 2026-07-24",
+            effective="2026-07-17 to 2026-07-24",
+            timing="available; no relevant items in window; returned_items=0",
+            retrieved_at="2026-07-24T08:00:00Z",
+        ),
+    )
+    fundamentals_response = attach_evidence_span(
+        attach_provenance(
+            "## Company profile (CNINFO; current reference, not historical PIT)\n"
+            "主营业务: 白酒生产",
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="AkShare / CNINFO company profile",
+                requested="2026-07-24",
+                effective="current reference",
+                timing="live-only current company reference; not historical PIT",
+                retrieved_at="2026-07-24T08:00:00Z",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    def route(method, *_args, **_kwargs):
+        return {
+            "get_stock_data": market_response,
+            "get_news": news_response,
+            "get_fundamentals": fundamentals_response,
+        }[method]
+
+    monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
+    synthesis_inputs = []
+
+    def synthesize(input_):
+        synthesis_inputs.append(input_)
+        return default_incremental_synthesizer(input_)
+
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        eligibility_resolver=lambda symbol: {
+            "symbol": symbol,
+            "quote_type": "EQUITY",
+        },
+        incremental_synthesizer=synthesize,
+    )
+    result = service.run(
+        AnalysisRequest(
+            ticker="600519.SS",
+            analysis_date=date(2026, 7, 24),
+            analysts=("market", "news", "fundamentals"),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.id,
+        )
+    )
+    response = await web_client.get("/api/v1/timelines/600519.SS")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert response.status_code == 200
+    node = next(
+        item
+        for item in response.json()["timeline"]["nodes"]
+        if item["id"] == result.run_id
+    )
+    assert node["performance"]["stock"]["calculation"]["adjustment_basis"] == (
+        "qfq_forward_adjusted"
+    )
+    assert node["performance"]["benchmarks"] == []
+    domains = {
+        domain["domain"]: domain
+        for domain in node["collection_summary"]["domains"]
+    }
+    assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
+    assert domains["news"]["state"] == "empty"
+    assert domains["news"]["diagnostic"] == {
+        "code": "bounded_feed_no_observed_records"
+    }
+    assert domains["fundamentals"]["diagnostic"] == {
+        "code": "near_live_snapshot"
+    }
+    assert {
+        domain["domain"]: domain["status"]
+        for domain in node["research_availability"]["domains"]
+    } == {
+        "market": "available",
+        "news": "missing",
+        "fundamentals": "limited",
+    }
+    assert len(synthesis_inputs) == 1
+    assert synthesis_inputs[0].full_baseline_run_id == baseline.id
 
 
 @pytest.mark.anyio
