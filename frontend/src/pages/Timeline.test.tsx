@@ -7,7 +7,14 @@ import { Router } from "../router";
 import Timeline from "./Timeline";
 
 vi.mock("../api/client", () => ({
-  api: { timeline: vi.fn(), timelines: vi.fn(), selectPrimaryCycle: vi.fn() },
+  api: {
+    timeline: vi.fn(),
+    timelines: vi.fn(),
+    selectPrimaryCycle: vi.fn(),
+    trashRuns: vi.fn(),
+    restoreRuns: vi.fn(),
+    purgeRuns: vi.fn(),
+  },
 }));
 
 beforeEach(async () => {
@@ -396,4 +403,37 @@ test("lets the user select a different Full Cycle as Primary Research", async ()
   await waitFor(() =>
     expect(api.selectPrimaryCycle).toHaveBeenCalledWith("7203.T", "run-2"),
   );
+});
+
+test("explains Full-Cycle Trash and preserves the explicit Primary replacement", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1", nodes: [
+      { id: "full-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
+        research_kind: "full", full_baseline_run_id: null,
+        is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null },
+      { id: "full-2", cycle_id: "full-2", instrument: "NVDA",
+        analysis_date: "2026-07-25", research_schema_version: "1",
+        information_cutoff_at: "2026-07-25T23:59:59Z", method_snapshot: {},
+        research_kind: "full", full_baseline_run_id: null,
+        is_cycle_head: true, is_primary: false, is_active: true, trashed_at: null },
+    ],
+  } } as never);
+  vi.mocked(api.trashRuns).mockResolvedValue({ runs: [], changed: 1, impacts: [] } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+  fireEvent.click((await screen.findAllByRole("button", { name: "Move Cycle to Trash" }))[0]);
+  expect(screen.getByText("The Full Node owns its entire Research Cycle.")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Replacement Primary Cycle"), {
+    target: { value: "full-2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm Trash" }));
+
+  await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(
+    ["full-1"], { "full-1": "full-2" },
+  ));
+  fireEvent.click(screen.getByRole("button", { name: "Show retained Trash" }));
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 0, "all"));
 });

@@ -14,6 +14,7 @@ from tradingagents.application.contracts import (
     EvidenceSealView,
     ResearchTimeline,
     RunAttemptView,
+    RunLifecycleImpact,
     RunView,
 )
 
@@ -96,6 +97,7 @@ class RunCreateRequest(AnalysisRequest):
 
 class RunBatchRequest(ApiModel):
     run_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+    primary_replacements: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("run_ids")
     @classmethod
@@ -107,10 +109,19 @@ class RunBatchRequest(ApiModel):
             raise ValueError("run IDs must be unique")
         return normalized
 
+    @field_validator("primary_replacements")
+    @classmethod
+    def validate_primary_replacements(cls, value: dict[str, str]) -> dict[str, str]:
+        normalized = {key.strip(): replacement.strip() for key, replacement in value.items()}
+        if any(not key or not replacement for key, replacement in normalized.items()):
+            raise ValueError("Primary replacement IDs must not be empty")
+        return normalized
+
 
 class RunBatchResult(ApiModel):
     runs: tuple[RunView, ...]
     changed: int = Field(ge=0)
+    impacts: tuple[RunLifecycleImpact, ...] = ()
 
 
 class ExportQuery(ApiModel):

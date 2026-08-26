@@ -61,6 +61,9 @@ class RunRecord(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     trashed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trash_cascade_full_run_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     attempts: Mapped[list[RunAttemptRecord]] = relationship(

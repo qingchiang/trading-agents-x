@@ -3632,6 +3632,17 @@
             "title": "Research Schema Version",
             "type": "string"
           },
+          "trash_cascade_full_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trash Cascade Full Run Id"
+          },
           "trashed_at": {
             "anyOf": [
               {
@@ -4112,6 +4123,13 @@
       "RunBatchRequest": {
         "additionalProperties": false,
         "properties": {
+          "primary_replacements": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Primary Replacements",
+            "type": "object"
+          },
           "run_ids": {
             "items": {
               "type": "string"
@@ -4135,6 +4153,14 @@
             "minimum": 0.0,
             "title": "Changed",
             "type": "integer"
+          },
+          "impacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunLifecycleImpact"
+            },
+            "title": "Impacts",
+            "type": "array"
           },
           "runs": {
             "items": {
@@ -4407,6 +4433,74 @@
           "created_at"
         ],
         "title": "RunEvent",
+        "type": "object"
+      },
+      "RunLifecycleImpact": {
+        "additionalProperties": false,
+        "description": "The exact Run and Cycle scope affected by one lifecycle request.",
+        "properties": {
+          "affected_run_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Run Ids",
+            "type": "array"
+          },
+          "cascade_moved_run_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cascade Moved Run Ids",
+            "type": "array"
+          },
+          "cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cycle Id"
+          },
+          "replacement_primary_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement Primary Cycle Id"
+          },
+          "requested_run_id": {
+            "title": "Requested Run Id",
+            "type": "string"
+          },
+          "research_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Kind"
+          }
+        },
+        "required": [
+          "requested_run_id"
+        ],
+        "title": "RunLifecycleImpact",
         "type": "object"
       },
       "RunMetrics": {
@@ -5768,6 +5862,44 @@
         "summary": "Create Run"
       }
     },
+    "/api/v1/runs/purge": {
+      "post": {
+        "operationId": "purge_runs_api_v1_runs_purge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Runs"
+      }
+    },
     "/api/v1/runs/restore": {
       "post": {
         "operationId": "restore_runs_api_v1_runs_restore_post",
@@ -6258,6 +6390,15 @@
               "minimum": 0,
               "title": "Node Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trash_state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunTrashState",
+              "default": "active"
             }
           }
         ],

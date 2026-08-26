@@ -674,7 +674,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0008_incremental_node_products",
+                "0009_cycle_aware_trash",
             )
             assert (
                 upgraded.execute(

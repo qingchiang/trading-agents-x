@@ -519,6 +519,7 @@ export interface components {
       research_availability?: components["schemas"]["ResearchAvailability"] | null;
       research_kind: "full" | "incremental";
       research_schema_version: string;
+      trash_cascade_full_run_id?: string | null;
       trashed_at?: string | null;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
@@ -589,10 +590,12 @@ export interface components {
       status: components["schemas"]["RunStatus"];
     };
     RunBatchRequest: {
+      primary_replacements?: Record<string, string>;
       run_ids: string[];
     };
     RunBatchResult: {
       changed: number;
+      impacts?: components["schemas"]["RunLifecycleImpact"][];
       runs: components["schemas"]["RunView"][];
     };
     RunCreateRequest: {
@@ -626,6 +629,14 @@ export interface components {
       payload?: Record<string, unknown>;
       run_id: string;
       sequence: number;
+    };
+    RunLifecycleImpact: {
+      affected_run_ids?: string[];
+      cascade_moved_run_ids?: string[];
+      cycle_id?: string | null;
+      replacement_primary_cycle_id?: string | null;
+      requested_run_id: string;
+      research_kind?: "full" | "incremental" | null;
     };
     RunMetrics: {
       cache_hit_input_tokens?: number;

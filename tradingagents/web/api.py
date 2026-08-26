@@ -375,12 +375,14 @@ def create_app(
         instrument: str,
         node_limit: Annotated[int, Query(ge=1, le=200)] = 50,
         node_offset: Annotated[int, Query(ge=0)] = 0,
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
     ):
         return TimelineDetail(
             timeline=repository.get_timeline(
                 instrument,
                 node_limit=node_limit,
                 node_offset=node_offset,
+                trash_state=trash_state,
             )
         )
 
@@ -401,16 +403,27 @@ def create_app(
         response_model=RunBatchResult,
     )
     def trash_runs(payload: RunBatchRequest):
-        runs, changed = repository.trash_runs(payload.run_ids)
-        return RunBatchResult(runs=runs, changed=changed)
+        result = repository.trash_runs_detailed(
+            payload.run_ids,
+            primary_replacements=payload.primary_replacements,
+        )
+        return RunBatchResult(**result.model_dump())
 
     @app.post(
         f"{API_PREFIX}/runs/restore",
         response_model=RunBatchResult,
     )
     def restore_runs(payload: RunBatchRequest):
-        runs, changed = repository.restore_runs(payload.run_ids)
-        return RunBatchResult(runs=runs, changed=changed)
+        result = repository.restore_runs_detailed(payload.run_ids)
+        return RunBatchResult(**result.model_dump())
+
+    @app.post(
+        f"{API_PREFIX}/runs/purge",
+        response_model=RunBatchResult,
+    )
+    def purge_runs(payload: RunBatchRequest):
+        result = repository.purge_runs_detailed(payload.run_ids)
+        return RunBatchResult(**result.model_dump())
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}", response_model=RunDetail)
     def get_run(run_id: str):

@@ -106,13 +106,21 @@ export const api = {
       }`,
     ),
   runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
-  trashRuns: (runIds: string[]) =>
+  trashRuns: (runIds: string[], primaryReplacements: Record<string, string> = {}) =>
     request<RunBatchResult>("/api/v1/runs/trash", {
       method: "POST",
-      body: JSON.stringify({ run_ids: runIds }),
+      body: JSON.stringify({
+        run_ids: runIds,
+        primary_replacements: primaryReplacements,
+      }),
     }),
   restoreRuns: (runIds: string[]) =>
     request<RunBatchResult>("/api/v1/runs/restore", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
+    }),
+  purgeRuns: (runIds: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/purge", {
       method: "POST",
       body: JSON.stringify({ run_ids: runIds }),
     }),
@@ -121,9 +129,14 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
-  timeline: (instrument: string, nodeLimit = 20, nodeOffset = 0) =>
+  timeline: (
+    instrument: string,
+    nodeLimit = 20,
+    nodeOffset = 0,
+    trashState: "active" | "trashed" | "all" = "active",
+  ) =>
     request<TimelineDetail>(
-      `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}`,
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}&trash_state=${trashState}`,
     ),
   timelines: (limit = 50, offset = 0) =>
     request<ResearchTimelinePage>(

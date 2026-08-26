@@ -123,7 +123,8 @@ export default function Runs() {
   };
 
   const eligibleRuns = (page?.items ?? []).filter((run) =>
-    trashState === "trashed" ? true : terminalStatuses.has(run.status),
+    !run.research_schema_version &&
+    (trashState === "trashed" ? true : terminalStatuses.has(run.status)),
   );
   const allEligibleSelected =
     eligibleRuns.length > 0 &&
@@ -326,8 +327,9 @@ export default function Runs() {
               <tbody>
                 {page.items.map((run) => {
                   const eligible =
-                    trashState === "trashed" ||
-                    terminalStatuses.has(run.status);
+                    !run.research_schema_version &&
+                    (trashState === "trashed" ||
+                      terminalStatuses.has(run.status));
                   return (
                     <tr key={run.id}>
                       <td className="selection-cell">

@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import { api, type ResearchTimelinePage, type TimelineDetail } from "../api/client";
 import type { components } from "../api/types.generated";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Link, usePathname } from "../router";
 
 const NODE_PAGE_SIZE = 20;
 type PerformanceCalculation = components["schemas"]["PerformanceCalculationRecord"];
+type ResearchNode = components["schemas"]["ResearchNodeView"];
 
 function PerformanceCalculationAudit({
   calculation,
@@ -40,6 +42,11 @@ export default function Timeline() {
   const [timelines, setTimelines] = useState<ResearchTimelinePage | null>(null);
   const [timelineOffset, setTimelineOffset] = useState(0);
   const [nodeOffset, setNodeOffset] = useState(0);
+  const [showRetainedTrash, setShowRetainedTrash] = useState(false);
+  const [pendingNode, setPendingNode] = useState<ResearchNode | null>(null);
+  const [lifecycleMode, setLifecycleMode] = useState<"trash" | "purge" | null>(null);
+  const [replacementPrimary, setReplacementPrimary] = useState("");
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const timelineItems = timelines?.items ?? [];
   const detailNodes = detail?.timeline.nodes ?? [];
   const nodeTotal = detail?.timeline.node_total ?? 0;
@@ -57,7 +64,10 @@ export default function Timeline() {
         onError,
       );
     } else {
-      void api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset).then(
+      const request = showRetainedTrash
+        ? api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset, "all")
+        : api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset);
+      void request.then(
         (value) => active && setDetail(value),
         onError,
       );
@@ -65,7 +75,51 @@ export default function Timeline() {
     return () => {
       active = false;
     };
-  }, [instrument, isList, nodeOffset, t, timelineOffset]);
+  }, [instrument, isList, nodeOffset, showRetainedTrash, t, timelineOffset]);
+
+  const reloadDetail = async () => {
+    const value = showRetainedTrash
+      ? await api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset, "all")
+      : await api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset);
+    setDetail(value);
+  };
+
+  const applyLifecycle = async () => {
+    if (!pendingNode || !lifecycleMode) return;
+    const replacements =
+      pendingNode.research_kind === "full" && pendingNode.is_primary && replacementPrimary
+        ? { [pendingNode.id]: replacementPrimary }
+        : {};
+    if (
+      lifecycleMode === "trash" &&
+      pendingNode.research_kind === "full" &&
+      pendingNode.is_primary &&
+      detailNodes.some((node) =>
+        node.research_kind === "full" && node.is_active && node.id !== pendingNode.id
+      ) &&
+      !replacementPrimary
+    ) {
+      setError(t("selectReplacementCycle"));
+      return;
+    }
+    setLifecycleBusy(true);
+    setError("");
+    try {
+      if (lifecycleMode === "trash") {
+        await api.trashRuns([pendingNode.id], replacements);
+      } else {
+        await api.purgeRuns([pendingNode.id]);
+      }
+      setPendingNode(null);
+      setLifecycleMode(null);
+      setReplacementPrimary("");
+      await reloadDetail();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("timelineLoadFailed"));
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
 
   if (isList) {
     return (
@@ -145,6 +199,16 @@ export default function Timeline() {
         <Link className="button" to="/runs">
           {t("executionHistory")}
         </Link>
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setNodeOffset(0);
+            setShowRetainedTrash((current) => !current);
+          }}
+        >
+          {t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}
+        </button>
       </header>
       {error && <div className="alert">{error}</div>}
       {!detail && !error && <div className="loading">{t("loading")}</div>}
@@ -165,6 +229,7 @@ export default function Timeline() {
             <div>
               {node.is_cycle_head && <strong>{t("cycleHead")}</strong>}
               {node.is_primary && <strong>{t("primaryCycle")}</strong>}
+              {!node.is_active && <strong>{t("retainedInTrash")}</strong>}
             </div>
           </div>
           <dl className="definition-list">
@@ -335,6 +400,44 @@ export default function Timeline() {
               {t("makePrimary")}
             </button>
           )}
+          {node.is_active ? (
+            <button
+              type="button"
+              className="button danger"
+              onClick={() => {
+                setPendingNode(node);
+                setLifecycleMode("trash");
+                setReplacementPrimary("");
+              }}
+            >
+              {t(node.research_kind === "full" ? "moveCycleToTrash" : "moveNodeToTrash")}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  setError("");
+                  void api.restoreRuns([node.id]).then(reloadDetail, (cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : t("timelineLoadFailed")),
+                  );
+                }}
+              >
+                {t("restoreResearchNode")}
+              </button>
+              <button
+                type="button"
+                className="button danger"
+                onClick={() => {
+                  setPendingNode(node);
+                  setLifecycleMode("purge");
+                }}
+              >
+                {t("purgeResearchNode")}
+              </button>
+            </>
+          )}
           <Link className="text-link" to={`/runs/${node.id}`}>
             {t("openOperationalRun")} →
           </Link>
@@ -373,6 +476,64 @@ export default function Timeline() {
             {t("next")} →
           </button>
         </div>
+      )}
+      {pendingNode && lifecycleMode && (
+        <ConfirmDialog
+          title={t(
+            lifecycleMode === "purge"
+              ? "purgeResearchTitle"
+              : pendingNode.research_kind === "full"
+                ? "cycleTrashTitle"
+                : "nodeTrashTitle",
+          )}
+          confirmLabel={t(
+            lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash",
+          )}
+          cancelLabel={t("cancel")}
+          busy={lifecycleBusy}
+          onCancel={() => {
+            setPendingNode(null);
+            setLifecycleMode(null);
+          }}
+          onConfirm={() => void applyLifecycle()}
+        >
+          <p>
+            {t(
+              lifecycleMode === "purge"
+                ? "purgeResearchImpact"
+                : pendingNode.research_kind === "full"
+                  ? "fullOwnsCycle"
+                  : "incrementalTrashImpact",
+            )}
+          </p>
+          {lifecycleMode === "trash" &&
+            pendingNode.research_kind === "full" &&
+            pendingNode.is_primary &&
+            detailNodes.some((node) =>
+              node.research_kind === "full" && node.is_active && node.id !== pendingNode.id
+            ) && (
+              <label>
+                {t("replacementPrimaryCycle")}
+                <select
+                  value={replacementPrimary}
+                  onChange={(event) => setReplacementPrimary(event.target.value)}
+                >
+                  <option value="">{t("selectReplacementCycle")}</option>
+                  {detailNodes
+                    .filter((node) =>
+                      node.research_kind === "full" &&
+                      node.is_active &&
+                      node.id !== pendingNode.id
+                    )
+                    .map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {node.analysis_date} · {node.id}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+        </ConfirmDialog>
       )}
     </section>
   );

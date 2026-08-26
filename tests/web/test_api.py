@@ -920,6 +920,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "is_primary": True,
             "is_active": True,
             "trashed_at": None,
+            "trash_cascade_full_run_id": None,
             "collection_summary": None,
             "research_availability": None,
             "information_advancement": None,
@@ -1127,7 +1128,10 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
         "/api/v1/timelines/NVDA/primary-cycle",
         json={"full_run_id": "missing"},
     )
-    web_repository.trash_runs((second,))
+    web_repository.trash_runs(
+        (second,),
+        primary_replacements={second: first},
+    )
     trashed = await web_client.put(
         "/api/v1/timelines/NVDA/primary-cycle",
         json={"full_run_id": second},
@@ -1141,6 +1145,86 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
     assert cross_instrument.json()["error"]["code"] == "invalid_primary_cycle"
     assert missing.status_code == 422
     assert trashed.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt_in(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    def commit_full(analysis_date: date, *, make_primary: bool | None = None) -> str:
+        request = AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=analysis_date,
+            make_primary=make_primary,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="1",
+            information_cutoff_at=datetime.combine(
+                analysis_date, datetime.max.time(), UTC
+            ),
+            method_snapshot={"schema_version": "1"},
+            research_kind="full",
+        )
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=analysis_date,
+            effective_date=analysis_date,
+            content=run.id,
+        )
+        evidence = EvidenceBundle(
+            instrument="NVDA", analysis_date=analysis_date, items=(item,)
+        )
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument="NVDA",
+                reports={},
+                decision=research_decision(evidence_refs=(item.ref,)),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    primary = commit_full(date(2026, 7, 24))
+    replacement = commit_full(date(2026, 7, 25), make_primary=False)
+
+    rejected = await web_client.post(
+        "/api/v1/runs/trash", json={"run_ids": [primary]}
+    )
+    trashed = await web_client.post(
+        "/api/v1/runs/trash",
+        json={
+            "run_ids": [primary],
+            "primary_replacements": {primary: replacement},
+        },
+    )
+    active = await web_client.get("/api/v1/timelines/NVDA")
+    retained = await web_client.get(
+        "/api/v1/timelines/NVDA?trash_state=all"
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "invalid_run_transition"
+    assert trashed.status_code == 200
+    assert trashed.json()["impacts"][0]["affected_run_ids"] == [primary]
+    assert trashed.json()["impacts"][0]["replacement_primary_cycle_id"] == replacement
+    assert [node["id"] for node in active.json()["timeline"]["nodes"]] == [
+        replacement
+    ]
+    assert {node["id"] for node in retained.json()["timeline"]["nodes"]} == {
+        primary,
+        replacement,
+    }
 
 
 @pytest.mark.anyio

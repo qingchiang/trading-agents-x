@@ -1712,6 +1712,7 @@ class ResearchNodeView(FrozenModel):
     is_primary: bool
     is_active: bool
     trashed_at: datetime | None = None
+    trash_cascade_full_run_id: str | None = None
     collection_summary: CollectionSummary | None = None
     research_availability: ResearchAvailability | None = None
     information_advancement: InformationAdvancement | None = None
@@ -1720,6 +1721,23 @@ class ResearchNodeView(FrozenModel):
     decision: ResearchDecision | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
     cycle_warning: bool = False
+
+
+class RunLifecycleImpact(FrozenModel):
+    """The exact Run and Cycle scope affected by one lifecycle request."""
+
+    requested_run_id: str
+    cycle_id: str | None = None
+    research_kind: Literal["full", "incremental"] | None = None
+    affected_run_ids: tuple[str, ...] = ()
+    cascade_moved_run_ids: tuple[str, ...] = ()
+    replacement_primary_cycle_id: str | None = None
+
+
+class RunLifecycleResult(FrozenModel):
+    runs: tuple[RunView, ...] = ()
+    changed: int = Field(ge=0)
+    impacts: tuple[RunLifecycleImpact, ...] = ()
 
 
 class ResearchTimeline(FrozenModel):

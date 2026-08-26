@@ -225,6 +225,23 @@ Only terminal runs can be moved to Trash. A trashed run remains readable and
 exportable, but is excluded immediately from default run listings, Dashboard
 summaries, and recent-instrument suggestions. Restore is idempotent.
 
+For Run-backed Research Nodes, the Full Node ID is also the lifecycle boundary
+of its derived Research Cycle. An Incremental Node moves independently. Moving
+a Full Node atomically moves every active direct Incremental child and records
+the Full ID on each child moved by that cascade, so restore can leave previously
+independent Trash entries untouched. Removing the Primary Full requires an
+explicit active replacement when another Cycle remains; removing the final
+active Full deletes the Primary pointer. Default Timeline reads include active
+Nodes only, while an explicit Trash-state query exposes retained audit data.
+
+Restore revalidates the current Full-baseline contract, active same-Cycle and
+cutoff uniqueness, and the Primary pointer in one SQLite write transaction. A
+child cannot be restored while its Full remains in Trash. Permanent purge of a
+Full deletes its entire owned Cycle; Incremental purge remains Node-local. Both
+manual purge and retention cleanup delete application-owned rows and every
+owned checkpoint thread transactionally, without following template lineage,
+Evidence references, or any cross-Cycle relationship.
+
 The Web process performs one opportunistic expiry check at startup. The worker
 checks before its first claim and uses a monotonic in-process deadline for
 subsequent checks: 24 hours after success or one hour after failure. UTC
