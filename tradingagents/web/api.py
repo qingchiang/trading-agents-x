@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
+    ResearchNodeComparison,
     ResearchTimelinePage,
     RunEvent,
     RunPage,
@@ -38,6 +39,7 @@ from tradingagents.application.errors import (
     IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
     InvalidIncrementalBaselineError,
+    InvalidResearchNodeComparisonError,
     UnsupportedInstrumentError,
 )
 from tradingagents.application.maintenance import TrashMaintenance
@@ -67,6 +69,7 @@ from .models import (
     PrimaryCycleSelectionRequest,
     ProviderModelCatalog,
     RequestValidationErrorResponse,
+    ResearchNodeComparisonRequest,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -157,6 +160,13 @@ def create_app(
         exc: IncrementalRequestConflictError,
     ):
         return _error(409, exc.code, str(exc))
+
+    @app.exception_handler(InvalidResearchNodeComparisonError)
+    async def invalid_research_node_comparison(
+        _request: Request,
+        exc: InvalidResearchNodeComparisonError,
+    ):
+        return _error(422, exc.code, str(exc))
 
     @app.exception_handler(UnsupportedInstrumentError)
     async def unsupported_instrument(
@@ -397,6 +407,16 @@ def create_app(
         return TimelineDetail(
             timeline=repository.select_primary_cycle(instrument, payload.full_run_id)
         )
+
+    @app.post(
+        f"{API_PREFIX}/timelines/{{instrument}}/compare",
+        response_model=ResearchNodeComparison,
+    )
+    def compare_research_nodes(
+        instrument: str,
+        payload: ResearchNodeComparisonRequest,
+    ):
+        return service.compare_research_nodes(instrument, payload.nodes)
 
     @app.post(
         f"{API_PREFIX}/runs/trash",

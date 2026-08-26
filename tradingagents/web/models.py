@@ -12,6 +12,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
+    ResearchNodeComparisonSelection,
     ResearchTimeline,
     RunAttemptView,
     RunLifecycleImpact,
@@ -70,6 +71,10 @@ class RunDetail(ApiModel):
 
 class TimelineDetail(ApiModel):
     timeline: ResearchTimeline
+
+
+class ResearchNodeComparisonRequest(ApiModel):
+    nodes: tuple[ResearchNodeComparisonSelection, ...] = Field(min_length=2, max_length=2)
 
 
 class PrimaryCycleSelectionRequest(ApiModel):

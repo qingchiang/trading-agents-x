@@ -1774,6 +1774,81 @@ class ResearchTimelinePage(FrozenModel):
     offset: int = Field(ge=0)
 
 
+class ResearchNodeLifecycleState(_StableStrEnum):
+    """Expected retained lifecycle state for an explicit comparison selection."""
+
+    ACTIVE = "active"
+    TRASHED = "trashed"
+
+
+class ResearchNodeComparisonSelection(FrozenModel):
+    """One explicitly selected side of an on-demand Node Comparison."""
+
+    node_id: str = Field(min_length=1, max_length=36)
+    lifecycle_state: ResearchNodeLifecycleState = ResearchNodeLifecycleState.ACTIVE
+
+    @field_validator("node_id", mode="before")
+    @classmethod
+    def normalize_node_id(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ComparisonValueState(_StableStrEnum):
+    """Presentation-safe distinction between schema absence and stored values."""
+
+    RECORDED = "recorded"
+    NULL = "null"
+    EMPTY = "empty"
+    NOT_RECORDED_UNDER_THIS_SCHEMA = "not_recorded_under_this_schema"
+
+
+class ResearchNodeComparisonValue(FrozenModel):
+    state: ComparisonValueState
+    value: Any = None
+
+
+class ResearchNodeDecisionSection(FrozenModel):
+    """One fixed Decision section aligned in requested side order."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    values: tuple[ResearchNodeComparisonValue, ...] = Field(min_length=2, max_length=2)
+
+
+class ResearchNodeComparisonWarning(FrozenModel):
+    code: Literal["method_changed"]
+    message: str = Field(min_length=1)
+
+
+class ResearchNodeComparisonSide(FrozenModel):
+    """Immutable per-Node context; values are never normalized across sides."""
+
+    node_id: str
+    cycle_id: str
+    analysis_date: date
+    research_schema_version: str
+    method_snapshot: dict[str, Any]
+    research_kind: Literal["full", "incremental"]
+    lifecycle_state: ResearchNodeLifecycleState
+    collection_summary: CollectionSummary | None = None
+    research_availability: ResearchAvailability | None = None
+    information_advancement: InformationAdvancement | None = None
+    reassessment: ResearchReassessment | None = None
+    decision: dict[str, Any]
+    performance: PerformanceObservation | None = None
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class ResearchNodeComparison(FrozenModel):
+    """Deterministic, read-only comparison of exactly two retained Nodes."""
+
+    instrument: str
+    sides: tuple[ResearchNodeComparisonSide, ...] = Field(min_length=2, max_length=2)
+    cross_cycle: bool
+    method_changed: bool
+    warnings: tuple[ResearchNodeComparisonWarning, ...] = ()
+    decision_sections: tuple[ResearchNodeDecisionSection, ...]
+
+
 class CollectionDiagnostic(FrozenModel):
     """A stable, secret-free collection failure class safe for Run events."""
 

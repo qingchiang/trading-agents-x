@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { api, type ResearchTimelinePage, type TimelineDetail } from "../api/client";
+import {
+  api,
+  type ResearchNodeComparison,
+  type ResearchNodeComparisonSelection,
+  type ResearchTimelinePage,
+  type TimelineDetail,
+} from "../api/client";
 import type { components } from "../api/types.generated";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { Link, usePathname } from "../router";
@@ -9,6 +15,97 @@ import { Link, usePathname } from "../router";
 const NODE_PAGE_SIZE = 20;
 type PerformanceCalculation = components["schemas"]["PerformanceCalculationRecord"];
 type ResearchNode = components["schemas"]["ResearchNodeView"];
+
+function AuditContext({ title, value }: { title: string; value: unknown }) {
+  return (
+    <section className="comparison-context">
+      <h4>{title}</h4>
+      {value === null || value === undefined ? (
+        <p>—</p>
+      ) : (
+        <pre>{JSON.stringify(value, null, 2)}</pre>
+      )}
+    </section>
+  );
+}
+
+function ComparisonValue({
+  state,
+  value,
+}: components["schemas"]["ResearchNodeComparisonValue"]) {
+  const { t } = useTranslation();
+  if (state === "not_recorded_under_this_schema") {
+    return <strong>{t("notRecordedUnderThisSchema")}</strong>;
+  }
+  if (state === "null") return <span>{t("comparisonNull")}</span>;
+  if (state === "empty") return <span>{t("comparisonEmpty")}</span>;
+  return <span>{typeof value === "string" ? value : JSON.stringify(value)}</span>;
+}
+
+function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison }) {
+  const { t } = useTranslation();
+  return (
+    <section className="panel comparison-panel" aria-label={t("nodeComparison")}>
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("nodeComparison")}</p>
+          <h2>{t("selectedResearchNodes")}</h2>
+        </div>
+        <span>{t(comparison.cross_cycle ? "crossCycleComparison" : "sameCycleComparison")}</span>
+      </div>
+      {comparison.warnings?.map((warning) => (
+        <div className="alert" role="status" key={warning.code}>
+          <strong>{t("methodChanged")}</strong> {warning.message}
+        </div>
+      ))}
+      <div className="comparison-grid">
+        {comparison.sides.map((side, index) => {
+          const kind = t(side.research_kind === "full" ? "fullResearchNode" : "incrementalResearchNode");
+          const lifecycle = t(side.lifecycle_state === "active" ? "activeNode" : "trashNode");
+          return (
+            <article
+              className="comparison-side"
+              aria-label={t("comparisonSideLabel", { side: index + 1, kind, lifecycle })}
+              key={side.node_id}
+            >
+              <header>
+                <p className="eyebrow">{kind} · {lifecycle}</p>
+                <h3>{side.analysis_date}</h3>
+                <code>{side.node_id}</code>
+              </header>
+              <dl className="definition-list">
+                <div><dt>{t("researchSchema")}</dt><dd>{side.research_schema_version}</dd></div>
+                <div><dt>{t("cycleId")}</dt><dd>{side.cycle_id}</dd></div>
+              </dl>
+              <AuditContext title={t("methodSnapshot")} value={side.method_snapshot} />
+              <AuditContext title={t("collectionSummary")} value={side.collection_summary} />
+              <AuditContext title={t("researchAvailability")} value={side.research_availability} />
+              <AuditContext title={t("reassessment")} value={side.reassessment} />
+              <AuditContext title={t("decision")} value={side.decision} />
+              <AuditContext title={t("performance")} value={side.performance} />
+            </article>
+          );
+        })}
+      </div>
+      <div className="table-wrap comparison-decision-table">
+        <table>
+          <caption>{t("alignedDecisionSections")}</caption>
+          <thead><tr><th>{t("decisionSection")}</th><th>{t("comparisonSide", { side: 1 })}</th><th>{t("comparisonSide", { side: 2 })}</th></tr></thead>
+          <tbody>
+            {comparison.decision_sections.map((section) => (
+              <tr key={section.key}>
+                <th scope="row">{section.key}</th>
+                {section.values.map((value, index) => (
+                  <td key={`${section.key}-${index}`}><ComparisonValue {...value} /></td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function PerformanceCalculationAudit({
   calculation,
@@ -47,12 +144,42 @@ export default function Timeline() {
   const [lifecycleMode, setLifecycleMode] = useState<"trash" | "purge" | null>(null);
   const [replacementPrimary, setReplacementPrimary] = useState("");
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [comparisonNodes, setComparisonNodes] = useState<ResearchNode[]>([]);
+  const [comparison, setComparison] = useState<ResearchNodeComparison | null>(null);
+  const [comparisonBusy, setComparisonBusy] = useState(false);
   const timelineItems = timelines?.items ?? [];
   const detailNodes = detail?.timeline.nodes ?? [];
   const activeFullCycles = detail?.timeline.active_full_cycles ?? [];
   const nodeTotal = detail?.timeline.node_total ?? 0;
   const nodeLimit = detail?.timeline.node_limit ?? NODE_PAGE_SIZE;
   const [error, setError] = useState("");
+
+  const toggleComparisonNode = (node: ResearchNode) => {
+    setComparison(null);
+    setComparisonNodes((current) => {
+      if (current.some((selected) => selected.id === node.id)) {
+        return current.filter((selected) => selected.id !== node.id);
+      }
+      return current.length < 2 ? [...current, node] : current;
+    });
+  };
+
+  const compareSelectedNodes = async () => {
+    if (comparisonNodes.length !== 2) return;
+    const selections: ResearchNodeComparisonSelection[] = comparisonNodes.map((node) => ({
+      node_id: node.id,
+      lifecycle_state: node.is_active ? "active" : "trashed",
+    }));
+    setComparisonBusy(true);
+    setError("");
+    try {
+      setComparison(await api.compareResearchNodes(instrument, selections));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("timelineLoadFailed"));
+    } finally {
+      setComparisonBusy(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -217,6 +344,26 @@ export default function Timeline() {
       {detail?.timeline.timeline_warning && (
         <div className="alert">{t("fullResearchRecommended")}</div>
       )}
+      {detail && (
+        <div className="panel comparison-toolbar" aria-label={t("comparisonSelection")}>
+          <div>
+            <strong>{t("comparisonSelection")}</strong>
+            <p>{t("comparisonSelectionHint")}</p>
+            {comparisonNodes.map((node, index) => (
+              <code key={node.id}>{index + 1}. {node.id} · {t(node.is_active ? "activeNode" : "trashNode")}</code>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="button primary"
+            disabled={comparisonNodes.length !== 2 || comparisonBusy}
+            onClick={() => void compareSelectedNodes()}
+          >
+            {t("compareSelectedNodes")}
+          </button>
+        </div>
+      )}
+      {comparison && <NodeComparisonView comparison={comparison} />}
       {detailNodes.map((node) => (
         <article className="panel" key={node.id}>
           <div className="panel-header">
@@ -251,6 +398,22 @@ export default function Timeline() {
               </dd>
             </div>
           </dl>
+          <button
+            type="button"
+            className="button"
+            disabled={
+              comparisonNodes.length === 2 &&
+              !comparisonNodes.some((selected) => selected.id === node.id)
+            }
+            aria-pressed={comparisonNodes.some((selected) => selected.id === node.id)}
+            onClick={() => toggleComparisonNode(node)}
+          >
+            {t(
+              comparisonNodes.some((selected) => selected.id === node.id)
+                ? "removeFromComparison"
+                : "selectForComparison",
+            )}
+          </button>
           {node.collection_summary && (
             <details>
               <summary>Collection Summary</summary>

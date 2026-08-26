@@ -271,6 +271,77 @@ select:focus-visible {
   letter-spacing: -0.045em;
 }
 
+.comparison-toolbar {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.comparison-toolbar p {
+  margin: 4px 0 8px;
+  color: var(--muted);
+}
+
+.comparison-toolbar code {
+  display: block;
+  margin-top: 4px;
+}
+
+.comparison-panel {
+  border-top: 4px solid var(--blue);
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.comparison-side {
+  min-width: 0;
+  padding: 18px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.comparison-side h3,
+.comparison-context h4 {
+  margin: 4px 0 8px;
+}
+
+.comparison-context {
+  margin-top: 16px;
+}
+
+.comparison-context pre {
+  max-height: 260px;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.comparison-decision-table {
+  margin-top: 20px;
+}
+
+.comparison-decision-table caption {
+  padding: 10px;
+  font-weight: 750;
+  text-align: left;
+}
+
+@media (max-width: 860px) {
+  .comparison-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .eyebrow {
   margin: 0;
   color: var(--blue);

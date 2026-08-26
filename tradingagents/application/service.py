@@ -46,6 +46,8 @@ from .contracts import (
     PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
+    ResearchNodeComparison,
+    ResearchNodeComparisonSelection,
     ResearchReassessment,
     ResearchReassessmentEntry,
     RunEvent,
@@ -175,6 +177,14 @@ class AnalysisService:
         self.incremental_collector = incremental_collector
         self.incremental_synthesizer = incremental_synthesizer
         self.now = now
+
+    def compare_research_nodes(
+        self,
+        instrument: str,
+        selections: tuple[ResearchNodeComparisonSelection, ...],
+    ) -> ResearchNodeComparison:
+        """Compare retained Node products without starting research or writing state."""
+        return self.repository.compare_research_nodes(instrument, selections)
 
     def enqueue(
         self,

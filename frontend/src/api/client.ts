@@ -8,6 +8,10 @@ export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
 export type TimelineDetail = components["schemas"]["TimelineDetail"];
+export type ResearchNodeComparison =
+  components["schemas"]["ResearchNodeComparison"];
+export type ResearchNodeComparisonSelection =
+  components["schemas"]["ResearchNodeComparisonSelection"];
 export type PrimaryCycleSelectionRequest =
   components["schemas"]["PrimaryCycleSelectionRequest"];
 export type ResearchTimelinePage =
@@ -137,6 +141,14 @@ export const api = {
   ) =>
     request<TimelineDetail>(
       `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}&trash_state=${trashState}`,
+    ),
+  compareResearchNodes: (
+    instrument: string,
+    nodes: ResearchNodeComparisonSelection[],
+  ) =>
+    request<ResearchNodeComparison>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/compare`,
+      { method: "POST", body: JSON.stringify({ nodes }) },
     ),
   timelines: (limit = 50, offset = 0) =>
     request<ResearchTimelinePage>(

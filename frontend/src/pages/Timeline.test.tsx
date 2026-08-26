@@ -14,6 +14,7 @@ vi.mock("../api/client", () => ({
     trashRuns: vi.fn(),
     restoreRuns: vi.fn(),
     purgeRuns: vi.fn(),
+    compareResearchNodes: vi.fn(),
   },
 }));
 
@@ -60,6 +61,77 @@ test("shows the first Full Run-backed node and keeps its operational Run link", 
   expect(
     screen.getByRole("link", { name: "Open operational Run →" }),
   ).toHaveAttribute("href", "/runs/run-1");
+});
+
+test("compares arbitrary active and Trash nodes with accessible side-by-side context", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1", nodes: [
+      { id: "full-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-20", research_schema_version: "0",
+        information_cutoff_at: "2026-07-20T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture-a" }, research_kind: "full",
+        full_baseline_run_id: null, is_cycle_head: false, is_primary: true,
+        is_active: true, trashed_at: null },
+      { id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture-b" }, research_kind: "incremental",
+        full_baseline_run_id: "full-1", is_cycle_head: false, is_primary: true,
+        is_active: false, trashed_at: "2026-07-25T00:00:00Z" },
+    ],
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockResolvedValue({
+    instrument: "NVDA", cross_cycle: false, method_changed: true,
+    warnings: [{ code: "method_changed", message: "Do not attribute differences automatically." }],
+    sides: [
+      { node_id: "full-1", cycle_id: "full-1", analysis_date: "2026-07-20",
+        research_schema_version: "0", method_snapshot: { llm_provider: "fixture-a" },
+        research_kind: "full", lifecycle_state: "active", decision: { rating: "hold" } },
+      { node_id: "incremental-1", cycle_id: "full-1", analysis_date: "2026-07-24",
+        research_schema_version: "1", method_snapshot: { llm_provider: "fixture-b" },
+        research_kind: "incremental", lifecycle_state: "trashed",
+        collection_summary: { version: "1", market: "united_states", domains: [] },
+        research_availability: { version: "1", domains: [] },
+        reassessment: { entries: [] },
+        decision: { rating: "bullish" },
+        performance: { stock: { status: "unavailable", reason: "fixture" }, benchmarks: [] } },
+    ],
+    decision_sections: [
+      { key: "rating", values: [
+        { state: "recorded", value: "hold" },
+        { state: "recorded", value: "bullish" },
+      ] },
+      { key: "unresolved_questions", values: [
+        { state: "not_recorded_under_this_schema", value: null },
+        { state: "empty", value: [] },
+      ] },
+    ],
+  } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  await waitFor(() => expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
+    { node_id: "full-1", lifecycle_state: "active" },
+    { node_id: "incremental-1", lifecycle_state: "trashed" },
+  ]));
+  expect(screen.getByRole("region", { name: "Node Comparison" })).toBeVisible();
+  expect(screen.getByRole("article", {
+    name: "Comparison side 1: Full Research Node, Active",
+  })).toBeVisible();
+  expect(screen.getByRole("article", {
+    name: "Comparison side 2: Incremental Research Node, Trash",
+  })).toBeVisible();
+  expect(screen.getByText("Method Changed")).toBeVisible();
+  expect(screen.getByText("Not Recorded Under This Schema")).toBeVisible();
+  for (const heading of [
+    "Collection Summary", "Research Availability", "Reassessment", "Decision", "Performance",
+  ]) {
+    expect(screen.getAllByText(heading).length).toBeGreaterThan(0);
+  }
 });
 
 test("distinguishes a warned Incremental node without disabling its Timeline", async () => {

@@ -718,6 +718,87 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(shell).not.toHaveClass(/sidebar-open/);
 });
 
+test("compares active and explicitly shown Trash nodes without creating research", async ({
+  page,
+}) => {
+  let comparisonPayload: Record<string, unknown> | null = null;
+  let researchCreateCalls = 0;
+  const full = {
+    id: "comparison-full", cycle_id: "comparison-full", instrument: "NVDA",
+    analysis_date: "2026-07-20", research_schema_version: "1",
+    information_cutoff_at: "2026-07-20T23:59:59Z",
+    method_snapshot: { llm_provider: "fixture-a" }, research_kind: "full",
+    full_baseline_run_id: null, is_baseline_compatible: true,
+    is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+  };
+  const incremental = {
+    id: "comparison-incremental", cycle_id: "comparison-full", instrument: "NVDA",
+    analysis_date: "2026-07-24", research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: { llm_provider: "fixture-b" }, research_kind: "incremental",
+    full_baseline_run_id: "comparison-full", is_baseline_compatible: false,
+    is_cycle_head: false, is_primary: true, is_active: false,
+    trashed_at: "2026-07-25T00:00:00Z",
+  };
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      const nodes = url.searchParams.get("trash_state") === "all"
+        ? [full, incremental]
+        : [full];
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: full.id, nodes,
+        node_total: nodes.length, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      comparisonPayload = request.postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ json: {
+        instrument: "NVDA", cross_cycle: false, method_changed: true,
+        warnings: [{ code: "method_changed", message: "No automatic attribution." }],
+        sides: [
+          { node_id: full.id, cycle_id: full.cycle_id, analysis_date: full.analysis_date,
+            research_schema_version: "1", method_snapshot: full.method_snapshot,
+            research_kind: "full", lifecycle_state: "active", decision: { rating: "hold" } },
+          { node_id: incremental.id, cycle_id: incremental.cycle_id,
+            analysis_date: incremental.analysis_date, research_schema_version: "1",
+            method_snapshot: incremental.method_snapshot, research_kind: "incremental",
+            lifecycle_state: "trashed", collection_summary: { version: "1" },
+            research_availability: { version: "1" }, reassessment: { entries: [] },
+            decision: { rating: "bullish" }, performance: {
+              stock: { status: "unavailable", reason: "fixture" }, benchmarks: [],
+            } },
+        ],
+        decision_sections: [{ key: "rating", values: [
+          { state: "recorded", value: "hold" },
+          { state: "recorded", value: "bullish" },
+        ] }],
+      } });
+    }
+    if (url.pathname === "/api/v1/runs" && request.method() === "POST") {
+      researchCreateCalls += 1;
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  await page.goto("/timelines/NVDA");
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
+  await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
+
+  await expect(page.getByRole("region", { name: /Node Comparison|节点对照|ノード比較/ })).toBeVisible();
+  await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
+  expect(comparisonPayload).toEqual({ nodes: [
+    { node_id: full.id, lifecycle_state: "active" },
+    { node_id: incremental.id, lifecycle_state: "trashed" },
+  ] });
+  expect(researchCreateCalls).toBe(0);
+});
+
 test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
   let stage: "none" | "full" | "incremental" = "none";
   let incrementalPayload: Record<string, unknown> | null = null;

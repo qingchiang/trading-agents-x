@@ -38,6 +38,13 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchCase,
     ResearchDecision,
+    ResearchNodeComparison,
+    ResearchNodeComparisonSelection,
+    ResearchNodeComparisonSide,
+    ResearchNodeComparisonValue,
+    ResearchNodeComparisonWarning,
+    ResearchNodeDecisionSection,
+    ResearchNodeLifecycleState,
     ResearchNodeView,
     ResearchRating,
     ResearchTimeline,
@@ -70,7 +77,11 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
-from .errors import IncrementalRequestConflictError, InvalidIncrementalBaselineError
+from .errors import (
+    IncrementalRequestConflictError,
+    InvalidIncrementalBaselineError,
+    InvalidResearchNodeComparisonError,
+)
 from .metrics import merge_run_metrics
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
@@ -84,6 +95,8 @@ _TERMINAL_STATUSES = {
     RunStatus.FAILED.value,
     RunStatus.CANCELLED.value,
 }
+
+_DECISION_SECTION_KEYS = tuple(ResearchDecision.model_fields)
 
 
 class InvalidPrimaryResearchCycleError(ValueError):
@@ -2297,6 +2310,138 @@ class RunRepository:
             node_limit=node_limit,
             node_offset=node_offset,
             timeline_warning=primary_warning,
+        )
+
+    def compare_research_nodes(
+        self,
+        instrument: str,
+        selections: tuple[ResearchNodeComparisonSelection, ...],
+    ) -> ResearchNodeComparison:
+        """Compute an ordered two-Node comparison without durable side effects."""
+        if len(selections) != 2:
+            raise InvalidResearchNodeComparisonError(
+                "Node Comparison requires exactly two Research Node IDs"
+            )
+        node_ids = tuple(selection.node_id for selection in selections)
+        if len(set(node_ids)) != 2:
+            raise InvalidResearchNodeComparisonError(
+                "Node Comparison requires two distinct Research Node IDs"
+            )
+        with self.sessions() as session:
+            rows = {
+                run.id: (run, node)
+                for run, node in session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(RunRecord.id.in_(node_ids))
+                )
+            }
+            decisions = {
+                record.run_id: dict(record.decision_json)
+                for record in session.execute(
+                    select(DecisionRecord).where(DecisionRecord.run_id.in_(node_ids))
+                ).scalars()
+            }
+        if set(rows) != set(node_ids):
+            raise InvalidResearchNodeComparisonError(
+                "Every comparison side must be a retained Research Node"
+            )
+
+        sides: list[ResearchNodeComparisonSide] = []
+        for selection in selections:
+            run, node = rows[selection.node_id]
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            if run.status != RunStatus.SUCCEEDED.value:
+                raise InvalidResearchNodeComparisonError(
+                    "Failed or cancelled Research Runs cannot be compared"
+                )
+            if request.ticker != instrument:
+                raise InvalidResearchNodeComparisonError(
+                    "Both Research Nodes must use the requested Instrument Key"
+                )
+            actual_lifecycle = (
+                ResearchNodeLifecycleState.TRASHED
+                if run.trashed_at is not None
+                else ResearchNodeLifecycleState.ACTIVE
+            )
+            if selection.lifecycle_state is not actual_lifecycle:
+                raise InvalidResearchNodeComparisonError(
+                    "Trash participation must be selected explicitly"
+                )
+            decision = decisions.get(run.id)
+            if decision is None:
+                raise InvalidResearchNodeComparisonError(
+                    "Every compared Research Node must retain its Decision"
+                )
+            products = (
+                IncrementalNodeProducts.model_validate(node.incremental_products_json)
+                if node.incremental_products_json is not None
+                else None
+            )
+            cycle_id = run.id if node.research_kind == "full" else node.full_baseline_run_id
+            assert cycle_id is not None
+            sides.append(
+                ResearchNodeComparisonSide(
+                    node_id=run.id,
+                    cycle_id=cycle_id,
+                    analysis_date=request.analysis_date,
+                    research_schema_version=run.research_schema_version,
+                    method_snapshot=run.method_snapshot_json or {},
+                    research_kind=node.research_kind,
+                    lifecycle_state=actual_lifecycle,
+                    collection_summary=products.collection_summary if products else None,
+                    research_availability=products.research_availability if products else None,
+                    information_advancement=products.information_advancement if products else None,
+                    reassessment=products.reassessment if products else None,
+                    decision=decision,
+                    performance=products.performance if products else None,
+                    full_research_required_reasons=(
+                        products.full_research_required_reasons if products else ()
+                    ),
+                )
+            )
+
+        def comparison_value(decision: dict[str, Any], key: str):
+            if key not in decision:
+                return ResearchNodeComparisonValue(
+                    state="not_recorded_under_this_schema"
+                )
+            value = decision[key]
+            if value is None:
+                return ResearchNodeComparisonValue(state="null")
+            if value == "" or value == [] or value == {}:
+                return ResearchNodeComparisonValue(state="empty", value=value)
+            return ResearchNodeComparisonValue(state="recorded", value=value)
+
+        method_changed = sides[0].method_snapshot != sides[1].method_snapshot
+        return ResearchNodeComparison(
+            instrument=instrument,
+            sides=(sides[0], sides[1]),
+            cross_cycle=sides[0].cycle_id != sides[1].cycle_id,
+            method_changed=method_changed,
+            warnings=(
+                (
+                    ResearchNodeComparisonWarning(
+                        code="method_changed",
+                        message=(
+                            "Method Snapshots differ; conclusion differences are not "
+                            "automatically attributable to Evidence, models, prompts, or methods."
+                        ),
+                    ),
+                )
+                if method_changed
+                else ()
+            ),
+            decision_sections=tuple(
+                ResearchNodeDecisionSection(
+                    key=key,
+                    values=(
+                        comparison_value(sides[0].decision, key),
+                        comparison_value(sides[1].decision, key),
+                    ),
+                )
+                for key in _DECISION_SECTION_KEYS
+            ),
         )
 
     def list_timelines(self, *, limit: int = 50, offset: int = 0) -> ResearchTimelinePage:

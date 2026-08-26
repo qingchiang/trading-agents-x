@@ -127,6 +127,7 @@ export interface components {
       version: string;
     };
     CollectionTemporalBasis: "pit" | "near_live_advisory";
+    ComparisonValueState: "recorded" | "null" | "empty" | "not_recorded_under_this_schema";
     DebateAgenda: {
       issues: components["schemas"]["DebateIssue"][];
       summary: string;
@@ -501,6 +502,50 @@ export interface components {
       unresolved_questions?: string[];
       valuation_assessment?: components["schemas"]["ValuationAssessment"] | null;
     };
+    ResearchNodeComparison: {
+      cross_cycle: boolean;
+      decision_sections: components["schemas"]["ResearchNodeDecisionSection"][];
+      instrument: string;
+      method_changed: boolean;
+      sides: components["schemas"]["ResearchNodeComparisonSide"][];
+      warnings?: components["schemas"]["ResearchNodeComparisonWarning"][];
+    };
+    ResearchNodeComparisonRequest: {
+      nodes: components["schemas"]["ResearchNodeComparisonSelection"][];
+    };
+    ResearchNodeComparisonSelection: {
+      lifecycle_state?: components["schemas"]["ResearchNodeLifecycleState"];
+      node_id: string;
+    };
+    ResearchNodeComparisonSide: {
+      analysis_date: string;
+      collection_summary?: components["schemas"]["CollectionSummary"] | null;
+      cycle_id: string;
+      decision: Record<string, unknown>;
+      full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
+      information_advancement?: components["schemas"]["InformationAdvancement"] | null;
+      lifecycle_state: components["schemas"]["ResearchNodeLifecycleState"];
+      method_snapshot: Record<string, unknown>;
+      node_id: string;
+      performance?: components["schemas"]["PerformanceObservation"] | null;
+      reassessment?: components["schemas"]["ResearchReassessment"] | null;
+      research_availability?: components["schemas"]["ResearchAvailability"] | null;
+      research_kind: "full" | "incremental";
+      research_schema_version: string;
+    };
+    ResearchNodeComparisonValue: {
+      state: components["schemas"]["ComparisonValueState"];
+      value?: unknown;
+    };
+    ResearchNodeComparisonWarning: {
+      code: string;
+      message: string;
+    };
+    ResearchNodeDecisionSection: {
+      key: string;
+      values: components["schemas"]["ResearchNodeComparisonValue"][];
+    };
+    ResearchNodeLifecycleState: "active" | "trashed";
     ResearchNodeView: {
       analysis_date: string;
       collection_summary?: components["schemas"]["CollectionSummary"] | null;

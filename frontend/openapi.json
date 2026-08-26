@@ -924,6 +924,17 @@
         "title": "CollectionTemporalBasis",
         "type": "string"
       },
+      "ComparisonValueState": {
+        "description": "Presentation-safe distinction between schema absence and stored values.",
+        "enum": [
+          "recorded",
+          "null",
+          "empty",
+          "not_recorded_under_this_schema"
+        ],
+        "title": "ComparisonValueState",
+        "type": "string"
+      },
       "DebateAgenda": {
         "additionalProperties": false,
         "description": "Prioritized shallow agenda derived from the two readable cases.",
@@ -3509,6 +3520,283 @@
         ],
         "title": "ResearchDecision",
         "type": "object"
+      },
+      "ResearchNodeComparison": {
+        "additionalProperties": false,
+        "description": "Deterministic, read-only comparison of exactly two retained Nodes.",
+        "properties": {
+          "cross_cycle": {
+            "title": "Cross Cycle",
+            "type": "boolean"
+          },
+          "decision_sections": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeDecisionSection"
+            },
+            "title": "Decision Sections",
+            "type": "array"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "method_changed": {
+            "title": "Method Changed",
+            "type": "boolean"
+          },
+          "sides": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeComparisonSide"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Sides",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeComparisonWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "sides",
+          "cross_cycle",
+          "method_changed",
+          "decision_sections"
+        ],
+        "title": "ResearchNodeComparison",
+        "type": "object"
+      },
+      "ResearchNodeComparisonRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeComparisonSelection"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "ResearchNodeComparisonRequest",
+        "type": "object"
+      },
+      "ResearchNodeComparisonSelection": {
+        "additionalProperties": false,
+        "description": "One explicitly selected side of an on-demand Node Comparison.",
+        "properties": {
+          "lifecycle_state": {
+            "$ref": "#/components/schemas/ResearchNodeLifecycleState",
+            "default": "active"
+          },
+          "node_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "ResearchNodeComparisonSelection",
+        "type": "object"
+      },
+      "ResearchNodeComparisonSide": {
+        "additionalProperties": false,
+        "description": "Immutable per-Node context; values are never normalized across sides.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "collection_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "decision": {
+            "additionalProperties": true,
+            "title": "Decision",
+            "type": "object"
+          },
+          "full_research_required_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FullResearchRequiredReason"
+            },
+            "title": "Full Research Required Reasons",
+            "type": "array"
+          },
+          "information_advancement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InformationAdvancement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle_state": {
+            "$ref": "#/components/schemas/ResearchNodeLifecycleState"
+          },
+          "method_snapshot": {
+            "additionalProperties": true,
+            "title": "Method Snapshot",
+            "type": "object"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "performance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerformanceObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reassessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchReassessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "research_availability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchAvailability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "research_kind": {
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Research Kind",
+            "type": "string"
+          },
+          "research_schema_version": {
+            "title": "Research Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "cycle_id",
+          "analysis_date",
+          "research_schema_version",
+          "method_snapshot",
+          "research_kind",
+          "lifecycle_state",
+          "decision"
+        ],
+        "title": "ResearchNodeComparisonSide",
+        "type": "object"
+      },
+      "ResearchNodeComparisonValue": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ComparisonValueState"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ResearchNodeComparisonValue",
+        "type": "object"
+      },
+      "ResearchNodeComparisonWarning": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "const": "method_changed",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ResearchNodeComparisonWarning",
+        "type": "object"
+      },
+      "ResearchNodeDecisionSection": {
+        "additionalProperties": false,
+        "description": "One fixed Decision section aligned in requested side order.",
+        "properties": {
+          "key": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeComparisonValue"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "values"
+        ],
+        "title": "ResearchNodeDecisionSection",
+        "type": "object"
+      },
+      "ResearchNodeLifecycleState": {
+        "description": "Expected retained lifecycle state for an explicit comparison selection.",
+        "enum": [
+          "active",
+          "trashed"
+        ],
+        "title": "ResearchNodeLifecycleState",
+        "type": "string"
       },
       "ResearchNodeView": {
         "additionalProperties": false,
@@ -6464,6 +6752,55 @@
           }
         },
         "summary": "Get Timeline"
+      }
+    },
+    "/api/v1/timelines/{instrument}/compare": {
+      "post": {
+        "operationId": "compare_research_nodes_api_v1_timelines__instrument__compare_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instrument",
+            "required": true,
+            "schema": {
+              "title": "Instrument",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchNodeComparisonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchNodeComparison"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Research Nodes"
       }
     },
     "/api/v1/timelines/{instrument}/primary-cycle": {

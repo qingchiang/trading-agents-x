@@ -72,12 +72,20 @@ class IncrementalCollectionCommitUnavailableError(RuntimeError):
     """Collection advanced, but this release cannot commit an Incremental Node."""
 
 
+class InvalidResearchNodeComparisonError(ValueError):
+    """A Node Comparison selection violates the retained Timeline boundary."""
+
+    code = "invalid_research_node_comparison"
+    status_code = 422
+
+
 __all__ = [
     "EligibilityUnavailableError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
     "IncrementalCollectionCommitUnavailableError",
     "IncrementalRequestConflictError",
+    "InvalidResearchNodeComparisonError",
     "InvalidIncrementalBaselineError",
     "NoInformationAdvancementError",
     "UnsupportedInstrumentError",
