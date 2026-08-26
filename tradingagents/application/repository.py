@@ -222,7 +222,7 @@ class RunRepository:
                             raise IdempotencyConflictError(
                                 "idempotency key was already used for a different request"
                             )
-                        return self._view(existing), False
+                        return self._view_for_session(session, existing), False
                 if research_kind == "incremental":
                     if full_baseline_run_id is None or incremental_input_fingerprint is None:
                         raise ValueError(
@@ -238,7 +238,7 @@ class RunRepository:
                             existing_slot.incremental_input_fingerprint
                             == incremental_input_fingerprint
                         ):
-                            return self._view(existing_slot), False
+                            return self._view_for_session(session, existing_slot), False
                         raise IncrementalRequestConflictError(
                             "An active Incremental Research Run already occupies this Cycle and cutoff."
                         )
@@ -310,7 +310,7 @@ class RunRepository:
                             existing_slot.incremental_input_fingerprint
                             == incremental_input_fingerprint
                         ):
-                            return self._view(existing_slot), False
+                            return self._view_for_session(session, existing_slot), False
                         raise IncrementalRequestConflictError(
                             "An active Incremental Research Run already occupies this Cycle and cutoff."
                         ) from exc
@@ -326,7 +326,7 @@ class RunRepository:
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc
-                return self._view(existing), False
+                return self._view_for_session(session, existing), False
         return self.get_run(run_id), True
 
     def validate_incremental_baseline(
@@ -359,7 +359,7 @@ class RunRepository:
             raise InvalidIncrementalBaselineError(
                 "Incremental cutoff must be later than its Full Baseline"
             )
-        return self._view(run)
+        return self._view(run, is_research_node=True)
 
     @staticmethod
     def checkpoint_thread_id(run_id: str, attempt: int) -> str:
@@ -370,10 +370,7 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            return self._view(
-                record,
-                is_research_node=session.get(ResearchNodeRecord, run_id) is not None,
-            )
+            return self._view_for_session(session, record)
 
     def list_runs(
         self,
@@ -1394,7 +1391,7 @@ class RunRepository:
                     )
                     if existing_slot is not None:
                         if existing_slot.incremental_input_fingerprint == fingerprint:
-                            return self._view(existing_slot)
+                            return self._view_for_session(session, existing_slot)
                         raise IncrementalRequestConflictError(
                             "An active Incremental Research Run already occupies "
                             "this Cycle and cutoff."
@@ -1432,7 +1429,7 @@ class RunRepository:
                 if existing_slot is None:
                     raise
                 if existing_slot.incremental_input_fingerprint == fingerprint:
-                    return self._view(existing_slot)
+                    return self._view_for_session(session, existing_slot)
             raise IncrementalRequestConflictError(
                 "An active Incremental Research Run already occupies this Cycle and cutoff."
             ) from exc
@@ -1445,7 +1442,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             self._require_retryable(record)
-            return self._view(record)
+            return self._view_for_session(session, record)
 
     @staticmethod
     def _require_retryable(record: RunRecord) -> None:
@@ -2618,6 +2615,19 @@ class RunRepository:
             finished_at=_aware(record.finished_at),
             trashed_at=_aware(record.trashed_at),
             updated_at=_aware(record.updated_at),
+        )
+
+    @classmethod
+    def _view_for_session(
+        cls,
+        session: Session,
+        record: RunRecord,
+    ) -> RunView:
+        return cls._view(
+            record,
+            is_research_node=(
+                session.get(ResearchNodeRecord, record.id) is not None
+            ),
         )
 
     @classmethod

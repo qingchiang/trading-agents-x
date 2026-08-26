@@ -165,6 +165,7 @@ def test_completed_first_full_replays_before_later_full_primary_validation(
     replayed = service.enqueue(request, idempotency_key="first-full-replay")
 
     assert replayed.id == first.id
+    assert replayed.is_research_node is True
     with pytest.raises(IdempotencyConflictError):
         service.enqueue(
             AnalysisRequest(ticker="NVDA", analysis_date="2026-07-23"),
@@ -301,10 +302,24 @@ def test_incremental_retry_replays_an_identical_active_slot_only_from_failed_his
     repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
     repository.fail(inactive.id, RuntimeError("fixture failure"))
     active = service.enqueue(request)
+    with repository.sessions.begin() as session:
+        active_record = session.get(RunRecord, active.id)
+        assert active_record is not None
+        active_record.status = RunStatus.SUCCEEDED.value
+        session.add(
+            ResearchNodeRecord(
+                run_id=active.id,
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+                incremental_products_json=None,
+            )
+        )
 
     replayed = service.retry(inactive.id)
 
     assert replayed.id == active.id
+    assert replayed.is_research_node is True
     unchanged = repository.get_run(inactive.id)
     assert unchanged.status is RunStatus.FAILED
     assert unchanged.attempt == 1
