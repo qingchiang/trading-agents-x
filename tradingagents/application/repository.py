@@ -31,6 +31,7 @@ from .contracts import (
     IncrementalNodeProducts,
     JudgeDraft,
     NumericAuditStatus,
+    PrimaryCycleCandidate,
     RebuttalReview,
     RecentInstrument,
     ResearchArtifact,
@@ -2091,8 +2092,15 @@ class RunRepository:
                 )
             primary = session.get(PrimaryResearchCycleRecord, instrument)
             if primary is None:
-                raise InvalidPrimaryResearchCycleError("Timeline has no Primary Cycle")
-            if primary.full_run_id != full_run_id:
+                session.add(
+                    PrimaryResearchCycleRecord(
+                        instrument=instrument,
+                        full_run_id=full_run_id,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            elif primary.full_run_id != full_run_id:
                 primary.full_run_id = full_run_id
                 primary.updated_at = now
         return self.get_timeline(instrument)
@@ -2142,7 +2150,7 @@ class RunRepository:
                 if node.incremental_products_json is not None
                 else None
             )
-            for run, node in rows
+            for run, node in all_rows
         }
         decisions_by_id = {
             decision.run_id: ResearchDecision.model_validate(decision.decision_json)
@@ -2165,6 +2173,16 @@ class RunRepository:
         return ResearchTimeline(
             instrument=instrument,
             primary_cycle_id=primary.full_run_id if primary else None,
+            active_full_cycles=tuple(
+                PrimaryCycleCandidate(
+                    id=run.id,
+                    analysis_date=RunRequestSnapshot.model_validate(
+                        run.request_json
+                    ).analysis_date,
+                )
+                for run, node in all_rows
+                if node.research_kind == "full" and run.trashed_at is None
+            ),
             nodes=tuple(
                 ResearchNodeView(
                     id=run.id,

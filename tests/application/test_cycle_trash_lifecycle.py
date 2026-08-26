@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from threading import Barrier
 
 import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
+from sqlalchemy import func, select
 
 from tests.factories import research_decision
 from tradingagents.application.contracts import (
@@ -14,7 +16,14 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     RunStatus,
 )
-from tradingagents.application.database import ResearchNodeRecord, RunRecord
+from tradingagents.application.database import (
+    DecisionRecord,
+    ResearchNodeRecord,
+    RunAttemptRecord,
+    RunEvidenceRecord,
+    RunRecord,
+)
+from tradingagents.application.errors import IncrementalRequestConflictError
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     InvalidRunTransitionError,
@@ -181,6 +190,8 @@ def test_independent_incremental_trash_updates_the_active_cycle(repository, app_
     retained = repository.get_timeline("NVDA", trash_state="all")
     assert tuple(node.id for node in retained.nodes) == (full.id, first.id, head.id)
     assert next(node for node in retained.nodes if node.id == head.id).is_active is False
+    trashed_only = repository.get_timeline("NVDA", trash_state="trashed")
+    assert tuple(node.id for node in trashed_only.nodes) == (head.id,)
 
 
 def test_full_trash_cascades_only_active_children_and_records_them(
@@ -381,3 +392,157 @@ def test_two_maintenance_connections_purge_one_full_cycle_once(
     for run_id in (full.id, child.id):
         with pytest.raises(RunNotFoundError):
             repository.get_run(run_id)
+
+
+def test_two_connections_linearize_independent_child_and_full_trash(
+    repository, app_settings
+):
+    full = _commit_node(
+        repository, app_settings, analysis_date=date(2026, 7, 24)
+    )
+    child = _commit_node(
+        repository,
+        app_settings,
+        analysis_date=date(2026, 7, 25),
+        baseline_id=full.id,
+    )
+    barrier = Barrier(2)
+
+    def trash(run_id: str):
+        barrier.wait(timeout=5)
+        return repository.trash_runs_detailed((run_id,))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(trash, (child.id, full.id)))
+
+    assert sum(result.changed for result in results) == 2
+    retained = repository.get_timeline("NVDA", trash_state="all")
+    retained_child = next(node for node in retained.nodes if node.id == child.id)
+
+    repository.restore_runs_detailed((full.id,))
+
+    child_after_full_restore = repository.get_run(child.id)
+    if retained_child.trash_cascade_full_run_id == full.id:
+        assert child_after_full_restore.trashed_at is None
+    else:
+        assert child_after_full_restore.trashed_at is not None
+
+
+def test_two_connections_linearize_restore_against_incremental_retry_slot(
+    repository, app_settings
+):
+    full = _commit_node(
+        repository, app_settings, analysis_date=date(2026, 7, 24)
+    )
+    retained = _commit_node(
+        repository,
+        app_settings,
+        analysis_date=date(2026, 7, 25),
+        baseline_id=full.id,
+    )
+    repository.trash_runs_detailed((retained.id,))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 25),
+        research_kind="incremental",
+        full_baseline_run_id=full.id,
+    )
+    failed, _ = repository.create_run(
+        request,
+        app_settings.resolve_run(request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 25, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="incremental",
+        full_baseline_run_id=full.id,
+        incremental_input_fingerprint="fingerprint-2026-07-25",
+    )
+    repository.claim_run(failed.id, "fixture", 30)
+    repository.fail(failed.id, RuntimeError("fixture"))
+    barrier = Barrier(2)
+
+    def restore() -> str:
+        barrier.wait(timeout=5)
+        try:
+            repository.restore_runs_detailed((retained.id,))
+            return "restored"
+        except InvalidRunTransitionError:
+            return "slot-won"
+
+    def retry() -> str:
+        barrier.wait(timeout=5)
+        try:
+            return repository.retry(failed.id).id
+        except IncrementalRequestConflictError:
+            return "restore-won"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        restore_future = executor.submit(restore)
+        retry_future = executor.submit(retry)
+        outcomes = (restore_future.result(timeout=10), retry_future.result(timeout=10))
+
+    with repository.sessions() as session:
+        active_ids = tuple(
+            session.scalars(
+                select(RunRecord.id).where(
+                    RunRecord.full_baseline_run_id == full.id,
+                    RunRecord.incremental_cutoff == date(2026, 7, 25),
+                    RunRecord.trashed_at.is_(None),
+                    RunRecord.status.in_(("queued", "running", "succeeded")),
+                )
+            )
+        )
+    assert len(active_ids) == 1
+    assert active_ids[0] in {retained.id, failed.id}
+    assert outcomes[0] in {"restored", "slot-won"}
+
+
+def test_incremental_purge_removes_only_its_owned_rows_and_checkpoint(
+    repository, app_settings
+):
+    full = _commit_node(
+        repository, app_settings, analysis_date=date(2026, 7, 24)
+    )
+    child = _commit_node(
+        repository,
+        app_settings,
+        analysis_date=date(2026, 7, 25),
+        baseline_id=full.id,
+    )
+    repository.trash_runs_detailed((child.id,))
+    checkpoint_thread = repository.checkpoint_thread(child.id)
+    with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
+        saver.setup()
+        saver.conn.execute(
+            """
+            INSERT INTO checkpoints (
+                thread_id, checkpoint_ns, checkpoint_id
+            ) VALUES (?, '', 'incremental-checkpoint')
+            """,
+            (checkpoint_thread,),
+        )
+        saver.conn.commit()
+
+    result = repository.purge_runs_detailed((child.id,))
+
+    assert result.changed == 1
+    assert repository.get_run(full.id).id == full.id
+    with pytest.raises(RunNotFoundError):
+        repository.get_run(child.id)
+    with repository.sessions() as session:
+        for model in (
+            ResearchNodeRecord,
+            RunAttemptRecord,
+            RunEvidenceRecord,
+            DecisionRecord,
+        ):
+            assert session.scalar(
+                select(func.count()).select_from(model).where(
+                    model.run_id == child.id
+                )
+            ) == 0
+    with repository.engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT count(*) FROM checkpoints WHERE thread_id = ?",
+            (checkpoint_thread,),
+        ).scalar_one() == 0

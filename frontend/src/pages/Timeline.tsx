@@ -49,6 +49,7 @@ export default function Timeline() {
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const timelineItems = timelines?.items ?? [];
   const detailNodes = detail?.timeline.nodes ?? [];
+  const activeFullCycles = detail?.timeline.active_full_cycles ?? [];
   const nodeTotal = detail?.timeline.node_total ?? 0;
   const nodeLimit = detail?.timeline.node_limit ?? NODE_PAGE_SIZE;
   const [error, setError] = useState("");
@@ -94,9 +95,7 @@ export default function Timeline() {
       lifecycleMode === "trash" &&
       pendingNode.research_kind === "full" &&
       pendingNode.is_primary &&
-      detailNodes.some((node) =>
-        node.research_kind === "full" && node.is_active && node.id !== pendingNode.id
-      ) &&
+      activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) &&
       !replacementPrimary
     ) {
       setError(t("selectReplacementCycle"));
@@ -509,9 +508,7 @@ export default function Timeline() {
           {lifecycleMode === "trash" &&
             pendingNode.research_kind === "full" &&
             pendingNode.is_primary &&
-            detailNodes.some((node) =>
-              node.research_kind === "full" && node.is_active && node.id !== pendingNode.id
-            ) && (
+            activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && (
               <label>
                 {t("replacementPrimaryCycle")}
                 <select
@@ -519,15 +516,11 @@ export default function Timeline() {
                   onChange={(event) => setReplacementPrimary(event.target.value)}
                 >
                   <option value="">{t("selectReplacementCycle")}</option>
-                  {detailNodes
-                    .filter((node) =>
-                      node.research_kind === "full" &&
-                      node.is_active &&
-                      node.id !== pendingNode.id
-                    )
-                    .map((node) => (
-                      <option key={node.id} value={node.id}>
-                        {node.analysis_date} · {node.id}
+                  {activeFullCycles
+                    .filter((cycle) => cycle.id !== pendingNode.id)
+                    .map((cycle) => (
+                      <option key={cycle.id} value={cycle.id}>
+                        {cycle.analysis_date} · {cycle.id}
                       </option>
                     ))}
                 </select>

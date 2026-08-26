@@ -1740,9 +1740,17 @@ class RunLifecycleResult(FrozenModel):
     impacts: tuple[RunLifecycleImpact, ...] = ()
 
 
+class PrimaryCycleCandidate(FrozenModel):
+    """One active Full Cycle eligible for explicit Primary selection."""
+
+    id: str
+    analysis_date: date
+
+
 class ResearchTimeline(FrozenModel):
     instrument: str
     primary_cycle_id: str | None = None
+    active_full_cycles: tuple[PrimaryCycleCandidate, ...] = ()
     nodes: tuple[ResearchNodeView, ...] = ()
     node_total: int = Field(default=0, ge=0)
     node_limit: int = Field(default=50, ge=1, le=200)

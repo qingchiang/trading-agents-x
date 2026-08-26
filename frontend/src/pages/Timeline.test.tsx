@@ -407,17 +407,16 @@ test("lets the user select a different Full Cycle as Primary Research", async ()
 
 test("explains Full-Cycle Trash and preserves the explicit Primary replacement", async () => {
   vi.mocked(api.timeline).mockResolvedValue({ timeline: {
-    instrument: "NVDA", primary_cycle_id: "full-1", nodes: [
+    instrument: "NVDA", primary_cycle_id: "full-1",
+    active_full_cycles: [
+      { id: "full-1", analysis_date: "2026-07-24" },
+      { id: "full-2", analysis_date: "2026-07-25" },
+    ], nodes: [
       { id: "full-1", cycle_id: "full-1", instrument: "NVDA",
         analysis_date: "2026-07-24", research_schema_version: "1",
         information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
         research_kind: "full", full_baseline_run_id: null,
         is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null },
-      { id: "full-2", cycle_id: "full-2", instrument: "NVDA",
-        analysis_date: "2026-07-25", research_schema_version: "1",
-        information_cutoff_at: "2026-07-25T23:59:59Z", method_snapshot: {},
-        research_kind: "full", full_baseline_run_id: null,
-        is_cycle_head: true, is_primary: false, is_active: true, trashed_at: null },
     ],
   } } as never);
   vi.mocked(api.trashRuns).mockResolvedValue({ runs: [], changed: 1, impacts: [] } as never);

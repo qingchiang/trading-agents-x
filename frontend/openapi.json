@@ -2785,6 +2785,27 @@
         "title": "PerformanceObservation",
         "type": "object"
       },
+      "PrimaryCycleCandidate": {
+        "additionalProperties": false,
+        "description": "One active Full Cycle eligible for explicit Primary selection.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "analysis_date"
+        ],
+        "title": "PrimaryCycleCandidate",
+        "type": "object"
+      },
       "PrimaryCycleSelectionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3791,6 +3812,14 @@
       "ResearchTimeline": {
         "additionalProperties": false,
         "properties": {
+          "active_full_cycles": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PrimaryCycleCandidate"
+            },
+            "title": "Active Full Cycles",
+            "type": "array"
+          },
           "instrument": {
             "title": "Instrument",
             "type": "string"

@@ -125,6 +125,98 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "incremental_products_json" in node_columns
 
 
+def test_cycle_trash_migration_converges_pre_ticket_12_state(app_settings) -> None:
+    upgrade_database(app_settings, "0008_incremental_node_products")
+    full_id = "00000000-0000-0000-0000-000000000001"
+    child_id = "00000000-0000-0000-0000-000000000002"
+    request = json.dumps(
+        {
+            "ticker": "NVDA",
+            "analysis_date": "2026-07-24",
+            "asset_type": "stock",
+            "profile": "standard",
+            "analysts": ["market"],
+            "research_kind": "full",
+            "full_baseline_run_id": None,
+            "make_primary": None,
+            "output_language": "English",
+        }
+    )
+    with sqlite3.connect(app_settings.database_path) as connection:
+        for run_id, kind, baseline_id, trashed_at, analysis_date in (
+            (full_id, "full", None, "2026-08-01 00:00:00", "2026-07-24"),
+            (child_id, "incremental", full_id, None, "2026-07-25"),
+        ):
+            request_json = json.loads(request)
+            request_json.update(
+                {
+                    "analysis_date": analysis_date,
+                    "research_kind": kind,
+                    "full_baseline_run_id": baseline_id,
+                }
+            )
+            connection.execute(
+                """
+                INSERT INTO runs (
+                    id, status, request_json, config_json,
+                    research_schema_version, information_cutoff_at,
+                    method_snapshot_json, research_kind,
+                    full_baseline_run_id, incremental_cutoff,
+                    incremental_input_fingerprint, version, current_attempt,
+                    cancel_requested, metrics_json, created_at, finished_at,
+                    trashed_at, updated_at
+                ) VALUES (?, 'succeeded', ?, '{}', '1', ?, '{}', ?, ?, ?, ?,
+                          'test', 1, 0, '{}', '2026-07-24 00:00:00',
+                          '2026-07-24 01:00:00', ?, '2026-08-01 00:00:00')
+                """,
+                (
+                    run_id,
+                    json.dumps(request_json),
+                    f"{analysis_date} 23:59:59",
+                    kind,
+                    baseline_id,
+                    analysis_date if baseline_id else None,
+                    "fixture" if baseline_id else None,
+                    trashed_at,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO research_nodes (
+                    run_id, research_kind, full_baseline_run_id,
+                    created_at, incremental_products_json
+                ) VALUES (?, ?, ?, '2026-07-24 01:00:00', NULL)
+                """,
+                (run_id, kind, baseline_id),
+            )
+        connection.execute(
+            """
+            INSERT INTO primary_research_cycles (
+                instrument, full_run_id, created_at, updated_at
+            ) VALUES ('NVDA', ?, '2026-07-24 01:00:00', '2026-07-24 01:00:00')
+            """,
+            (full_id,),
+        )
+
+    upgrade_database(app_settings)
+
+    with sqlite3.connect(app_settings.database_path) as connection:
+        assert connection.execute(
+            "SELECT trashed_at, trash_cascade_full_run_id FROM runs WHERE id = ?",
+            (child_id,),
+        ).fetchone() == ("2026-08-01 00:00:00", full_id)
+        assert connection.execute(
+            "SELECT count(*) FROM primary_research_cycles"
+        ).fetchone() == (0,)
+
+    repository = RunRepository(app_settings)
+    try:
+        repository.restore_runs_detailed((full_id,))
+        assert repository.get_timeline("NVDA").primary_cycle_id == full_id
+    finally:
+        repository.engine.dispose()
+
+
 def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history(
     app_settings,
     tmp_path,
