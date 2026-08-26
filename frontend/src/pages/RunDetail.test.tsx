@@ -857,6 +857,8 @@ test("shows trashed retention details and restores without deleting data", async
       ...detail,
       run: {
         ...detail.run,
+        research_schema_version: "1",
+        is_research_node: false,
         trashed_at: "2026-07-01T00:00:00Z",
       },
     } as RunDetailType)

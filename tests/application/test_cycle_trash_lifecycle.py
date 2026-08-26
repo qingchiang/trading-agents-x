@@ -519,6 +519,11 @@ def test_two_connections_linearize_restore_against_incremental_retry_slot(
     )
     repository.claim_run(failed.id, "fixture", 30)
     repository.fail(failed.id, RuntimeError("fixture"))
+    assert repository.get_run(full.id).is_research_node is True
+    assert repository.get_run(failed.id).is_research_node is False
+    listed = {run.id: run for run in repository.list_runs().items}
+    assert listed[full.id].is_research_node is True
+    assert listed[failed.id].is_research_node is False
     barrier = Barrier(2)
 
     def restore() -> str:

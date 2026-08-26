@@ -692,6 +692,7 @@ export interface components {
       information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      is_research_node?: boolean;
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
@@ -718,6 +719,7 @@ export interface components {
       information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      is_research_node?: boolean;
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];

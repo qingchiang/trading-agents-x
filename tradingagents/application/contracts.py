@@ -1657,6 +1657,7 @@ class EvidenceSealView(FrozenModel):
 class RunView(FrozenModel):
     id: str
     source_run_id: str | None = None
+    is_research_node: bool = False
     research_schema_version: str | None = None
     information_cutoff_at: datetime | None = None
     method_snapshot: dict[str, Any] | None = None

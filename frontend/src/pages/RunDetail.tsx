@@ -399,12 +399,12 @@ export default function RunDetail() {
               {t("retry")}
             </button>
           )}
-          {run.trashed_at && !run.research_schema_version && (
+          {run.trashed_at && !run.is_research_node && (
             <button className="button primary" onClick={() => void restore()}>
               {t("restore")}
             </button>
           )}
-          {run.research_schema_version && (
+          {run.is_research_node && (
             <Link
               className="button"
               to={`/timelines/${encodeURIComponent(run.request.ticker)}`}

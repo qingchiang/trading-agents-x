@@ -123,7 +123,7 @@ export default function Runs() {
   };
 
   const eligibleRuns = (page?.items ?? []).filter((run) =>
-    !run.research_schema_version &&
+    !run.is_research_node &&
     (trashState === "trashed" ? true : terminalStatuses.has(run.status)),
   );
   const allEligibleSelected =
@@ -327,7 +327,7 @@ export default function Runs() {
               <tbody>
                 {page.items.map((run) => {
                   const eligible =
-                    !run.research_schema_version &&
+                    !run.is_research_node &&
                     (trashState === "trashed" ||
                       terminalStatuses.has(run.status));
                   return (
@@ -372,7 +372,7 @@ export default function Runs() {
                         )}
                       </td>
                       <td className="right">
-                        {run.research_schema_version &&
+                        {run.is_research_node &&
                           run.status === "succeeded" && (
                             <Link
                               className="text-link"

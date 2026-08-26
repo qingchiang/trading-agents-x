@@ -370,7 +370,10 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            return self._view(record)
+            return self._view(
+                record,
+                is_research_node=session.get(ResearchNodeRecord, run_id) is not None,
+            )
 
     def list_runs(
         self,
@@ -420,8 +423,9 @@ class RunRepository:
                 )
             )
         stmt = (
-            select(RunRecord, DecisionRecord.rating)
+            select(RunRecord, DecisionRecord.rating, ResearchNodeRecord.run_id)
             .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
+            .outerjoin(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
             .where(*filters)
             .order_by(RunRecord.created_at.desc())
             .offset(offset)
@@ -431,7 +435,8 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating) for record, rating in session.execute(stmt)
+                    self._summary(record, rating, node_run_id is not None)
+                    for record, rating, node_run_id in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -563,7 +568,13 @@ class RunRepository:
                         child.updated_at = now
                         changed_ids.add(child.id)
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+            views = tuple(
+                self._view(
+                    records[run_id],
+                    is_research_node=run_id in requested_nodes,
+                )
+                for run_id in run_ids
+            )
             impacts = tuple(
                 RunLifecycleImpact(
                     requested_run_id=run_id,
@@ -780,7 +791,13 @@ class RunRepository:
                     record.updated_at = now
                     changed_ids.add(run_id)
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+            views = tuple(
+                self._view(
+                    records[run_id],
+                    is_research_node=run_id in requested_nodes,
+                )
+                for run_id in run_ids
+            )
             impacts = tuple(
                 RunLifecycleImpact(
                     requested_run_id=run_id,
@@ -2572,10 +2589,15 @@ class RunRepository:
         return aggregate
 
     @staticmethod
-    def _view(record: RunRecord) -> RunView:
+    def _view(
+        record: RunRecord,
+        *,
+        is_research_node: bool = False,
+    ) -> RunView:
         return RunView(
             id=record.id,
             source_run_id=record.source_run_id,
+            is_research_node=is_research_node,
             research_schema_version=record.research_schema_version,
             information_cutoff_at=_aware(record.information_cutoff_at),
             method_snapshot=record.method_snapshot_json,
@@ -2603,8 +2625,12 @@ class RunRepository:
         cls,
         record: RunRecord,
         rating: str | None,
+        is_research_node: bool,
     ) -> RunSummaryView:
         return RunSummaryView(
-            **cls._view(record).model_dump(),
+            **cls._view(
+                record,
+                is_research_node=is_research_node,
+            ).model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
         )

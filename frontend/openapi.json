@@ -4917,6 +4917,11 @@
             ],
             "title": "Instrument Name"
           },
+          "is_research_node": {
+            "default": false,
+            "title": "Is Research Node",
+            "type": "boolean"
+          },
           "method_snapshot": {
             "anyOf": [
               {
@@ -5148,6 +5153,11 @@
               }
             ],
             "title": "Instrument Name"
+          },
+          "is_research_node": {
+            "default": false,
+            "title": "Is Research Node",
+            "type": "boolean"
           },
           "method_snapshot": {
             "anyOf": [
