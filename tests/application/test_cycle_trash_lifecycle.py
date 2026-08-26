@@ -394,6 +394,41 @@ def test_two_maintenance_connections_purge_one_full_cycle_once(
             repository.get_run(run_id)
 
 
+def test_retention_batch_promotes_cascade_child_to_atomic_full_cycle(
+    repository, app_settings
+):
+    full = _commit_node(
+        repository, app_settings, analysis_date=date(2026, 7, 24)
+    )
+    child = _commit_node(
+        repository,
+        app_settings,
+        analysis_date=date(2026, 7, 25),
+        baseline_id=full.id,
+    )
+    repository.trash_runs_detailed((full.id,))
+    with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
+        saver.setup()
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    with repository.sessions.begin() as session:
+        session.get(RunRecord, child.id).trashed_at = (
+            now - timedelta(days=32)
+        ).replace(tzinfo=None)
+        session.get(RunRecord, full.id).trashed_at = (
+            now - timedelta(days=31)
+        ).replace(tzinfo=None)
+
+    purged = repository.purge_expired_trash(
+        cutoff=now - timedelta(days=30),
+        batch_size=1,
+    )
+
+    assert purged == 2
+    for run_id in (full.id, child.id):
+        with pytest.raises(RunNotFoundError):
+            repository.get_run(run_id)
+
+
 def test_two_connections_linearize_independent_child_and_full_trash(
     repository, app_settings
 ):
@@ -426,6 +461,31 @@ def test_two_connections_linearize_independent_child_and_full_trash(
         assert child_after_full_restore.trashed_at is None
     else:
         assert child_after_full_restore.trashed_at is not None
+
+
+def test_incremental_restore_revalidates_the_current_full_baseline(
+    repository, app_settings
+):
+    full = _commit_node(
+        repository, app_settings, analysis_date=date(2026, 7, 24)
+    )
+    child = _commit_node(
+        repository,
+        app_settings,
+        analysis_date=date(2026, 7, 25),
+        baseline_id=full.id,
+    )
+    repository.trash_runs_detailed((child.id,))
+    with repository.sessions.begin() as session:
+        session.get(RunRecord, full.id).research_schema_version = "obsolete"
+
+    with pytest.raises(
+        InvalidRunTransitionError,
+        match="valid current Full Baseline",
+    ):
+        repository.restore_runs_detailed((child.id,))
+
+    assert repository.get_run(child.id).trashed_at is not None
 
 
 def test_two_connections_linearize_restore_against_incremental_retry_slot(

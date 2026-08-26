@@ -675,6 +675,9 @@ class RunRepository:
                 if node.research_kind != "incremental":
                     continue
                 baseline = session.get(RunRecord, node.full_baseline_run_id)
+                baseline_node = session.get(
+                    ResearchNodeRecord, node.full_baseline_run_id
+                )
                 if baseline is None or (
                     baseline.trashed_at is not None and baseline.id not in restore_ids
                 ):
@@ -682,6 +685,25 @@ class RunRepository:
                         "an Incremental cannot be restored while its Full remains in Trash"
                     )
                 run = session.get(RunRecord, run_id)
+                baseline_request = RunRequestSnapshot.model_validate(
+                    baseline.request_json
+                )
+                incremental_request = RunRequestSnapshot.model_validate(
+                    run.request_json
+                )
+                if (
+                    baseline_node is None
+                    or baseline_node.research_kind != "full"
+                    or baseline.status != RunStatus.SUCCEEDED.value
+                    or baseline.research_schema_version
+                    != CURRENT_RESEARCH_SCHEMA_VERSION
+                    or baseline_request.ticker != incremental_request.ticker
+                    or baseline_request.analysis_date
+                    >= incremental_request.analysis_date
+                ):
+                    raise InvalidRunTransitionError(
+                        "restored Incremental must retain a valid current Full Baseline"
+                    )
                 slot = (node.full_baseline_run_id, run.incremental_cutoff)
                 if slot in restoring_slots:
                     raise InvalidRunTransitionError(
@@ -934,6 +956,7 @@ class RunRepository:
                         .where(
                             RunRecord.trashed_at.is_not(None),
                             RunRecord.trashed_at <= cutoff,
+                            RunRecord.trash_cascade_full_run_id.is_(None),
                         )
                         .order_by(RunRecord.trashed_at, RunRecord.id)
                         .limit(batch_size)
