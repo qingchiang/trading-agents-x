@@ -67,6 +67,7 @@ export interface components {
     BenchmarkContext: {
       component: components["schemas"]["PerformanceComponent"];
       name: string;
+      reported_difference?: number | null;
     };
     CalculationRecord: {
       as_of_date: string;

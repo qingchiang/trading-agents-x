@@ -2252,6 +2252,7 @@ class PerformanceComponent(FrozenModel):
 class BenchmarkContext(FrozenModel):
     name: str = Field(min_length=1, max_length=120)
     component: PerformanceComponent
+    reported_difference: float | None = Field(default=None, allow_inf_nan=False)
 
 
 class PerformanceObservation(FrozenModel):

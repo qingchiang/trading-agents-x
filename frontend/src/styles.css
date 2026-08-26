@@ -283,8 +283,10 @@ select:focus-visible {
   color: var(--muted);
 }
 
-.comparison-toolbar code {
-  display: block;
+.comparison-selection {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   margin-top: 4px;
 }
 

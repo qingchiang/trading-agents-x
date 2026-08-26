@@ -496,6 +496,17 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "reported_difference": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Difference"
           }
         },
         "required": [

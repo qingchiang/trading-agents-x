@@ -4,7 +4,6 @@ from datetime import UTC, date, datetime
 
 import httpx2 as httpx
 import pytest
-from sqlalchemy import func, select
 
 from tests.application.test_cycle_trash_lifecycle import _commit_node
 from tests.factories import research_decision
@@ -15,11 +14,29 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     RunStatus,
 )
-from tradingagents.application.database import RunEventRecord, RunRecord
+from tradingagents.application.database import RunRecord
 
 
 def _selection(node_id: str, lifecycle_state: str = "active") -> dict[str, str]:
     return {"node_id": node_id, "lifecycle_state": lifecycle_state}
+
+
+def _database_snapshot(repository) -> dict[str, tuple[tuple[object, ...], ...]]:
+    with repository.engine.connect() as connection:
+        table_names = tuple(
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
+            )
+        )
+        return {
+            table_name: tuple(
+                connection.exec_driver_sql(f'SELECT * FROM "{table_name}"')
+            )
+            for table_name in table_names
+        }
 
 
 def _commit_full(repository, settings, ticker: str, analysis_date: date) -> str:
@@ -89,12 +106,7 @@ async def test_comparison_api_supports_every_pair_shape_and_explicit_trash(
         baseline_id=second_full.id,
     )
     web_repository.trash_runs((sibling.id,))
-    with web_repository.sessions() as session:
-        before = (
-            session.scalar(select(func.count()).select_from(RunRecord)),
-            session.scalar(select(func.count()).select_from(RunEventRecord)),
-            tuple(session.execute(select(RunRecord.id, RunRecord.updated_at).order_by(RunRecord.id))),
-        )
+    before = _database_snapshot(web_repository)
     pairs = (
         (first_full.id, second_full.id, "full", "full", True),
         (first_full.id, first_incremental.id, "full", "incremental", False),
@@ -120,12 +132,7 @@ async def test_comparison_api_supports_every_pair_shape_and_explicit_trash(
             right_kind,
         ]
         assert payload["cross_cycle"] is cross_cycle
-    with web_repository.sessions() as session:
-        after = (
-            session.scalar(select(func.count()).select_from(RunRecord)),
-            session.scalar(select(func.count()).select_from(RunEventRecord)),
-            tuple(session.execute(select(RunRecord.id, RunRecord.updated_at).order_by(RunRecord.id))),
-        )
+    after = _database_snapshot(web_repository)
     assert after == before
 
 

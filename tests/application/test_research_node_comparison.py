@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from tests.application.test_cycle_trash_lifecycle import _commit_node, _warning_products
 from tests.application.test_service import _equity_resolver, _Graph
@@ -15,7 +15,6 @@ from tradingagents.application.contracts import (
 from tradingagents.application.database import (
     DecisionRecord,
     ResearchNodeRecord,
-    RunEventRecord,
     RunRecord,
 )
 from tradingagents.application.errors import InvalidResearchNodeComparisonError
@@ -55,12 +54,24 @@ def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(
         llm_factory=forbidden_llm_factory,
         eligibility_resolver=_equity_resolver,
     )
-    with repository.sessions() as session:
-        before = (
-            session.scalar(select(func.count()).select_from(RunRecord)),
-            session.scalar(select(func.count()).select_from(RunEventRecord)),
-            tuple(session.execute(select(RunRecord.id, RunRecord.updated_at).order_by(RunRecord.id))),
-        )
+    def database_snapshot() -> dict[str, tuple[tuple[object, ...], ...]]:
+        with repository.engine.connect() as connection:
+            table_names = tuple(
+                row[0]
+                for row in connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY name"
+                )
+            )
+            return {
+                table_name: tuple(
+                    connection.exec_driver_sql(f'SELECT * FROM "{table_name}"')
+                )
+                for table_name in table_names
+            }
+
+    before = database_snapshot()
 
     comparison = reader.compare_research_nodes(
         "NVDA",
@@ -70,12 +81,7 @@ def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(
         ),
     )
 
-    with repository.sessions() as session:
-        after = (
-            session.scalar(select(func.count()).select_from(RunRecord)),
-            session.scalar(select(func.count()).select_from(RunEventRecord)),
-            tuple(session.execute(select(RunRecord.id, RunRecord.updated_at).order_by(RunRecord.id))),
-        )
+    after = database_snapshot()
     assert [side.node_id for side in comparison.sides] == [second.run_id, first.run_id]
     assert [side.research_kind for side in comparison.sides] == ["full", "full"]
     assert comparison.instrument == "NVDA"
@@ -235,26 +241,66 @@ def test_comparison_warns_on_method_change_and_preserves_each_performance_record
         baseline_id=baseline.id,
     )
 
-    def products(*, provider: str, basis: str, start: float, end: float):
+    def calculation(
+        *,
+        provider: str,
+        basis: str,
+        start: float,
+        end: float,
+    ) -> dict[str, object]:
+        return {
+            "provider": provider,
+            "fallback": False,
+            "adjustment_basis": basis,
+            "retrieved_at": "2026-07-25T00:00:00Z",
+            "baseline_information_cutoff_at": "2026-07-20T23:59:59Z",
+            "target_information_cutoff_at": "2026-07-24T23:59:59Z",
+            "start_session": "2026-07-20",
+            "end_session": "2026-07-24",
+            "start_value": start,
+            "end_value": end,
+            "unrounded_return": (end / start) - 1,
+        }
+
+    def products(
+        *,
+        provider: str,
+        basis: str,
+        start: float,
+        end: float,
+        benchmark_end: float,
+    ):
         value = _warning_products()
+        stock_calculation = calculation(
+            provider=provider,
+            basis=basis,
+            start=start,
+            end=end,
+        )
+        benchmark_calculation = calculation(
+            provider=f"{provider}.benchmark",
+            basis=basis,
+            start=start,
+            end=benchmark_end,
+        )
         value["performance"] = {
             "stock": {
                 "status": "calculated",
-                "calculation": {
-                    "provider": provider,
-                    "fallback": False,
-                    "adjustment_basis": basis,
-                    "retrieved_at": "2026-07-25T00:00:00Z",
-                    "baseline_information_cutoff_at": "2026-07-20T23:59:59Z",
-                    "target_information_cutoff_at": "2026-07-24T23:59:59Z",
-                    "start_session": "2026-07-20",
-                    "end_session": "2026-07-24",
-                    "start_value": start,
-                    "end_value": end,
-                    "unrounded_return": (end / start) - 1,
-                },
+                "calculation": stock_calculation,
             },
-            "benchmarks": [],
+            "benchmarks": [
+                {
+                    "name": "S&P 500",
+                    "component": {
+                        "status": "calculated",
+                        "calculation": benchmark_calculation,
+                    },
+                    "reported_difference": (
+                        stock_calculation["unrounded_return"]
+                        - benchmark_calculation["unrounded_return"]
+                    ),
+                }
+            ],
         }
         return value
 
@@ -268,12 +314,14 @@ def test_comparison_warns_on_method_change_and_preserves_each_performance_record
             basis="split_adjusted",
             start=100,
             end=110,
+            benchmark_end=105,
         )
         session.get(ResearchNodeRecord, second.id).incremental_products_json = products(
             provider="fixture.second",
             basis="dividend_adjusted",
             start=200,
             end=190,
+            benchmark_end=196,
         )
     comparison = AnalysisService(
         app_settings,
@@ -293,11 +341,17 @@ def test_comparison_warns_on_method_change_and_preserves_each_performance_record
     assert comparison.sides[0].performance.stock.calculation.provider == "fixture.first"
     assert comparison.sides[0].performance.stock.calculation.adjustment_basis == "split_adjusted"
     assert comparison.sides[0].performance.stock.calculation.unrounded_return == pytest.approx(0.1)
+    assert comparison.sides[0].performance.benchmarks[0].reported_difference == pytest.approx(
+        0.05
+    )
     assert comparison.sides[1].performance.stock.calculation.provider == "fixture.second"
     assert comparison.sides[1].performance.stock.calculation.adjustment_basis == (
         "dividend_adjusted"
     )
     assert comparison.sides[1].performance.stock.calculation.unrounded_return == pytest.approx(-0.05)
+    assert comparison.sides[1].performance.benchmarks[0].reported_difference == pytest.approx(
+        -0.03
+    )
     assert not hasattr(comparison, "performance_difference")
     assert not hasattr(comparison, "ranking")
 

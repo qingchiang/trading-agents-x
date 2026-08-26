@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { api } from "../api/client";
@@ -22,6 +22,51 @@ beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
 });
+
+function comparisonNode(
+  id: string,
+  researchKind: "full" | "incremental",
+  cycleId: string,
+) {
+  return {
+    id,
+    cycle_id: cycleId,
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {},
+    research_kind: researchKind,
+    full_baseline_run_id: researchKind === "full" ? null : cycleId,
+    is_cycle_head: true,
+    is_primary: cycleId === "cycle-a",
+    is_active: true,
+    trashed_at: null,
+  };
+}
+
+function comparisonResponse(
+  nodes: ReturnType<typeof comparisonNode>[],
+  crossCycle: boolean,
+) {
+  return {
+    instrument: "NVDA",
+    cross_cycle: crossCycle,
+    method_changed: false,
+    warnings: [],
+    sides: nodes.map((node) => ({
+      node_id: node.id,
+      cycle_id: node.cycle_id,
+      analysis_date: node.analysis_date,
+      research_schema_version: node.research_schema_version,
+      method_snapshot: node.method_snapshot,
+      research_kind: node.research_kind,
+      lifecycle_state: "active",
+      decision: { rating: "hold" },
+    })),
+    decision_sections: [],
+  };
+}
 
 test("shows the first Full Run-backed node and keeps its operational Run link", async () => {
   vi.mocked(api.timeline).mockResolvedValue({
@@ -132,6 +177,112 @@ test("compares arbitrary active and Trash nodes with accessible side-by-side con
   ]) {
     expect(screen.getAllByText(heading).length).toBeGreaterThan(0);
   }
+});
+
+test.each([
+  ["Full to Full", comparisonNode("full-a", "full", "cycle-a"), comparisonNode("full-b", "full", "cycle-b"), true],
+  ["Full to Incremental", comparisonNode("full-a", "full", "cycle-a"), comparisonNode("incremental-a", "incremental", "cycle-a"), false],
+  ["Incremental siblings", comparisonNode("incremental-a", "incremental", "cycle-a"), comparisonNode("incremental-b", "incremental", "cycle-a"), false],
+  ["cross-Cycle", comparisonNode("incremental-a", "incremental", "cycle-a"), comparisonNode("incremental-b", "incremental", "cycle-b"), true],
+])("supports the %s comparison pair", async (_label, first, second, crossCycle) => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes: [first, second],
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockResolvedValue(
+    comparisonResponse([first, second], crossCycle) as never,
+  );
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  await waitFor(() => expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
+    { node_id: first.id, lifecycle_state: "active" },
+    { node_id: second.id, lifecycle_state: "active" },
+  ]));
+  expect(screen.getByRole("region", { name: "Node Comparison" })).toBeVisible();
+  expect(screen.getByText(crossCycle ? "Cross-Cycle" : "Same Cycle"))
+    .toBeVisible();
+});
+
+test("enforces exactly two selections before comparison", async () => {
+  const nodes = [
+    comparisonNode("full-a", "full", "cycle-a"),
+    comparisonNode("incremental-a", "incremental", "cycle-a"),
+    comparisonNode("incremental-b", "incremental", "cycle-a"),
+  ];
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes,
+  } } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const compareButton = await screen.findByRole("button", { name: "Compare selected nodes" });
+  const selectButtons = screen.getAllByRole("button", { name: "Select for comparison" });
+  expect(compareButton).toBeDisabled();
+  fireEvent.click(selectButtons[0]);
+  expect(compareButton).toBeDisabled();
+  fireEvent.click(selectButtons[1]);
+  expect(compareButton).toBeEnabled();
+  expect(selectButtons[2]).toBeDisabled();
+  expect(api.compareResearchNodes).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["Legacy-only nodes are not comparable"],
+  ["Failed or cancelled nodes are not comparable"],
+  ["Selected nodes must belong to one Instrument"],
+  ["Research Node was not found"],
+  ["Purged Research Nodes cannot be compared"],
+  ["Trash lifecycle state must be explicit"],
+])("surfaces comparison rejection: %s", async (message) => {
+  const nodes = [
+    comparisonNode("full-a", "full", "cycle-a"),
+    comparisonNode("incremental-a", "incremental", "cycle-a"),
+  ];
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes,
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockRejectedValue(new Error(message));
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Node Comparison" })).not.toBeInTheDocument();
+});
+
+test("clears comparison state when navigating to another Instrument Timeline", async () => {
+  const timelineNode = (instrument: string, id: string) => ({
+    id, cycle_id: id, instrument, analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: "full", full_baseline_run_id: null,
+    is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+  });
+  vi.mocked(api.timeline).mockImplementation(async (instrument) => ({ timeline: {
+    instrument, primary_cycle_id: `${instrument}-full`,
+    nodes: [timelineNode(instrument, `${instrument}-full`)],
+  } }) as never);
+  window.history.replaceState(null, "", "/timelines/NVDA");
+  render(<Router><Timeline /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Select for comparison" }));
+  expect(screen.getByText(/NVDA-full · Active/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Remove selected node NVDA-full" })).toBeVisible();
+
+  act(() => {
+    window.history.pushState(null, "", "/timelines/AAPL");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("AAPL", 20, 0));
+  expect(screen.queryByText(/NVDA-full · Active/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Compare selected nodes" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Select for comparison" })).toBeEnabled();
+  window.history.replaceState(null, "", "/");
 });
 
 test("distinguishes a warned Incremental node without disabling its Timeline", async () => {

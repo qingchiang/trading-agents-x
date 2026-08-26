@@ -799,6 +799,134 @@ test("compares active and explicitly shown Trash nodes without creating research
   expect(researchCreateCalls).toBe(0);
 });
 
+test("covers every supported retained-node comparison pair", async ({ page }) => {
+  const makeNode = (
+    id: string,
+    researchKind: "full" | "incremental",
+    cycleId: string,
+  ) => ({
+    id, cycle_id: cycleId, instrument: "NVDA", analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: researchKind,
+    full_baseline_run_id: researchKind === "full" ? null : cycleId,
+    is_baseline_compatible: researchKind === "full", is_cycle_head: true,
+    is_primary: cycleId === "cycle-a", is_active: true, trashed_at: null,
+  });
+  const pairs = [
+    [makeNode("full-a", "full", "cycle-a"), makeNode("full-b", "full", "cycle-b")],
+    [makeNode("full-a", "full", "cycle-a"), makeNode("incremental-a", "incremental", "cycle-a")],
+    [makeNode("incremental-a", "incremental", "cycle-a"), makeNode("incremental-b", "incremental", "cycle-a")],
+    [makeNode("incremental-a", "incremental", "cycle-a"), makeNode("incremental-b", "incremental", "cycle-b")],
+  ];
+  let currentPair = pairs[0];
+  const comparisonPayloads: Record<string, unknown>[] = [];
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: "cycle-a", nodes: currentPair,
+        node_total: 2, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      comparisonPayloads.push(request.postDataJSON() as Record<string, unknown>);
+      const crossCycle = currentPair[0].cycle_id !== currentPair[1].cycle_id;
+      return route.fulfill({ json: {
+        instrument: "NVDA", cross_cycle: crossCycle, method_changed: false,
+        warnings: [], sides: currentPair.map((node) => ({
+          node_id: node.id, cycle_id: node.cycle_id,
+          analysis_date: node.analysis_date, research_schema_version: "1",
+          method_snapshot: {}, research_kind: node.research_kind,
+          lifecycle_state: "active", decision: { rating: "hold" },
+        })), decision_sections: [],
+      } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  for (const [index, pair] of pairs.entries()) {
+    currentPair = pair;
+    await page.goto(`/timelines/NVDA?pair=${index}`);
+    const selectButtons = page.getByRole("button", {
+      name: /Select for comparison|选择用于对照|比較対象に選択/,
+    });
+    await selectButtons.nth(0).click();
+    await selectButtons.nth(0).click();
+    await page.getByRole("button", {
+      name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
+    }).click();
+    await expect(page.getByRole("region", {
+      name: /Node Comparison|节点对照|ノード比較/,
+    })).toBeVisible();
+    expect(comparisonPayloads.at(-1)).toEqual({ nodes: pair.map((node) => ({
+      node_id: node.id, lifecycle_state: "active",
+    })) });
+  }
+});
+
+test("enforces selection cardinality and surfaces every comparison rejection", async ({
+  page,
+}) => {
+  const nodes = ["full-a", "incremental-a", "incremental-b"].map((id, index) => ({
+    id, cycle_id: "full-a", instrument: "NVDA", analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: index === 0 ? "full" : "incremental",
+    full_baseline_run_id: index === 0 ? null : "full-a",
+    is_baseline_compatible: index === 0, is_cycle_head: index === 2,
+    is_primary: true, is_active: true, trashed_at: null,
+  }));
+  const rejectionMessages = [
+    "Legacy-only nodes are not comparable",
+    "Failed or cancelled nodes are not comparable",
+    "Selected nodes must belong to one Instrument",
+    "Research Node was not found",
+    "Purged Research Nodes cannot be compared",
+    "Trash lifecycle state must be explicit",
+  ];
+  let rejectionMessage = rejectionMessages[0];
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: "full-a", nodes,
+        node_total: 3, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      return route.fulfill({ status: 422, json: { error: {
+        code: "invalid_research_node_comparison", message: rejectionMessage,
+      } } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  for (const [index, message] of rejectionMessages.entries()) {
+    rejectionMessage = message;
+    await page.goto(`/timelines/NVDA?rejection=${index}`);
+    const compareButton = page.getByRole("button", {
+      name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
+    });
+    const selectButtons = page.getByRole("button", {
+      name: /Select for comparison|选择用于对照|比較対象に選択/,
+    });
+    await expect(compareButton).toBeDisabled();
+    await selectButtons.nth(0).click();
+    await expect(compareButton).toBeDisabled();
+    await selectButtons.nth(0).click();
+    await expect(compareButton).toBeEnabled();
+    await expect(selectButtons.nth(0)).toBeDisabled();
+    await compareButton.click();
+    await expect(page.getByText(message)).toBeVisible();
+    await expect(page.getByRole("region", {
+      name: /Node Comparison|节点对照|ノード比較/,
+    })).toBeHidden();
+  }
+});
+
 test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
   let stage: "none" | "full" | "incremental" = "none";
   let incrementalPayload: Record<string, unknown> | null = null;

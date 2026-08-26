@@ -182,6 +182,15 @@ export default function Timeline() {
   };
 
   useEffect(() => {
+    setDetail(null);
+    setNodeOffset(0);
+    setShowRetainedTrash(false);
+    setComparisonNodes([]);
+    setComparison(null);
+    setError("");
+  }, [instrument]);
+
+  useEffect(() => {
     let active = true;
     const onError = (cause: unknown) =>
       active &&
@@ -350,7 +359,17 @@ export default function Timeline() {
             <strong>{t("comparisonSelection")}</strong>
             <p>{t("comparisonSelectionHint")}</p>
             {comparisonNodes.map((node, index) => (
-              <code key={node.id}>{index + 1}. {node.id} · {t(node.is_active ? "activeNode" : "trashNode")}</code>
+              <span className="comparison-selection" key={node.id}>
+                <code>{index + 1}. {node.id} · {t(node.is_active ? "activeNode" : "trashNode")}</code>
+                <button
+                  type="button"
+                  className="button compact-button"
+                  aria-label={t("removeSelectedNode", { nodeId: node.id })}
+                  onClick={() => toggleComparisonNode(node)}
+                >
+                  ×
+                </button>
+              </span>
             ))}
           </div>
           <button
