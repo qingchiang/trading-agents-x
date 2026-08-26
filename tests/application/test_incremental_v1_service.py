@@ -773,6 +773,29 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
                 ),
             ),
             stock_series_evidence_ref=market_evidence.evidence.ref,
+            benchmark_series=(
+                BenchmarkSeriesResult(
+                    name="S&P 500",
+                    series=MarketSeriesResult(
+                        instrument="^GSPC",
+                        source="fixture.benchmark",
+                        adjustment_basis="adjusted_close",
+                        retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+                        points=(
+                            MarketSeriesPoint(
+                                session="2026-07-20",
+                                completed_at="2026-07-20T20:00:00Z",
+                                adjusted_close=100,
+                            ),
+                            MarketSeriesPoint(
+                                session="2026-07-24",
+                                completed_at="2026-07-24T20:00:00Z",
+                                adjusted_close=105,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         )
 
     result = _incremental_service(
@@ -800,6 +823,10 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     assert calculation.end_session == date(2026, 7, 24)
     assert calculation.unrounded_return == pytest.approx(0.1)
     assert calculation.fallback is True
+    benchmark = node.performance.benchmarks[0]
+    assert benchmark.component.calculation is not None
+    assert benchmark.component.calculation.unrounded_return == pytest.approx(0.05)
+    assert benchmark.reported_difference == pytest.approx(0.05)
 
 
 def test_completed_stock_session_rejects_unrelated_market_evidence(
@@ -1001,6 +1028,7 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
     assert calculation.start_session == date(2026, 7, 20)
     assert calculation.end_session == date(2026, 7, 24)
     assert calculation.unrounded_return == pytest.approx(0.05)
+    assert node.performance.benchmarks[0].reported_difference is None
 
 
 def test_near_live_five_day_observation_is_admitted_without_claiming_pit(

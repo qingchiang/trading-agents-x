@@ -277,14 +277,70 @@ def test_unavailable_benchmark_uses_only_a_sanitized_diagnostic_code() -> None:
         unavailable_diagnostic=CollectionDiagnostic(code="rate_limited"),
     )
 
-    result = calculate_benchmark_performance(request, (benchmark,))
+    result = calculate_benchmark_performance(
+        request,
+        (benchmark,),
+        stock=calculate_stock_performance(request, None).stock,
+    )
 
     assert result[0].component.reason == "Benchmark unavailable: rate_limited."
+    assert result[0].reported_difference is None
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         BenchmarkSeriesResult(
             name="S&P 500",
             unavailable_reason="Authorization: Bearer secret-value",
         )
+
+
+def test_reported_benchmark_difference_requires_matching_actual_sessions() -> None:
+    request = _collection_request(analysis_cutoff="2026-07-24")
+    stock = calculate_stock_performance(
+        request,
+        MarketSeriesResult(
+            instrument="NVDA",
+            source="fixture.stock",
+            adjustment_basis="adjusted_close",
+            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            points=(
+                MarketSeriesPoint(
+                    session="2026-07-20",
+                    completed_at="2026-07-20T20:00:00Z",
+                    adjusted_close=100,
+                ),
+                MarketSeriesPoint(
+                    session="2026-07-24",
+                    completed_at="2026-07-24T20:00:00Z",
+                    adjusted_close=110,
+                ),
+            ),
+        ),
+    ).stock
+    benchmark = BenchmarkSeriesResult(
+        name="S&P 500",
+        series=MarketSeriesResult(
+            instrument="^GSPC",
+            source="fixture.benchmark",
+            adjustment_basis="price_index",
+            retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+            points=(
+                MarketSeriesPoint(
+                    session="2026-07-19",
+                    completed_at="2026-07-19T20:00:00Z",
+                    adjusted_close=100,
+                ),
+                MarketSeriesPoint(
+                    session="2026-07-24",
+                    completed_at="2026-07-24T20:00:00Z",
+                    adjusted_close=105,
+                ),
+            ),
+        ),
+    )
+
+    result = calculate_benchmark_performance(request, (benchmark,), stock=stock)
+
+    assert result[0].component.status is PerformanceComponentStatus.CALCULATED
+    assert result[0].reported_difference is None
 
 
 def test_incremental_collection_request_deeply_freezes_configured_routes() -> None:

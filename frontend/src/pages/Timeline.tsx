@@ -83,6 +83,19 @@ function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison
               <AuditContext title={t("reassessment")} value={side.reassessment} />
               <AuditContext title={t("decision")} value={side.decision} />
               <AuditContext title={t("performance")} value={side.performance} />
+              {(side.full_research_required_reasons?.length ?? 0) > 0 && (
+                <section
+                  className="comparison-context"
+                  aria-label={t("comparisonSideWarnings", { side: index + 1 })}
+                >
+                  <h4>{t("warnings")}</h4>
+                  <ul>
+                    {side.full_research_required_reasons?.map((reason) => (
+                      <li className="alert" key={reason.code}>{reason.message}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </article>
           );
         })}

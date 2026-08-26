@@ -767,6 +767,9 @@ test("compares active and explicitly shown Trash nodes without creating research
             method_snapshot: incremental.method_snapshot, research_kind: "incremental",
             lifecycle_state: "trashed", collection_summary: { version: "1" },
             research_availability: { version: "1" }, reassessment: { entries: [] },
+            full_research_required_reasons: [{ code: "attribution.unreliable",
+              message: "Comparison side needs Full research.", origin: "semantic",
+              evidence_refs: [] }],
             decision: { rating: "bullish" }, performance: {
               stock: { status: "unavailable", reason: "fixture" }, benchmarks: [],
             } },
@@ -792,6 +795,7 @@ test("compares active and explicitly shown Trash nodes without creating research
 
   await expect(page.getByRole("region", { name: /Node Comparison|节点对照|ノード比較/ })).toBeVisible();
   await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
+  await expect(page.getByText("Comparison side needs Full research.")).toBeVisible();
   expect(comparisonPayload).toEqual({ nodes: [
     { node_id: full.id, lifecycle_state: "active" },
     { node_id: incremental.id, lifecycle_state: "trashed" },

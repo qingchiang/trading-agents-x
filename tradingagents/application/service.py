@@ -922,6 +922,7 @@ class AnalysisService:
             benchmarks=calculate_benchmark_performance(
                 request,
                 collected.benchmark_series,
+                stock=performance.stock,
             ),
         )
         research_availability = derive_research_availability(collection_summary)

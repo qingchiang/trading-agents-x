@@ -340,22 +340,53 @@ def calculate_stock_performance(
 def calculate_benchmark_performance(
     request: IncrementalCollectionRequest,
     benchmarks: tuple[BenchmarkSeriesResult, ...],
+    *,
+    stock: PerformanceComponent,
 ) -> tuple[BenchmarkContext, ...]:
-    """Calculate benchmark endpoints from the actual collected series."""
-    return tuple(
-        BenchmarkContext(
-            name=benchmark.name,
-            component=(
-                _calculate_performance_component(request, benchmark.series)
-                if benchmark.series is not None
-                else PerformanceComponent(
-                    status=PerformanceComponentStatus.UNAVAILABLE,
-                    reason=(f"Benchmark unavailable: {benchmark.unavailable_diagnostic.code}."),
-                )
-            ),
+    """Calculate benchmark endpoints and compatible reported differences."""
+    contexts = []
+    for benchmark in benchmarks:
+        component = (
+            _calculate_performance_component(request, benchmark.series)
+            if benchmark.series is not None
+            else PerformanceComponent(
+                status=PerformanceComponentStatus.UNAVAILABLE,
+                reason=(f"Benchmark unavailable: {benchmark.unavailable_diagnostic.code}."),
+            )
         )
-        for benchmark in benchmarks
+        contexts.append(
+            BenchmarkContext(
+                name=benchmark.name,
+                component=component,
+                reported_difference=_reported_benchmark_difference(stock, component),
+            )
+        )
+    return tuple(contexts)
+
+
+def _reported_benchmark_difference(
+    stock: PerformanceComponent,
+    benchmark: PerformanceComponent,
+) -> float | None:
+    stock_calculation = stock.calculation
+    benchmark_calculation = benchmark.calculation
+    if stock_calculation is None or benchmark_calculation is None:
+        return None
+    stock_interval = (
+        stock_calculation.baseline_information_cutoff_at,
+        stock_calculation.target_information_cutoff_at,
+        stock_calculation.start_session,
+        stock_calculation.end_session,
     )
+    benchmark_interval = (
+        benchmark_calculation.baseline_information_cutoff_at,
+        benchmark_calculation.target_information_cutoff_at,
+        benchmark_calculation.start_session,
+        benchmark_calculation.end_session,
+    )
+    if stock_interval != benchmark_interval:
+        return None
+    return stock_calculation.unrounded_return - benchmark_calculation.unrounded_return
 
 
 def _calculate_performance_component(

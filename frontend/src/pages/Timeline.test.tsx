@@ -138,6 +138,10 @@ test("compares arbitrary active and Trash nodes with accessible side-by-side con
         collection_summary: { version: "1", market: "united_states", domains: [] },
         research_availability: { version: "1", domains: [] },
         reassessment: { entries: [] },
+        full_research_required_reasons: [{
+          code: "attribution.unreliable", message: "Comparison side needs Full research.",
+          origin: "semantic", evidence_refs: [],
+        }],
         decision: { rating: "bullish" },
         performance: { stock: { status: "unavailable", reason: "fixture" }, benchmarks: [] } },
     ],
@@ -171,6 +175,8 @@ test("compares arbitrary active and Trash nodes with accessible side-by-side con
     name: "Comparison side 2: Incremental Research Node, Trash",
   })).toBeVisible();
   expect(screen.getByText("Method Changed")).toBeVisible();
+  expect(screen.getByRole("region", { name: "Warnings for comparison side 2" })).toBeVisible();
+  expect(screen.getByText("Comparison side needs Full research.")).toBeVisible();
   expect(screen.getByText("Not Recorded Under This Schema")).toBeVisible();
   for (const heading of [
     "Collection Summary", "Research Availability", "Reassessment", "Decision", "Performance",
