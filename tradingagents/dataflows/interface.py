@@ -68,6 +68,7 @@ from .market_data_validator import (
     build_verified_market_snapshot as get_yfinance_verified_snapshot,
 )
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .rate_limit import stop_on_rate_limit_scope
 from .symbol_utils import normalize_symbol
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -88,27 +89,17 @@ TOOLS_CATEGORIES = {
         "description": "Current listed-equity product admission",
         "tools": ["resolve_instrument_eligibility"],
     },
-    "core_stock_apis": {
-        "description": "OHLCV stock price data",
-        "tools": [
-            "get_stock_data"
-        ]
-    },
+    "core_stock_apis": {"description": "OHLCV stock price data", "tools": ["get_stock_data"]},
     "technical_indicators": {
         "description": "Technical analysis indicators",
         "tools": [
             "get_indicators",
             "get_verified_market_snapshot",
-        ]
+        ],
     },
     "fundamental_data": {
         "description": "Company fundamentals",
-        "tools": [
-            "get_fundamentals",
-            "get_balance_sheet",
-            "get_cashflow",
-            "get_income_statement"
-        ]
+        "tools": ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"],
     },
     "news_data": {
         "description": "News and insider data",
@@ -116,20 +107,20 @@ TOOLS_CATEGORIES = {
             "get_news",
             "get_global_news",
             "get_insider_transactions",
-        ]
+        ],
     },
     "macro_data": {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
         "tools": [
             "get_macro_indicators",
-        ]
+        ],
     },
     "prediction_markets": {
         "description": "Market-implied probabilities for forward-looking events",
         "tools": [
             "get_prediction_markets",
-        ]
-    }
+        ],
+    },
 }
 
 VENDOR_LIST = [
@@ -244,6 +235,7 @@ VENDOR_METHODS = {
     },
 }
 
+
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
     for category, info in TOOLS_CATEGORIES.items():
@@ -286,17 +278,11 @@ def validate_market_routing(config: dict | None = None) -> None:
         raise ValueError("data_vendors_by_market must be a mapping")
 
     registered = set(VENDOR_LIST)
-    registered.update(
-        vendor for methods in VENDOR_METHODS.values() for vendor in methods
-    )
+    registered.update(vendor for methods in VENDOR_METHODS.values() for vendor in methods)
 
     def declared_chain(raw_chain: str, context: str) -> list[str]:
         vendors = parse_vendor_chain(raw_chain)
-        unknown = [
-            vendor
-            for vendor in vendors
-            if vendor != "default" and vendor not in registered
-        ]
+        unknown = [vendor for vendor in vendors if vendor != "default" and vendor not in registered]
         if unknown:
             raise ValueError(f"Unknown vendor(s) {unknown} in {context}")
         return vendors
@@ -383,10 +369,7 @@ def _append_availability_notes(result, notes: list[str]):
     if not notes or not isinstance(result, str):
         return result
     unique_notes = list(dict.fromkeys(notes))
-    return (
-        f"{result.rstrip()}\n\n### Source availability notes\n"
-        + "\n".join(unique_notes)
-    )
+    return f"{result.rstrip()}\n\n### Source availability notes\n" + "\n".join(unique_notes)
 
 
 def _provenance_for_route(
@@ -436,12 +419,15 @@ def _provenance_for_route(
         requested = f"{args[1]} to {args[2]}"
         effective = requested
         timing = (
-            "publication/disclosure-date filtered; "
-            f"returned_items={result.count(chr(10) + '### ')}"
+            f"publication/disclosure-date filtered; returned_items={result.count(chr(10) + '### ')}"
         )
     elif method == "get_global_news" and args:
         end_date = str(args[0])
-        lookback = args[1] if len(args) > 1 and args[1] is not None else config["global_news_lookback_days"]
+        lookback = (
+            args[1]
+            if len(args) > 1 and args[1] is not None
+            else config["global_news_lookback_days"]
+        )
         try:
             start_date = (
                 datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=int(lookback))
@@ -450,10 +436,7 @@ def _provenance_for_route(
         except (TypeError, ValueError):
             requested = f"ending {end_date}"
         effective = requested
-        timing = (
-            "publication-date filtered; "
-            f"returned_items={result.count(chr(10) + '### ')}"
-        )
+        timing = f"publication-date filtered; returned_items={result.count(chr(10) + '### ')}"
     elif method == "get_macro_indicators" and len(args) >= 2:
         requested = str(args[1])
         effective = f"observations <= {args[1]}"
@@ -471,11 +454,7 @@ def _provenance_for_route(
     elif method in {"get_balance_sheet", "get_cashflow", "get_income_statement"}:
         curr_date = args[2] if len(args) >= 3 else None
         requested = str(curr_date or "live retrieval")
-        effective = (
-            f"fiscal period ends <= {curr_date}"
-            if curr_date
-            else "current statement frame"
-        )
+        effective = f"fiscal period ends <= {curr_date}" if curr_date else "current statement frame"
         if "LIVE_DATA_UNAVAILABLE" in result:
             timing = "unavailable for historical date; vendor not queried"
         elif vendor in {"yfinance", "alpha_vantage"}:
@@ -500,7 +479,11 @@ def _provenance_for_route(
             else "unavailable for historical date; vendor not queried"
         )
         retrieved_at = None
-    elif "data_unavailable" in lowered or "error fetching" in lowered or "error retrieving" in lowered:
+    elif (
+        "data_unavailable" in lowered
+        or "error fetching" in lowered
+        or "error retrieving" in lowered
+    ):
         effective = "—"
         timing = "retrieval unavailable"
     elif method in {"get_news", "get_global_news"} and (
@@ -550,9 +533,7 @@ def _attach_unavailable_provenance(
     config: dict,
     timing: str,
 ) -> str:
-    record = _provenance_for_route(
-        method, " / ".join(vendors) or "unknown", args, config, result
-    )
+    record = _provenance_for_route(method, " / ".join(vendors) or "unknown", args, config, result)
     if record is None:
         return result
     return attach_provenance(
@@ -567,7 +548,14 @@ def _attach_unavailable_provenance(
     )
 
 
-def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
+def route_to_vendor(
+    method: str,
+    *args,
+    _provenance: bool = False,
+    _stop_on_rate_limit: bool = False,
+    _require_adjusted: bool = False,
+    **kwargs,
+):
     """Route method calls to appropriate vendor implementation with fallback support."""
     if method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
@@ -631,7 +619,14 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
-            result = impl_func(*args, **kwargs)
+            vendor_kwargs = kwargs
+            # Only the J-Quants adapter needs this bounded Incremental control.
+            # Keep it out of the general provider interface so yfinance and all
+            # ordinary Full routes retain their existing signatures/semantics.
+            if _require_adjusted and method == "get_stock_data" and vendor == "jquants":
+                vendor_kwargs = {**kwargs, "require_adjusted": True}
+            with stop_on_rate_limit_scope(_stop_on_rate_limit):
+                result = impl_func(*args, **vendor_kwargs)
             if _provenance and isinstance(result, str):
                 existing_records = extract_provenance(result)
                 record = (
@@ -652,8 +647,7 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
                             "get_verified_market_snapshot",
                         }:
                             fallback_timing += (
-                                "; adjustment provider changed; "
-                                "technical indicators may differ"
+                                "; adjustment provider changed; technical indicators may differ"
                             )
                         record = ProvenanceRecord(
                             evidence=record.evidence,
@@ -670,6 +664,8 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
             result = _append_availability_notes(result, availability_notes)
             return result
         except VendorRateLimitError:
+            if _stop_on_rate_limit:
+                raise
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             continue
         except VendorNotConfiguredError as e:
@@ -700,13 +696,10 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
             # verdict can't hide a broken primary (network/auth/etc.).
             logger.warning(
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
-                method, first_error,
+                method,
+                first_error,
             )
-        sym = (
-            requested_symbol
-            if isinstance(requested_symbol, str)
-            else last_no_data.symbol
-        )
+        sym = requested_symbol if isinstance(requested_symbol, str) else last_no_data.symbol
         canonical = last_no_data.canonical
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
         # Surface the typed error's detail (e.g. "latest row is 2025-06-11 ...

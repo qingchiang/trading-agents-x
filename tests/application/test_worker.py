@@ -14,14 +14,6 @@ class _Service:
         self.executed.append((run.id, worker_id, run.status))
 
 
-class _Settlement:
-    def __init__(self):
-        self.calls = []
-
-    def settle_once(self, *, limit):
-        self.calls.append(limit)
-
-
 class _Maintenance:
     def __init__(self, *, failures=0):
         self.calls = 0
@@ -34,7 +26,7 @@ class _Maintenance:
         return 0
 
 
-def test_worker_prioritizes_queued_analysis_over_settlement(
+def test_worker_prioritizes_queued_analysis(
     app_settings,
     repository,
 ) -> None:
@@ -44,11 +36,9 @@ def test_worker_prioritizes_queued_analysis_over_settlement(
         app_settings.resolve_run(request).snapshot(),
     )
     service = _Service(repository)
-    settlement = _Settlement()
     worker = AnalysisWorker(
         app_settings,
         service=service,
-        settlement=settlement,
         maintenance=_Maintenance(),
         worker_id="fixture-worker",
     )
@@ -57,25 +47,6 @@ def test_worker_prioritizes_queued_analysis_over_settlement(
     assert service.executed == [
         (queued.id, "fixture-worker", RunStatus.RUNNING)
     ]
-    assert settlement.calls == []
-
-
-def test_idle_worker_runs_low_priority_settlement(
-    app_settings,
-    repository,
-) -> None:
-    service = _Service(repository)
-    settlement = _Settlement()
-    worker = AnalysisWorker(
-        app_settings,
-        service=service,
-        settlement=settlement,
-        maintenance=_Maintenance(),
-        worker_id="fixture-worker",
-    )
-
-    assert worker.run_once() is False
-    assert settlement.calls == [10]
 
 
 def test_busy_worker_runs_maintenance_immediately_and_every_24_hours(
@@ -93,7 +64,6 @@ def test_busy_worker_runs_maintenance_immediately_and_every_24_hours(
     worker = AnalysisWorker(
         app_settings,
         service=_Service(repository),
-        settlement=_Settlement(),
         maintenance=maintenance,
         monotonic_clock=lambda: clock[0],
         worker_id="fixture-worker",
@@ -124,7 +94,6 @@ def test_maintenance_failure_retries_after_one_hour_without_blocking_work(
     worker = AnalysisWorker(
         app_settings,
         service=service,
-        settlement=_Settlement(),
         maintenance=maintenance,
         monotonic_clock=lambda: clock[0],
         worker_id="fixture-worker",

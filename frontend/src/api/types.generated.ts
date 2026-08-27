@@ -11,11 +11,14 @@ export interface components {
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       ticker: string;
     };
     AnalysisResult: {
@@ -61,6 +64,11 @@ export interface components {
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       value: number;
     };
+    BenchmarkContext: {
+      component: components["schemas"]["PerformanceComponent"];
+      name: string;
+      reported_difference?: number | null;
+    };
     CalculationRecord: {
       as_of_date: string;
       date_evidence_refs?: string[];
@@ -93,6 +101,34 @@ export interface components {
       trash_retention_days: number;
     };
     ClaimImportance: "primary" | "supporting";
+    CollectionDiagnostic: {
+      code: string;
+    };
+    CollectionDomainResult: {
+      diagnostic?: components["schemas"]["CollectionDiagnostic"] | null;
+      domain: "fundamentals" | "market" | "news" | "social";
+      evidence_refs?: string[];
+      observed_from?: string | null;
+      observed_through?: string | null;
+      omitted_by_temporal_boundary?: boolean;
+      sources?: components["schemas"]["CollectionSourceProvenance"][];
+      state: components["schemas"]["CollectionResultState"];
+      temporal_bases?: components["schemas"]["CollectionTemporalBasis"][];
+    };
+    CollectionResultState: "data" | "empty" | "partial" | "unavailable";
+    CollectionSourceProvenance: {
+      diagnostic?: components["schemas"]["CollectionDiagnostic"] | null;
+      fallback?: boolean;
+      retrieved_at: string;
+      source: string;
+    };
+    CollectionSummary: {
+      domains: components["schemas"]["CollectionDomainResult"][];
+      market: "united_states" | "japan" | "mainland_china";
+      version: string;
+    };
+    CollectionTemporalBasis: "pit" | "near_live_advisory";
+    ComparisonValueState: "recorded" | "null" | "empty" | "not_recorded_under_this_schema";
     DebateAgenda: {
       issues: components["schemas"]["DebateIssue"][];
       summary: string;
@@ -205,6 +241,12 @@ export interface components {
       row_id?: string | null;
       table_id?: string | null;
     };
+    FullResearchRequiredReason: {
+      code: "thesis.material_reversal" | "identity.uncertain" | "attribution.unreliable" | "evidence.material_conflict";
+      evidence_refs?: string[];
+      message: string;
+      origin: "deterministic" | "semantic";
+    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -213,6 +255,11 @@ export interface components {
       queue: components["schemas"]["QueueHealth"];
       status: "ok" | "degraded";
       version: string;
+    };
+    InformationAdvancement: {
+      advanced: boolean;
+      observation_ids?: string[];
+      reasons?: ("admissible_observation" | "completed_stock_session")[];
     };
     InstrumentAdmissionError: {
       code: components["schemas"]["InstrumentAdmissionErrorCode"];
@@ -261,28 +308,6 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
-    MemoryEntry: {
-      analysis_date: string;
-      asset_type: string;
-      decision: components["schemas"]["ResearchDecision"];
-      instrument_local_name?: string | null;
-      instrument_name?: string | null;
-      market: string | null;
-      outcome: components["schemas"]["MemoryOutcome"];
-      profile: components["schemas"]["RunProfile"];
-      reflection: string | null;
-      run_id: string;
-      ticker: string;
-    };
-    MemoryOutcome: {
-      alpha_return: number | null;
-      benchmark: string;
-      holding_intervals: number;
-      observation_end: string | null;
-      observation_start: string | null;
-      raw_return: number | null;
-      status: "pending" | "resolved";
-    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -345,6 +370,37 @@ export interface components {
       unit: string;
     };
     NumericTemporalBasis: "point_in_time" | "live_snapshot";
+    PerformanceCalculationRecord: {
+      adjustment_basis: string;
+      baseline_information_cutoff_at: string;
+      end_session: string;
+      end_value: number;
+      fallback?: boolean;
+      formula?: string;
+      provider: string;
+      retrieved_at: string;
+      start_session: string;
+      start_value: number;
+      target_information_cutoff_at: string;
+      unrounded_return: number;
+    };
+    PerformanceComponent: {
+      calculation?: components["schemas"]["PerformanceCalculationRecord"] | null;
+      reason?: string | null;
+      status: components["schemas"]["PerformanceComponentStatus"];
+    };
+    PerformanceComponentStatus: "calculated" | "not_yet_observable" | "unavailable";
+    PerformanceObservation: {
+      benchmarks?: components["schemas"]["BenchmarkContext"][];
+      stock: components["schemas"]["PerformanceComponent"];
+    };
+    PrimaryCycleCandidate: {
+      analysis_date: string;
+      id: string;
+    };
+    PrimaryCycleSelectionRequest: {
+      full_run_id: string;
+    };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -363,10 +419,10 @@ export interface components {
       warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     QueueHealth: {
-      pending_outcomes: number;
       queued: number;
       running: number;
     };
+    ReassessmentDisposition: "reaffirmed" | "strengthened" | "weakened" | "overturned" | "unresolved";
     RebuttalReview: {
       addressed_issue_ids: string[];
       markdown: string;
@@ -416,6 +472,15 @@ export interface components {
       schema_version?: string;
       stage: string;
     };
+    ResearchAvailability: {
+      domains: components["schemas"]["ResearchAvailabilityDomain"][];
+      version: string;
+    };
+    ResearchAvailabilityDomain: {
+      domain: "fundamentals" | "market" | "news" | "social";
+      status: components["schemas"]["ResearchAvailabilityStatus"];
+    };
+    ResearchAvailabilityStatus: "available" | "limited" | "missing";
     ResearchCase: {
       markdown: string;
       role: "bull" | "bear";
@@ -428,7 +493,6 @@ export interface components {
       executive_summary: string;
       invalidation_conditions: string[];
       market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
-      memory_refs?: string[];
       numeric_audit_status?: components["schemas"]["NumericAuditStatus"] | null;
       rating: components["schemas"]["ResearchRating"];
       risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];
@@ -439,7 +503,85 @@ export interface components {
       unresolved_questions?: string[];
       valuation_assessment?: components["schemas"]["ValuationAssessment"] | null;
     };
+    ResearchNodeComparison: {
+      cross_cycle: boolean;
+      decision_sections: components["schemas"]["ResearchNodeDecisionSection"][];
+      instrument: string;
+      method_changed: boolean;
+      sides: components["schemas"]["ResearchNodeComparisonSide"][];
+      warnings?: components["schemas"]["ResearchNodeComparisonWarning"][];
+    };
+    ResearchNodeComparisonRequest: {
+      nodes: components["schemas"]["ResearchNodeComparisonSelection"][];
+    };
+    ResearchNodeComparisonSelection: {
+      lifecycle_state?: components["schemas"]["ResearchNodeLifecycleState"];
+      node_id: string;
+    };
+    ResearchNodeComparisonSide: {
+      analysis_date: string;
+      collection_summary?: components["schemas"]["CollectionSummary"] | null;
+      cycle_id: string;
+      decision: Record<string, unknown>;
+      full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
+      information_advancement?: components["schemas"]["InformationAdvancement"] | null;
+      lifecycle_state: components["schemas"]["ResearchNodeLifecycleState"];
+      method_snapshot: Record<string, unknown>;
+      node_id: string;
+      performance?: components["schemas"]["PerformanceObservation"] | null;
+      reassessment?: components["schemas"]["ResearchReassessment"] | null;
+      research_availability?: components["schemas"]["ResearchAvailability"] | null;
+      research_kind: "full" | "incremental";
+      research_schema_version: string;
+    };
+    ResearchNodeComparisonValue: {
+      state: components["schemas"]["ComparisonValueState"];
+      value?: unknown;
+    };
+    ResearchNodeComparisonWarning: {
+      code: string;
+      message: string;
+    };
+    ResearchNodeDecisionSection: {
+      key: string;
+      values: components["schemas"]["ResearchNodeComparisonValue"][];
+    };
+    ResearchNodeLifecycleState: "active" | "trashed";
+    ResearchNodeView: {
+      analysis_date: string;
+      collection_summary?: components["schemas"]["CollectionSummary"] | null;
+      cycle_id: string;
+      cycle_warning?: boolean;
+      decision?: components["schemas"]["ResearchDecision"] | null;
+      full_baseline_run_id?: string | null;
+      full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
+      id: string;
+      information_advancement?: components["schemas"]["InformationAdvancement"] | null;
+      information_cutoff_at: string;
+      instrument: string;
+      is_active: boolean;
+      is_baseline_compatible: boolean;
+      is_cycle_head: boolean;
+      is_primary: boolean;
+      method_snapshot: Record<string, unknown>;
+      performance?: components["schemas"]["PerformanceObservation"] | null;
+      reassessment?: components["schemas"]["ResearchReassessment"] | null;
+      research_availability?: components["schemas"]["ResearchAvailability"] | null;
+      research_kind: "full" | "incremental";
+      research_schema_version: string;
+      trash_cascade_full_run_id?: string | null;
+      trashed_at?: string | null;
+    };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchReassessment: {
+      entries: components["schemas"]["ResearchReassessmentEntry"][];
+    };
+    ResearchReassessmentEntry: {
+      component_id: string;
+      disposition: components["schemas"]["ReassessmentDisposition"];
+      evidence_refs?: string[];
+      reason: string;
+    };
     ResearchScenario: {
       core_assumptions: string[];
       evidence_refs?: string[];
@@ -448,6 +590,27 @@ export interface components {
       reference_ranges?: components["schemas"]["ScenarioReferenceRange"][];
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
+    ResearchTimeline: {
+      active_full_cycles?: components["schemas"]["PrimaryCycleCandidate"][];
+      instrument: string;
+      node_limit?: number;
+      node_offset?: number;
+      node_total?: number;
+      nodes?: components["schemas"]["ResearchNodeView"][];
+      primary_cycle_id?: string | null;
+      timeline_warning?: boolean;
+    };
+    ResearchTimelinePage: {
+      items?: components["schemas"]["ResearchTimelineSummary"][];
+      limit: number;
+      offset: number;
+      total: number;
+    };
+    ResearchTimelineSummary: {
+      instrument: string;
+      node_count: number;
+      primary_cycle_id?: string | null;
+    };
     ResearchWarning: {
       code?: string;
       evidence_ref?: string | null;
@@ -478,10 +641,12 @@ export interface components {
       status: components["schemas"]["RunStatus"];
     };
     RunBatchRequest: {
+      primary_replacements?: Record<string, string>;
       run_ids: string[];
     };
     RunBatchResult: {
       changed: number;
+      impacts?: components["schemas"]["RunLifecycleImpact"][];
       runs: components["schemas"]["RunView"][];
     };
     RunCreateRequest: {
@@ -490,11 +655,14 @@ export interface components {
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       source_run_id?: string | null;
       ticker: string;
     };
@@ -512,6 +680,14 @@ export interface components {
       payload?: Record<string, unknown>;
       run_id: string;
       sequence: number;
+    };
+    RunLifecycleImpact: {
+      affected_run_ids?: string[];
+      cascade_moved_run_ids?: string[];
+      cycle_id?: string | null;
+      replacement_primary_cycle_id?: string | null;
+      requested_run_id: string;
+      research_kind?: "full" | "incremental" | null;
     };
     RunMetrics: {
       cache_hit_input_tokens?: number;
@@ -538,11 +714,14 @@ export interface components {
       asset_type?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
+      make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       ticker: string;
     };
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -554,12 +733,18 @@ export interface components {
       error_code?: string | null;
       error_message?: string | null;
       finished_at?: string | null;
+      full_baseline_run_id?: string | null;
       id: string;
+      information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      is_research_node?: boolean;
+      method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_kind?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
+      research_schema_version?: string | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
@@ -575,11 +760,17 @@ export interface components {
       error_code?: string | null;
       error_message?: string | null;
       finished_at?: string | null;
+      full_baseline_run_id?: string | null;
       id: string;
+      information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
+      is_research_node?: boolean;
+      method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_kind?: "full" | "incremental" | null;
+      research_schema_version?: string | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
@@ -607,6 +798,9 @@ export interface components {
       validation_issue_codes?: string[];
     };
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
+    TimelineDetail: {
+      timeline: components["schemas"]["ResearchTimeline"];
+    };
     ValidationError: {
       ctx?: {
       };

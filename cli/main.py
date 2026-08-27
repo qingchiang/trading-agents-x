@@ -28,6 +28,7 @@ from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.application.worker import AnalysisWorker
 from tradingagents.dataflows.symbol_utils import market_today
+from tradingagents.persistence import backup_sqlite_database
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 from tradingagents.web.access_logging import uvicorn_log_config
@@ -252,7 +253,7 @@ def worker(
         ),
     ] = None,
 ) -> None:
-    """Run the single-concurrency analysis and outcome-settlement worker."""
+    """Run the single-concurrency analysis worker."""
     color_enabled = (
         sys.stderr.isatty() and "NO_COLOR" not in os.environ
         if use_colors is None
@@ -400,7 +401,7 @@ def backup_database(
         event_console.print(f"[red]Refusing to overwrite existing file: {target}[/red]")
         raise typer.Exit(code=1)
     try:
-        created = _service().backup_database(target)
+        created = backup_sqlite_database(_settings(), target)
     except (OSError, ValueError) as exc:
         event_console.print(f"[red]Database backup failed: {exc}[/red]")
         raise typer.Exit(code=1) from None

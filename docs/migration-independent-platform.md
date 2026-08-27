@@ -6,15 +6,30 @@ and versioned HTTP API.
 
 ## Before upgrading
 
-1. Preserve your existing repository or installation until the migration is
+1. Back up the application SQLite database before opening it with the new
+   release:
+
+   ```bash
+   tradingagents db backup /path/to/pre-migration-backup.db
+   ```
+
+   This command uses SQLite's online backup operation without constructing the
+   application service or running Alembic, so a Branch 3 predecessor database
+   at revision `0004_instrument_local_name` retains its legacy review rows in
+   the backup. The command refuses to overwrite a destination unless `--force`
+   is supplied.
+2. Preserve your existing repository or installation until the migration is
    verified.
-2. Back up any legacy Markdown memory and report directories.
-3. Record provider/model settings you still need without copying credentials
+3. Back up any legacy Markdown memory and report directories.
+4. Record provider/model settings you still need without copying credentials
    into notes, issues, or logs.
-4. Install the new release into a separate virtual environment.
-5. Configure a local database path and provider keys through `.env`.
+5. Install the new release into a separate virtual environment.
+6. Configure a local database path and provider keys through `.env`.
 
 The migration does not modify legacy report trees or old checkpoint databases.
+When an existing Branch 3 application database is opened, Alembic revision
+`0005_remove_legacy_memory` deliberately drops the retired `outcomes` and
+`reflections` tables; Runs and their execution-history tables remain readable.
 
 ## Entry-point changes
 
@@ -123,8 +138,9 @@ migrated into SQLite.
 ## Legacy Markdown memory
 
 Keep legacy Markdown memory and report files as read-only archives. The
-independent platform does not parse or import them automatically; SQLite is the
-source of truth for all new runs, decisions, outcomes, and reflections.
+independent platform does not parse or import them automatically. SQLite is the
+source of truth for new runs, decisions, sealed Evidence, and Execution History;
+legacy review outcomes and reflections are not retained.
 
 ## Reports and checkpoints
 
@@ -151,7 +167,8 @@ TRADINGAGENTS_DATABASE_PATH=/absolute/local/path/tradingagents.db
 Do not place it on NFS, SMB, or another network filesystem. For Docker Compose,
 both services use the `tradingagents_data` named volume.
 
-Create a consistent backup while services are running:
+Create a consistent backup while services are running (and before upgrading a
+predecessor database):
 
 ```bash
 tradingagents db backup /path/to/tradingagents-backup.db
@@ -169,8 +186,9 @@ The command refuses to overwrite a destination unless `--force` is supplied.
 - `retry` continues the same run/attempt lineage; “New from this run” opens an
   editable form and creates a linked run with fresh evidence only after
   confirmation.
-- Outcome settlement runs in the background and no longer waits for a later
-  same-ticker analysis.
+- The legacy fixed-period Outcome and Reflection lifecycle is removed. The
+  database migration drops those review rows without converting Runs into
+  Research Nodes or Incremental Research baselines.
 - UI language and report language are separate settings.
 
 ## Verification checklist
@@ -180,6 +198,7 @@ The command refuses to overwrite a destination unless `--force` is supplied.
 3. A test run appears in Dashboard and Run Detail.
 4. Refreshing Run Detail replays its event timeline.
 5. Exported Markdown/JSON matches the persisted result.
-6. Legacy memory dry-run has no unexpected malformed blocks.
-7. Applied import leaves the original file unchanged and creates a backup.
-8. `tradingagents db backup` produces a readable copy.
+6. The database revision is `0005_remove_legacy_memory`, and the retired review
+   tables are absent while Runs, Evidence, reports, and decisions remain.
+7. `tradingagents db backup` produces a readable copy without the retired review
+   tables.

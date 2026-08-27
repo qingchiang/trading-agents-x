@@ -7,6 +7,15 @@ export type RunSummaryView = components["schemas"]["RunSummaryView"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
+export type TimelineDetail = components["schemas"]["TimelineDetail"];
+export type ResearchNodeComparison =
+  components["schemas"]["ResearchNodeComparison"];
+export type ResearchNodeComparisonSelection =
+  components["schemas"]["ResearchNodeComparisonSelection"];
+export type PrimaryCycleSelectionRequest =
+  components["schemas"]["PrimaryCycleSelectionRequest"];
+export type ResearchTimelinePage =
+  components["schemas"]["ResearchTimelinePage"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
 export type ResearchArtifact = components["schemas"]["ResearchArtifact"];
@@ -39,7 +48,6 @@ export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
-export type MemoryEntry = components["schemas"]["MemoryEntry"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -102,13 +110,21 @@ export const api = {
       }`,
     ),
   runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
-  trashRuns: (runIds: string[]) =>
+  trashRuns: (runIds: string[], primaryReplacements: Record<string, string> = {}) =>
     request<RunBatchResult>("/api/v1/runs/trash", {
       method: "POST",
-      body: JSON.stringify({ run_ids: runIds }),
+      body: JSON.stringify({
+        run_ids: runIds,
+        primary_replacements: primaryReplacements,
+      }),
     }),
   restoreRuns: (runIds: string[]) =>
     request<RunBatchResult>("/api/v1/runs/restore", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
+    }),
+  purgeRuns: (runIds: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/purge", {
       method: "POST",
       body: JSON.stringify({ run_ids: runIds }),
     }),
@@ -117,6 +133,35 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  timeline: (
+    instrument: string,
+    nodeLimit = 20,
+    nodeOffset = 0,
+    trashState: "active" | "trashed" | "all" = "active",
+  ) =>
+    request<TimelineDetail>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}&trash_state=${trashState}`,
+    ),
+  compareResearchNodes: (
+    instrument: string,
+    nodes: ResearchNodeComparisonSelection[],
+  ) =>
+    request<ResearchNodeComparison>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/compare`,
+      { method: "POST", body: JSON.stringify({ nodes }) },
+    ),
+  timelines: (limit = 50, offset = 0) =>
+    request<ResearchTimelinePage>(
+      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+    ),
+  selectPrimaryCycle: (instrument: string, fullRunId: string) =>
+    request<TimelineDetail>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/primary-cycle`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ full_run_id: fullRunId }),
+      },
+    ),
   evidence: (id: string) =>
     request<EvidenceBundle>(`/api/v1/runs/${id}/evidence`),
   artifacts: (id: string, attempt?: number) =>
@@ -133,8 +178,6 @@ export const api = {
     }),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
-  memory: (query = "") =>
-    request<MemoryEntry[]>(`/api/v1/memory${query}`),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/api/v1/auth/login", {
       method: "POST",

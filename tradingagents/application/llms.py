@@ -23,13 +23,6 @@ class RunLLMs:
     quick_serializer: Any
     deep_serializer: Any
 
-    def __iter__(self):
-        """Keep two-value unpacking for outcome reflection and callers."""
-
-        yield self.quick
-        yield self.deep
-
-
 def create_run_llms(
     settings: RunSettings,
     *,

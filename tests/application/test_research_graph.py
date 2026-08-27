@@ -22,9 +22,6 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     IssueDisposition,
     KeyClaim,
-    MemoryContext,
-    MemoryOutcome,
-    MemoryRecord,
     ResearchArtifactDraft,
     ResearchRating,
     ResearchWarning,
@@ -58,14 +55,6 @@ class _StructuredInvoker:
         assert config is None or "metadata" in config
         self.calls.append((self.schema.__name__, prompt))
         refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", prompt)))
-        memory_refs = tuple(
-            dict.fromkeys(
-                re.findall(
-                    r"memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
-                    prompt,
-                )
-            )
-        )
         if self.schema is AnalystAuditDraft:
             analyst = re.search(
                 r"existing\n(market|social|news|fundamentals) report",
@@ -144,7 +133,6 @@ class _StructuredInvoker:
                 confidence=0.65,
                 thesis="The available evidence supports a balanced conclusion.",
                 evidence_refs=refs[-1:],
-                memory_refs=memory_refs[:1],
                 catalysts=("Evidence improves",),
                 risks=("Evidence deteriorates",),
                 invalidation_conditions=("The cited evidence is superseded",),
@@ -219,7 +207,6 @@ class _AnalystSubgraph:
         self.analyst = analyst
 
     def invoke(self, state, **_kwargs):
-        assert state["past_context"] == ""
         assert _kwargs["config"]["metadata"] == {"research_node": f"analyst.{self.analyst}.collect"}
         return {
             **state,
@@ -235,7 +222,6 @@ def _context(
     profile: RunProfile,
     analysts=("market", "news"),
     artifact_writer=None,
-    memory: MemoryContext | None = None,
 ) -> RunContext:
     request = AnalysisRequest(
         ticker="NVDA",
@@ -249,50 +235,9 @@ def _context(
         request=request,
         settings=settings,
         dataflow_config=settings.dataflow_config(app_settings),
-        memory=memory
-        or MemoryContext(
-            instrument=request.ticker,
-            market="America/New_York",
-        ),
         instrument_context="The instrument is NVDA.",
         cancel_requested=lambda: False,
         **({"artifact_writer": artifact_writer} if artifact_writer else {}),
-    )
-
-
-def _memory_context() -> MemoryContext:
-    run_id = "prior-run"
-    return MemoryContext(
-        instrument="NVDA",
-        market="America/New_York",
-        items=(
-            MemoryRecord(
-                ref=f"memory:{run_id}",
-                run_id=run_id,
-                scope="same_ticker",
-                ticker="NVDA",
-                market="America/New_York",
-                analysis_date=date(2026, 6, 30),
-                decision=research_decision(
-                    confidence=0.55,
-                    thesis="Prior demand thesis.",
-                    evidence_refs=(),
-                    catalysts=(),
-                    risks=("Demand slowed.",),
-                    invalidation_conditions=("Growth missed.",),
-                    time_horizon="6-12 months",
-                ),
-                outcome=MemoryOutcome(
-                    benchmark="SPY",
-                    observation_start=date(2026, 7, 1),
-                    observation_end=date(2026, 7, 8),
-                    holding_intervals=5,
-                    raw_return=-0.02,
-                    alpha_return=-0.01,
-                ),
-                reflection="Calibration lesson: demand evidence was overweighted.",
-            ),
-        ),
     )
 
 
@@ -704,77 +649,37 @@ def test_debate_agenda_uses_reasoning_client_not_serializer(
     }
 
 
-@pytest.mark.parametrize(
-    ("profile", "decision_prompt_count"),
-    (
-        (RunProfile.FAST, 1),
-        (RunProfile.STANDARD, 2),
-        (RunProfile.DEEP, 2),
-    ),
-)
-def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
+def test_full_graph_without_memory_does_not_render_legacy_feedback(
     app_settings,
     monkeypatch,
-    profile,
-    decision_prompt_count,
 ) -> None:
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
     )
-    quick = _FakeLLM()
-    deep = _FakeLLM()
-    memory = _memory_context()
+    llm = _FakeLLM()
     graph = ResearchGraph(
-        quick_llm=quick,
-        deep_llm=deep,
-        profile=profile,
+        quick_llm=llm,
+        deep_llm=llm,
+        profile=RunProfile.FAST,
         selected_analysts=("market",),
     )
 
-    execution = graph.execute(
-        _context(
-            app_settings,
-            profile,
-            analysts=("market",),
-            memory=memory,
-        ),
-        checkpoint_thread_id=f"memory:{profile.value}",
+    graph.execute(
+        _context(app_settings, RunProfile.FAST, analysts=("market",)),
+        checkpoint_thread_id="full-without-memory",
     )
 
-    calls = [*quick.calls, *deep.calls]
-    decision_prompts = [
-        prompt
-        for schema, prompt in calls
-        if schema == "ResearchMarkdown"
-        and (
-            "Research Judge" in str(prompt)
-            or "Final Research Committee" in str(prompt)
-        )
-    ]
-    memory_prompts = [
-        str(prompt)
-        for _schema, prompt in calls
-        if "Calibration lesson: demand evidence was overweighted."
-        in str(prompt)
-    ]
-    assert len(decision_prompts) == decision_prompt_count
+    prompts = [str(_prompt) for _schema, _prompt in llm.calls]
+    assert all("historical_feedback_memory" not in prompt for prompt in prompts)
     assert all(
-        "Calibration lesson: demand evidence was overweighted." in prompt
-        for prompt in decision_prompts
+        "Calibration lesson: demand evidence was overweighted." not in prompt
+        for prompt in prompts
     )
-    assert all(
-        (
-            "Research Judge" in prompt
-            or "Final Research Committee" in prompt
-            or "DECISION SYNTHESIS BRIEF" in prompt
-        )
-        for prompt in memory_prompts
-    )
-    assert execution.decision.memory_refs == memory.refs
-    assert "memory:invented" not in execution.decision.memory_refs
-    assert not any(ref.startswith("memory:") for ref in execution.decision.evidence_refs)
 
 
 def test_graph_emits_only_typed_visible_research_artifacts(

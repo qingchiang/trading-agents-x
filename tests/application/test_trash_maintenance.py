@@ -7,7 +7,10 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import analyst_report, research_decision
+from tests.factories import (
+    analyst_report,
+    research_decision,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -19,8 +22,6 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
-    OutcomeRecord,
-    ReflectionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
@@ -128,18 +129,6 @@ def _complete_trashed_run(repository, app_settings):
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
-    )
-    pending = repository.pending_outcomes(
-        due_at=datetime(2026, 9, 1, tzinfo=UTC)
-    )[0]
-    repository.resolve_outcome(
-        pending["outcome_id"],
-        observation_start=date(2026, 7, 25),
-        observation_end=date(2026, 8, 1),
-        raw_return=0.05,
-        alpha_return=0.01,
-        reflection="Fixture reflection.",
     )
     repository.append_event(run.id, "fixture.completed")
     repository.trash_runs((run.id,))
@@ -192,13 +181,6 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
                 )
                 == 0
             )
-        assert (
-            session.scalar(select(func.count()).select_from(OutcomeRecord)) == 0
-        )
-        assert (
-            session.scalar(select(func.count()).select_from(ReflectionRecord))
-            == 0
-        )
     with repository.engine.connect() as connection:
         assert (
             connection.exec_driver_sql(

@@ -133,7 +133,7 @@ test("filters and atomically trashes eligible runs with instrument names", async
     name: "Move 1 selected run(s) to Trash?",
   });
   expect(dialog).toHaveTextContent(
-    "They will immediately leave the Dashboard, Memory, outcome settlement, and instrument suggestions.",
+    "They will immediately leave the Dashboard and instrument suggestions.",
   );
   expect(dialog).toHaveTextContent(/scheduled for permanent deletion/);
   expect(api.trashRuns).not.toHaveBeenCalled();
@@ -183,6 +183,8 @@ test("restores trashed runs and returns from an emptied page", async () => {
     "failed",
     "2026-07-01T00:00:00Z",
   );
+  trashed.research_schema_version = "1";
+  trashed.is_research_node = false;
   vi.mocked(api.runs).mockResolvedValue(page([trashed], 20, 41));
 
   render(
@@ -210,4 +212,22 @@ test("restores trashed runs and returns from an emptied page", async () => {
       "/runs?trash_state=trashed&offset=0",
     ),
   );
+});
+
+test("routes real Research Nodes to the Timeline lifecycle", async () => {
+  const node = run("full-node", "NVDA", "succeeded");
+  node.research_schema_version = "1";
+  node.is_research_node = true;
+  vi.mocked(api.runs).mockResolvedValue(page([node]));
+
+  render(
+    <Router initialPath="/runs">
+      <Runs />
+    </Router>,
+  );
+
+  expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
+  expect(
+    screen.getByRole("link", { name: "Research Timeline" }),
+  ).toHaveAttribute("href", "/timelines/NVDA");
 });

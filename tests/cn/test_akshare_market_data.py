@@ -14,6 +14,7 @@ from tradingagents.dataflows import interface, stockstats_utils, y_finance
 from tradingagents.dataflows.cn import akshare_indicator, akshare_stock, calendar, common
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_provenance, provenance_quality_issues
 
 
@@ -691,6 +692,52 @@ def test_rate_limit_is_retried_then_typed(monkeypatch):
     with pytest.raises(common.AkShareRateLimitError, match="rate limited"):
         common.call_with_retry(call, label="AkShare test")
     assert call.call_count == common.MAX_ATTEMPTS
+
+
+@pytest.mark.unit
+def test_incremental_scope_does_not_retry_a_rate_limit(monkeypatch):
+    response = mock.Mock(status_code=429)
+    call = mock.Mock(side_effect=requests.HTTPError("429", response=response))
+    sleep = mock.Mock()
+    monkeypatch.setattr(common.time, "sleep", sleep)
+
+    with (
+        stop_on_rate_limit_scope(True),
+        pytest.raises(common.AkShareRateLimitError, match="rate limited"),
+    ):
+        common.call_with_retry(call, label="AkShare incremental test")
+
+    call.assert_called_once_with()
+    sleep.assert_not_called()
+
+
+@pytest.mark.unit
+def test_incremental_market_stops_before_eastmoney_after_tencent_rate_limit(
+    monkeypatch,
+):
+    akshare_stock.clear_cache()
+    later = mock.Mock(side_effect=AssertionError("Eastmoney queried after 429"))
+    monkeypatch.setattr(
+        akshare_stock,
+        "_fetch_tencent",
+        mock.Mock(side_effect=common.AkShareRateLimitError("Tencent 429")),
+    )
+    monkeypatch.setattr(akshare_stock, "_fetch_eastmoney", later)
+    monkeypatch.setattr(
+        calendar,
+        "effective_trade_date",
+        lambda *_args, **_kwargs: date(2026, 7, 17),
+    )
+
+    with (
+        stop_on_rate_limit_scope(True),
+        pytest.raises(common.AkShareRateLimitError, match="Tencent 429"),
+    ):
+        akshare_stock.fetch_ohlcv(
+            "600519.SS", "2026-07-01", "2026-07-17"
+        )
+
+    later.assert_not_called()
 
 
 @pytest.mark.unit

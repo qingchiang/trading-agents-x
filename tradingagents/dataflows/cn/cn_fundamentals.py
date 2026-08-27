@@ -14,8 +14,9 @@ from tradingagents.provenance import (
     attach_provenance,
 )
 
-from ..errors import NoMarketDataError
+from ..errors import NoMarketDataError, VendorRateLimitError
 from ..lookahead import is_near_live
+from ..rate_limit import stop_on_rate_limit_requested
 from ..y_finance import get_fundamentals as get_yfinance_fundamentals
 from .common import canonical_a_share
 from .company import classify_entity, get_company_profile_snapshot
@@ -152,6 +153,11 @@ def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
         )
     try:
         result = get_yfinance_fundamentals(ticker, curr_date)
+    except VendorRateLimitError:
+        if stop_on_rate_limit_requested():
+            raise
+        logger.warning("CN fundamentals: live yfinance snapshot rate-limited for %s", ticker)
+        result = ""
     except Exception as exc:  # noqa: BLE001 - optional enrichment
         logger.warning("CN fundamentals: live yfinance snapshot failed for %s: %s", ticker, exc)
         result = ""
@@ -199,6 +205,12 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
             profile_retrieved_at = profile_snapshot.retrieved_at
             if profile.empty:
                 profile_issue = "no company profile returned"
+        except VendorRateLimitError:
+            if stop_on_rate_limit_requested():
+                raise
+            logger.warning("CN fundamentals: CNINFO profile rate-limited for %s", ticker)
+            profile = pd.DataFrame()
+            profile_issue = "rate limited"
         except Exception as exc:  # noqa: BLE001 - partial assembler result is useful
             logger.warning(
                 "CN fundamentals: CNINFO profile failed for %s: %s",
@@ -213,6 +225,12 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
         abstract = filter_visible_records(raw, curr_date, "quarterly")
         if abstract.empty:
             abstract_issue = "no reports visible for the requested date"
+    except VendorRateLimitError:
+        if stop_on_rate_limit_requested():
+            raise
+        logger.warning("CN fundamentals: Sina abstract rate-limited for %s", ticker)
+        abstract = pd.DataFrame()
+        abstract_issue = "rate limited"
     except Exception as exc:  # noqa: BLE001 - partial assembler result is useful
         logger.warning("CN fundamentals: Sina abstract failed for %s: %s", ticker, exc)
         abstract = pd.DataFrame()
@@ -298,6 +316,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
                 "## Financial abstract (AkShare / Sina)",
                 "Visibility rule: max(report date, publication date, update date) <= cutoff.",
                 f"Latest visible disclosure/update: {effective}",
+                f"Effective period: {abstract['ReportDate'].max().strftime('%Y-%m-%d')}",
                 f"Missing mapped fields: {', '.join(missing) if missing else 'none'}",
                 table,
             )

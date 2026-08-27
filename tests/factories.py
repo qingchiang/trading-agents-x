@@ -72,7 +72,6 @@ def analyst_report(
         warnings=warnings,
     )
 
-
 def research_decision(
     *,
     rating: ResearchRating = ResearchRating.HOLD,
@@ -80,7 +79,6 @@ def research_decision(
     executive_summary: str = "Fixture decision summary.",
     thesis: str = "Fixture evidence supports a conditional conclusion.",
     evidence_refs: tuple[str, ...] = (_DEFAULT_REF,),
-    memory_refs: tuple[str, ...] = (),
     catalysts: tuple[str, ...] = (),
     risks: tuple[str, ...] = ("Fixture downside risk.",),
     invalidation_conditions: tuple[str, ...] = (
@@ -98,7 +96,6 @@ def research_decision(
         executive_summary=executive_summary,
         thesis=thesis,
         evidence_refs=evidence_refs,
-        memory_refs=memory_refs,
         catalysts=catalysts,
         risks=risks,
         invalidation_conditions=invalidation_conditions,

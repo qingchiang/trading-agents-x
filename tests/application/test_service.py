@@ -5,10 +5,11 @@ import json
 import operator
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import UTC, date, datetime
 from threading import Barrier, Lock
 from typing import Annotated, TypedDict
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -25,9 +26,22 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
-from tradingagents.application.database import RunRecord
-from tradingagents.application.errors import UnsupportedInstrumentError
-from tradingagents.application.repository import RunRepository
+from tradingagents.application.database import (
+    DecisionRecord,
+    PrimaryResearchCycleRecord,
+    ResearchNodeRecord,
+    RunRecord,
+)
+from tradingagents.application.errors import (
+    IncrementalRequestConflictError,
+    InvalidIncrementalBaselineError,
+    UnsupportedInstrumentError,
+)
+from tradingagents.application.repository import (
+    IdempotencyConflictError,
+    InvalidRunTransitionError,
+    RunRepository,
+)
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
@@ -36,6 +50,565 @@ from tradingagents.graph.research_graph import GraphExecution
 
 def _equity_resolver(ticker: str) -> dict[str, str]:
     return {"symbol": ticker, "quote_type": "EQUITY"}
+
+
+def test_first_full_run_commits_same_identity_node_and_primary_timeline(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+        now=lambda: datetime(2026, 7, 25, 1, 30, tzinfo=UTC),
+    )
+
+    result = service.run(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24)))
+    timeline = repository.get_timeline("7203.T")
+    run = repository.get_run(result.run_id)
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert run.research_schema_version == "1"
+    assert run.information_cutoff_at == datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)
+    assert run.method_snapshot["schema_version"] == "1"
+    assert run.method_snapshot["research_schema_version"] == "1"
+    assert run.method_snapshot["prompt_versions"]
+    assert run.method_snapshot["enabled_roles"] == [
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+    ]
+    assert set(run.method_snapshot["data_routes"]) == {
+        "data_vendors",
+        "tool_vendors",
+        "data_vendors_by_market",
+    }
+    configured_routes = app_settings.default_run_settings.snapshot()["data_config"]
+    assert run.method_snapshot["data_routes"] == {
+        key: configured_routes[key]
+        for key in ("data_vendors", "tool_vendors", "data_vendors_by_market")
+    }
+    assert run.method_snapshot["data_availability_policy"] == {
+        "version": "1",
+        "near_live_max_age_days": 5,
+    }
+    assert run.method_snapshot["thresholds"]["news_article_limit"] == 30
+    assert len(run.method_snapshot["configuration_fingerprint"]) == 64
+    assert timeline.primary_cycle_id == result.run_id
+    assert [(node.id, node.cycle_id, node.is_primary) for node in timeline.nodes] == [
+        (result.run_id, result.run_id, True)
+    ]
+
+
+def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selected(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+
+    first = service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    with pytest.raises(ValueError, match="make_primary"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    later = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            make_primary=False,
+        )
+    )
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == sorted(
+        (first.run_id, later.run_id)
+    )
+    assert repository.get_timeline("NVDA").primary_cycle_id == first.run_id
+
+    selected = repository.select_primary_cycle("NVDA", later.run_id)
+    repeated = repository.select_primary_cycle("NVDA", later.run_id)
+
+    assert selected.primary_cycle_id == later.run_id
+    assert repeated == selected
+    assert [node.is_primary for node in selected.nodes] == [
+        node.id == later.run_id for node in selected.nodes
+    ]
+
+
+def test_completed_first_full_replays_before_later_full_primary_validation(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+
+    first = service.enqueue(request, idempotency_key="first-full-replay")
+    claimed = repository.claim_run(first.id, "worker", app_settings.lease_seconds)
+    service.execute_claimed(claimed, worker_id="worker")
+
+    replayed = service.enqueue(request, idempotency_key="first-full-replay")
+
+    assert replayed.id == first.id
+    assert replayed.is_research_node is True
+    with pytest.raises(IdempotencyConflictError):
+        service.enqueue(
+            AnalysisRequest(ticker="NVDA", analysis_date="2026-07-23"),
+            idempotency_key="first-full-replay",
+        )
+
+
+def test_incremental_request_requires_an_explicit_compatible_full_baseline(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+
+    with pytest.raises(ValueError, match="full_baseline_run_id"):
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24), research_kind="incremental")
+    with pytest.raises(ValueError, match="must not carry a Full Baseline"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="full",
+            full_baseline_run_id=baseline.run_id,
+        )
+    with pytest.raises(InvalidIncrementalBaselineError, match="same Instrument"):
+        service.enqueue(
+            AnalysisRequest(
+                ticker="AAPL",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+
+def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    first = service.enqueue(request)
+    assert service.enqueue(request).id == first.id
+
+    with pytest.raises(IncrementalRequestConflictError):
+        service.enqueue(request.model_copy(update={"analysts": ("market",)}))
+
+
+def test_two_connections_return_one_incremental_slot_for_identical_requests(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        runs = list(executor.map(lambda _unused: service.enqueue(request), range(2)))
+
+    assert {run.id for run in runs} == {runs[0].id}
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_status", "trashed"),
+    [
+        ("failed", RunStatus.FAILED, False),
+        ("cancelled", RunStatus.CANCELLED, False),
+        ("trashed", RunStatus.CANCELLED, True),
+    ],
+)
+def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_active(
+    app_settings,
+    repository,
+    terminal_state: str,
+    expected_status: RunStatus,
+    trashed: bool,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    failed_request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    inactive = service.enqueue(failed_request)
+    if terminal_state == "failed":
+        repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
+        repository.fail(inactive.id, RuntimeError("fixture failure"))
+    else:
+        service.cancel(inactive.id)
+        if terminal_state == "trashed":
+            repository.trash_runs((inactive.id,))
+    active = service.enqueue(failed_request.model_copy(update={"analysts": ("market",)}))
+
+    expected_error = (
+        IncrementalRequestConflictError if terminal_state == "failed" else InvalidRunTransitionError
+    )
+    with pytest.raises(expected_error):
+        service.retry(inactive.id)
+
+    unchanged = repository.get_run(inactive.id)
+    assert unchanged.status is expected_status
+    assert unchanged.attempt == 1
+    assert (unchanged.trashed_at is not None) is trashed
+    assert repository.get_run(active.id).status is RunStatus.QUEUED
+
+
+def test_incremental_retry_replays_an_identical_active_slot_only_from_failed_history(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    inactive = service.enqueue(request)
+    repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
+    repository.fail(inactive.id, RuntimeError("fixture failure"))
+    active = service.enqueue(request)
+    with repository.sessions.begin() as session:
+        active_record = session.get(RunRecord, active.id)
+        assert active_record is not None
+        active_record.status = RunStatus.SUCCEEDED.value
+        session.add(
+            ResearchNodeRecord(
+                run_id=active.id,
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+                incremental_products_json=None,
+            )
+        )
+
+    replayed = service.retry(inactive.id)
+
+    assert replayed.id == active.id
+    assert replayed.is_research_node is True
+    unchanged = repository.get_run(inactive.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+    assert unchanged.trashed_at is None
+    assert not any(
+        event.event_type == "run.retry_queued" for event in repository.list_events(inactive.id)
+    )
+
+
+@pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RUNNING])
+def test_incremental_retry_rejects_an_active_target_before_slot_replay(
+    app_settings,
+    repository,
+    status: RunStatus,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    target = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+    if status is RunStatus.RUNNING:
+        repository.claim_run(target.id, "fixture", app_settings.lease_seconds)
+
+    events_before = repository.list_events(target.id)
+    with pytest.raises(InvalidRunTransitionError, match="only failed runs"):
+        service.retry(target.id)
+
+    unchanged = repository.get_run(target.id)
+    assert unchanged.status is status
+    assert unchanged.attempt == 1
+    assert repository.list_events(target.id) == events_before
+
+
+def test_incremental_retry_maps_a_sqlite_slot_integrity_error_to_typed_conflict(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    failed = service.enqueue(request)
+    repository.claim_run(failed.id, "fixture", app_settings.lease_seconds)
+    repository.fail(failed.id, RuntimeError("fixture failure"))
+    service.enqueue(request.model_copy(update={"analysts": ("market",)}))
+    active_slot = repository._active_incremental_slot
+    reads = 0
+
+    def stale_first_slot_read(*args):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return None
+        return active_slot(*args)
+
+    monkeypatch.setattr(repository, "_active_incremental_slot", stale_first_slot_read)
+
+    with pytest.raises(IncrementalRequestConflictError):
+        service.retry(failed.id)
+
+    assert reads == 2
+    unchanged = repository.get_run(failed.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+
+
+def test_two_sqlite_connections_make_one_incremental_retry_slot_winner(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    failed = service.enqueue(request)
+    repository.claim_run(failed.id, "fixture", app_settings.lease_seconds)
+    repository.fail(failed.id, RuntimeError("fixture failure"))
+    conflicting_request = request.model_copy(update={"analysts": ("market",)})
+    barrier = Barrier(2)
+
+    def attempt(operation):
+        barrier.wait(timeout=10)
+        try:
+            return operation()
+        except Exception as exc:  # Both service calls share the public error seam.
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(
+            executor.map(
+                attempt,
+                (
+                    lambda: service.retry(failed.id),
+                    lambda: service.enqueue(conflicting_request),
+                ),
+            )
+        )
+
+    successful = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    conflicts = [
+        outcome for outcome in outcomes if isinstance(outcome, IncrementalRequestConflictError)
+    ]
+    assert len(successful) == 1
+    assert len(conflicts) == 1
+    assert repository.get_run(successful[0].id).status is RunStatus.QUEUED
+    retained = repository.get_run(failed.id)
+    assert retained.status in {RunStatus.FAILED, RunStatus.QUEUED}
+    assert retained.attempt in {1, 2}
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("backend_url", "https://changed-gateway.example.invalid/v1"),
+        ("temperature", 0.7),
+        ("llm_max_retries", 5),
+    ],
+)
+def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
+    app_settings,
+    repository,
+    field,
+    changed_value,
+) -> None:
+    """Queued Runs retain non-secret LLM behavior that can change a method."""
+    base_run_settings = app_settings.default_run_settings.model_copy(
+        update={
+            "backend_url": "https://gateway.example.invalid/v1",
+            "temperature": 0.2,
+            "llm_max_retries": 3,
+            "data_config": {
+                **app_settings.default_run_settings.data_config,
+                "provider_api_key": "method-snapshot-test-secret",
+            },
+        }
+    )
+    base_settings = app_settings.model_copy(update={"default_run_settings": base_run_settings})
+    request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
+
+    base_run = AnalysisService(
+        base_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    ).enqueue(request, idempotency_key=f"method-snapshot-base-{field}")
+    base_snapshot = repository.get_run(base_run.id).method_snapshot
+
+    assert base_snapshot["backend_url"] == "https://gateway.example.invalid/v1"
+    assert base_snapshot["temperature"] == 0.2
+    assert base_snapshot["llm_max_retries"] == 3
+    assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
+
+    changed_run_settings = base_run_settings.model_copy(update={field: changed_value})
+    changed_settings = app_settings.model_copy(
+        update={"default_run_settings": changed_run_settings}
+    )
+    changed_run = AnalysisService(
+        changed_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    ).enqueue(request, idempotency_key=f"method-snapshot-changed-{field}")
+    changed_snapshot = repository.get_run(changed_run.id).method_snapshot
+
+    assert changed_snapshot[field] == changed_value
+    assert (
+        changed_snapshot["configuration_fingerprint"] != base_snapshot["configuration_fingerprint"]
+    )
+
+
+def test_current_market_day_freezes_current_instant_and_future_rejects_without_run(
+    app_settings,
+    repository,
+) -> None:
+    now = datetime(2026, 7, 24, 15, 30, tzinfo=ZoneInfo("Asia/Tokyo"))
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: now,
+    )
+
+    run = service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=now.date()))
+    assert run.information_cutoff_at == now.astimezone(UTC)
+
+    with pytest.raises(ValueError, match="future analysis cutoff"):
+        service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 25)))
+    assert repository.list_runs().total == 1
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        "decision_insert",
+        "node_insert",
+        "primary_insert",
+        "run_success",
+        "attempt_success",
+    ],
+)
+def test_atomic_research_commit_rolls_back_every_persisted_boundary(
+    app_settings,
+    repository,
+    trigger,
+) -> None:
+    """SQLite failures leave the lifecycle in failed History, never partial Timeline."""
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+    trigger_sql = {
+        "decision_insert": """
+            CREATE TRIGGER fail_decision_insert BEFORE INSERT ON decisions
+            BEGIN SELECT RAISE(ABORT, 'injected decision failure'); END
+        """,
+        "node_insert": """
+            CREATE TRIGGER fail_node_insert BEFORE INSERT ON research_nodes
+            BEGIN SELECT RAISE(ABORT, 'injected node failure'); END
+        """,
+        "primary_insert": """
+            CREATE TRIGGER fail_primary_insert BEFORE INSERT ON primary_research_cycles
+            BEGIN SELECT RAISE(ABORT, 'injected primary failure'); END
+        """,
+        "run_success": """
+            CREATE TRIGGER fail_run_success BEFORE UPDATE OF status ON runs
+            WHEN NEW.status = 'succeeded'
+            BEGIN SELECT RAISE(ABORT, 'injected run success failure'); END
+        """,
+        "attempt_success": """
+            CREATE TRIGGER fail_attempt_success BEFORE UPDATE OF status ON run_attempts
+            WHEN NEW.status = 'succeeded'
+            BEGIN SELECT RAISE(ABORT, 'injected attempt success failure'); END
+        """,
+    }[trigger]
+    with repository.engine.begin() as connection:
+        connection.exec_driver_sql(trigger_sql)
+
+    with pytest.raises(Exception, match="injected"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24)))
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    with repository.sessions() as session:
+        assert session.query(DecisionRecord).count() == 0
+        assert session.query(ResearchNodeRecord).count() == 0
+        assert session.query(PrimaryResearchCycleRecord).count() == 0
+    assert repository.get_timeline("NVDA").nodes == ()
+
+
+@pytest.mark.parametrize(
+    ("ticker", "expected"),
+    [
+        ("NVDA", datetime(2026, 7, 25, 3, 59, 59, 999999, tzinfo=UTC)),
+        ("7203.T", datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)),
+        ("600000.SS", datetime(2026, 7, 24, 15, 59, 59, 999999, tzinfo=UTC)),
+    ],
+)
+def test_historical_cutoffs_use_each_listed_instrument_market_day_end(
+    app_settings,
+    repository,
+    ticker,
+    expected,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: datetime(2026, 7, 26, tzinfo=UTC),
+    )
+
+    run = service.enqueue(AnalysisRequest(ticker=ticker, analysis_date="2026-07-24"))
+
+    assert run.information_cutoff_at == expected
 
 
 def _execution(ticker: str) -> GraphExecution:
@@ -118,6 +691,61 @@ class _ArtifactGraph:
             )
         )
         return execution
+
+
+class _DecisionlessGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(self, context, **_kwargs):
+        execution = _execution(context.request.ticker)
+        return GraphExecution(
+            state=execution.state,
+            evidence=execution.evidence,
+            reports=execution.reports,
+            decision=None,
+        )
+
+
+def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decision(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_DecisionlessGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+
+    with pytest.raises(ValueError, match="complete Research Decision"):
+        service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items[0]
+    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_result(failed.id).decision is None
+
+
+def test_queued_legacy_run_fails_execution_boundary_without_a_node(
+    app_settings,
+    repository,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    run, _ = repository.create_run(request, {"fixture": True})
+    claimed = repository.claim_run(run.id, "worker", 30)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    )
+
+    with pytest.raises(ValueError, match="legacy runs"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert repository.get_run(run.id).status is RunStatus.FAILED
+    assert repository.get_timeline("NVDA").nodes == ()
 
 
 class _MetricFailureGraph:
@@ -336,6 +964,33 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_full_service_run_has_no_legacy_review_state(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert result.decision is not None
+    with repository.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "outcomes" not in tables
+    assert "reflections" not in tables
+
+
 def test_rejected_creation_has_no_persistent_side_effects(
     app_settings,
     repository,
@@ -360,8 +1015,6 @@ def test_rejected_creation_has_no_persistent_side_effects(
         "run_evidence",
         "run_artifacts",
         "decisions",
-        "outcomes",
-        "reflections",
         "checkpoints",
         "writes",
     )
@@ -374,9 +1027,7 @@ def test_rejected_creation_has_no_persistent_side_effects(
         }
         counts = {
             table: (
-                connection.exec_driver_sql(
-                    f"SELECT COUNT(*) FROM {table}"
-                ).scalar_one()
+                connection.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
                 if table in available_tables
                 else 0
             )
@@ -447,9 +1098,7 @@ def test_service_persists_cutoff_safe_local_name_once(
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
-        identity_resolver=lambda _ticker, _date: {
-            "company_name": "Toyota Motor Corporation"
-        },
+        identity_resolver=lambda _ticker, _date: {"company_name": "Toyota Motor Corporation"},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=local_name,
     )
@@ -517,9 +1166,7 @@ def test_service_commits_artifact_and_event_before_callback(
         if event.event_type != "artifact.created":
             return
         artifacts = repository.list_artifacts(event.run_id)
-        assert [artifact.id for artifact in artifacts] == [
-            event.payload["artifact_id"]
-        ]
+        assert [artifact.id for artifact in artifacts] == [event.payload["artifact_id"]]
         persisted = repository.list_events(
             event.run_id,
             after_sequence=event.sequence - 1,
@@ -611,9 +1258,7 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
     claimed = []
     for index, request in enumerate(requests):
         queued = service.enqueue(request)
-        claimed.append(
-            repository.claim_run(queued.id, f"worker-{index}", 30)
-        )
+        claimed.append(repository.claim_run(queued.id, f"worker-{index}", 30))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(
@@ -723,10 +1368,7 @@ def test_failure_persists_observed_metrics_and_emits_the_aggregate(
     assert failed.metrics.llm_calls == 1
     assert failed.metrics.input_tokens == 250
     assert failed.metrics.output_tokens == 25
-    assert (
-        failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls
-        == 1
-    )
+    assert failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls == 1
     assert event.event_type == "run.failed"
     assert event.payload["metrics"]["input_tokens"] == 250
 
@@ -808,9 +1450,7 @@ def test_queued_cancel_is_terminal_and_emits_event(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    queued = service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     cancelled = service.cancel(queued.id)
 
@@ -845,9 +1485,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
 
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        checkpoint_config = {
-            "configurable": {"thread_id": checkpoint_thread}
-        }
+        checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
         assert saver.get_tuple(checkpoint_config) is not None
 
     retried = service.retry(queued.id)
@@ -862,9 +1500,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
     artifacts = repository.list_artifacts(queued.id)
     assert len(artifacts) == 1
     assert artifacts[0].attempt == 1
-    assert "run.resumed" in {
-        event.event_type for event in repository.list_events(queued.id)
-    }
+    assert "run.resumed" in {event.event_type for event in repository.list_events(queued.id)}
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
         assert saver.get_tuple(checkpoint_config) is None
@@ -897,9 +1533,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
     assert result.status is RunStatus.CANCELLED
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        assert saver.get_tuple(
-            {"configurable": {"thread_id": checkpoint_thread}}
-        ) is None
+        assert saver.get_tuple({"configurable": {"thread_id": checkpoint_thread}}) is None
 
 
 @pytest.mark.parametrize("format", ("markdown", "json", "package"))
@@ -953,9 +1587,7 @@ def test_service_export_reads_the_durable_result(
             assert "Fixture thesis" in report
             run_payload = json.loads(archive.read("run.json"))
             assert run_payload["attempts"][0]["status"] == "succeeded"
-            assert run_payload["result"]["recoveries"][0]["node"] == (
-                "debate.agenda.serialize"
-            )
+            assert run_payload["result"]["recoveries"][0]["node"] == ("debate.agenda.serialize")
             assert "## Structured Recoveries" in report
         return
     assert isinstance(body, str)
@@ -968,9 +1600,7 @@ def test_service_export_reads_the_durable_result(
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
         assert payload["result"]["evidence"] == payload["evidence"]
-        assert payload["result"]["recoveries"][0]["initial_reason_code"] == (
-            "non_json_response"
-        )
+        assert payload["result"]["recoveries"][0]["initial_reason_code"] == ("non_json_response")
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
         content = payload["artifacts"][0]["content"]

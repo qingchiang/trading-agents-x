@@ -58,11 +58,8 @@ _PRICE_WINDOW_DAYS = 365
 
 # Beta follows Japanese valuation practice: a trailing-3-year WEEKLY regression
 # against TOPIX (the cap-weighted market portfolio, not the price-weighted Nikkei
-# 225). This intentionally differs from benchmark_map[".T"] = "^N225", which the
-# reflection layer uses for the *alpha* headline — beta wants the broad market
-# portfolio, alpha wants the recognizable index. Require ~1 year of weekly
-# returns before reporting it — below that the regression is too noisy (e.g. a
-# recent IPO), so it degrades to N/A.
+# 225). Require ~1 year of weekly returns before reporting it — below that the
+# regression is too noisy (e.g. a recent IPO), so it degrades to N/A.
 _MARKET_INDEX = "TOPIX"
 _BETA_MIN_OBS = 52  # ~1yr of weekly returns
 

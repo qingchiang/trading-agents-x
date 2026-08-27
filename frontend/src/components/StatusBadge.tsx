@@ -6,8 +6,6 @@ const labels: Record<string, string> = {
   succeeded: "statusSucceeded",
   failed: "statusFailed",
   cancelled: "statusCancelled",
-  pending: "statusPending",
-  resolved: "statusResolved",
 };
 
 export default function StatusBadge({ status }: { status: string }) {

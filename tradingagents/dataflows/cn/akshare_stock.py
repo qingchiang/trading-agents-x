@@ -16,6 +16,7 @@ import requests
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
+from ..rate_limit import stop_on_rate_limit_requested
 from ..symbol_utils import NoMarketDataError
 from .calendar import effective_trade_date
 from .common import (
@@ -420,6 +421,8 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
                 fallback_reason=fallback_reason,
             )
         except Exception as exc:  # noqa: BLE001 - internal source fallback boundary
+            if isinstance(exc, AkShareRateLimitError) and stop_on_rate_limit_requested():
+                raise
             errors.append(exc)
             elapsed_ms = round((time.monotonic() - started) * 1000)
             status, latest, detail = _health_failure(exc)

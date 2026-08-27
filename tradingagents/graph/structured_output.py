@@ -123,7 +123,6 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         *,
         example: dict[str, Any],
         allowed_evidence_refs: tuple[str, ...],
-        allowed_memory_refs: tuple[str, ...] = (),
     ) -> StructuredOutputResult[StructuredModel]:
         primary_reason = "structured_binding_error"
         primary_validation_issues: tuple[str, ...] = ()
@@ -136,7 +135,6 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                 schema=self.schema,
                 example=example,
                 allowed_evidence_refs=allowed_evidence_refs,
-                allowed_memory_refs=allowed_memory_refs,
             )
             if primary_generation_method is ArtifactGenerationMethod.JSON_MODE
             else prompt
@@ -277,7 +275,6 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
             schema=self.schema,
             example=example,
             allowed_evidence_refs=allowed_evidence_refs,
-            allowed_memory_refs=allowed_memory_refs,
             validation_issues=primary_validation_issues,
             candidate=(
                 primary_candidate
@@ -649,7 +646,6 @@ def _recovery_prompt(
     schema: type[BaseModel],
     example: dict[str, Any],
     allowed_evidence_refs: tuple[str, ...],
-    allowed_memory_refs: tuple[str, ...],
     validation_issues: tuple[str, ...],
     candidate: dict[str, Any] | None,
     repair_instructions: str | None,
@@ -660,7 +656,6 @@ def _recovery_prompt(
         schema=schema,
         example=example,
         allowed_evidence_refs=allowed_evidence_refs,
-        allowed_memory_refs=allowed_memory_refs,
         validation_issues=validation_issues,
         candidate=candidate,
         repair_instructions=repair_instructions,
@@ -675,14 +670,12 @@ def _primary_json_prompt(
     schema: type[BaseModel],
     example: dict[str, Any],
     allowed_evidence_refs: tuple[str, ...],
-    allowed_memory_refs: tuple[str, ...],
 ) -> str:
     return _json_contract_prompt(
         original_prompt,
         schema=schema,
         example=example,
         allowed_evidence_refs=allowed_evidence_refs,
-        allowed_memory_refs=allowed_memory_refs,
         validation_issues=(),
         candidate=None,
         repair_instructions=None,
@@ -697,7 +690,6 @@ def _json_contract_prompt(
     schema: type[BaseModel],
     example: dict[str, Any],
     allowed_evidence_refs: tuple[str, ...],
-    allowed_memory_refs: tuple[str, ...],
     validation_issues: tuple[str, ...],
     candidate: dict[str, Any] | None,
     repair_instructions: str | None,
@@ -753,8 +745,6 @@ VALID EXAMPLE:
 ALLOWED EVIDENCE REFS:
 {json.dumps(allowed_evidence_refs, ensure_ascii=False)}
 
-ALLOWED MEMORY REFS:
-{json.dumps(allowed_memory_refs, ensure_ascii=False)}
 {original_task}
 """
 

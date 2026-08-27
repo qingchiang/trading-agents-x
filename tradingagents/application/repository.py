@@ -1,10 +1,9 @@
-"""Transactional repository for runs, events, reports, and research memory."""
+"""Transactional repository for runs, events, reports, and research history."""
 
 from __future__ import annotations
 
 import re
-import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -14,9 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.persistence.backup import backup_sqlite_database
 from tradingagents.version import __version__
 
 from .contracts import (
+    CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
@@ -27,22 +28,34 @@ from .contracts import (
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceSealView,
+    IncrementalNodeProducts,
     JudgeDraft,
-    MemoryContext,
-    MemoryOutcome,
-    MemoryRecord,
     NumericAuditStatus,
+    PrimaryCycleCandidate,
     RebuttalReview,
     RecentInstrument,
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchCase,
     ResearchDecision,
+    ResearchNodeComparison,
+    ResearchNodeComparisonSelection,
+    ResearchNodeComparisonSide,
+    ResearchNodeComparisonValue,
+    ResearchNodeComparisonWarning,
+    ResearchNodeDecisionSection,
+    ResearchNodeLifecycleState,
+    ResearchNodeView,
     ResearchRating,
+    ResearchTimeline,
+    ResearchTimelinePage,
+    ResearchTimelineSummary,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
     RunEvent,
+    RunLifecycleImpact,
+    RunLifecycleResult,
     RunMetrics,
     RunPage,
     RunRequestSnapshot,
@@ -55,8 +68,8 @@ from .contracts import (
 from .database import (
     Base,
     DecisionRecord,
-    OutcomeRecord,
-    ReflectionRecord,
+    PrimaryResearchCycleRecord,
+    ResearchNodeRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
@@ -64,8 +77,12 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
+from .errors import (
+    IncrementalRequestConflictError,
+    InvalidIncrementalBaselineError,
+    InvalidResearchNodeComparisonError,
+)
 from .metrics import merge_run_metrics
-from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
 from .settings import AppSettings
@@ -78,6 +95,12 @@ _TERMINAL_STATUSES = {
     RunStatus.FAILED.value,
     RunStatus.CANCELLED.value,
 }
+
+_DECISION_SECTION_KEYS = tuple(ResearchDecision.model_fields)
+
+
+class InvalidPrimaryResearchCycleError(ValueError):
+    """A requested Primary Research Cycle is not an active Full Cycle."""
 
 
 def _numeric_audit_warning_message(
@@ -92,6 +115,8 @@ def _numeric_audit_warning_message(
         "Optional numeric components were omitted because their audit failed"
         f"{omitted}. The qualitative decision remains audited."
     )
+
+
 _SAFE_METRIC_KEYS = {
     "llm_calls",
     "tool_calls",
@@ -171,9 +196,7 @@ class RunRepository:
             settings.database_path,
             busy_timeout_ms=settings.busy_timeout_ms,
         )
-        self.sessions = sessionmaker(
-            self.engine, expire_on_commit=False, class_=Session
-        )
+        self.sessions = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
 
     def create_schema(self) -> None:
         """Create the current schema for tests; production entry points run Alembic."""
@@ -186,11 +209,15 @@ class RunRepository:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
+        research_schema_version: str | None = None,
+        information_cutoff_at: datetime | None = None,
+        method_snapshot: dict[str, Any] | None = None,
+        research_kind: str | None = None,
+        full_baseline_run_id: str | None = None,
+        incremental_input_fingerprint: str | None = None,
     ) -> tuple[RunView, bool]:
         if not isinstance(request, AnalysisRequest):
-            raise TypeError(
-                "new Runs require an AnalysisRequest creation contract"
-            )
+            raise TypeError("new Runs require an AnalysisRequest creation contract")
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
         try:
@@ -198,9 +225,7 @@ class RunRepository:
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 if idempotency_key:
                     existing = session.scalar(
-                        select(RunRecord).where(
-                            RunRecord.idempotency_key == idempotency_key
-                        )
+                        select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                     )
                     if existing is not None:
                         if (
@@ -208,10 +233,34 @@ class RunRepository:
                             or existing.source_run_id != source_run_id
                         ):
                             raise IdempotencyConflictError(
-                                "idempotency key was already used for a "
-                                "different request"
+                                "idempotency key was already used for a different request"
                             )
-                        return self._view(existing), False
+                        return self._view_for_session(session, existing), False
+                if research_kind == "incremental":
+                    if full_baseline_run_id is None or incremental_input_fingerprint is None:
+                        raise ValueError(
+                            "Incremental Research requires immutable baseline and fingerprint"
+                        )
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        full_baseline_run_id,
+                        request.analysis_date,
+                    )
+                    if existing_slot is not None:
+                        if (
+                            existing_slot.incremental_input_fingerprint
+                            == incremental_input_fingerprint
+                        ):
+                            return self._view_for_session(session, existing_slot), False
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies this Cycle and cutoff."
+                        )
+                if (
+                    research_kind == "full"
+                    and request.make_primary is None
+                    and session.get(PrimaryResearchCycleRecord, request.ticker) is not None
+                ):
+                    raise ValueError("later Full Research requires an explicit make_primary choice")
                 if source_run_id is not None:
                     source = session.get(RunRecord, source_run_id)
                     if source is None:
@@ -229,6 +278,21 @@ class RunRepository:
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
                     config_json=_sanitize_payload(config_snapshot),
+                    research_schema_version=research_schema_version,
+                    information_cutoff_at=(
+                        information_cutoff_at.astimezone(UTC).replace(tzinfo=None)
+                        if information_cutoff_at and information_cutoff_at.tzinfo
+                        else information_cutoff_at
+                    ),
+                    method_snapshot_json=_sanitize_payload(method_snapshot)
+                    if method_snapshot is not None
+                    else None,
+                    research_kind=research_kind,
+                    full_baseline_run_id=full_baseline_run_id,
+                    incremental_cutoff=(
+                        request.analysis_date if research_kind == "incremental" else None
+                    ),
+                    incremental_input_fingerprint=incremental_input_fingerprint,
                     version=__version__,
                     current_attempt=1,
                     cancel_requested=False,
@@ -247,25 +311,68 @@ class RunRepository:
                     )
                 )
         except IntegrityError as exc:
+            if research_kind == "incremental":
+                with self.sessions() as session:
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        full_baseline_run_id,
+                        request.analysis_date,
+                    )
+                    if existing_slot is not None:
+                        if (
+                            existing_slot.incremental_input_fingerprint
+                            == incremental_input_fingerprint
+                        ):
+                            return self._view_for_session(session, existing_slot), False
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies this Cycle and cutoff."
+                        ) from exc
             if idempotency_key is None:
                 raise
             with self.sessions() as session:
                 existing = session.scalar(
-                    select(RunRecord).where(
-                        RunRecord.idempotency_key == idempotency_key
-                    )
+                    select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                 )
                 if existing is None:
                     raise
-                if (
-                    existing.request_json != request_json
-                    or existing.source_run_id != source_run_id
-                ):
+                if existing.request_json != request_json or existing.source_run_id != source_run_id:
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc
-                return self._view(existing), False
+                return self._view_for_session(session, existing), False
         return self.get_run(run_id), True
+
+    def validate_incremental_baseline(
+        self,
+        full_baseline_run_id: str,
+        request: AnalysisRequest,
+    ) -> RunView:
+        """Return one active compatible Full Baseline or fail before a Run starts."""
+        with self.sessions() as session:
+            row = session.execute(
+                select(RunRecord, ResearchNodeRecord)
+                .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                .where(RunRecord.id == full_baseline_run_id)
+            ).one_or_none()
+        if row is None:
+            raise InvalidIncrementalBaselineError("Full Baseline was not found")
+        run, node = row
+        baseline_request = RunRequestSnapshot.model_validate(run.request_json)
+        if node.research_kind != "full":
+            raise InvalidIncrementalBaselineError("Full Baseline must be a Full Research Node")
+        if run.status != RunStatus.SUCCEEDED.value or run.trashed_at is not None:
+            raise InvalidIncrementalBaselineError("Full Baseline must be active")
+        if baseline_request.ticker != request.ticker:
+            raise InvalidIncrementalBaselineError("Full Baseline must use the same Instrument Key")
+        if run.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION:
+            raise InvalidIncrementalBaselineError(
+                "Full Baseline has an incompatible Research Schema Version"
+            )
+        if baseline_request.analysis_date >= request.analysis_date:
+            raise InvalidIncrementalBaselineError(
+                "Incremental cutoff must be later than its Full Baseline"
+            )
+        return self._view(run, is_research_node=True)
 
     @staticmethod
     def checkpoint_thread_id(run_id: str, attempt: int) -> str:
@@ -276,7 +383,7 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            return self._view(record)
+            return self._view_for_session(session, record)
 
     def list_runs(
         self,
@@ -315,23 +422,20 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_local_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
                 )
             )
         stmt = (
-            select(RunRecord, DecisionRecord.rating)
+            select(RunRecord, DecisionRecord.rating, ResearchNodeRecord.run_id)
             .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
+            .outerjoin(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
             .where(*filters)
             .order_by(RunRecord.created_at.desc())
             .offset(offset)
@@ -341,8 +445,8 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating)
-                    for record, rating in session.execute(stmt)
+                    self._summary(record, rating, node_run_id is not None)
+                    for record, rating, node_run_id in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -352,15 +456,30 @@ class RunRepository:
     def trash_runs(
         self,
         run_ids: tuple[str, ...],
+        *,
+        primary_replacements: dict[str, str] | None = None,
     ) -> tuple[tuple[RunView, ...], int]:
-        """Atomically trash terminal runs after validating the full batch."""
+        """Compatibility wrapper for the Cycle-aware lifecycle result."""
+        result = self.trash_runs_detailed(
+            run_ids,
+            primary_replacements=primary_replacements,
+        )
+        return result.runs, result.changed
+
+    def trash_runs_detailed(
+        self,
+        run_ids: tuple[str, ...],
+        *,
+        primary_replacements: dict[str, str] | None = None,
+    ) -> RunLifecycleResult:
+        """Atomically Trash requested Runs and any Full-owned active Cycle."""
         now = _utc_naive()
+        replacements = primary_replacements or {}
         with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
@@ -368,51 +487,361 @@ class RunRepository:
             invalid = [
                 record.id
                 for record in records.values()
-                if record.trashed_at is None
-                and record.status not in _TERMINAL_STATUSES
+                if record.trashed_at is None and record.status not in _TERMINAL_STATUSES
             ]
             if invalid:
                 raise InvalidRunTransitionError(
-                    "only terminal runs can be trashed: "
-                    + ", ".join(invalid)
+                    "only terminal runs can be trashed: " + ", ".join(invalid)
                 )
-            changed = 0
+            requested_nodes = {
+                node.run_id: node
+                for node in session.scalars(
+                    select(ResearchNodeRecord).where(ResearchNodeRecord.run_id.in_(run_ids))
+                )
+            }
+            full_ids = tuple(
+                run_id
+                for run_id, node in requested_nodes.items()
+                if node.research_kind == "full"
+            )
+            cycle_children = {
+                full_id: tuple(
+                    session.scalars(
+                        select(RunRecord)
+                        .join(
+                            ResearchNodeRecord,
+                            ResearchNodeRecord.run_id == RunRecord.id,
+                        )
+                        .where(
+                            ResearchNodeRecord.full_baseline_run_id == full_id,
+                            RunRecord.trashed_at.is_(None),
+                        )
+                        .order_by(RunRecord.id)
+                    )
+                )
+                for full_id in full_ids
+            }
+            affected_ids = set(run_ids)
+            for children in cycle_children.values():
+                affected_ids.update(child.id for child in children)
+
+            for primary in tuple(
+                session.scalars(
+                    select(PrimaryResearchCycleRecord).where(
+                        PrimaryResearchCycleRecord.full_run_id.in_(full_ids)
+                    )
+                )
+            ):
+                remaining = tuple(
+                    session.scalars(
+                        select(ResearchNodeRecord.run_id)
+                        .join(RunRecord, RunRecord.id == ResearchNodeRecord.run_id)
+                        .where(
+                            ResearchNodeRecord.research_kind == "full",
+                            func.json_extract(RunRecord.request_json, "$.ticker")
+                            == primary.instrument,
+                            RunRecord.status == RunStatus.SUCCEEDED.value,
+                            RunRecord.trashed_at.is_(None),
+                            ResearchNodeRecord.run_id.not_in(affected_ids),
+                        )
+                        .order_by(ResearchNodeRecord.run_id)
+                    )
+                )
+                replacement = replacements.get(primary.full_run_id)
+                if remaining:
+                    if replacement is None:
+                        raise InvalidRunTransitionError(
+                            "trashing the Primary Full requires an explicit replacement"
+                        )
+                    if replacement not in remaining:
+                        raise InvalidRunTransitionError(
+                            "replacement Primary must be an active Full Cycle on this Timeline"
+                        )
+                    primary.full_run_id = replacement
+                    primary.updated_at = now
+                else:
+                    session.delete(primary)
+
+            changed_ids: set[str] = set()
             for run_id in run_ids:
                 record = records[run_id]
                 if record.trashed_at is None:
                     record.trashed_at = now
+                    record.trash_cascade_full_run_id = None
                     record.updated_at = now
-                    changed += 1
+                    changed_ids.add(run_id)
+            for full_id, children in cycle_children.items():
+                for child in children:
+                    if child.trashed_at is None:
+                        child.trashed_at = now
+                        child.trash_cascade_full_run_id = full_id
+                        child.updated_at = now
+                        changed_ids.add(child.id)
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
-        return views, changed
+            views = tuple(
+                self._view(
+                    records[run_id],
+                    is_research_node=run_id in requested_nodes,
+                )
+                for run_id in run_ids
+            )
+            impacts = tuple(
+                RunLifecycleImpact(
+                    requested_run_id=run_id,
+                    cycle_id=(
+                        run_id
+                        if requested_nodes.get(run_id)
+                        and requested_nodes[run_id].research_kind == "full"
+                        else (
+                            requested_nodes[run_id].full_baseline_run_id
+                            if requested_nodes.get(run_id)
+                            else None
+                        )
+                    ),
+                    research_kind=(
+                        requested_nodes[run_id].research_kind
+                        if requested_nodes.get(run_id)
+                        else None
+                    ),
+                    affected_run_ids=(
+                        (run_id, *(child.id for child in cycle_children.get(run_id, ())))
+                        if run_id in full_ids
+                        else (run_id,)
+                    ),
+                    cascade_moved_run_ids=tuple(
+                        child.id
+                        for child in cycle_children.get(run_id, ())
+                        if child.id in changed_ids
+                    ),
+                    replacement_primary_cycle_id=replacements.get(run_id),
+                )
+                for run_id in run_ids
+            )
+        return RunLifecycleResult(
+            runs=views,
+            changed=len(changed_ids),
+            impacts=impacts,
+        )
 
     def restore_runs(
         self,
         run_ids: tuple[str, ...],
     ) -> tuple[tuple[RunView, ...], int]:
-        """Atomically restore trashed runs; repeated requests are idempotent."""
+        """Compatibility wrapper for the Cycle-aware lifecycle result."""
+        result = self.restore_runs_detailed(run_ids)
+        return result.runs, result.changed
+
+    def restore_runs_detailed(
+        self,
+        run_ids: tuple[str, ...],
+    ) -> RunLifecycleResult:
+        """Restore requested Nodes without violating Full-Cycle invariants."""
         now = _utc_naive()
         with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
                 raise RunNotFoundError(", ".join(missing))
-            changed = 0
-            for run_id in run_ids:
-                record = records[run_id]
-                if record.trashed_at is not None:
+            requested_nodes = {
+                node.run_id: node
+                for node in session.scalars(
+                    select(ResearchNodeRecord).where(ResearchNodeRecord.run_id.in_(run_ids))
+                )
+            }
+            full_ids = tuple(
+                run_id
+                for run_id, node in requested_nodes.items()
+                if node.research_kind == "full" and records[run_id].trashed_at is not None
+            )
+            cascade_children = {
+                full_id: tuple(
+                    session.scalars(
+                        select(RunRecord)
+                        .where(RunRecord.trash_cascade_full_run_id == full_id)
+                        .order_by(RunRecord.id)
+                    )
+                )
+                for full_id in full_ids
+            }
+            restore_ids = {
+                run_id for run_id in run_ids if records[run_id].trashed_at is not None
+            }
+            for children in cascade_children.values():
+                restore_ids.update(child.id for child in children)
+
+            for full_id in full_ids:
+                full = records[full_id]
+                if (
+                    full.status != RunStatus.SUCCEEDED.value
+                    or full.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
+                ):
+                    raise InvalidRunTransitionError(
+                        "restored Full must remain a valid current Full Baseline"
+                    )
+
+            restoring_nodes = {
+                node.run_id: node
+                for node in session.scalars(
+                    select(ResearchNodeRecord).where(
+                        ResearchNodeRecord.run_id.in_(restore_ids)
+                    )
+                )
+            }
+            restoring_slots: set[tuple[str, date]] = set()
+            for run_id, node in restoring_nodes.items():
+                if node.research_kind != "incremental":
+                    continue
+                baseline = session.get(RunRecord, node.full_baseline_run_id)
+                baseline_node = session.get(
+                    ResearchNodeRecord, node.full_baseline_run_id
+                )
+                if baseline is None or (
+                    baseline.trashed_at is not None and baseline.id not in restore_ids
+                ):
+                    raise InvalidRunTransitionError(
+                        "an Incremental cannot be restored while its Full remains in Trash"
+                    )
+                run = session.get(RunRecord, run_id)
+                baseline_request = RunRequestSnapshot.model_validate(
+                    baseline.request_json
+                )
+                incremental_request = RunRequestSnapshot.model_validate(
+                    run.request_json
+                )
+                if (
+                    baseline_node is None
+                    or baseline_node.research_kind != "full"
+                    or baseline.status != RunStatus.SUCCEEDED.value
+                    or baseline.research_schema_version
+                    != CURRENT_RESEARCH_SCHEMA_VERSION
+                    or baseline_request.ticker != incremental_request.ticker
+                    or baseline_request.analysis_date
+                    >= incremental_request.analysis_date
+                ):
+                    raise InvalidRunTransitionError(
+                        "restored Incremental must retain a valid current Full Baseline"
+                    )
+                slot = (node.full_baseline_run_id, run.incremental_cutoff)
+                if slot in restoring_slots:
+                    raise InvalidRunTransitionError(
+                        "restore contains duplicate same-Cycle/cutoff slots"
+                    )
+                restoring_slots.add(slot)
+                conflict = session.scalar(
+                    select(RunRecord.id).where(
+                        RunRecord.research_kind == "incremental",
+                        RunRecord.full_baseline_run_id == node.full_baseline_run_id,
+                        RunRecord.incremental_cutoff == run.incremental_cutoff,
+                        RunRecord.trashed_at.is_(None),
+                        RunRecord.status.in_(
+                            (
+                                RunStatus.QUEUED.value,
+                                RunStatus.RUNNING.value,
+                                RunStatus.SUCCEEDED.value,
+                            )
+                        ),
+                        RunRecord.id.not_in(restore_ids),
+                    )
+                )
+                if conflict is not None:
+                    raise InvalidRunTransitionError(
+                        "restore conflicts with an active slot for the same Cycle/cutoff"
+                    )
+
+            fulls_by_instrument: dict[str, list[str]] = {}
+            for full_id in full_ids:
+                instrument = RunRequestSnapshot.model_validate(
+                    records[full_id].request_json
+                ).ticker
+                fulls_by_instrument.setdefault(instrument, []).append(full_id)
+            for full_id in full_ids:
+                full = records[full_id]
+                instrument = RunRequestSnapshot.model_validate(full.request_json).ticker
+                primary = session.get(PrimaryResearchCycleRecord, instrument)
+                active_other = session.scalar(
+                    select(ResearchNodeRecord.run_id)
+                    .join(RunRecord, RunRecord.id == ResearchNodeRecord.run_id)
+                    .where(
+                        ResearchNodeRecord.research_kind == "full",
+                        ResearchNodeRecord.run_id != full_id,
+                        RunRecord.trashed_at.is_(None),
+                        RunRecord.status == RunStatus.SUCCEEDED.value,
+                        func.json_extract(RunRecord.request_json, "$.ticker") == instrument,
+                    )
+                    .limit(1)
+                )
+                if primary is None:
+                    if len(fulls_by_instrument[instrument]) > 1:
+                        raise InvalidRunTransitionError(
+                            "restoring multiple Full Cycles requires an explicit Primary choice"
+                        )
+                    if active_other is not None:
+                        raise InvalidRunTransitionError(
+                            "Timeline with active Cycles must retain an explicit Primary"
+                        )
+                    session.add(
+                        PrimaryResearchCycleRecord(
+                            instrument=instrument,
+                            full_run_id=full_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+
+            changed_ids: set[str] = set()
+            for run_id in restore_ids:
+                record = session.get(RunRecord, run_id)
+                if record is not None and record.trashed_at is not None:
                     record.trashed_at = None
+                    record.trash_cascade_full_run_id = None
                     record.updated_at = now
-                    changed += 1
+                    changed_ids.add(run_id)
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
-        return views, changed
+            views = tuple(
+                self._view(
+                    records[run_id],
+                    is_research_node=run_id in requested_nodes,
+                )
+                for run_id in run_ids
+            )
+            impacts = tuple(
+                RunLifecycleImpact(
+                    requested_run_id=run_id,
+                    cycle_id=(
+                        run_id
+                        if requested_nodes.get(run_id)
+                        and requested_nodes[run_id].research_kind == "full"
+                        else (
+                            requested_nodes[run_id].full_baseline_run_id
+                            if requested_nodes.get(run_id)
+                            else None
+                        )
+                    ),
+                    research_kind=(
+                        requested_nodes[run_id].research_kind
+                        if requested_nodes.get(run_id)
+                        else None
+                    ),
+                    affected_run_ids=(
+                        (run_id, *(child.id for child in cascade_children.get(run_id, ())))
+                        if run_id in full_ids
+                        else (run_id,)
+                    ),
+                    cascade_moved_run_ids=tuple(
+                        child.id for child in cascade_children.get(run_id, ())
+                    ),
+                )
+                for run_id in run_ids
+            )
+        return RunLifecycleResult(
+            runs=views,
+            changed=len(changed_ids),
+            impacts=impacts,
+        )
 
     def set_instrument_name(
         self,
@@ -443,8 +872,7 @@ class RunRepository:
         """Persist one cutoff-safe market-local display name when available."""
         normalized = (
             instrument_local_name.strip()[:300]
-            if isinstance(instrument_local_name, str)
-            and instrument_local_name.strip()
+            if isinstance(instrument_local_name, str) and instrument_local_name.strip()
             else None
         )
         if normalized is None:
@@ -485,7 +913,6 @@ class RunRepository:
                 )
                 .label("ticker_rank"),
             )
-
             .where(
                 RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
@@ -530,10 +957,7 @@ class RunRepository:
             .group_by(RunRecord.status)
         )
         with self.sessions() as session:
-            return {
-                str(status): int(count)
-                for status, count in session.execute(stmt)
-            }
+            return {str(status): int(count) for status, count in session.execute(stmt)}
 
     def purge_expired_trash(
         self,
@@ -559,6 +983,7 @@ class RunRepository:
                         .where(
                             RunRecord.trashed_at.is_not(None),
                             RunRecord.trashed_at <= cutoff,
+                            RunRecord.trash_cascade_full_run_id.is_(None),
                         )
                         .order_by(RunRecord.trashed_at, RunRecord.id)
                         .limit(batch_size)
@@ -567,11 +992,28 @@ class RunRepository:
                 if not run_ids:
                     connection.commit()
                     return 0
+                full_ids = set(
+                    connection.scalars(
+                        select(ResearchNodeRecord.run_id).where(
+                            ResearchNodeRecord.run_id.in_(run_ids),
+                            ResearchNodeRecord.research_kind == "full",
+                        )
+                    )
+                )
+                target_ids = set(run_ids)
+                if full_ids:
+                    target_ids.update(
+                        connection.scalars(
+                            select(ResearchNodeRecord.run_id).where(
+                                ResearchNodeRecord.full_baseline_run_id.in_(full_ids)
+                            )
+                        )
+                    )
                 checkpoint_threads = tuple(
                     dict.fromkeys(
                         connection.scalars(
                             select(RunAttemptRecord.checkpoint_thread_id)
-                            .where(RunAttemptRecord.run_id.in_(run_ids))
+                            .where(RunAttemptRecord.run_id.in_(target_ids))
                             .order_by(RunAttemptRecord.id)
                         )
                     )
@@ -585,18 +1027,169 @@ class RunRepository:
                         "DELETE FROM checkpoints WHERE thread_id = ?",
                         (checkpoint_thread,),
                     )
-                deleted = connection.execute(
-                    delete(RunRecord).where(
-                        RunRecord.id.in_(run_ids),
-                        RunRecord.trashed_at.is_not(None),
-                        RunRecord.trashed_at <= cutoff,
+                child_ids = target_ids - full_ids
+                deleted = 0
+                if child_ids:
+                    deleted += int(
+                        connection.execute(
+                            delete(RunRecord).where(
+                                RunRecord.id.in_(child_ids),
+                                RunRecord.trashed_at.is_not(None),
+                            )
+                        ).rowcount
+                        or 0
                     )
-                ).rowcount
+                if full_ids:
+                    deleted += int(
+                        connection.execute(
+                            delete(RunRecord).where(
+                                RunRecord.id.in_(full_ids),
+                                RunRecord.trashed_at.is_not(None),
+                                RunRecord.trashed_at <= cutoff,
+                            )
+                        ).rowcount
+                        or 0
+                    )
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
         return int(deleted or 0)
+
+    def purge_runs_detailed(
+        self,
+        run_ids: tuple[str, ...],
+    ) -> RunLifecycleResult:
+        """Permanently purge trashed Runs at their Node-owned boundaries."""
+        runs_table = RunRecord.__table__
+        nodes_table = ResearchNodeRecord.__table__
+        attempts_table = RunAttemptRecord.__table__
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                requested = {
+                    str(row["id"]): row
+                    for row in connection.execute(
+                        select(runs_table).where(runs_table.c.id.in_(run_ids))
+                    ).mappings()
+                }
+                nodes = {
+                    str(row["run_id"]): row
+                    for row in connection.execute(
+                        select(nodes_table).where(nodes_table.c.run_id.in_(run_ids))
+                    ).mappings()
+                }
+                active = [
+                    run_id
+                    for run_id, row in requested.items()
+                    if row["trashed_at"] is None
+                ]
+                if active:
+                    raise InvalidRunTransitionError(
+                        "only Runs in Trash can be permanently purged: "
+                        + ", ".join(active)
+                    )
+                affected_by_request: dict[str, tuple[str, ...]] = {}
+                target_ids: set[str] = set()
+                full_ids: set[str] = set()
+                for run_id in run_ids:
+                    row = requested.get(run_id)
+                    if row is None:
+                        affected_by_request[run_id] = ()
+                        continue
+                    node = nodes.get(run_id)
+                    if node is not None and node["research_kind"] == "full":
+                        full_ids.add(run_id)
+                        children = tuple(
+                            str(value)
+                            for value in connection.scalars(
+                                select(nodes_table.c.run_id)
+                                .where(nodes_table.c.full_baseline_run_id == run_id)
+                                .order_by(nodes_table.c.run_id)
+                            )
+                        )
+                        cycle_ids = (run_id, *children)
+                        retained_active = tuple(
+                            connection.scalars(
+                                select(runs_table.c.id).where(
+                                    runs_table.c.id.in_(cycle_ids),
+                                    runs_table.c.trashed_at.is_(None),
+                                )
+                            )
+                        )
+                        if retained_active:
+                            raise InvalidRunTransitionError(
+                                "a Full Cycle must be entirely in Trash before purge"
+                            )
+                        affected_by_request[run_id] = cycle_ids
+                        target_ids.update(cycle_ids)
+                    else:
+                        affected_by_request[run_id] = (run_id,)
+                        target_ids.add(run_id)
+
+                checkpoint_threads = tuple(
+                    dict.fromkeys(
+                        connection.scalars(
+                            select(attempts_table.c.checkpoint_thread_id)
+                            .where(attempts_table.c.run_id.in_(target_ids))
+                            .order_by(attempts_table.c.id)
+                        )
+                    )
+                )
+                for checkpoint_thread in checkpoint_threads:
+                    connection.exec_driver_sql(
+                        "DELETE FROM writes WHERE thread_id = ?",
+                        (checkpoint_thread,),
+                    )
+                    connection.exec_driver_sql(
+                        "DELETE FROM checkpoints WHERE thread_id = ?",
+                        (checkpoint_thread,),
+                    )
+                child_ids = target_ids - full_ids
+                deleted = 0
+                if child_ids:
+                    deleted += int(
+                        connection.execute(
+                            delete(runs_table).where(runs_table.c.id.in_(child_ids))
+                        ).rowcount
+                        or 0
+                    )
+                if full_ids:
+                    deleted += int(
+                        connection.execute(
+                            delete(runs_table).where(runs_table.c.id.in_(full_ids))
+                        ).rowcount
+                        or 0
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return RunLifecycleResult(
+            changed=deleted,
+            impacts=tuple(
+                RunLifecycleImpact(
+                    requested_run_id=run_id,
+                    cycle_id=(
+                        run_id
+                        if nodes.get(run_id)
+                        and nodes[run_id]["research_kind"] == "full"
+                        else (
+                            nodes[run_id]["full_baseline_run_id"]
+                            if nodes.get(run_id)
+                            else None
+                        )
+                    ),
+                    research_kind=(
+                        nodes[run_id]["research_kind"]
+                        if nodes.get(run_id)
+                        else None
+                    ),
+                    affected_run_ids=affected_by_request[run_id],
+                )
+                for run_id in run_ids
+            ),
+        )
 
     def claim_next(self, worker_id: str, lease_seconds: int) -> RunView | None:
         """Atomically claim queued work or recover an expired running lease."""
@@ -604,34 +1197,38 @@ class RunRepository:
         expires = now + timedelta(seconds=lease_seconds)
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
-            candidate = connection.execute(
-                select(
-                    RunRecord.id,
-                    RunRecord.status,
-                    RunRecord.current_attempt,
-                    RunAttemptRecord.started_at.label("attempt_started_at"),
-                )
-                .join(
-                    RunAttemptRecord,
-                    and_(
-                        RunAttemptRecord.run_id == RunRecord.id,
-                        RunAttemptRecord.attempt == RunRecord.current_attempt,
-                    ),
-                )
-                .where(
-                    RunRecord.trashed_at.is_(None),
-                    or_(
-                        RunRecord.status == RunStatus.QUEUED.value,
+            candidate = (
+                connection.execute(
+                    select(
+                        RunRecord.id,
+                        RunRecord.status,
+                        RunRecord.current_attempt,
+                        RunAttemptRecord.started_at.label("attempt_started_at"),
+                    )
+                    .join(
+                        RunAttemptRecord,
                         and_(
-                            RunRecord.status == RunStatus.RUNNING.value,
-                            RunRecord.lease_expires_at < now,
-                            RunRecord.cancel_requested.is_(False),
+                            RunAttemptRecord.run_id == RunRecord.id,
+                            RunAttemptRecord.attempt == RunRecord.current_attempt,
                         ),
                     )
+                    .where(
+                        RunRecord.trashed_at.is_(None),
+                        or_(
+                            RunRecord.status == RunStatus.QUEUED.value,
+                            and_(
+                                RunRecord.status == RunStatus.RUNNING.value,
+                                RunRecord.lease_expires_at < now,
+                                RunRecord.cancel_requested.is_(False),
+                            ),
+                        ),
+                    )
+                    .order_by(RunRecord.created_at)
+                    .limit(1)
                 )
-                .order_by(RunRecord.created_at)
-                .limit(1)
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if candidate is None:
                 connection.commit()
                 return None
@@ -666,9 +1263,7 @@ class RunRepository:
             connection.commit()
         return self.get_run(candidate["id"])
 
-    def claim_run(
-        self, run_id: str, worker_id: str, lease_seconds: int
-    ) -> RunView:
+    def claim_run(self, run_id: str, worker_id: str, lease_seconds: int) -> RunView:
         """Claim a specific queued run for the synchronous Python API."""
         now = _utc_naive()
         expires = now + timedelta(seconds=lease_seconds)
@@ -677,13 +1272,9 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status != RunStatus.QUEUED.value:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is {record.status}, expected queued"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is {record.status}, expected queued")
             record.status = RunStatus.RUNNING.value
             record.lease_owner = worker_id
             record.lease_expires_at = expires
@@ -741,13 +1332,8 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if (
-                record.status != RunStatus.RUNNING.value
-                or record.lease_owner != worker_id
-            ):
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is not claimed by {worker_id}"
-                )
+            if record.status != RunStatus.RUNNING.value or record.lease_owner != worker_id:
+                raise InvalidRunTransitionError(f"run {run_id} is not claimed by {worker_id}")
             record.status = RunStatus.QUEUED.value
             record.lease_owner = None
             record.lease_expires_at = None
@@ -766,9 +1352,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status == RunStatus.QUEUED.value:
                 record.status = RunStatus.CANCELLED.value
                 record.cancel_requested = True
@@ -789,50 +1373,118 @@ class RunRepository:
 
     def cancel_requested(self, run_id: str) -> bool:
         with self.sessions() as session:
-            value = session.scalar(
-                select(RunRecord.cancel_requested).where(RunRecord.id == run_id)
-            )
+            value = session.scalar(select(RunRecord.cancel_requested).where(RunRecord.id == run_id))
             if value is None:
                 raise RunNotFoundError(run_id)
             return bool(value)
 
     def retry(self, run_id: str) -> RunView:
         now = _utc_naive()
-        with self.sessions.begin() as session:
+        slot_identity: tuple[str, Any] | None = None
+        fingerprint: str | None = None
+        try:
+            with self.sessions.begin() as session:
+                record = session.get(RunRecord, run_id)
+                if record is None:
+                    raise RunNotFoundError(run_id)
+                self._require_retryable(record)
+                if (
+                    record.research_kind == "incremental"
+                    and record.full_baseline_run_id is not None
+                    and record.incremental_cutoff is not None
+                ):
+                    slot_identity = (
+                        record.full_baseline_run_id,
+                        record.incremental_cutoff,
+                    )
+                    fingerprint = record.incremental_input_fingerprint
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        *slot_identity,
+                    )
+                    if existing_slot is not None:
+                        if existing_slot.incremental_input_fingerprint == fingerprint:
+                            return self._view_for_session(session, existing_slot)
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies "
+                            "this Cycle and cutoff."
+                        )
+                checkpoint_thread_id = self._attempt(
+                    session,
+                    record,
+                ).checkpoint_thread_id
+                record.current_attempt += 1
+                record.status = RunStatus.QUEUED.value
+                record.cancel_requested = False
+                record.lease_owner = None
+                record.lease_expires_at = None
+                record.error_code = None
+                record.error_message = None
+                record.finished_at = None
+                record.updated_at = now
+                session.add(
+                    RunAttemptRecord(
+                        run_id=run_id,
+                        attempt=record.current_attempt,
+                        status=RunStatus.QUEUED.value,
+                        checkpoint_thread_id=checkpoint_thread_id,
+                        metrics_json=RunMetrics().model_dump(mode="json"),
+                    )
+                )
+        except IntegrityError as exc:
+            if slot_identity is None:
+                raise
+            with self.sessions() as session:
+                existing_slot = self._active_incremental_slot(
+                    session,
+                    *slot_identity,
+                )
+                if existing_slot is None:
+                    raise
+                if existing_slot.incremental_input_fingerprint == fingerprint:
+                    return self._view_for_session(session, existing_slot)
+            raise IncrementalRequestConflictError(
+                "An active Incremental Research Run already occupies this Cycle and cutoff."
+            ) from exc
+        return self.get_run(run_id)
+
+    def require_retryable(self, run_id: str) -> RunView:
+        """Check the target lifecycle before any retry admission work."""
+        with self.sessions() as session:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
-            if record.status != RunStatus.FAILED.value:
-                raise InvalidRunTransitionError(
-                    f"only failed runs can be retried, got {record.status}"
-                )
-            checkpoint_thread_id = self._attempt(
-                session,
-                record,
-            ).checkpoint_thread_id
-            record.current_attempt += 1
-            record.status = RunStatus.QUEUED.value
-            record.cancel_requested = False
-            record.lease_owner = None
-            record.lease_expires_at = None
-            record.error_code = None
-            record.error_message = None
-            record.finished_at = None
-            record.updated_at = now
-            session.add(
-                RunAttemptRecord(
-                    run_id=run_id,
-                    attempt=record.current_attempt,
-                    status=RunStatus.QUEUED.value,
-                    checkpoint_thread_id=checkpoint_thread_id,
-                    metrics_json=RunMetrics().model_dump(mode="json"),
-                )
+            self._require_retryable(record)
+            return self._view_for_session(session, record)
+
+    @staticmethod
+    def _require_retryable(record: RunRecord) -> None:
+        if record.trashed_at is not None:
+            raise InvalidRunTransitionError(f"run {record.id} is trashed")
+        if record.status != RunStatus.FAILED.value:
+            raise InvalidRunTransitionError(f"only failed runs can be retried, got {record.status}")
+
+    @staticmethod
+    def _active_incremental_slot(
+        session: Session,
+        full_baseline_run_id: str,
+        incremental_cutoff: date,
+    ) -> RunRecord | None:
+        return session.scalar(
+            select(RunRecord).where(
+                RunRecord.research_kind == "incremental",
+                RunRecord.full_baseline_run_id == full_baseline_run_id,
+                RunRecord.incremental_cutoff == incremental_cutoff,
+                RunRecord.trashed_at.is_(None),
+                RunRecord.status.in_(
+                    (
+                        RunStatus.QUEUED.value,
+                        RunStatus.RUNNING.value,
+                        RunStatus.SUCCEEDED.value,
+                    )
+                ),
             )
-        return self.get_run(run_id)
+        )
 
     def checkpoint_thread(self, run_id: str) -> str:
         with self.sessions() as session:
@@ -859,12 +1511,11 @@ class RunRepository:
             if row is None:
                 connection.rollback()
                 raise RunNotFoundError(run_id)
-            sequence = (
-                connection.execute(
-                    select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                    .where(RunEventRecord.run_id == run_id)
-                ).scalar_one()
-            )
+            sequence = connection.execute(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
+            ).scalar_one()
             connection.execute(
                 RunEventRecord.__table__.insert().values(
                     run_id=run_id,
@@ -995,9 +1646,7 @@ class RunRepository:
             if existing is not None:
                 if existing["content_hash"] != draft.content_hash:
                     connection.rollback()
-                    raise ArtifactConflictError(
-                        "artifact identity replayed with different content"
-                    )
+                    raise ArtifactConflictError("artifact identity replayed with different content")
                 connection.commit()
                 return self._artifact(existing), None
 
@@ -1015,8 +1664,7 @@ class RunRepository:
                     prompt_version=draft.prompt_version,
                     generation_method=draft.generation_method.value,
                     generation_observations_json=[
-                        item.model_dump(mode="json")
-                        for item in draft.generation_observations
+                        item.model_dump(mode="json") for item in draft.generation_observations
                     ],
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
@@ -1025,8 +1673,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "artifact_id": artifact_id,
@@ -1038,8 +1687,7 @@ class RunRepository:
                 "prompt_version": draft.prompt_version,
                 "generation_method": draft.generation_method.value,
                 "generation_observations": [
-                    item.model_dump(mode="json")
-                    for item in draft.generation_observations
+                    item.model_dump(mode="json") for item in draft.generation_observations
                 ],
                 "content_type": draft.content_type,
             }
@@ -1124,18 +1772,12 @@ class RunRepository:
                 connection.rollback()
                 raise InvalidRunTransitionError(run_row.status)
             existing = (
-                connection.execute(
-                    select(table).where(table.c.run_id == run_id)
-                )
-                .mappings()
-                .first()
+                connection.execute(select(table).where(table.c.run_id == run_id)).mappings().first()
             )
             if existing is not None:
                 if existing["digest"] != digest:
                     connection.rollback()
-                    raise EvidenceConflictError(
-                        "evidence seal replayed with a different digest"
-                    )
+                    raise EvidenceConflictError("evidence seal replayed with a different digest")
                 connection.commit()
                 return self._evidence_view(existing), None
 
@@ -1152,8 +1794,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "attempt": attempt,
@@ -1197,17 +1840,13 @@ class RunRepository:
     def evidence_status(self, run_id: str) -> EvidenceSealView:
         with self.engine.connect() as connection:
             run_exists = connection.scalar(
-                select(func.count())
-                .select_from(RunRecord)
-                .where(RunRecord.id == run_id)
+                select(func.count()).select_from(RunRecord).where(RunRecord.id == run_id)
             )
             if not run_exists:
                 raise RunNotFoundError(run_id)
             record = (
                 connection.execute(
-                    select(RunEvidenceRecord.__table__).where(
-                        RunEvidenceRecord.run_id == run_id
-                    )
+                    select(RunEvidenceRecord.__table__).where(RunEvidenceRecord.run_id == run_id)
                 )
                 .mappings()
                 .first()
@@ -1233,8 +1872,8 @@ class RunRepository:
         result: AnalysisResult,
         *,
         evidence: EvidenceBundle,
-        benchmark: str,
     ) -> RunMetrics:
+        """Persist a terminal result without creating legacy review state."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             record = session.get(RunRecord, run_id)
@@ -1246,9 +1885,12 @@ class RunRepository:
             if sealed is None:
                 raise EvidenceNotSealedError(run_id)
             if sealed.digest != evidence.digest:
-                raise EvidenceConflictError(
-                    "completed result does not match the sealed evidence"
-                )
+                raise EvidenceConflictError("completed result does not match the sealed evidence")
+            is_post_redesign_full = (
+                record.research_schema_version is not None and record.research_kind == "full"
+            )
+            if is_post_redesign_full and result.decision is None:
+                raise ValueError("Full Research Node requires a complete Research Decision")
             if result.decision is not None:
                 request = RunRequestSnapshot.model_validate(record.request_json)
                 market = self.market_bucket(request.ticker)
@@ -1270,23 +1912,30 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                if request.asset_type == "stock":
+            if is_post_redesign_full:
+                node = ResearchNodeRecord(
+                    run_id=run_id,
+                    research_kind="full",
+                    full_baseline_run_id=None,
+                    created_at=now,
+                )
+                session.add(node)
+                request = RunRequestSnapshot.model_validate(record.request_json)
+                primary = session.get(PrimaryResearchCycleRecord, request.ticker)
+                if primary is None:
                     session.add(
-                        OutcomeRecord(
-                            decision_id=decision.id,
-                            status="pending",
-                            benchmark=benchmark,
-                            holding_intervals=5,
-                            next_check_at=max(
-                                now,
-                                earliest_outcome_check_at(
-                                    ticker=request.ticker,
-                                    analysis_date=request.analysis_date,
-                                    holding_intervals=5,
-                                ).replace(tzinfo=None),
-                            ),
+                        PrimaryResearchCycleRecord(
+                            instrument=request.ticker,
+                            full_run_id=run_id,
+                            created_at=now,
+                            updated_at=now,
                         )
                     )
+                elif request.make_primary is None:
+                    raise ValueError("later Full Research requires an explicit make_primary choice")
+                elif request.make_primary:
+                    primary.full_run_id = run_id
+                    primary.updated_at = now
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1299,6 +1948,533 @@ class RunRepository:
             attempt.lease_expires_at = None
             aggregate = self._merge_metrics(record, attempt, result.metrics)
         return aggregate
+
+    def complete_incremental(
+        self,
+        run_id: str,
+        result: AnalysisResult,
+        *,
+        evidence: EvidenceBundle,
+        products: IncrementalNodeProducts,
+    ) -> RunMetrics:
+        """Atomically commit an Incremental Node and every required product."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if record.status != RunStatus.RUNNING.value:
+                raise InvalidRunTransitionError(record.status)
+            if record.research_kind != "incremental" or record.full_baseline_run_id is None:
+                raise ValueError("Incremental commit requires an Incremental Run")
+            if result.decision is None:
+                raise ValueError("Incremental Node requires a complete Research Decision")
+            if session.get(RunEvidenceRecord, run_id) is not None:
+                raise EvidenceConflictError("Incremental evidence was already sealed")
+            digest = evidence.digest
+            if digest is None:
+                raise ValueError("evidence bundle must have a digest")
+            request = RunRequestSnapshot.model_validate(record.request_json)
+            baseline = session.get(RunRecord, record.full_baseline_run_id)
+            baseline_node = session.get(ResearchNodeRecord, record.full_baseline_run_id)
+            baseline_evidence = session.get(RunEvidenceRecord, record.full_baseline_run_id)
+            if (
+                baseline is None
+                or baseline_node is None
+                or baseline_evidence is None
+                or baseline.status != RunStatus.SUCCEEDED.value
+                or baseline.trashed_at is not None
+                or baseline_node.research_kind != "full"
+            ):
+                raise InvalidIncrementalBaselineError(
+                    "Incremental commit requires an active sealed Full Baseline"
+                )
+            baseline_items = {
+                item.ref: item
+                for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
+            }
+            baseline_request = RunRequestSnapshot.model_validate(baseline.request_json)
+            if baseline_request.ticker != request.ticker:
+                raise InvalidIncrementalBaselineError(
+                    "Full Baseline must use the same Instrument Key at commit"
+                )
+            if baseline.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION:
+                raise InvalidIncrementalBaselineError(
+                    "Full Baseline has an incompatible Research Schema Version at commit"
+                )
+            if baseline_request.analysis_date >= request.analysis_date:
+                raise InvalidIncrementalBaselineError(
+                    "Incremental cutoff must remain later than its Full Baseline at commit"
+                )
+            for item in evidence.items:
+                if item.ref in baseline_items:
+                    raise EvidenceConflictError(
+                        "Incremental Evidence bundle must not copy Full Baseline Evidence references"
+                    )
+            allowed_evidence_refs = set(baseline_items)
+            allowed_evidence_refs.update(item.ref for item in evidence.items)
+            current_evidence_refs = {item.ref for item in evidence.items}
+            for domain in products.collection_summary.domains:
+                if not set(domain.evidence_refs).issubset(current_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Collection Summary references evidence outside the current "
+                        "Incremental bundle"
+                    )
+            if not set(result.decision.evidence_refs).issubset(allowed_evidence_refs):
+                raise EvidenceConflictError(
+                    "Incremental Decision references evidence outside its closure"
+                )
+            for entry in products.reassessment.entries:
+                if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Incremental Reassessment references evidence outside its closure"
+                    )
+            for reason in products.full_research_required_reasons:
+                if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Full Research Required references evidence outside its closure"
+                    )
+            session.add(
+                RunEvidenceRecord(
+                    run_id=run_id,
+                    sealed_attempt=record.current_attempt,
+                    bundle_json=evidence.model_dump(mode="json"),
+                    digest=digest,
+                    item_count=len(evidence.items),
+                    table_count=len(evidence.tables),
+                    sealed_at=now,
+                )
+            )
+            session.add(
+                DecisionRecord(
+                    run_id=run_id,
+                    ticker=request.ticker,
+                    market=self.market_bucket(request.ticker),
+                    asset_type=request.asset_type,
+                    analysis_date=request.analysis_date,
+                    rating=result.decision.rating.value,
+                    confidence=result.decision.confidence,
+                    decision_json=result.decision.model_dump(mode="json"),
+                    numeric_audit_json=None,
+                    created_at=now,
+                )
+            )
+            session.add(
+                ResearchNodeRecord(
+                    run_id=run_id,
+                    research_kind="incremental",
+                    full_baseline_run_id=record.full_baseline_run_id,
+                    created_at=now,
+                    incremental_products_json=products.model_dump(mode="json"),
+                )
+            )
+            record.status = RunStatus.SUCCEEDED.value
+            record.finished_at = now
+            record.updated_at = now
+            record.lease_owner = None
+            record.lease_expires_at = None
+            attempt = self._attempt(session, record)
+            attempt.status = RunStatus.SUCCEEDED.value
+            attempt.finished_at = now
+            attempt.lease_owner = None
+            attempt.lease_expires_at = None
+            aggregate = self._merge_metrics(record, attempt, result.metrics)
+            sequence = session.scalar(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
+            )
+            session.add_all(
+                [
+                    RunEventRecord(
+                        run_id=run_id,
+                        sequence=sequence,
+                        attempt=record.current_attempt,
+                        event_type="evidence.sealed",
+                        node="evidence.seal",
+                        payload_json={
+                            "attempt": record.current_attempt,
+                            "digest": digest,
+                            "item_count": len(evidence.items),
+                            "table_count": len(evidence.tables),
+                        },
+                        created_at=now,
+                    ),
+                    RunEventRecord(
+                        run_id=run_id,
+                        sequence=sequence + 1,
+                        attempt=record.current_attempt,
+                        event_type="run.succeeded",
+                        node=None,
+                        payload_json={"metrics": aggregate.model_dump(mode="json")},
+                        created_at=now,
+                    ),
+                ]
+            )
+        return aggregate
+
+    def select_primary_cycle(
+        self,
+        instrument: str,
+        full_run_id: str,
+    ) -> ResearchTimeline:
+        """Idempotently select one active Full Cycle for a Timeline."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            row = session.execute(
+                select(RunRecord, ResearchNodeRecord)
+                .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                .where(ResearchNodeRecord.run_id == full_run_id)
+            ).one_or_none()
+            if row is None:
+                raise InvalidPrimaryResearchCycleError("Full Cycle was not found")
+            run, node = row
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            if (
+                node.research_kind != "full"
+                or request.ticker != instrument
+                or run.status != RunStatus.SUCCEEDED.value
+                or run.trashed_at is not None
+            ):
+                raise InvalidPrimaryResearchCycleError(
+                    "Primary Research must be an active Full Cycle on this Timeline"
+                )
+            primary = session.get(PrimaryResearchCycleRecord, instrument)
+            if primary is None:
+                session.add(
+                    PrimaryResearchCycleRecord(
+                        instrument=instrument,
+                        full_run_id=full_run_id,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            elif primary.full_run_id != full_run_id:
+                primary.full_run_id = full_run_id
+                primary.updated_at = now
+        return self.get_timeline(instrument)
+
+    def get_timeline(
+        self,
+        instrument: str,
+        *,
+        node_limit: int = 50,
+        node_offset: int = 0,
+        trash_state: RunTrashState | str = RunTrashState.ACTIVE,
+    ) -> ResearchTimeline:
+        """Return derived Cycles without copying Run products into a Timeline."""
+        with self.sessions() as session:
+            primary = session.get(PrimaryResearchCycleRecord, instrument)
+            all_rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(func.json_extract(RunRecord.request_json, "$.ticker") == instrument)
+                    .order_by(
+                        func.json_extract(RunRecord.request_json, "$.analysis_date"),
+                        RunRecord.id,
+                    )
+                )
+            )
+            decision_records = list(
+                session.execute(
+                    select(DecisionRecord).where(
+                        DecisionRecord.run_id.in_([run.id for run, _node in all_rows])
+                    )
+                ).scalars()
+            )
+        trash_state = RunTrashState(trash_state)
+        rows = [
+            row
+            for row in all_rows
+            if trash_state is RunTrashState.ALL
+            or (trash_state is RunTrashState.ACTIVE and row[0].trashed_at is None)
+            or (trash_state is RunTrashState.TRASHED and row[0].trashed_at is not None)
+        ]
+        node_total = len(rows)
+        page_rows = rows[node_offset : node_offset + node_limit]
+        products_by_id = {
+            run.id: (
+                IncrementalNodeProducts.model_validate(node.incremental_products_json)
+                if node.incremental_products_json is not None
+                else None
+            )
+            for run, node in all_rows
+        }
+        decisions_by_id = {
+            decision.run_id: ResearchDecision.model_validate(decision.decision_json)
+            for decision in decision_records
+        }
+        cycle_warning_by_id = {
+            run.id: any(
+                other_run.trashed_at is None
+                and other_node.full_baseline_run_id
+                == (run.id if node.research_kind == "full" else node.full_baseline_run_id)
+                and bool(
+                    products_by_id[other_run.id]
+                    and products_by_id[other_run.id].full_research_required_reasons
+                )
+                for other_run, other_node in all_rows
+            )
+            for run, node in rows
+        }
+        primary_warning = bool(primary and cycle_warning_by_id.get(primary.full_run_id))
+        return ResearchTimeline(
+            instrument=instrument,
+            primary_cycle_id=primary.full_run_id if primary else None,
+            active_full_cycles=tuple(
+                PrimaryCycleCandidate(
+                    id=run.id,
+                    analysis_date=RunRequestSnapshot.model_validate(
+                        run.request_json
+                    ).analysis_date,
+                )
+                for run, node in all_rows
+                if node.research_kind == "full" and run.trashed_at is None
+            ),
+            nodes=tuple(
+                ResearchNodeView(
+                    id=run.id,
+                    cycle_id=(
+                        run.id if node.research_kind == "full" else node.full_baseline_run_id
+                    ),
+                    instrument=instrument,
+                    analysis_date=RunRequestSnapshot.model_validate(run.request_json).analysis_date,
+                    research_schema_version=run.research_schema_version,
+                    information_cutoff_at=_aware(run.information_cutoff_at),
+                    method_snapshot=run.method_snapshot_json or {},
+                    research_kind=node.research_kind,
+                    full_baseline_run_id=node.full_baseline_run_id,
+                    is_baseline_compatible=(
+                        node.research_kind == "full"
+                        and run.research_schema_version == CURRENT_RESEARCH_SCHEMA_VERSION
+                    ),
+                    is_cycle_head=(
+                        run.trashed_at is None
+                        and not any(
+                            other_node.full_baseline_run_id
+                            == (
+                                run.id
+                                if node.research_kind == "full"
+                                else node.full_baseline_run_id
+                            )
+                            and other_run.trashed_at is None
+                            and RunRequestSnapshot.model_validate(
+                                other_run.request_json
+                            ).analysis_date
+                            > RunRequestSnapshot.model_validate(run.request_json).analysis_date
+                            for other_run, other_node in all_rows
+                        )
+                    ),
+                    is_primary=(
+                        primary is not None
+                        and primary.full_run_id
+                        == (run.id if node.research_kind == "full" else node.full_baseline_run_id)
+                    ),
+                    is_active=run.trashed_at is None,
+                    trashed_at=_aware(run.trashed_at),
+                    trash_cascade_full_run_id=run.trash_cascade_full_run_id,
+                    collection_summary=(
+                        products_by_id[run.id].collection_summary
+                        if products_by_id[run.id]
+                        else None
+                    ),
+                    research_availability=(
+                        products_by_id[run.id].research_availability
+                        if products_by_id[run.id]
+                        else None
+                    ),
+                    information_advancement=(
+                        products_by_id[run.id].information_advancement
+                        if products_by_id[run.id]
+                        else None
+                    ),
+                    performance=(
+                        products_by_id[run.id].performance if products_by_id[run.id] else None
+                    ),
+                    reassessment=(
+                        products_by_id[run.id].reassessment if products_by_id[run.id] else None
+                    ),
+                    decision=decisions_by_id.get(run.id),
+                    full_research_required_reasons=(
+                        products_by_id[run.id].full_research_required_reasons
+                        if products_by_id[run.id]
+                        else ()
+                    ),
+                    cycle_warning=cycle_warning_by_id[run.id],
+                )
+                for run, node in page_rows
+            ),
+            node_total=node_total,
+            node_limit=node_limit,
+            node_offset=node_offset,
+            timeline_warning=primary_warning,
+        )
+
+    def compare_research_nodes(
+        self,
+        instrument: str,
+        selections: tuple[ResearchNodeComparisonSelection, ...],
+    ) -> ResearchNodeComparison:
+        """Compute an ordered two-Node comparison without durable side effects."""
+        if len(selections) != 2:
+            raise InvalidResearchNodeComparisonError(
+                "Node Comparison requires exactly two Research Node IDs"
+            )
+        node_ids = tuple(selection.node_id for selection in selections)
+        if len(set(node_ids)) != 2:
+            raise InvalidResearchNodeComparisonError(
+                "Node Comparison requires two distinct Research Node IDs"
+            )
+        with self.sessions() as session:
+            rows = {
+                run.id: (run, node)
+                for run, node in session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(RunRecord.id.in_(node_ids))
+                )
+            }
+            decisions = {
+                record.run_id: dict(record.decision_json)
+                for record in session.execute(
+                    select(DecisionRecord).where(DecisionRecord.run_id.in_(node_ids))
+                ).scalars()
+            }
+        if set(rows) != set(node_ids):
+            raise InvalidResearchNodeComparisonError(
+                "Every comparison side must be a retained Research Node"
+            )
+
+        sides: list[ResearchNodeComparisonSide] = []
+        for selection in selections:
+            run, node = rows[selection.node_id]
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            if run.status != RunStatus.SUCCEEDED.value:
+                raise InvalidResearchNodeComparisonError(
+                    "Failed or cancelled Research Runs cannot be compared"
+                )
+            if request.ticker != instrument:
+                raise InvalidResearchNodeComparisonError(
+                    "Both Research Nodes must use the requested Instrument Key"
+                )
+            actual_lifecycle = (
+                ResearchNodeLifecycleState.TRASHED
+                if run.trashed_at is not None
+                else ResearchNodeLifecycleState.ACTIVE
+            )
+            if selection.lifecycle_state is not actual_lifecycle:
+                raise InvalidResearchNodeComparisonError(
+                    "Trash participation must be selected explicitly"
+                )
+            decision = decisions.get(run.id)
+            if decision is None:
+                raise InvalidResearchNodeComparisonError(
+                    "Every compared Research Node must retain its Decision"
+                )
+            products = (
+                IncrementalNodeProducts.model_validate(node.incremental_products_json)
+                if node.incremental_products_json is not None
+                else None
+            )
+            cycle_id = run.id if node.research_kind == "full" else node.full_baseline_run_id
+            assert cycle_id is not None
+            sides.append(
+                ResearchNodeComparisonSide(
+                    node_id=run.id,
+                    cycle_id=cycle_id,
+                    analysis_date=request.analysis_date,
+                    research_schema_version=run.research_schema_version,
+                    method_snapshot=run.method_snapshot_json or {},
+                    research_kind=node.research_kind,
+                    lifecycle_state=actual_lifecycle,
+                    collection_summary=products.collection_summary if products else None,
+                    research_availability=products.research_availability if products else None,
+                    information_advancement=products.information_advancement if products else None,
+                    reassessment=products.reassessment if products else None,
+                    decision=decision,
+                    performance=products.performance if products else None,
+                    full_research_required_reasons=(
+                        products.full_research_required_reasons if products else ()
+                    ),
+                )
+            )
+
+        def comparison_value(decision: dict[str, Any], key: str):
+            if key not in decision:
+                return ResearchNodeComparisonValue(
+                    state="not_recorded_under_this_schema"
+                )
+            value = decision[key]
+            if value is None:
+                return ResearchNodeComparisonValue(state="null")
+            if value == "" or value == [] or value == {}:
+                return ResearchNodeComparisonValue(state="empty", value=value)
+            return ResearchNodeComparisonValue(state="recorded", value=value)
+
+        method_changed = sides[0].method_snapshot != sides[1].method_snapshot
+        return ResearchNodeComparison(
+            instrument=instrument,
+            sides=(sides[0], sides[1]),
+            cross_cycle=sides[0].cycle_id != sides[1].cycle_id,
+            method_changed=method_changed,
+            warnings=(
+                (
+                    ResearchNodeComparisonWarning(
+                        code="method_changed",
+                        message=(
+                            "Method Snapshots differ; conclusion differences are not "
+                            "automatically attributable to Evidence, models, prompts, or methods."
+                        ),
+                    ),
+                )
+                if method_changed
+                else ()
+            ),
+            decision_sections=tuple(
+                ResearchNodeDecisionSection(
+                    key=key,
+                    values=(
+                        comparison_value(sides[0].decision, key),
+                        comparison_value(sides[1].decision, key),
+                    ),
+                )
+                for key in _DECISION_SECTION_KEYS
+            ),
+        )
+
+    def list_timelines(self, *, limit: int = 50, offset: int = 0) -> ResearchTimelinePage:
+        """List derived Timelines without introducing a second product store."""
+        ticker = func.json_extract(RunRecord.request_json, "$.ticker")
+        stmt = (
+            select(
+                ticker.label("instrument"),
+                PrimaryResearchCycleRecord.full_run_id.label("primary_cycle_id"),
+                func.count(ResearchNodeRecord.run_id).label("node_count"),
+            )
+            .select_from(RunRecord)
+            .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+            .outerjoin(
+                PrimaryResearchCycleRecord,
+                PrimaryResearchCycleRecord.instrument == ticker,
+            )
+            .where(RunRecord.trashed_at.is_(None))
+            .group_by(ticker, PrimaryResearchCycleRecord.full_run_id)
+            .order_by(ticker)
+        )
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        with self.sessions() as session:
+            items = tuple(
+                ResearchTimelineSummary(
+                    instrument=str(row.instrument),
+                    primary_cycle_id=row.primary_cycle_id,
+                    node_count=int(row.node_count),
+                )
+                for row in session.execute(stmt.offset(offset).limit(limit)).mappings()
+            )
+            total = int(session.scalar(count_stmt) or 0)
+        return ResearchTimelinePage(items=items, total=total, limit=limit, offset=offset)
 
     def fail(
         self,
@@ -1367,8 +2543,7 @@ class RunRepository:
             {
                 artifact.role: artifact.content
                 for artifact in artifacts
-                if artifact.stage == "analyst"
-                and isinstance(artifact.content, AnalystReport)
+                if artifact.stage == "analyst" and isinstance(artifact.content, AnalystReport)
             }
         )
         decision = (
@@ -1385,16 +2560,12 @@ class RunRepository:
             )
         )
         numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(
-                decision_record.numeric_audit_json
-            )
+            DecisionNumericAuditAppendix.model_validate(decision_record.numeric_audit_json)
             if decision_record and decision_record.numeric_audit_json
             else None
         )
         evidence = (
-            EvidenceBundle.model_validate(evidence_record.bundle_json)
-            if evidence_record
-            else None
+            EvidenceBundle.model_validate(evidence_record.bundle_json) if evidence_record else None
         )
         warnings = tuple(
             dict.fromkeys(
@@ -1409,12 +2580,9 @@ class RunRepository:
                         (
                             ResearchWarning(
                                 code=(
-                                    "decision.numeric_audit_"
-                                    f"{decision.numeric_audit_status.value}"
+                                    f"decision.numeric_audit_{decision.numeric_audit_status.value}"
                                 ),
-                                message=(
-                                    _numeric_audit_warning_message(numeric_audit)
-                                ),
+                                message=(_numeric_audit_warning_message(numeric_audit)),
                                 source="committee.final.serialize.numeric",
                             ),
                         )
@@ -1471,9 +2639,7 @@ class RunRepository:
     def _run_exists(self, run_id: str) -> bool:
         with self.engine.connect() as connection:
             return (
-                connection.execute(
-                    select(RunRecord.id).where(RunRecord.id == run_id)
-                ).first()
+                connection.execute(select(RunRecord.id).where(RunRecord.id == run_id)).first()
                 is not None
             )
 
@@ -1491,12 +2657,8 @@ class RunRepository:
         }
         model = content_models.get(record["content_type"])
         if model is None:
-            raise ValueError(
-                f"unsupported research artifact type: {record['content_type']}"
-            )
-        generation_method = ArtifactGenerationMethod(
-            record["generation_method"]
-        )
+            raise ValueError(f"unsupported research artifact type: {record['content_type']}")
+        generation_method = ArtifactGenerationMethod(record["generation_method"])
         generation_observations = tuple(
             ArtifactGenerationObservation.model_validate(item)
             for item in (record["generation_observations_json"] or ())
@@ -1528,409 +2690,8 @@ class RunRepository:
             sealed_at=_aware(record["sealed_at"]),
         )
 
-    def pending_outcomes(
-        self,
-        limit: int = 20,
-        *,
-        due_at: datetime | None = None,
-    ) -> list[dict[str, Any]]:
-        due = due_at or _utc_naive()
-        if due.tzinfo is not None:
-            due = due.astimezone(UTC).replace(tzinfo=None)
-        stmt = (
-            select(OutcomeRecord, DecisionRecord)
-            .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
-            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-            .where(
-                OutcomeRecord.status == "pending",
-                DecisionRecord.asset_type == "stock",
-                RunRecord.trashed_at.is_(None),
-                OutcomeRecord.next_check_at.is_not(None),
-                OutcomeRecord.next_check_at <= due,
-            )
-            .order_by(OutcomeRecord.next_check_at, DecisionRecord.analysis_date)
-            .limit(limit)
-        )
-        with self.sessions() as session:
-            return [
-                {
-                    "outcome_id": outcome.id,
-                    "decision_id": decision.id,
-                    "ticker": decision.ticker,
-                    "analysis_date": decision.analysis_date,
-                    "benchmark": outcome.benchmark,
-                    "holding_intervals": outcome.holding_intervals,
-                    "decision": decision.decision_json,
-                    "next_check_at": _aware(outcome.next_check_at),
-                }
-                for outcome, decision in session.execute(stmt)
-            ]
-
-    def pending_outcome_count(self) -> int:
-        """Count active stock outcomes still scheduled for settlement."""
-        stmt = (
-            select(func.count())
-            .select_from(OutcomeRecord)
-            .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
-            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-            .where(
-                OutcomeRecord.status == "pending",
-                DecisionRecord.asset_type == "stock",
-                RunRecord.trashed_at.is_(None),
-            )
-        )
-        with self.sessions() as session:
-            return int(session.scalar(stmt) or 0)
-
-    def mark_outcome_checked(
-        self,
-        outcome_id: int,
-        *,
-        checked_at: datetime,
-        next_check_at: datetime,
-        error_message: str | None = None,
-    ) -> None:
-        if checked_at.tzinfo is not None:
-            checked_at = checked_at.astimezone(UTC).replace(tzinfo=None)
-        if next_check_at.tzinfo is not None:
-            next_check_at = next_check_at.astimezone(UTC).replace(
-                tzinfo=None
-            )
-        with self.sessions.begin() as session:
-            outcome = session.scalar(
-                select(OutcomeRecord)
-                .join(
-                    DecisionRecord,
-                    OutcomeRecord.decision_id == DecisionRecord.id,
-                )
-                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-                .where(
-                    OutcomeRecord.id == outcome_id,
-                    DecisionRecord.asset_type == "stock",
-                    RunRecord.trashed_at.is_(None),
-                )
-            )
-            if outcome is None:
-                return
-            outcome.last_checked_at = checked_at
-            outcome.next_check_at = next_check_at
-            outcome.error_message = _sanitize_text(error_message)
-
-    def resolve_outcome(
-        self,
-        outcome_id: int,
-        *,
-        observation_start,
-        observation_end,
-        raw_return: float,
-        alpha_return: float,
-        reflection: str,
-    ) -> None:
-        now = _utc_naive()
-        with self.sessions.begin() as session:
-            outcome = session.scalar(
-                select(OutcomeRecord)
-                .join(
-                    DecisionRecord,
-                    OutcomeRecord.decision_id == DecisionRecord.id,
-                )
-                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-                .where(
-                    OutcomeRecord.id == outcome_id,
-                    DecisionRecord.asset_type == "stock",
-                    RunRecord.trashed_at.is_(None),
-                )
-            )
-            if outcome is None or outcome.status != "pending":
-                return
-            outcome.status = "resolved"
-            outcome.observation_start = observation_start
-            outcome.observation_end = observation_end
-            outcome.raw_return = raw_return
-            outcome.alpha_return = alpha_return
-            outcome.last_checked_at = now
-            outcome.next_check_at = None
-            outcome.resolved_at = now
-            outcome.error_message = None
-            session.add(
-                ReflectionRecord(
-                    outcome_id=outcome.id,
-                    text=reflection,
-                    created_at=now,
-                )
-            )
-
-    def memory_context(
-        self,
-        ticker: str,
-        asset_type: str,
-        *,
-        same_limit: int = 5,
-        cross_limit: int = 3,
-    ) -> MemoryContext:
-        if asset_type.casefold() != "stock":
-            return MemoryContext(
-                instrument=ticker,
-                market=None,
-                items=(),
-            )
-        market = self.market_bucket(ticker, asset_type)
-        resolved = (
-            select(
-                DecisionRecord,
-                OutcomeRecord,
-                ReflectionRecord,
-            )
-            .join(OutcomeRecord, OutcomeRecord.decision_id == DecisionRecord.id)
-            .join(
-                ReflectionRecord,
-                ReflectionRecord.outcome_id == OutcomeRecord.id,
-            )
-            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-            .where(
-                RunRecord.trashed_at.is_(None),
-                DecisionRecord.asset_type == "stock",
-                OutcomeRecord.status == "resolved",
-                OutcomeRecord.holding_intervals >= 5,
-                OutcomeRecord.raw_return.is_not(None),
-                OutcomeRecord.alpha_return.is_not(None),
-            )
-            .order_by(
-                OutcomeRecord.resolved_at.desc(),
-                OutcomeRecord.id.desc(),
-            )
-        )
-        with self.sessions() as session:
-            rows = list(session.execute(resolved))
-        same: list[MemoryRecord] = []
-        cross: list[MemoryRecord] = []
-        ticker_key = ticker.casefold()
-        asset_type_key = asset_type.casefold()
-        for decision_record, outcome_record, reflection_record in rows:
-            reflection = reflection_record.text.strip()
-            if not reflection:
-                continue
-            try:
-                decision = ResearchDecision.model_validate(
-                    decision_record.decision_json
-                )
-                outcome = MemoryOutcome(
-                    benchmark=outcome_record.benchmark,
-                    observation_start=outcome_record.observation_start,
-                    observation_end=outcome_record.observation_end,
-                    holding_intervals=outcome_record.holding_intervals,
-                    raw_return=outcome_record.raw_return,
-                    alpha_return=outcome_record.alpha_return,
-                )
-            except ValueError:
-                continue
-            if (
-                decision_record.ticker.casefold() == ticker_key
-                and len(same) < max(0, same_limit)
-            ):
-                same.append(
-                    MemoryRecord(
-                        ref=f"memory:{decision_record.run_id}",
-                        run_id=decision_record.run_id,
-                        scope="same_ticker",
-                        ticker=decision_record.ticker,
-                        market=decision_record.market,
-                        analysis_date=decision_record.analysis_date,
-                        decision=decision,
-                        outcome=outcome,
-                        reflection=reflection,
-                    )
-                )
-            elif (
-                decision_record.ticker.casefold() != ticker_key
-                and decision_record.asset_type.casefold() == asset_type_key
-                and market is not None
-                and decision_record.market == market
-                and len(cross) < max(0, cross_limit)
-            ):
-                cross.append(
-                    MemoryRecord(
-                        ref=f"memory:{decision_record.run_id}",
-                        run_id=decision_record.run_id,
-                        scope="same_market",
-                        ticker=decision_record.ticker,
-                        market=decision_record.market,
-                        analysis_date=decision_record.analysis_date,
-                        reflection=reflection,
-                    )
-                )
-        return MemoryContext(
-            instrument=ticker,
-            market=market,
-            items=(*same, *cross),
-        )
-
-    def memory_entries(
-        self,
-        *,
-        ticker: str | None = None,
-        market: str | None = None,
-        q: str | None = None,
-        status: str | None = None,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
-        stmt = (
-            select(
-                DecisionRecord,
-                OutcomeRecord,
-                ReflectionRecord,
-                RunRecord.instrument_name,
-                RunRecord.instrument_local_name,
-                RunRecord.request_json,
-            )
-            .join(OutcomeRecord, OutcomeRecord.decision_id == DecisionRecord.id)
-            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
-            .outerjoin(
-                ReflectionRecord,
-                ReflectionRecord.outcome_id == OutcomeRecord.id,
-            )
-            .order_by(
-                DecisionRecord.created_at.desc(),
-                DecisionRecord.id.desc(),
-            )
-            .where(
-                RunRecord.trashed_at.is_(None),
-                DecisionRecord.asset_type == "stock",
-            )
-            .limit(min(max(1, limit), 500))
-        )
-        if ticker and (ticker_query := ticker.strip().casefold()):
-            stmt = stmt.where(
-                func.lower(DecisionRecord.ticker).contains(
-                    ticker_query,
-                    autoescape=True,
-                )
-            )
-        if market and (market_query := market.strip().casefold()):
-            stmt = stmt.where(
-                func.lower(func.coalesce(DecisionRecord.market, "")).contains(
-                    market_query,
-                    autoescape=True,
-                )
-            )
-        if q and (query := q.strip().casefold()):
-            decision_fields = (
-                "$.rating",
-                "$.thesis",
-                "$.catalysts",
-                "$.risks",
-                "$.invalidation_conditions",
-                "$.time_horizon",
-                "$.scenarios",
-                "$.unresolved_questions",
-            )
-            stmt = stmt.where(
-                or_(
-                    func.lower(DecisionRecord.run_id).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                    func.lower(DecisionRecord.ticker).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                    func.lower(
-                        func.coalesce(DecisionRecord.market, "")
-                    ).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                    *(
-                        func.lower(
-                            func.coalesce(
-                                func.json_extract(
-                                    DecisionRecord.decision_json,
-                                    path,
-                                ),
-                                "",
-                            )
-                        ).contains(
-                            query,
-                            autoescape=True,
-                        )
-                        for path in decision_fields
-                    ),
-                    func.lower(
-                        func.coalesce(ReflectionRecord.text, "")
-                    ).contains(
-                        query,
-                        autoescape=True,
-                    ),
-                )
-            )
-        if status:
-            stmt = stmt.where(OutcomeRecord.status == status)
-        with self.sessions() as session:
-            return [
-                {
-                    "run_id": decision.run_id,
-                    "ticker": decision.ticker,
-                    "instrument_name": instrument_name,
-                    "instrument_local_name": instrument_local_name,
-                    "market": decision.market,
-                    "asset_type": decision.asset_type,
-                    "analysis_date": decision.analysis_date.isoformat(),
-                    "profile": RunRequestSnapshot.model_validate(request_json).profile,
-                    "decision": decision.decision_json,
-                    "outcome": {
-                        "status": outcome.status,
-                        "benchmark": outcome.benchmark,
-                        "observation_start": (
-                            outcome.observation_start.isoformat()
-                            if outcome.observation_start
-                            else None
-                        ),
-                        "observation_end": (
-                            outcome.observation_end.isoformat()
-                            if outcome.observation_end
-                            else None
-                        ),
-                        "holding_intervals": outcome.holding_intervals,
-                        "raw_return": outcome.raw_return,
-                        "alpha_return": outcome.alpha_return,
-                    },
-                    "reflection": reflection.text if reflection else None,
-                }
-                for (
-                    decision,
-                    outcome,
-                    reflection,
-                    instrument_name,
-                    instrument_local_name,
-                    request_json,
-                ) in session.execute(stmt)
-            ]
-
     def backup(self, destination: Path) -> Path:
-        destination = destination.expanduser().resolve()
-        if destination == self.settings.database_path.resolve():
-            raise ValueError("backup destination must differ from the live database")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source = sqlite3.connect(self.settings.database_path)
-        target = sqlite3.connect(destination)
-        try:
-            source.backup(target)
-        finally:
-            target.close()
-            source.close()
-        return destination
+        return backup_sqlite_database(self.settings, destination)
 
     @staticmethod
     def market_bucket(ticker: str, asset_type: str | None = None) -> str | None:
@@ -1970,10 +2731,20 @@ class RunRepository:
         return aggregate
 
     @staticmethod
-    def _view(record: RunRecord) -> RunView:
+    def _view(
+        record: RunRecord,
+        *,
+        is_research_node: bool = False,
+    ) -> RunView:
         return RunView(
             id=record.id,
             source_run_id=record.source_run_id,
+            is_research_node=is_research_node,
+            research_schema_version=record.research_schema_version,
+            information_cutoff_at=_aware(record.information_cutoff_at),
+            method_snapshot=record.method_snapshot_json,
+            research_kind=record.research_kind,
+            full_baseline_run_id=record.full_baseline_run_id,
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
             status=RunStatus(record.status),
@@ -1992,12 +2763,29 @@ class RunRepository:
         )
 
     @classmethod
+    def _view_for_session(
+        cls,
+        session: Session,
+        record: RunRecord,
+    ) -> RunView:
+        return cls._view(
+            record,
+            is_research_node=(
+                session.get(ResearchNodeRecord, record.id) is not None
+            ),
+        )
+
+    @classmethod
     def _summary(
         cls,
         record: RunRecord,
         rating: str | None,
+        is_research_node: bool,
     ) -> RunSummaryView:
         return RunSummaryView(
-            **cls._view(record).model_dump(),
+            **cls._view(
+                record,
+                is_research_node=is_research_node,
+            ).model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
         )

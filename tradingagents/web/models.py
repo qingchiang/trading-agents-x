@@ -12,9 +12,10 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
-    ResearchDecision,
+    ResearchNodeComparisonSelection,
+    ResearchTimeline,
     RunAttemptView,
-    RunProfile,
+    RunLifecycleImpact,
     RunView,
 )
 
@@ -68,6 +69,23 @@ class RunDetail(ApiModel):
     evidence_status: EvidenceSealView
 
 
+class TimelineDetail(ApiModel):
+    timeline: ResearchTimeline
+
+
+class ResearchNodeComparisonRequest(ApiModel):
+    nodes: tuple[ResearchNodeComparisonSelection, ...] = Field(min_length=2, max_length=2)
+
+
+class PrimaryCycleSelectionRequest(ApiModel):
+    full_run_id: str = Field(min_length=1, max_length=36)
+
+    @field_validator("full_run_id", mode="before")
+    @classmethod
+    def normalize_full_run_id(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
 class RunCreateRequest(AnalysisRequest):
     source_run_id: str | None = Field(default=None, min_length=1, max_length=36)
 
@@ -84,6 +102,7 @@ class RunCreateRequest(AnalysisRequest):
 
 class RunBatchRequest(ApiModel):
     run_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+    primary_replacements: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("run_ids")
     @classmethod
@@ -95,10 +114,19 @@ class RunBatchRequest(ApiModel):
             raise ValueError("run IDs must be unique")
         return normalized
 
+    @field_validator("primary_replacements")
+    @classmethod
+    def validate_primary_replacements(cls, value: dict[str, str]) -> dict[str, str]:
+        normalized = {key.strip(): replacement.strip() for key, replacement in value.items()}
+        if any(not key or not replacement for key, replacement in normalized.items()):
+            raise ValueError("Primary replacement IDs must not be empty")
+        return normalized
+
 
 class RunBatchResult(ApiModel):
     runs: tuple[RunView, ...]
     changed: int = Field(ge=0)
+    impacts: tuple[RunLifecycleImpact, ...] = ()
 
 
 class ExportQuery(ApiModel):
@@ -115,7 +143,6 @@ class HealthResponse(ApiModel):
 class QueueHealth(ApiModel):
     queued: int
     running: int
-    pending_outcomes: int
 
 
 class ProviderCapabilities(ApiModel):
@@ -168,27 +195,3 @@ class CapabilitiesResponse(ApiModel):
     output_languages: list[str]
     providers: dict[str, ProviderCapabilities]
     defaults: CapabilityDefaults
-
-
-class MemoryOutcome(ApiModel):
-    status: Literal["pending", "resolved"]
-    benchmark: str
-    observation_start: str | None
-    observation_end: str | None
-    holding_intervals: int
-    raw_return: float | None
-    alpha_return: float | None
-
-
-class MemoryEntry(ApiModel):
-    run_id: str
-    ticker: str
-    instrument_name: str | None = None
-    instrument_local_name: str | None = None
-    market: str | None
-    asset_type: str
-    analysis_date: str
-    profile: RunProfile
-    decision: ResearchDecision
-    outcome: MemoryOutcome
-    reflection: str | None

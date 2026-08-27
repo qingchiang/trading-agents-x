@@ -8,7 +8,7 @@ const nav = [
   { to: "/", key: "dashboard", icon: "⌁" },
   { to: "/runs/new", key: "newRun", icon: "+" },
   { to: "/runs", key: "runManagement", icon: "≡" },
-  { to: "/memory", key: "memory", icon: "◫" },
+  { to: "/timelines", key: "researchTimelines", icon: "⌘" },
   { to: "/settings", key: "settings", icon: "◇" },
 ];
 

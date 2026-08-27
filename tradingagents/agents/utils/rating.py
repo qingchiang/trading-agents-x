@@ -4,7 +4,7 @@ The same five-tier scale (Buy, Overweight, Hold, Underweight, Sell) is used by:
 - The Research Manager (investment plan recommendation)
 - The Portfolio Manager (final position decision)
 - The signal processor (rating extracted for downstream consumers)
-- The memory log (rating tag stored alongside each decision entry)
+- the research decision contract
 
 Centralising it here avoids drift between those call sites.
 """

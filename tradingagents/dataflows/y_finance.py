@@ -4,8 +4,10 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .errors import VendorRateLimitError
 from .lookahead import is_near_live
 from .macro_common import SeriesCache
+from .rate_limit import stop_on_rate_limit_requested
 from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
     StockstatsUtils,
@@ -206,6 +208,12 @@ def get_fundamentals(
             ("Market Cap", info.get("marketCap")),
             ("PE Ratio (TTM)", info.get("trailingPE")),
             ("Forward PE", info.get("forwardPE")),
+            ("Analyst Recommendation", info.get("recommendationKey")),
+            ("Analyst Recommendation Mean", info.get("recommendationMean")),
+            ("Analyst Opinion Count", info.get("numberOfAnalystOpinions")),
+            ("Analyst Target Mean Price", info.get("targetMeanPrice")),
+            ("Analyst Target High Price", info.get("targetHighPrice")),
+            ("Analyst Target Low Price", info.get("targetLowPrice")),
             ("PEG Ratio", info.get("pegRatio")),
             ("Price to Book", info.get("priceToBook")),
             ("EPS (TTM)", info.get("trailingEps")),
@@ -253,6 +261,13 @@ def get_fundamentals(
 
     except NoMarketDataError:
         raise
+    except VendorRateLimitError as exc:
+        # The bounded Incremental journey treats a real 429 as a stop signal.
+        # Ordinary Full analysis retains its established rendered-unavailable
+        # behaviour if a caller supplies this vendor error outside that scope.
+        if stop_on_rate_limit_requested():
+            raise
+        return f"Error retrieving fundamentals for {ticker}: {str(exc)}"
     except Exception as e:
         return f"Error retrieving fundamentals for {ticker}: {str(e)}"
 

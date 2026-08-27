@@ -33,6 +33,7 @@ from ..symbol_utils import tokyo_securities_base
 from .edinet_common import (
     documents_on,
     filing_detail_line,
+    filing_period_detail,
     iter_window_dates,
     render_filings,
 )
@@ -46,7 +47,9 @@ def _format_filing(record: dict) -> str:
     title = record.get("docDescription") or record.get("docTypeCode") or "Disclosure"
     filer = record.get("filerName") or "Unknown filer"
     line = f"### {title} (filer: {filer})"
-    detail = filing_detail_line(record)
+    detail = "\n".join(
+        part for part in (filing_detail_line(record), filing_period_detail(record)) if part
+    )
     return f"{line}\n{detail}" if detail else line
 
 

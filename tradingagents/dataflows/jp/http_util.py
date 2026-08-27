@@ -1,8 +1,9 @@
 """Shared stdlib HTTP for the keyless JP feeds (Google News, TDnet).
 
 Owns the identified User-Agent and the one fetch *policy* these feeds share: send
-the request, back off once on a 429 (honouring ``Retry-After``), and degrade to
-None on any other network/HTTP error. Each feed keeps only what actually differs —
+the request, back off once on a 429 (honouring ``Retry-After``) for ordinary
+requests, or surface bounded failures as typed errors, and degrade ordinary
+network/HTTP errors to None. Each feed keeps only what actually differs —
 constructing its ``Request`` and parsing the body (XML vs HTML). (Reddit's feed
 carries its own copy — it's an upstream file this fork doesn't edit.)
 """
@@ -16,6 +17,9 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tradingagents.version import IDENTIFIED_USER_AGENT
+
+from ..errors import VendorRateLimitError, VendorTransportError
+from ..rate_limit import stop_on_rate_limit_requested
 
 logger = logging.getLogger(__name__)
 
@@ -36,21 +40,30 @@ def retry_after_seconds(exc: HTTPError) -> float | None:
 def fetch_bytes(req: Request, timeout: float, label: str, _retry: bool = True) -> bytes | None:
     """Send ``req`` and return the response body, or None on any failure.
 
-    Backs off once on a 429 (honouring ``Retry-After``) then retries; degrades to
-    None on any other HTTP/network error. ``label`` identifies the feed and key in
-    log lines. Callers own request construction and body parsing.
+    Ordinary routes back off once on a 429 (honouring ``Retry-After``); bounded
+    routes raise ``VendorRateLimitError`` immediately. Bounded routes also surface
+    non-429 HTTP/network failures as ``VendorTransportError``; ordinary routes
+    degrade those failures to None. ``label`` identifies the feed and key in log
+    lines. Callers own request construction and body parsing.
     """
     try:
         with urlopen(req, timeout=timeout) as resp:
             return resp.read()
     except HTTPError as exc:
-        if exc.code == 429 and _retry:
-            wait = retry_after_seconds(exc) or 5.0
-            logger.warning("%s: 429 — backing off %.1fs then retrying once", label, wait)
-            time.sleep(wait)
-            return fetch_bytes(req, timeout, label, _retry=False)
+        if exc.code == 429:
+            if stop_on_rate_limit_requested():
+                raise VendorRateLimitError(f"{label} rate limited") from exc
+            if _retry:
+                wait = retry_after_seconds(exc) or 5.0
+                logger.warning("%s: 429 — backing off %.1fs then retrying once", label, wait)
+                time.sleep(wait)
+                return fetch_bytes(req, timeout, label, _retry=False)
+        if stop_on_rate_limit_requested():
+            raise VendorTransportError(f"{label} HTTP request failed") from exc
         logger.warning("%s: fetch failed: %s", label, exc)
         return None
     except (OSError, http.client.HTTPException) as exc:
+        if stop_on_rate_limit_requested():
+            raise VendorTransportError(f"{label} transport failed") from exc
         logger.warning("%s: fetch failed: %s", label, exc)
         return None

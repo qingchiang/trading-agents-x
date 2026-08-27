@@ -2,11 +2,12 @@
 import unittest
 from datetime import date, datetime
 from unittest import mock
+from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
 import pytest
 
-from tradingagents.dataflows.jp import tdnet_news as td
+from tradingagents.dataflows.jp import http_util, tdnet_news as td
 
 
 def _row(code="72030", title="2026年3月期決算短信", pdf="/inbs/140120260710590974.pdf",
@@ -155,6 +156,18 @@ class GetNewsTests(unittest.TestCase):
     def test_search_failure_returns_no_disclosures_line(self):
         out = self._run(None)  # network degraded to None
         self.assertIn("No TDnet disclosures found for 7203.T", out)
+
+    def test_unscoped_429_retries_once_then_degrades(self):
+        rate_limited = HTTPError("https://example.test", 429, "Too Many", {}, None)
+        with (
+            mock.patch.object(http_util, "urlopen", side_effect=[rate_limited, rate_limited]) as urlopen,
+            mock.patch.object(http_util.time, "sleep") as sleep,
+        ):
+            out = td.get_news("7203.T", "2026-06-12", "2026-07-12")
+
+        self.assertIn("No TDnet disclosures found for 7203.T", out)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
 
     def test_newest_first(self):
         html = _page(_row(title="古い", when="2026/06/13 09:00"),

@@ -42,8 +42,6 @@ flowchart TB
     GRAPH --> DATA["Market dataflows"]
     GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
     CHECKPOINT --> DB
-    SETTLE["OutcomeSettlement"] --> REPO
-    WORKER --> SETTLE
     DB --> SSE["Persistent SSE replay"]
     SSE --> WEB
 ```
@@ -70,7 +68,6 @@ confidence
 executive_summary
 thesis
 evidence_refs
-memory_refs
 catalysts
 risks
 invalidation_conditions
@@ -87,8 +84,8 @@ Failed optional numeric candidates never enter `ResearchDecision`. A separate
 `DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
 snapshots (initial and repair), their safe validation issue codes, and the
 components omitted from the canonical decision. It is persisted atomically
-with the decision for user inspection and export, but memory retrieval,
-outcome settlement, ratings, and thesis generation ignore it.
+with the decision for user inspection and export, while ratings and thesis
+generation use only the canonical decision.
 
 Decision-critical calculations keep model-proposed formulas, named numeric
 inputs, units, limitations, and evidence references. The strict qualitative
@@ -154,10 +151,12 @@ process environment and are excluded from persisted configuration snapshots.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
-context, dataflow configuration, memory, cancellation callback, and event
-writer. The dataflow `ContextVar` bridge exists only to support established
-adapter signatures during one scoped invocation; there is no mutable package
-configuration or `set_config()` operation.
+context, dataflow configuration, cancellation callbacks, and artifact/evidence
+writers; the LangGraph runtime provides the event stream writer separately.
+Runs carry no historical review context. The dataflow
+`ContextVar` bridge exists only to support established adapter signatures
+during one scoped invocation; there is no mutable package configuration or
+`set_config()` operation.
 
 Two runs with different provider, model, reasoning, language, or vendor
 settings must remain isolated even if worker concurrency changes in the future.
@@ -169,12 +168,12 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. retrieves deterministic decision memory;
+4. builds an independent Full run without retrieving historical review state;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
 7. persists events, reports, evidence, decision, metrics, and warnings;
 8. cleans up or retains checkpoints according to terminal state;
-9. creates a pending outcome for background settlement.
+9. leaves each completed Run readable through its Execution History.
 
 Creation and retained history use separate request contracts.
 `AnalysisRequest` is the admission contract for new research and for any
@@ -224,9 +223,24 @@ it for retry or later trash cleanup.
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
 exportable, but is excluded immediately from default run listings, Dashboard
-summaries, Memory and `MemoryContext`, pending outcome settlement, and
-recent-instrument suggestions. Restore is idempotent and re-enables those
-consumers.
+summaries, and recent-instrument suggestions. Restore is idempotent.
+
+For Run-backed Research Nodes, the Full Node ID is also the lifecycle boundary
+of its derived Research Cycle. An Incremental Node moves independently. Moving
+a Full Node atomically moves every active direct Incremental child and records
+the Full ID on each child moved by that cascade, so restore can leave previously
+independent Trash entries untouched. Removing the Primary Full requires an
+explicit active replacement when another Cycle remains; removing the final
+active Full deletes the Primary pointer. Default Timeline reads include active
+Nodes only, while an explicit Trash-state query exposes retained audit data.
+
+Restore revalidates the current Full-baseline contract, active same-Cycle and
+cutoff uniqueness, and the Primary pointer in one SQLite write transaction. A
+child cannot be restored while its Full remains in Trash. Permanent purge of a
+Full deletes its entire owned Cycle; Incremental purge remains Node-local. Both
+manual purge and retention cleanup delete application-owned rows and every
+owned checkpoint thread transactionally, without following template lineage,
+Evidence references, or any cross-Cycle relationship.
 
 The Web process performs one opportunistic expiry check at startup. The worker
 checks before its first claim and uses a monotonic in-process deadline for
@@ -257,8 +271,8 @@ Alembic manages application tables:
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
-| `outcomes` | benchmark, five-interval dates, raw return, alpha |
-| `reflections` | outcome-aware research reflection |
+| `research_nodes` | same-identity successful Run role, direct Full-baseline relation, and Node-owned Incremental product JSON |
+| `primary_research_cycles` | the only mutable per-instrument Timeline pointer |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -268,8 +282,10 @@ normal synchronous mode. WAL still permits only one writer at a time. The
 database and `-wal`/`-shm` files must be on one host-local filesystem; NFS/SMB
 deployment is unsupported.
 
-`tradingagents db backup` uses SQLite's online backup operation and is the
-supported backup boundary.
+`tradingagents db backup` calls the persistence-only SQLite online-backup seam
+directly. It does not construct `AnalysisService` or run Alembic, so it is the
+supported pre-migration backup boundary and preserves the source schema and
+rows exactly as they exist when the copy starts.
 
 ### Events and SSE
 
@@ -492,37 +508,58 @@ The displayed role time is cumulative phase activity, not total elapsed time for
 the parallel graph. Prepared contexts and attempt metrics remain separate
 collapsible views.
 
-## Decision memory and outcomes
+## Research review boundary
 
-The repository supplies deterministic context:
+The fixed-period Memory, Outcome, and Reflection lifecycle is retired. Migration
+`0005_remove_legacy_memory` deliberately drops its persisted review tables and
+does not convert historical Runs into Research Nodes. Runs, Attempts, Events,
+Artifacts, sealed Evidence, Decisions, reports, exports, Trash, and restore
+remain available through Execution History. Retained pre-redesign Decision JSON
+may contain a `memory_refs` field; hydration drops that field while preserving
+the current core Decision contract.
 
-- up to five most recent resolved full entries for the same ticker;
-- up to three most recent resolved reflection-only entries for a different
-  ticker in the same asset type and regional market;
-- pending outcomes and legacy outcomes shorter than five intervals are excluded.
+## Incremental research boundary
 
-No vector database is used. This avoids introducing an unmeasured semantic
-similarity feedback loop.
+Incremental Research is a bounded update to one explicitly selected Full
+Baseline, not a strict historical backtest or a chained revision. It receives
+no sibling Incremental conclusion, seals only its own newly admitted Evidence,
+performs one required synthesis into the complete current `ResearchDecision`,
+and commits its Evidence, Reassessment, Decision, Node role, and fixed products
+atomically. Its direct Full Baseline bundle is referenceable but is never
+copied into the current Node.
 
-Outcome settlement is a low-priority worker task, independent of a future run
-for the same ticker. Ticker and benchmark histories retain their own
-exchange-local date labels and are intersected by date. Six common completed
-closes form five intervals:
+The Incremental collector reuses the Run's configured routers and existing
+market assemblers. A provider may receive an exact interval or a broader range
+that the producer truncates locally. The product records actual selected
+sources, admitted observations, material limitations, and sanitized failures;
+it does not mirror the configured chain into a second provider registry, model
+every unattempted fallback as a product result, or certify an exhaustive scan
+when the provider exposes only a bounded feed.
 
-```text
-raw return = ticker_close[5] / ticker_close[0] - 1
-alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
-```
+Information Advancement requires genuine new information: newly admitted PIT
+Evidence, qualified Near-live Advisory Evidence, or a newly completed stock
+session used by the current research product. Elapsed time, provider success
+without usable information, a repeated observation whose only change is its
+retrieval time, and an unproven empty response do not advance a Run. A thin
+Research Availability summary discloses which research domains were available,
+limited, or missing without claiming historical or provider completeness.
+Missing optional inputs do not by themselves require a new Full Research Run.
 
-Each pending outcome stores its next due time. The initial check is no earlier
-than the market-local day after six plausible closes (weekdays are the lower
-bound for supported equities). An incomplete observation is
-deferred for 24 hours; a provider or transport failure is retried after one
-hour. Exchange holidays therefore degrade to bounded daily checks instead of
-the worker poll interval.
+Stock Vendor-adjusted Return is the deterministic v1 Performance requirement.
+Its two endpoints come from one disclosed provider/adjustment/retrieval series;
+that series may also supply market Evidence. Named benchmark returns are
+independent optional context and never block a calculated stock return or an
+otherwise valid Incremental Node. The stock component itself is always recorded
+but may be Not Yet Observable or unavailable; an unavailable result does not
+block a Node that has other genuine Information Advancement. Stock-minus-
+benchmark arithmetic, when shown, is a Reported Benchmark Difference and never
+Alpha.
 
-The stored range and reflection describe short-term feedback. They are not the
-sole truth for long-horizon thesis validity or graph quality.
+[ADR 0005](adr/0005-bounded-best-effort-incremental-data.md)
+supersedes the original complete-empty advancement, mandatory source-level
+Coverage audit, dual-benchmark parity, and v1 Outcome Review design.
+Full-rooted Cycle, slot uniqueness, Evidence ownership, reference closure, and
+atomic lifecycle invariants remain unchanged.
 
 ## Data routing and point-in-time contracts
 
@@ -560,12 +597,17 @@ The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
 
-Sources truncate observations to the cutoff. A disclosure/update source uses
-the conservative visibility boundary. Live-only values are withheld from
-historical runs; absence remains unknown rather than becoming a neutral or
-bearish signal. When a live-only response is cached, its producer-owned
-retrieval timestamp is cached with the payload and reused by consumers; cache
-hits are never restamped at assembly time.
+Sources truncate strict PIT observations to the cutoff. A disclosure/update
+source uses the conservative visibility boundary. Retrieval-time snapshots may
+be admitted only as explicitly non-PIT Near-live Advisory Evidence when the
+Analysis Cutoff is today or one of the preceding five market-local calendar
+dates. They may inform research but cannot prove historical completeness,
+historical absence, or strict historical availability for their domain; older
+live-only values are withheld. Absence remains unknown rather than becoming
+neutral or bearish.
+When a live-only response is cached, its producer-owned retrieval timestamp is
+cached with the payload and reused by consumers; cache hits are never restamped
+at assembly time.
 
 ### Vendor chains and assemblers
 
@@ -619,8 +661,8 @@ roles, tenant isolation, or Internet-facing hardening.
 
 The default suite is offline. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
-SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
-selection, point-in-time evidence sealing, API security, frontend behavior,
+SSE replay, cancellation/retry/run templates, SQLite backup, migration,
+point-in-time evidence sealing, API security, frontend behavior,
 wheel contents, and Docker startup.
 
 These offline checks validate product contracts but do not measure comparative
@@ -638,8 +680,7 @@ modules.
 - Public API: `tradingagents/client.py`,
   `tradingagents/application/contracts.py`
 - Lifecycle: `tradingagents/application/service.py`
-- Worker/outcomes: `tradingagents/application/worker.py`,
-  `tradingagents/application/outcomes.py`
+- Worker: `tradingagents/application/worker.py`
 - Repository/schema: `tradingagents/application/repository.py`,
   `tradingagents/application/database.py`
 - Migrations: `tradingagents/persistence/`

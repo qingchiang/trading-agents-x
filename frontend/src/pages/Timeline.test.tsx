@@ -1,0 +1,667 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
+
+import { api } from "../api/client";
+import i18n from "../i18n";
+import { Router } from "../router";
+import Timeline from "./Timeline";
+
+vi.mock("../api/client", () => ({
+  api: {
+    timeline: vi.fn(),
+    timelines: vi.fn(),
+    selectPrimaryCycle: vi.fn(),
+    trashRuns: vi.fn(),
+    restoreRuns: vi.fn(),
+    purgeRuns: vi.fn(),
+    compareResearchNodes: vi.fn(),
+  },
+}));
+
+beforeEach(async () => {
+  vi.resetAllMocks();
+  await i18n.changeLanguage("en");
+});
+
+function comparisonNode(
+  id: string,
+  researchKind: "full" | "incremental",
+  cycleId: string,
+) {
+  return {
+    id,
+    cycle_id: cycleId,
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {},
+    research_kind: researchKind,
+    full_baseline_run_id: researchKind === "full" ? null : cycleId,
+    is_cycle_head: true,
+    is_primary: cycleId === "cycle-a",
+    is_active: true,
+    trashed_at: null,
+  };
+}
+
+function comparisonResponse(
+  nodes: ReturnType<typeof comparisonNode>[],
+  crossCycle: boolean,
+) {
+  return {
+    instrument: "NVDA",
+    cross_cycle: crossCycle,
+    method_changed: false,
+    warnings: [],
+    sides: nodes.map((node) => ({
+      node_id: node.id,
+      cycle_id: node.cycle_id,
+      analysis_date: node.analysis_date,
+      research_schema_version: node.research_schema_version,
+      method_snapshot: node.method_snapshot,
+      research_kind: node.research_kind,
+      lifecycle_state: "active",
+      decision: { rating: "hold" },
+    })),
+    decision_sections: [],
+  };
+}
+
+test("shows the first Full Run-backed node and keeps its operational Run link", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "7203.T",
+      primary_cycle_id: "run-1",
+      nodes: [
+        {
+          id: "run-1",
+          cycle_id: "run-1",
+          instrument: "7203.T",
+          analysis_date: "2026-07-24",
+          research_schema_version: "1",
+          information_cutoff_at: "2026-07-24T14:59:59Z",
+          method_snapshot: { llm_provider: "fixture" },
+          research_kind: "full",
+          full_baseline_run_id: null,
+          is_cycle_head: true,
+          is_primary: true,
+          is_active: true,
+          trashed_at: null,
+        },
+      ],
+    },
+  } as never);
+
+  render(
+    <Router initialPath="/timelines/7203.T">
+      <Timeline />
+    </Router>,
+  );
+
+  expect(await screen.findByText("Primary Cycle")).toBeVisible();
+  expect(screen.getByText("Full Baseline")).toBeVisible();
+  expect(screen.getByText("Cycle Head")).toBeVisible();
+  expect(screen.getByText("run-1")).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "Open operational Run →" }),
+  ).toHaveAttribute("href", "/runs/run-1");
+});
+
+test("compares arbitrary active and Trash nodes with accessible side-by-side context", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1", nodes: [
+      { id: "full-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-20", research_schema_version: "0",
+        information_cutoff_at: "2026-07-20T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture-a" }, research_kind: "full",
+        full_baseline_run_id: null, is_cycle_head: false, is_primary: true,
+        is_active: true, trashed_at: null },
+      { id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture-b" }, research_kind: "incremental",
+        full_baseline_run_id: "full-1", is_cycle_head: false, is_primary: true,
+        is_active: false, trashed_at: "2026-07-25T00:00:00Z" },
+    ],
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockResolvedValue({
+    instrument: "NVDA", cross_cycle: false, method_changed: true,
+    warnings: [{ code: "method_changed", message: "Do not attribute differences automatically." }],
+    sides: [
+      { node_id: "full-1", cycle_id: "full-1", analysis_date: "2026-07-20",
+        research_schema_version: "0", method_snapshot: { llm_provider: "fixture-a" },
+        research_kind: "full", lifecycle_state: "active", decision: { rating: "hold" } },
+      { node_id: "incremental-1", cycle_id: "full-1", analysis_date: "2026-07-24",
+        research_schema_version: "1", method_snapshot: { llm_provider: "fixture-b" },
+        research_kind: "incremental", lifecycle_state: "trashed",
+        collection_summary: { version: "1", market: "united_states", domains: [] },
+        research_availability: { version: "1", domains: [] },
+        reassessment: { entries: [] },
+        full_research_required_reasons: [{
+          code: "attribution.unreliable", message: "Comparison side needs Full research.",
+          origin: "semantic", evidence_refs: [],
+        }],
+        decision: { rating: "bullish" },
+        performance: { stock: { status: "unavailable", reason: "fixture" }, benchmarks: [] } },
+    ],
+    decision_sections: [
+      { key: "rating", values: [
+        { state: "recorded", value: "hold" },
+        { state: "recorded", value: "bullish" },
+      ] },
+      { key: "unresolved_questions", values: [
+        { state: "not_recorded_under_this_schema", value: null },
+        { state: "empty", value: [] },
+      ] },
+    ],
+  } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  await waitFor(() => expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
+    { node_id: "full-1", lifecycle_state: "active" },
+    { node_id: "incremental-1", lifecycle_state: "trashed" },
+  ]));
+  expect(screen.getByRole("region", { name: "Node Comparison" })).toBeVisible();
+  expect(screen.getByRole("article", {
+    name: "Comparison side 1: Full Research Node, Active",
+  })).toBeVisible();
+  expect(screen.getByRole("article", {
+    name: "Comparison side 2: Incremental Research Node, Trash",
+  })).toBeVisible();
+  expect(screen.getByText("Method Changed")).toBeVisible();
+  expect(screen.getByRole("region", { name: "Warnings for comparison side 2" })).toBeVisible();
+  expect(screen.getByText("Comparison side needs Full research.")).toBeVisible();
+  expect(screen.getByText("Not Recorded Under This Schema")).toBeVisible();
+  for (const heading of [
+    "Collection Summary", "Research Availability", "Reassessment", "Decision", "Performance",
+  ]) {
+    expect(screen.getAllByText(heading).length).toBeGreaterThan(0);
+  }
+});
+
+test.each([
+  ["Full to Full", comparisonNode("full-a", "full", "cycle-a"), comparisonNode("full-b", "full", "cycle-b"), true],
+  ["Full to Incremental", comparisonNode("full-a", "full", "cycle-a"), comparisonNode("incremental-a", "incremental", "cycle-a"), false],
+  ["Incremental siblings", comparisonNode("incremental-a", "incremental", "cycle-a"), comparisonNode("incremental-b", "incremental", "cycle-a"), false],
+  ["cross-Cycle", comparisonNode("incremental-a", "incremental", "cycle-a"), comparisonNode("incremental-b", "incremental", "cycle-b"), true],
+])("supports the %s comparison pair", async (_label, first, second, crossCycle) => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes: [first, second],
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockResolvedValue(
+    comparisonResponse([first, second], crossCycle) as never,
+  );
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  await waitFor(() => expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
+    { node_id: first.id, lifecycle_state: "active" },
+    { node_id: second.id, lifecycle_state: "active" },
+  ]));
+  expect(screen.getByRole("region", { name: "Node Comparison" })).toBeVisible();
+  expect(screen.getByText(crossCycle ? "Cross-Cycle" : "Same Cycle"))
+    .toBeVisible();
+});
+
+test("enforces exactly two selections before comparison", async () => {
+  const nodes = [
+    comparisonNode("full-a", "full", "cycle-a"),
+    comparisonNode("incremental-a", "incremental", "cycle-a"),
+    comparisonNode("incremental-b", "incremental", "cycle-a"),
+  ];
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes,
+  } } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const compareButton = await screen.findByRole("button", { name: "Compare selected nodes" });
+  const selectButtons = screen.getAllByRole("button", { name: "Select for comparison" });
+  expect(compareButton).toBeDisabled();
+  fireEvent.click(selectButtons[0]);
+  expect(compareButton).toBeDisabled();
+  fireEvent.click(selectButtons[1]);
+  expect(compareButton).toBeEnabled();
+  expect(selectButtons[2]).toBeDisabled();
+  expect(api.compareResearchNodes).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["Legacy-only nodes are not comparable"],
+  ["Failed or cancelled nodes are not comparable"],
+  ["Selected nodes must belong to one Instrument"],
+  ["Research Node was not found"],
+  ["Purged Research Nodes cannot be compared"],
+  ["Trash lifecycle state must be explicit"],
+])("surfaces comparison rejection: %s", async (message) => {
+  const nodes = [
+    comparisonNode("full-a", "full", "cycle-a"),
+    comparisonNode("incremental-a", "incremental", "cycle-a"),
+  ];
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "cycle-a", nodes,
+  } } as never);
+  vi.mocked(api.compareResearchNodes).mockRejectedValue(new Error(message));
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  const selectButtons = await screen.findAllByRole("button", { name: "Select for comparison" });
+  fireEvent.click(selectButtons[0]);
+  fireEvent.click(selectButtons[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Node Comparison" })).not.toBeInTheDocument();
+});
+
+test("clears comparison state when navigating to another Instrument Timeline", async () => {
+  const timelineNode = (instrument: string, id: string) => ({
+    id, cycle_id: id, instrument, analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: "full", full_baseline_run_id: null,
+    is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+  });
+  vi.mocked(api.timeline).mockImplementation(async (instrument) => ({ timeline: {
+    instrument, primary_cycle_id: `${instrument}-full`,
+    nodes: [timelineNode(instrument, `${instrument}-full`)],
+  } }) as never);
+  window.history.replaceState(null, "", "/timelines/NVDA");
+  render(<Router><Timeline /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Select for comparison" }));
+  expect(screen.getByText(/NVDA-full · Active/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Remove selected node NVDA-full" })).toBeVisible();
+
+  act(() => {
+    window.history.pushState(null, "", "/timelines/AAPL");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("AAPL", 20, 0));
+  expect(screen.queryByText(/NVDA-full · Active/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Compare selected nodes" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Select for comparison" })).toBeEnabled();
+  window.history.replaceState(null, "", "/");
+});
+
+test("distinguishes a warned Incremental node without disabling its Timeline", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1", timeline_warning: true,
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      cycle_warning: true,
+      collection_summary: { version: "1", market: "united_states", domains: [{
+        domain: "news", state: "empty", sources: [{
+          source: "fixture", fallback: true, retrieved_at: "2026-07-24T20:00:00Z",
+          diagnostic: { code: "transport_failure" },
+        }],
+        observed_from: "2026-07-24T18:00:00Z",
+        observed_through: "2026-07-24T20:00:00Z",
+        temporal_bases: ["near_live_advisory"], evidence_refs: [],
+      }] },
+      research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
+      reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed", reason: "No new record." }] },
+      decision: { rating: "bullish", thesis: "Current complete decision" },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "fixture.market", fallback: true, adjustment_basis: "adjusted_close",
+        retrieved_at: "2026-07-24T21:00:00Z",
+        baseline_information_cutoff_at: "2026-07-21T03:59:59Z",
+        target_information_cutoff_at: "2026-07-25T03:59:59Z",
+        start_session: "2026-07-20", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
+      full_research_required_reasons: [{ code: "attribution.unreliable", message: "The bounded update cannot resolve attribution.", origin: "semantic" }],
+    }],
+  } } as never);
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  expect(await screen.findByText("Incremental Research Node")).toBeVisible();
+  expect(screen.getByText("Full research recommended")).toBeVisible();
+  expect(screen.getByText("Collection Summary")).toBeVisible();
+  fireEvent.click(screen.getByText("Collection Summary"));
+  expect(screen.getByText("2026-07-24T20:00:00Z")).toBeVisible();
+  expect(screen.getByText("fixture (fallback) [transport_failure]")).toBeVisible();
+  expect(screen.getByText("2026-07-24T18:00:00Z → 2026-07-24T20:00:00Z")).toBeVisible();
+  expect(screen.getByText("near_live_advisory")).toBeVisible();
+  expect(screen.getByText("Research Availability")).toBeVisible();
+  expect(screen.getByText("Reassessment")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Current Decision" })).toBeVisible();
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("fixture.market")).toBeVisible();
+  expect(screen.getByText("yes")).toBeVisible();
+  expect(screen.getByText("adjusted_close")).toBeVisible();
+  expect(screen.getByText("100 → 110")).toBeVisible();
+  expect(screen.getByText("(end_value / start_value) - 1")).toBeVisible();
+  expect(screen.getByText("Cycle warning")).toBeVisible();
+});
+
+test("shows evidence-based Information Advancement in the Timeline audit", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "600000.SS", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "600000.SS",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      information_advancement: {
+        advanced: true, reasons: ["admissible_observation"],
+        newly_reviewable_baseline_component_ids: [],
+        observation_ids: ["obs-1"],
+      },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/600000.SS"><Timeline /></Router>);
+
+  expect(await screen.findByText("Information Advancement")).toBeVisible();
+  fireEvent.click(screen.getByText("Information Advancement"));
+  expect(screen.getByText("admissible_observation")).toBeVisible();
+});
+
+test.each([
+  ["NVDA", "ev_0123456789ab"],
+  ["7203.T", "ev_123456789abc"],
+  ["600000.SS", "ev_abcdef012345"],
+])(
+  "shows admissible Evidence references in the %s Timeline audit",
+  async (instrument, evidenceRef) => {
+    vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+      instrument, primary_cycle_id: "full-1",
+      nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument,
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+        research_kind: "incremental", full_baseline_run_id: "full-1",
+        is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+        information_advancement: {
+          advanced: true, reasons: ["admissible_observation"],
+          newly_reviewable_baseline_component_ids: [],
+          observation_ids: ["obs-1"],
+        },
+        collection_summary: { version: "1", market: "united_states", domains: [{
+          domain: "news", state: "data", sources: [{
+            source: "fixture.news", fallback: false, retrieved_at: "2026-07-24T20:00:00Z",
+          }], temporal_bases: ["pit"],
+          evidence_refs: [evidenceRef],
+        }] },
+      }],
+    } } as never);
+
+    render(<Router initialPath={`/timelines/${instrument}`}><Timeline /></Router>);
+
+    fireEvent.click(await screen.findByText("Collection Summary"));
+    expect(screen.getByText(evidenceRef)).toBeVisible();
+  },
+);
+
+test("discloses temporal omissions without replacing the domain diagnostic", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T20:00:00Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "united_states", domains: [{
+        domain: "fundamentals", state: "partial", sources: [],
+        temporal_bases: ["pit"], evidence_refs: ["ev_0123456789ab"],
+        diagnostic: { code: "bounded_snapshot" },
+        omitted_by_temporal_boundary: true,
+      }] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "[bounded_snapshot] [outside_temporal_boundary]",
+  );
+});
+
+test("shows Japanese adjusted-stock provenance and an optional missing domain", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "7203.T", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "7203.T",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T14:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "japan", domains: [
+        { domain: "market", state: "data", sources: [{
+          source: "jquants", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
+        }], temporal_bases: ["pit"], evidence_refs: ["ev_japan_close"] },
+        { domain: "news", state: "empty", sources: [{
+          source: "edinet", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
+        }], temporal_bases: [], evidence_refs: [],
+          diagnostic: { code: "bounded_feed_no_observed_records" } },
+        { domain: "fundamentals", state: "partial", sources: [{
+          source: "yfinance", fallback: false, retrieved_at: "2026-07-24T15:00:00Z",
+          diagnostic: { code: "near_live_snapshot" },
+        }], temporal_bases: ["near_live_advisory"], evidence_refs: ["ev_japan_fundamentals"],
+          diagnostic: { code: "near_live_snapshot" } },
+      ] },
+      research_availability: { version: "1", domains: [
+        { domain: "market", status: "available" }, { domain: "news", status: "missing" },
+        { domain: "fundamentals", status: "limited" },
+      ] },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "jquants", fallback: false,
+        adjustment_basis: "jquants_split_dividend_adjusted_close",
+        retrieved_at: "2026-07-24T15:00:00Z",
+        baseline_information_cutoff_at: "2026-07-17T14:59:59Z",
+        target_information_cutoff_at: "2026-07-24T14:59:59Z",
+        start_session: "2026-07-17", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/7203.T"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getAllByText("jquants")).not.toHaveLength(0);
+  expect(screen.getByText(/news: empty/)).toHaveTextContent("bounded_feed_no_observed_records");
+  expect(screen.getByText("edinet")).toBeVisible();
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "near_live_snapshot",
+  );
+  expect(screen.getByText("yfinance [near_live_snapshot]")).toBeVisible();
+  fireEvent.click(screen.getByText("Research Availability"));
+  expect(screen.getByText(/fundamentals: limited/)).toBeVisible();
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("jquants_split_dividend_adjusted_close")).toBeVisible();
+});
+
+test("shows mainland qfq provenance and bounded source limitations", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "600519.SS", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "600519.SS",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      collection_summary: { version: "1", market: "mainland_china", domains: [
+        { domain: "market", state: "data", sources: [{
+          source: "akshare_tencent", fallback: false,
+          retrieved_at: "2026-07-24T08:00:00Z",
+        }], temporal_bases: ["pit"], evidence_refs: ["ev_mainland_close"] },
+        { domain: "news", state: "empty", sources: [{
+          source: "cninfo", fallback: false, retrieved_at: "2026-07-24T08:00:00Z",
+        }], temporal_bases: [], evidence_refs: [],
+          diagnostic: { code: "bounded_feed_no_observed_records" } },
+        { domain: "fundamentals", state: "partial", sources: [{
+          source: "akshare_cninfo_company_profile", fallback: false,
+          retrieved_at: "2026-07-24T08:00:00Z",
+          diagnostic: { code: "near_live_snapshot" },
+        }], temporal_bases: ["near_live_advisory"],
+          evidence_refs: ["ev_mainland_fundamentals"],
+          diagnostic: { code: "near_live_snapshot" } },
+      ] },
+      research_availability: { version: "1", domains: [
+        { domain: "market", status: "available" },
+        { domain: "news", status: "missing" },
+        { domain: "fundamentals", status: "limited" },
+      ] },
+      performance: { stock: { status: "calculated", calculation: {
+        provider: "akshare_tencent", fallback: false,
+        adjustment_basis: "qfq_forward_adjusted",
+        retrieved_at: "2026-07-24T08:00:00Z",
+        baseline_information_cutoff_at: "2026-07-17T15:59:59Z",
+        target_information_cutoff_at: "2026-07-24T15:59:59Z",
+        start_session: "2026-07-17", end_session: "2026-07-24",
+        start_value: 100, end_value: 110,
+        formula: "(end_value / start_value) - 1", unrounded_return: 0.1,
+      } }, benchmarks: [] },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/600519.SS"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByText("Collection Summary"));
+  expect(screen.getAllByText("akshare_tencent")).not.toHaveLength(0);
+  expect(screen.getByText(/news: empty/)).toHaveTextContent(
+    "bounded_feed_no_observed_records",
+  );
+  expect(screen.getByText("cninfo")).toBeVisible();
+  expect(screen.getByText(/fundamentals: partial/)).toHaveTextContent(
+    "near_live_snapshot",
+  );
+  expect(
+    screen.getByText("akshare_cninfo_company_profile [near_live_snapshot]"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByText("Research Availability"));
+  expect(screen.getByText(/fundamentals: limited/)).toBeVisible();
+  fireEvent.click(screen.getByText("Performance"));
+  expect(screen.getByText("qfq_forward_adjusted")).toBeVisible();
+});
+
+test("paginates Timeline nodes independently from the Timeline list", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "7203.T", primary_cycle_id: "run-1", node_total: 21,
+        node_limit: 20, node_offset: 0, nodes: [],
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "7203.T", primary_cycle_id: "run-1", node_total: 21,
+        node_limit: 20, node_offset: 20, nodes: [],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/timelines/7203.T">
+      <Timeline />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("button", { name: "Next →" })).toBeEnabled();
+  expect(api.timeline).toHaveBeenCalledWith("7203.T", 20, 0);
+  fireEvent.click(screen.getByRole("button", { name: "Next →" }));
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("7203.T", 20, 20));
+});
+
+test("lists derived timelines without presenting Execution History as a timeline", async () => {
+  vi.mocked(api.timelines).mockResolvedValue({
+    items: [{ instrument: "7203.T", primary_cycle_id: "run-1", node_count: 1 }],
+    total: 1,
+  } as never);
+
+  render(
+    <Router initialPath="/timelines">
+      <Timeline />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Research Timelines" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "7203.T" })).toHaveAttribute(
+    "href",
+    "/timelines/7203.T",
+  );
+  expect(screen.getByText("1 research node")).toBeVisible();
+});
+
+test("lets the user select a different Full Cycle as Primary Research", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "7203.T",
+      primary_cycle_id: "run-1",
+      nodes: [
+        {
+          id: "run-1", cycle_id: "run-1", instrument: "7203.T",
+          analysis_date: "2026-07-24", research_schema_version: "1",
+          information_cutoff_at: "2026-07-24T14:59:59Z", method_snapshot: {},
+          research_kind: "full", full_baseline_run_id: null, is_cycle_head: true,
+          is_primary: true, is_active: true, trashed_at: null,
+        },
+        {
+          id: "run-2", cycle_id: "run-2", instrument: "7203.T",
+          analysis_date: "2026-07-24", research_schema_version: "1",
+          information_cutoff_at: "2026-07-24T14:59:59Z", method_snapshot: {},
+          research_kind: "full", full_baseline_run_id: null, is_cycle_head: true,
+          is_primary: false, is_active: true, trashed_at: null,
+        },
+      ],
+    },
+  } as never);
+  vi.mocked(api.selectPrimaryCycle).mockResolvedValue({
+    timeline: {
+      instrument: "7203.T", primary_cycle_id: "run-2", nodes: [],
+    },
+  } as never);
+
+  render(
+    <Router initialPath="/timelines/7203.T">
+      <Timeline />
+    </Router>,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "Make primary" }));
+  await waitFor(() =>
+    expect(api.selectPrimaryCycle).toHaveBeenCalledWith("7203.T", "run-2"),
+  );
+});
+
+test("explains Full-Cycle Trash and preserves the explicit Primary replacement", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1",
+    active_full_cycles: [
+      { id: "full-1", analysis_date: "2026-07-24" },
+      { id: "full-2", analysis_date: "2026-07-25" },
+    ], nodes: [
+      { id: "full-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
+        research_kind: "full", full_baseline_run_id: null,
+        is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null },
+    ],
+  } } as never);
+  vi.mocked(api.trashRuns).mockResolvedValue({ runs: [], changed: 1, impacts: [] } as never);
+
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+  fireEvent.click((await screen.findAllByRole("button", { name: "Move Cycle to Trash" }))[0]);
+  expect(screen.getByText("The Full Node owns its entire Research Cycle.")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Replacement Primary Cycle"), {
+    target: { value: "full-2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm Trash" }));
+
+  await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(
+    ["full-1"], { "full-1": "full-2" },
+  ));
+  fireEvent.click(screen.getByRole("button", { name: "Show retained Trash" }));
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 0, "all"));
+});

@@ -1,12 +1,14 @@
 """yfinance-based news data fetching functions."""
 
 import contextlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
+from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
+from .errors import VendorRateLimitError
 from .instrument_identity import identity_names, resolve_search_identity
 from .news_quality import (
     build_company_aliases,
@@ -15,6 +17,17 @@ from .news_quality import (
 )
 from .stockstats_utils import yf_retry
 from .symbol_utils import market_timezone, normalize_symbol
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    return (
+        isinstance(exc, YFRateLimitError)
+        or getattr(exc, "code", None) == 429
+        or getattr(getattr(exc, "response", None), "status_code", None) == 429
+        or "429" in str(exc)
+        or "rate limit" in str(exc).casefold()
+        or "too many requests" in str(exc).casefold()
+    )
 
 
 def _extract_article_data(article: dict) -> dict:
@@ -33,10 +46,16 @@ def _extract_article_data(article: dict) -> dict:
 
         # Get publish date
         pub_date_str = content.get("pubDate", "")
-        pub_date = None
+        pub_date: datetime | date | None = None
         if pub_date_str:
             with contextlib.suppress(ValueError, AttributeError):
-                pub_date = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+                if "T" in pub_date_str or " " in pub_date_str:
+                    parsed = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+                    pub_date = (
+                        parsed if parsed.tzinfo is not None else parsed.date()
+                    )
+                else:
+                    pub_date = date.fromisoformat(pub_date_str)
 
         return {
             "title": title,
@@ -49,7 +68,7 @@ def _extract_article_data(article: dict) -> dict:
         # Fallback for flat structure. Parse the epoch publish time so flat
         # articles are date-filterable too (otherwise they bypass the
         # historical window and leak future news, #992/#1007).
-        pub_date = None
+        pub_date: datetime | date | None = None
         ts = article.get("providerPublishTime")
         if ts:
             # Epoch seconds are UTC; parse them as UTC-aware so filtering does
@@ -82,13 +101,15 @@ def _in_news_window(
     """
     market_tz = market_timezone(ticker)
     if pub_date is not None:
-        if not isinstance(pub_date, datetime):
+        if isinstance(pub_date, date) and not isinstance(pub_date, datetime):
+            local_pub_date = pub_date
+        elif not isinstance(pub_date, datetime):
             return False
-        if pub_date.tzinfo is None:
-            local_pub_date = pub_date.replace(tzinfo=market_tz)
+        elif pub_date.tzinfo is None:
+            local_pub_date = pub_date.date()
         else:
-            local_pub_date = pub_date.astimezone(market_tz)
-        return start_dt.date() <= local_pub_date.date() <= end_dt.date()
+            local_pub_date = pub_date.astimezone(market_tz).date()
+        return start_dt.date() <= local_pub_date <= end_dt.date()
     return end_dt.date() >= (
         datetime.now(market_tz) - relativedelta(days=1)
     ).date()
@@ -173,6 +194,12 @@ def get_news_yfinance(
         news_str = ""
         for data, tier in kept:
             news_str += f"### [{tier}] {data['title']} (source: {data['publisher']})\n"
+            if isinstance(data["pub_date"], datetime) and data["pub_date"].tzinfo is not None:
+                published = data["pub_date"].astimezone(UTC).isoformat().replace("+00:00", "Z")
+                news_str += f"Published: {published}\n"
+            elif data["pub_date"] is not None:
+                published = data["pub_date"].isoformat()
+                news_str += f"Published: {published}\n"
             if data["summary"]:
                 news_str += f"{data['summary']}\n"
             if data["link"]:
@@ -191,6 +218,8 @@ def get_news_yfinance(
         )
 
     except Exception as e:
+        if _is_rate_limit(e):
+            raise VendorRateLimitError("Yahoo Finance rate limited the news request.") from e
         return f"Error fetching news for {ticker}: {str(e)}"
 
 

@@ -123,7 +123,8 @@ export default function Runs() {
   };
 
   const eligibleRuns = (page?.items ?? []).filter((run) =>
-    trashState === "trashed" ? true : terminalStatuses.has(run.status),
+    !run.is_research_node &&
+    (trashState === "trashed" ? true : terminalStatuses.has(run.status)),
   );
   const allEligibleSelected =
     eligibleRuns.length > 0 &&
@@ -326,8 +327,9 @@ export default function Runs() {
               <tbody>
                 {page.items.map((run) => {
                   const eligible =
-                    trashState === "trashed" ||
-                    terminalStatuses.has(run.status);
+                    !run.is_research_node &&
+                    (trashState === "trashed" ||
+                      terminalStatuses.has(run.status));
                   return (
                     <tr key={run.id}>
                       <td className="selection-cell">
@@ -370,6 +372,15 @@ export default function Runs() {
                         )}
                       </td>
                       <td className="right">
+                        {run.is_research_node &&
+                          run.status === "succeeded" && (
+                            <Link
+                              className="text-link"
+                              to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
+                            >
+                              {t("researchTimeline")}
+                            </Link>
+                          )}
                         <Link className="text-link" to={`/runs/${run.id}`}>
                           {t("open")} →
                         </Link>

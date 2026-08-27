@@ -81,6 +81,7 @@ class NewsRenderTests(unittest.TestCase):
         self.assertIn("自社株買い", out)
         self.assertNotIn("他社の開示", out)
         self.assertIn("EDINET docID: MINE", out)
+        self.assertNotIn("Effective period:", out)
 
     def test_no_disclosures_returns_informative_line(self):
         with self._patch({"2026-06-22": [_doc("72030")]}):  # only another company

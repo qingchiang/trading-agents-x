@@ -47,9 +47,46 @@ class InstrumentEligibilityUnavailableError(
 EligibilityUnavailableError = InstrumentEligibilityUnavailableError
 
 
+class InvalidIncrementalBaselineError(ValueError):
+    """An Incremental request did not name an eligible active Full Baseline."""
+
+    code = "invalid_incremental_baseline"
+    status_code = 422
+
+
+class IncrementalRequestConflictError(ValueError):
+    """An active Cycle/cutoff slot already has different immutable inputs."""
+
+    code = "incremental_request_conflict"
+    status_code = 409
+
+
+class NoInformationAdvancementError(RuntimeError):
+    """Deterministic Incremental collection found no admissible advancement."""
+
+    code = "no_information_advancement"
+    status_code = 409
+
+
+class IncrementalCollectionCommitUnavailableError(RuntimeError):
+    """Collection advanced, but this release cannot commit an Incremental Node."""
+
+
+class InvalidResearchNodeComparisonError(ValueError):
+    """A Node Comparison selection violates the retained Timeline boundary."""
+
+    code = "invalid_research_node_comparison"
+    status_code = 422
+
+
 __all__ = [
     "EligibilityUnavailableError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
+    "IncrementalCollectionCommitUnavailableError",
+    "IncrementalRequestConflictError",
+    "InvalidResearchNodeComparisonError",
+    "InvalidIncrementalBaselineError",
+    "NoInformationAdvancementError",
     "UnsupportedInstrumentError",
 ]

@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-08-16
+- Partially superseded by: [ADR 0005](0005-bounded-best-effort-incremental-data.md)
+  for the Incremental Outcome Review product described here only
 
 ## Context
 

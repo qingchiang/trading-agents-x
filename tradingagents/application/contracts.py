@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from enum import Enum, StrEnum
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import (
@@ -27,7 +30,6 @@ from tradingagents.dataflows.symbol_utils import (
 )
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
-_MEMORY_REF_PATTERN = re.compile(r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
 _RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _DECISION_COMPONENT_PATH_PATTERN = re.compile(
@@ -55,6 +57,18 @@ def _unique_research_ids(value: tuple[str, ...]) -> tuple[str, ...]:
 def utc_now() -> datetime:
     """Return an aware UTC timestamp for public contracts."""
     return datetime.now(UTC)
+
+
+def _deeply_frozen_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _deeply_frozen_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_deeply_frozen_value(item) for item in value)
+    return value
+
+
+def _deeply_frozen_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType({key: _deeply_frozen_value(item) for key, item in value.items()})
 
 
 class FrozenModel(BaseModel):
@@ -320,10 +334,7 @@ class NumericRequirementCheck(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -356,10 +367,7 @@ class NumericRequirementCheck(FrozenModel):
     @model_validator(mode="after")
     def validate_status_fields(self) -> NumericRequirementCheck:
         if self.calculation_status is NumericCalculationStatus.VERIFIED:
-            if (
-                self.calculation_id is None
-                or self.canonical_result is None
-            ):
+            if self.calculation_id is None or self.canonical_result is None:
                 raise ValueError("verified calculations require an ID and result")
             comparison_fields = (
                 self.comparison_result,
@@ -368,15 +376,10 @@ class NumericRequirementCheck(FrozenModel):
             if any(item is not None for item in comparison_fields) and any(
                 item is None for item in comparison_fields
             ):
-                raise ValueError(
-                    "display comparison fields must be all present or all absent"
-                )
+                raise ValueError("display comparison fields must be all present or all absent")
             if self.display_status is NumericDisplayStatus.NOT_CHECKED:
                 raise ValueError("verified calculations require a display comparison")
-            if (
-                self.rounded_stated_value is None
-                or self.rounded_canonical_result is None
-            ):
+            if self.rounded_stated_value is None or self.rounded_canonical_result is None:
                 raise ValueError("checked displays require both rounded values")
         elif self.display_status is not NumericDisplayStatus.NOT_CHECKED:
             raise ValueError("invalid or missing calculations cannot compare display")
@@ -754,6 +757,7 @@ class ReportSection(FrozenModel):
     def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
+
 class KeyClaim(FrozenModel):
     """A decision-relevant assertion extracted from a readable report."""
 
@@ -849,23 +853,12 @@ class AnalystReport(FrozenModel):
             raise ValueError("analyst section IDs must be unique")
         if any(claim.section_id not in set(section_ids) for claim in self.key_claims):
             raise ValueError("key claims must identify an existing report section")
-        used_refs = {
-            ref
-            for claim in self.key_claims
-            for ref in claim.evidence_refs
-        }
-        used_refs.update(
-            ref
-            for section in self.report_sections
-            for ref in section.source_refs
-        )
+        used_refs = {ref for claim in self.key_claims for ref in claim.evidence_refs}
+        used_refs.update(ref for section in self.report_sections for ref in section.source_refs)
         if not used_refs.issubset(self.source_refs):
             raise ValueError("report source refs must include claim and section refs")
         if self.audit_status is ReportAuditStatus.COMPLETE:
-            if not any(
-                claim.importance is ClaimImportance.PRIMARY
-                for claim in self.key_claims
-            ):
+            if not any(claim.importance is ClaimImportance.PRIMARY for claim in self.key_claims):
                 raise ValueError("complete report audit requires a primary claim")
             if any(not claim.evidence_refs for claim in self.key_claims):
                 raise ValueError("complete report audit requires cited claims")
@@ -995,9 +988,7 @@ class EvidenceValueLocator(FrozenModel):
         if any(part is not None for part in table_parts) and not all(
             part is not None for part in table_parts
         ):
-            raise ValueError(
-                "table-backed evidence values require table_id, row_id, and column"
-            )
+            raise ValueError("table-backed evidence values require table_id, row_id, and column")
         return self
 
 
@@ -1041,9 +1032,7 @@ class AuditedRangeEndpoint(FrozenModel):
                 raise ValueError("observed endpoint refs must include its locator ref")
         elif self.basis is MarketReferenceBasis.INTERPRETED:
             if self.source_locator is not None or self.calculation_id:
-                raise ValueError(
-                    "interpreted endpoint must not claim a locator or calculation"
-                )
+                raise ValueError("interpreted endpoint must not claim a locator or calculation")
         elif self.basis is MarketReferenceBasis.DERIVED:
             if not self.calculation_id:
                 raise ValueError("derived endpoint requires a calculation")
@@ -1085,6 +1074,7 @@ class ResearchScenario(FrozenModel):
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
 
 class ValuationAssessment(FrozenModel):
     method: str = Field(min_length=1)
@@ -1155,9 +1145,7 @@ class MarketReferenceLevel(FrozenModel):
     @model_validator(mode="after")
     def validate_basis(self) -> MarketReferenceLevel:
         if not set(self.date_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError(
-                "date evidence refs must be included in market reference refs"
-            )
+            raise ValueError("date evidence refs must be included in market reference refs")
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed market reference requires an Evidence locator")
@@ -1227,10 +1215,7 @@ class CalculationRecord(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -1261,7 +1246,6 @@ class ResearchDecision(FrozenModel):
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
-    memory_refs: tuple[str, ...] = ()
     catalysts: tuple[str, ...] = ()
     risks: tuple[str, ...] = Field(min_length=1)
     invalidation_conditions: tuple[str, ...] = Field(min_length=1)
@@ -1283,6 +1267,10 @@ class ResearchDecision(FrozenModel):
         """Make the top-level evidence index a deterministic nested-ref union."""
         if not isinstance(value, dict):
             return value
+        # Retained pre-redesign Decisions may still contain ``memory_refs``.
+        # Drop that retired field while hydrating the current core contract so
+        # Execution History remains readable without exposing Memory again.
+        value = {key: item for key, item in value.items() if key != "memory_refs"}
         merged = list(value.get("evidence_refs") or ())
         for scenario in value.get("scenarios") or ():
             merged.extend(_field_value(scenario, "evidence_refs") or ())
@@ -1298,20 +1286,10 @@ class ResearchDecision(FrozenModel):
         for level in value.get("market_reference_levels") or ():
             merged.extend(_field_value(level, "evidence_refs") or ())
         for calculation in value.get("calculation_records") or ():
-            merged.extend(
-                _field_value(calculation, "input_evidence_refs") or ()
-            )
+            merged.extend(_field_value(calculation, "input_evidence_refs") or ())
         for adjustment in value.get("risk_review_adjustments") or ():
             merged.extend(_field_value(adjustment, "evidence_refs") or ())
         return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}
-
-    @field_validator("memory_refs")
-    @classmethod
-    def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
-            raise ValueError("memory refs must use the memory:<run_id> format")
-        return refs
 
     @field_validator("evidence_refs")
     @classmethod
@@ -1343,128 +1321,6 @@ def _field_value(value: Any, field: str) -> Any:
     if isinstance(value, dict):
         return value.get(field)
     return None
-
-
-class MemoryOutcome(FrozenModel):
-    """Completed five-or-more-interval feedback for one past decision."""
-
-    benchmark: str
-    observation_start: date | None = None
-    observation_end: date | None = None
-    holding_intervals: int = Field(ge=5)
-    raw_return: float
-    alpha_return: float
-
-
-class MemoryRecord(FrozenModel):
-    """One auditable memory item supplied to a research decision node."""
-
-    ref: str
-    run_id: str
-    scope: Literal["same_ticker", "same_market"]
-    ticker: str
-    market: str | None = None
-    analysis_date: date
-    decision: ResearchDecision | None = None
-    outcome: MemoryOutcome | None = None
-    reflection: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_record(self) -> MemoryRecord:
-        if not _MEMORY_REF_PATTERN.fullmatch(self.ref):
-            raise ValueError("memory ref must use the memory:<run_id> format")
-        if self.ref != f"memory:{self.run_id}":
-            raise ValueError("memory ref must identify its run_id")
-        if self.scope == "same_ticker":
-            if self.decision is None or self.outcome is None:
-                raise ValueError("same-ticker memory requires decision and outcome")
-        elif self.decision is not None or self.outcome is not None:
-            raise ValueError("same-market memory must contain reflection-only feedback")
-        return self
-
-    def prompt_text(self, max_chars: int = 2000) -> str:
-        """Render one bounded block without turning memory into evidence."""
-        parts = [
-            f"REF: {self.ref}",
-            f"SCOPE: {self.scope}",
-            (f"PAST RUN: {self.analysis_date} | {self.ticker} | {self.market or 'unknown market'}"),
-        ]
-        if self.decision is not None:
-            parts.append(
-                "PAST DECISION:\n"
-                + json.dumps(
-                    self.decision.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            )
-        if self.outcome is not None:
-            parts.append(
-                "OBSERVED OUTCOME:\n"
-                + json.dumps(
-                    self.outcome.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            )
-        parts.append(f"REFLECTION:\n{self.reflection}")
-        rendered = "\n".join(parts)
-        if max_chars <= 0:
-            return ""
-        if len(rendered) <= max_chars:
-            return rendered
-        if max_chars == 1:
-            return "…"
-        return rendered[: max_chars - 1] + "…"
-
-
-class MemoryContext(FrozenModel):
-    """Deterministic, bounded historical feedback for one current run."""
-
-    version: Literal["1"] = "1"
-    instrument: str
-    market: str | None = None
-    items: tuple[MemoryRecord, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_context(self) -> MemoryContext:
-        refs = [item.ref for item in self.items]
-        if len(refs) != len(set(refs)):
-            raise ValueError("memory refs must be unique")
-        instrument = self.instrument.casefold()
-        for item in self.items:
-            if item.scope == "same_ticker" and item.ticker.casefold() != instrument:
-                raise ValueError("same-ticker memory must match the current instrument")
-            if item.scope == "same_market" and (
-                item.ticker.casefold() == instrument
-                or self.market is None
-                or item.market != self.market
-            ):
-                raise ValueError(
-                    "same-market memory must be another instrument in the current market"
-                )
-        return self
-
-    @property
-    def refs(self) -> tuple[str, ...]:
-        return tuple(item.ref for item in self.items)
-
-    def prompt_text(
-        self,
-        *,
-        max_chars: int = 12_000,
-        item_max_chars: int = 2_000,
-    ) -> str:
-        if not self.items or max_chars <= 0 or item_max_chars <= 0:
-            return ""
-        separators = 2 * (len(self.items) - 1)
-        available = max(0, max_chars - separators)
-        per_item = min(item_max_chars, available // len(self.items))
-        if per_item <= 0:
-            return ""
-        return "\n\n".join(item.prompt_text(per_item) for item in self.items)[:max_chars]
 
 
 ResearchArtifactContent = (
@@ -1631,6 +1487,15 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    research_kind: Literal["full", "incremental"] = "full"
+    full_baseline_run_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=36,
+    )
+    # The first Full Cycle is selected automatically.  Once a Timeline exists,
+    # callers must make this choice explicitly rather than relying on order.
+    make_primary: bool | None = None
     # Keep the union inline so Pydantic preserves the existing OpenAPI shape;
     # a named PEP 695 alias is emitted as a separate schema component.
     output_language: ReportLanguage | str | None = None
@@ -1676,6 +1541,10 @@ class AnalysisRequest(FrozenModel):
             raise ValueError("Only listed equity instruments are supported")
         if self.asset_type is None:
             object.__setattr__(self, "asset_type", AssetType.STOCK)
+        if self.research_kind == "full" and self.full_baseline_run_id is not None:
+            raise ValueError("Full Research must not carry a Full Baseline")
+        if self.research_kind == "incremental" and self.full_baseline_run_id is None:
+            raise ValueError("Incremental Research requires exactly one full_baseline_run_id")
         return self
 
 
@@ -1705,6 +1574,9 @@ class RunRequestSnapshot(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    research_kind: Literal["full", "incremental"] = "full"
+    full_baseline_run_id: str | None = None
+    make_primary: bool | None = None
     output_language: ReportLanguage | str | None = None
 
     def to_analysis_request(self) -> AnalysisRequest:
@@ -1785,6 +1657,12 @@ class EvidenceSealView(FrozenModel):
 class RunView(FrozenModel):
     id: str
     source_run_id: str | None = None
+    is_research_node: bool = False
+    research_schema_version: str | None = None
+    information_cutoff_at: datetime | None = None
+    method_snapshot: dict[str, Any] | None = None
+    research_kind: Literal["full", "incremental"] | None = None
+    full_baseline_run_id: str | None = None
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     status: RunStatus
@@ -1813,6 +1691,624 @@ class RunView(FrozenModel):
         if isinstance(value, AnalysisRequest):
             return value.model_dump(mode="python")
         return value
+
+
+CURRENT_RESEARCH_SCHEMA_VERSION = "1"
+
+
+class ResearchNodeView(FrozenModel):
+    """A Run-backed Node; it deliberately owns no duplicate research data."""
+
+    id: str
+    cycle_id: str
+    instrument: str
+    analysis_date: date
+    research_schema_version: str
+    information_cutoff_at: datetime
+    method_snapshot: dict[str, Any]
+    research_kind: Literal["full", "incremental"]
+    full_baseline_run_id: str | None = None
+    is_baseline_compatible: bool
+    is_cycle_head: bool
+    is_primary: bool
+    is_active: bool
+    trashed_at: datetime | None = None
+    trash_cascade_full_run_id: str | None = None
+    collection_summary: CollectionSummary | None = None
+    research_availability: ResearchAvailability | None = None
+    information_advancement: InformationAdvancement | None = None
+    performance: PerformanceObservation | None = None
+    reassessment: ResearchReassessment | None = None
+    decision: ResearchDecision | None = None
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+    cycle_warning: bool = False
+
+
+class RunLifecycleImpact(FrozenModel):
+    """The exact Run and Cycle scope affected by one lifecycle request."""
+
+    requested_run_id: str
+    cycle_id: str | None = None
+    research_kind: Literal["full", "incremental"] | None = None
+    affected_run_ids: tuple[str, ...] = ()
+    cascade_moved_run_ids: tuple[str, ...] = ()
+    replacement_primary_cycle_id: str | None = None
+
+
+class RunLifecycleResult(FrozenModel):
+    runs: tuple[RunView, ...] = ()
+    changed: int = Field(ge=0)
+    impacts: tuple[RunLifecycleImpact, ...] = ()
+
+
+class PrimaryCycleCandidate(FrozenModel):
+    """One active Full Cycle eligible for explicit Primary selection."""
+
+    id: str
+    analysis_date: date
+
+
+class ResearchTimeline(FrozenModel):
+    instrument: str
+    primary_cycle_id: str | None = None
+    active_full_cycles: tuple[PrimaryCycleCandidate, ...] = ()
+    nodes: tuple[ResearchNodeView, ...] = ()
+    node_total: int = Field(default=0, ge=0)
+    node_limit: int = Field(default=50, ge=1, le=200)
+    node_offset: int = Field(default=0, ge=0)
+    timeline_warning: bool = False
+
+
+class ResearchTimelineSummary(FrozenModel):
+    """Derived Timeline identity and stable, non-duplicated summary metadata."""
+
+    instrument: str
+    primary_cycle_id: str | None = None
+    node_count: int = Field(ge=1)
+
+
+class ResearchTimelinePage(FrozenModel):
+    items: tuple[ResearchTimelineSummary, ...] = ()
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+
+
+class ResearchNodeLifecycleState(_StableStrEnum):
+    """Expected retained lifecycle state for an explicit comparison selection."""
+
+    ACTIVE = "active"
+    TRASHED = "trashed"
+
+
+class ResearchNodeComparisonSelection(FrozenModel):
+    """One explicitly selected side of an on-demand Node Comparison."""
+
+    node_id: str = Field(min_length=1, max_length=36)
+    lifecycle_state: ResearchNodeLifecycleState = ResearchNodeLifecycleState.ACTIVE
+
+    @field_validator("node_id", mode="before")
+    @classmethod
+    def normalize_node_id(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ComparisonValueState(_StableStrEnum):
+    """Presentation-safe distinction between schema absence and stored values."""
+
+    RECORDED = "recorded"
+    NULL = "null"
+    EMPTY = "empty"
+    NOT_RECORDED_UNDER_THIS_SCHEMA = "not_recorded_under_this_schema"
+
+
+class ResearchNodeComparisonValue(FrozenModel):
+    state: ComparisonValueState
+    value: Any = None
+
+
+class ResearchNodeDecisionSection(FrozenModel):
+    """One fixed Decision section aligned in requested side order."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    values: tuple[ResearchNodeComparisonValue, ...] = Field(min_length=2, max_length=2)
+
+
+class ResearchNodeComparisonWarning(FrozenModel):
+    code: Literal["method_changed"]
+    message: str = Field(min_length=1)
+
+
+class ResearchNodeComparisonSide(FrozenModel):
+    """Immutable per-Node context; values are never normalized across sides."""
+
+    node_id: str
+    cycle_id: str
+    analysis_date: date
+    research_schema_version: str
+    method_snapshot: dict[str, Any]
+    research_kind: Literal["full", "incremental"]
+    lifecycle_state: ResearchNodeLifecycleState
+    collection_summary: CollectionSummary | None = None
+    research_availability: ResearchAvailability | None = None
+    information_advancement: InformationAdvancement | None = None
+    reassessment: ResearchReassessment | None = None
+    decision: dict[str, Any]
+    performance: PerformanceObservation | None = None
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class ResearchNodeComparison(FrozenModel):
+    """Deterministic, read-only comparison of exactly two retained Nodes."""
+
+    instrument: str
+    sides: tuple[ResearchNodeComparisonSide, ...] = Field(min_length=2, max_length=2)
+    cross_cycle: bool
+    method_changed: bool
+    warnings: tuple[ResearchNodeComparisonWarning, ...] = ()
+    decision_sections: tuple[ResearchNodeDecisionSection, ...]
+
+
+class CollectionDiagnostic(FrozenModel):
+    """A stable, secret-free collection failure class safe for Run events."""
+
+    code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+
+
+class CollectionResultState(_StableStrEnum):
+    """Truthful result state for one enabled Incremental research domain."""
+
+    DATA = "data"
+    EMPTY = "empty"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
+class CollectionTemporalBasis(_StableStrEnum):
+    """Temporal basis actually represented by admitted domain observations."""
+
+    PIT = "pit"
+    NEAR_LIVE_ADVISORY = "near_live_advisory"
+
+
+class CollectionSourceProvenance(FrozenModel):
+    """One actual source used or attempted for a domain result."""
+
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    fallback: bool = False
+    retrieved_at: datetime
+    diagnostic: CollectionDiagnostic | None = None
+
+    @model_validator(mode="after")
+    def validate_retrieval_time(self) -> CollectionSourceProvenance:
+        if self.retrieved_at.tzinfo is None or self.retrieved_at.utcoffset() is None:
+            raise ValueError("source retrieved_at must include a timezone")
+        return self
+
+
+class CollectionDomainResult(FrozenModel):
+    """One actual domain result without a configured-provider attempt ledger."""
+
+    domain: Literal["fundamentals", "market", "news", "social"]
+    state: CollectionResultState
+    sources: tuple[CollectionSourceProvenance, ...] = ()
+    observed_from: datetime | None = None
+    observed_through: datetime | None = None
+    temporal_bases: tuple[CollectionTemporalBasis, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    diagnostic: CollectionDiagnostic | None = None
+    omitted_by_temporal_boundary: bool = False
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_truthful_result(self) -> CollectionDomainResult:
+        for field_name in ("observed_from", "observed_through"):
+            value = getattr(self, field_name)
+            if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+                raise ValueError(f"{field_name} must include a timezone")
+        observed = (self.observed_from, self.observed_through)
+        if any(value is not None for value in observed) and any(
+            value is None for value in observed
+        ):
+            raise ValueError("observed window must be complete")
+        if (
+            self.observed_from is not None
+            and self.observed_through is not None
+            and self.observed_from > self.observed_through
+        ):
+            raise ValueError("observed window must be ordered")
+        if self.state in {CollectionResultState.DATA, CollectionResultState.PARTIAL}:
+            if not self.evidence_refs or not self.temporal_bases:
+                raise ValueError("data and partial results require Evidence and a temporal basis")
+        elif self.evidence_refs or self.temporal_bases:
+            raise ValueError(
+                "empty and unavailable results cannot report Evidence or a temporal basis"
+            )
+        if self.state is CollectionResultState.UNAVAILABLE:
+            if self.diagnostic is None:
+                raise ValueError("unavailable results require a sanitized diagnostic")
+        elif self.state is CollectionResultState.PARTIAL and self.diagnostic is None:
+            raise ValueError("partial results require a sanitized limitation")
+        elif not self.sources:
+            raise ValueError("queried collection results require actual sources")
+        source_names = tuple(source.source for source in self.sources)
+        if len(source_names) != len(set(source_names)):
+            raise ValueError("collection result sources must be unique")
+        if len(self.temporal_bases) != len(set(self.temporal_bases)):
+            raise ValueError("collection temporal bases must be unique")
+        return self
+
+
+class CollectionSummary(FrozenModel):
+    """Actual Incremental collection results and disclosed limitations."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    market: Literal["united_states", "japan", "mainland_china"]
+    domains: tuple[CollectionDomainResult, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_domains(self) -> CollectionSummary:
+        domains = tuple(item.domain for item in self.domains)
+        if len(domains) != len(set(domains)):
+            raise ValueError("collection summary domains must be unique")
+        return self
+
+
+class ResearchAvailabilityStatus(_StableStrEnum):
+    AVAILABLE = "available"
+    LIMITED = "limited"
+    MISSING = "missing"
+
+
+class ResearchAvailabilityDomain(FrozenModel):
+    domain: Literal["fundamentals", "market", "news", "social"]
+    status: ResearchAvailabilityStatus
+
+
+class ResearchAvailability(FrozenModel):
+    """Descriptive breadth of actual inputs, without source certification."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    domains: tuple[ResearchAvailabilityDomain, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_domains(self) -> ResearchAvailability:
+        domains = tuple(item.domain for item in self.domains)
+        if len(domains) != len(set(domains)):
+            raise ValueError("research availability domains must be unique")
+        return self
+
+
+class IncrementalCollectionRequest(FrozenModel):
+    """Frozen common request passed to one configured market collection seam."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    instrument: str = Field(min_length=1)
+    market: Literal["united_states", "japan", "mainland_china"]
+    route_suffix: str
+    baseline_analysis_cutoff: date
+    analysis_cutoff: date
+    window_start: datetime
+    window_end: datetime
+    enabled_domains: tuple[Literal["fundamentals", "market", "news", "social"], ...] = Field(
+        min_length=1
+    )
+    configured_routes: Mapping[str, Any]
+    near_live_max_age_days: int = Field(default=5, ge=0, le=5)
+
+    @field_validator("configured_routes", mode="after")
+    @classmethod
+    def freeze_configured_routes(
+        cls,
+        value: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        return _deeply_frozen_mapping(value)
+
+    @model_validator(mode="after")
+    def validate_collection_boundary(self) -> IncrementalCollectionRequest:
+        if self.baseline_analysis_cutoff >= self.analysis_cutoff:
+            raise ValueError("Incremental analysis cutoff must follow the Full Baseline")
+        if self.window_start >= self.window_end:
+            raise ValueError("Incremental collection window must advance")
+        for field_name in ("window_start", "window_end"):
+            value = getattr(self, field_name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone")
+        if len(self.enabled_domains) != len(set(self.enabled_domains)):
+            raise ValueError("enabled collection domains must be unique")
+        return self
+
+
+class IncrementalEvidenceCandidate(FrozenModel):
+    """One collector-produced record before its PIT availability is admitted.
+
+    A source may establish a precise publication instant or only a market-local
+    publication date.  The latter is deliberately resolved by the application
+    at conservative day-end before it reaches a sealed EvidenceBundle.
+    """
+
+    evidence: EvidenceItem
+    available_on: date | None = None
+
+    @model_validator(mode="after")
+    def validate_availability_shape(self) -> IncrementalEvidenceCandidate:
+        if self.evidence.available_at is not None and self.available_on is not None:
+            raise ValueError("Evidence availability must use either an instant or a date")
+        return self
+
+
+class IncrementalEvidenceBinding(FrozenModel):
+    """Resolution from a collector-owned ref to the admitted sealed ref."""
+
+    candidate_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
+    admitted_ref: str | None = Field(default=None, pattern=r"^ev_[a-f0-9]{12}$")
+
+
+class InformationAdvancement(FrozenModel):
+    """Deterministic answer to whether collection can justify an Incremental Node."""
+
+    advanced: bool
+    reasons: tuple[
+        Literal[
+            "admissible_observation",
+            "completed_stock_session",
+        ],
+        ...,
+    ] = ()
+    observation_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_advancement_inputs(self) -> InformationAdvancement:
+        if self.advanced != bool(self.reasons):
+            raise ValueError("information advancement must agree with its reasons")
+        has_observations = bool(self.observation_ids)
+        if has_observations != ("admissible_observation" in self.reasons):
+            raise ValueError("new observation identities must agree with advancement reasons")
+        if len(self.observation_ids) != len(set(self.observation_ids)):
+            raise ValueError("new observation identities must be unique")
+        return self
+
+
+class IncrementalCollectionPreflight(FrozenModel):
+    """Simplified deterministic gate result, safe to persist in sanitized events."""
+
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
+    information_advancement: InformationAdvancement
+    diagnostics: tuple[CollectionDiagnostic, ...] = ()
+
+
+class ReassessmentDisposition(_StableStrEnum):
+    REAFFIRMED = "reaffirmed"
+    STRENGTHENED = "strengthened"
+    WEAKENED = "weakened"
+    OVERTURNED = "overturned"
+    UNRESOLVED = "unresolved"
+
+
+class ResearchReassessmentEntry(FrozenModel):
+    component_id: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
+    disposition: ReassessmentDisposition
+    reason: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class ResearchReassessment(FrozenModel):
+    entries: tuple[ResearchReassessmentEntry, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_components(self) -> ResearchReassessment:
+        if len({entry.component_id for entry in self.entries}) != len(self.entries):
+            raise ValueError("reassessment components must be unique")
+        return self
+
+
+class MarketSeriesPoint(FrozenModel):
+    session: date
+    completed_at: datetime
+    adjusted_close: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_completed_at(self) -> MarketSeriesPoint:
+        if self.completed_at.tzinfo is None or self.completed_at.utcoffset() is None:
+            raise ValueError("market-series completed_at must include a timezone")
+        return self
+
+
+class MarketSeriesResult(FrozenModel):
+    """One completed-session series from a single provider and retrieval vintage."""
+
+    instrument: str = Field(min_length=1)
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    adjustment_basis: str = Field(min_length=1, max_length=120)
+    retrieved_at: datetime
+    fallback: bool = False
+    points: tuple[MarketSeriesPoint, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_series(self) -> MarketSeriesResult:
+        if self.retrieved_at.tzinfo is None or self.retrieved_at.utcoffset() is None:
+            raise ValueError("market-series retrieved_at must include a timezone")
+        sessions = tuple(point.session for point in self.points)
+        if sessions != tuple(sorted(set(sessions))):
+            raise ValueError("market-series sessions must be unique and ordered")
+        completions = tuple(point.completed_at for point in self.points)
+        if completions != tuple(sorted(completions)):
+            raise ValueError("market-series completion times must be ordered")
+        if any(completed_at > self.retrieved_at for completed_at in completions):
+            raise ValueError("market-series sessions must complete before retrieval")
+        return self
+
+
+class BenchmarkSeriesResult(FrozenModel):
+    """One benchmark's collected series or truthful unavailability."""
+
+    name: str = Field(min_length=1, max_length=120)
+    series: MarketSeriesResult | None = None
+    unavailable_diagnostic: CollectionDiagnostic | None = None
+
+    @model_validator(mode="after")
+    def validate_result_state(self) -> BenchmarkSeriesResult:
+        if (self.series is None) == (self.unavailable_diagnostic is None):
+            raise ValueError(
+                "benchmark collection requires either a series or an unavailable diagnostic"
+            )
+        return self
+
+
+class IncrementalCollectionResult(FrozenModel):
+    """Deterministic collection observations plus unsealed new Evidence."""
+
+    collection_summary: CollectionSummary
+    evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
+    stock_series: MarketSeriesResult | None = None
+    stock_series_evidence_ref: str | None = Field(
+        default=None,
+        pattern=r"^ev_[a-f0-9]{12}$",
+    )
+    benchmark_series: tuple[BenchmarkSeriesResult, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_collection_links(self) -> IncrementalCollectionResult:
+        if self.stock_series is None and self.stock_series_evidence_ref is not None:
+            raise ValueError("stock-series Evidence link requires a stock series")
+        names = tuple(item.name for item in self.benchmark_series)
+        if len(names) != len(set(names)):
+            raise ValueError("benchmark series names must be unique")
+        return self
+
+
+class PerformanceComponentStatus(_StableStrEnum):
+    CALCULATED = "calculated"
+    NOT_YET_OBSERVABLE = "not_yet_observable"
+    UNAVAILABLE = "unavailable"
+
+
+class PerformanceCalculationRecord(FrozenModel):
+    provider: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    fallback: bool = False
+    adjustment_basis: str = Field(min_length=1, max_length=120)
+    retrieved_at: datetime
+    baseline_information_cutoff_at: datetime
+    target_information_cutoff_at: datetime
+    start_session: date
+    end_session: date
+    start_value: float = Field(gt=0, allow_inf_nan=False)
+    end_value: float = Field(gt=0, allow_inf_nan=False)
+    formula: Literal["(end_value / start_value) - 1"] = "(end_value / start_value) - 1"
+    unrounded_return: float = Field(allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_calculation_boundary(self) -> PerformanceCalculationRecord:
+        for field_name in (
+            "retrieved_at",
+            "baseline_information_cutoff_at",
+            "target_information_cutoff_at",
+        ):
+            value = getattr(self, field_name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone")
+        if self.baseline_information_cutoff_at >= self.target_information_cutoff_at:
+            raise ValueError("Performance information cutoffs must advance")
+        if self.start_session >= self.end_session:
+            raise ValueError("calculated Performance sessions must advance")
+        expected_return = (self.end_value / self.start_value) - 1
+        if not math.isclose(
+            self.unrounded_return,
+            expected_return,
+            rel_tol=1e-12,
+            abs_tol=1e-15,
+        ):
+            raise ValueError("unrounded return must match endpoint values")
+        return self
+
+
+class PerformanceComponent(FrozenModel):
+    status: PerformanceComponentStatus
+    reason: str | None = Field(default=None, min_length=1)
+    calculation: PerformanceCalculationRecord | None = None
+
+    @model_validator(mode="after")
+    def validate_component_state(self) -> PerformanceComponent:
+        if self.status is PerformanceComponentStatus.CALCULATED:
+            if self.calculation is None:
+                raise ValueError("calculated Performance requires a calculation record")
+        elif self.calculation is not None or self.reason is None:
+            raise ValueError(
+                "non-calculated Performance requires a reason and no calculation record"
+            )
+        return self
+
+
+class BenchmarkContext(FrozenModel):
+    name: str = Field(min_length=1, max_length=120)
+    component: PerformanceComponent
+    reported_difference: float | None = Field(default=None, allow_inf_nan=False)
+
+
+class PerformanceObservation(FrozenModel):
+    stock: PerformanceComponent
+    benchmarks: tuple[BenchmarkContext, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_unique_benchmarks(self) -> PerformanceObservation:
+        names = tuple(item.name for item in self.benchmarks)
+        if len(names) != len(set(names)):
+            raise ValueError("Benchmark Context names must be unique")
+        return self
+
+
+class FullResearchRequiredReason(FrozenModel):
+    code: Literal[
+        "thesis.material_reversal",
+        "identity.uncertain",
+        "attribution.unreliable",
+        "evidence.material_conflict",
+    ]
+    message: str = Field(min_length=1)
+    origin: Literal["deterministic", "semantic"]
+    evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class IncrementalSynthesisInput(FrozenModel):
+    full_baseline_run_id: str = Field(min_length=1, max_length=36)
+    full_baseline_decision: ResearchDecision
+    permitted_baseline_evidence_refs: tuple[str, ...] = ()
+    incremental_evidence: EvidenceBundle
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
+    information_advancement: InformationAdvancement
+    performance: PerformanceObservation
+    method_snapshot: dict[str, Any]
+
+
+class IncrementalSynthesis(FrozenModel):
+    reassessment: ResearchReassessment
+    decision: ResearchDecision
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class IncrementalNodeProducts(FrozenModel):
+    collection_summary: CollectionSummary
+    research_availability: ResearchAvailability
+    information_advancement: InformationAdvancement
+    performance: PerformanceObservation
+    reassessment: ResearchReassessment
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
 class RunAttemptView(FrozenModel):

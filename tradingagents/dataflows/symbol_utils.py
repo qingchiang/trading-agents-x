@@ -367,12 +367,12 @@ def match_exchange_suffix(symbol: str, suffixes: Iterable[str]) -> str:
     with (case-insensitive), or "" if none match.
 
     ``suffixes`` is any iterable of suffix strings — typically the keys of
-    ``benchmark_map`` or ``data_vendors_by_market``. The empty-string entry some
-    maps carry as a default is ignored; callers handle the no-suffix fallback.
+    configured vendor maps. The empty-string entry some maps carry as a default
+    is ignored; callers handle the no-suffix fallback.
     Longest-match makes the result deterministic if two configured suffixes ever
     overlap. Single source of truth for exchange-suffix detection so new markets
     (Japan ``.T``, China ``.SS``/``.SZ``) are recognized in one place by both
-    vendor routing and benchmark resolution.
+    vendor routing.
     """
     if not isinstance(symbol, str) or not symbol:
         return ""

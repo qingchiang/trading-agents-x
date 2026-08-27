@@ -14,7 +14,6 @@ from .maintenance import (
     TRASH_MAINTENANCE_RETRY_SECONDS,
     TrashMaintenance,
 )
-from .outcomes import OutcomeSettlement
 from .runtime import WorkerShutdown
 from .service import AnalysisService
 from .settings import AppSettings
@@ -28,7 +27,6 @@ class AnalysisWorker:
         settings: AppSettings,
         *,
         service: AnalysisService | None = None,
-        settlement: OutcomeSettlement | None = None,
         maintenance: TrashMaintenance | None = None,
         monotonic_clock: Callable[[], float] = monotonic,
         worker_id: str | None = None,
@@ -36,10 +34,6 @@ class AnalysisWorker:
         self.settings = settings
         self.service = service or AnalysisService(settings)
         self.repository = self.service.repository
-        self.settlement = settlement or OutcomeSettlement(
-            settings,
-            self.repository,
-        )
         self.maintenance = maintenance or TrashMaintenance(
             settings,
             self.repository,
@@ -56,7 +50,6 @@ class AnalysisWorker:
             self.settings.lease_seconds,
         )
         if claimed is None:
-            self.settlement.settle_once(limit=10)
             return False
         try:
             self.service.execute_claimed(

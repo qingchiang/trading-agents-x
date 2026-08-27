@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from tests.factories import (
     analyst_report,
@@ -53,8 +53,6 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
-    OutcomeRecord,
-    ReflectionRecord,
     RunAttemptRecord,
     RunRecord,
 )
@@ -168,6 +166,55 @@ def test_retry_reuses_compatible_checkpoint_across_attempts(
 
         assert retried.attempt == expected_attempt
         assert repository.checkpoint_thread(run.id) == initial_checkpoint
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["queued", "running", "succeeded", "cancelled", "trashed"],
+)
+def test_retry_rejects_every_ineligible_lifecycle_state_without_mutation(
+    repository: RunRepository,
+    app_settings: AppSettings,
+    state: str,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    if state == "running":
+        repository.claim_run(run.id, "worker", 30)
+    elif state == "succeeded":
+        repository.claim_run(run.id, "worker", 30)
+        evidence = EvidenceBundle(
+            instrument="NVDA",
+            analysis_date=date(2026, 7, 24),
+            items=(),
+        )
+        repository.seal_evidence(run.id, evidence)
+        repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument="NVDA",
+                reports={},
+                decision=research_decision(evidence_refs=()),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+    elif state in {"cancelled", "trashed"}:
+        repository.request_cancel(run.id)
+        if state == "trashed":
+            repository.trash_runs((run.id,))
+
+    events_before = repository.list_events(run.id)
+    with pytest.raises(InvalidRunTransitionError):
+        repository.retry(run.id)
+
+    unchanged = repository.get_run(run.id)
+    expected_status = "cancelled" if state == "trashed" else state
+    assert unchanged.status.value == expected_status
+    assert unchanged.attempt == 1
+    assert (unchanged.trashed_at is not None) is (state == "trashed")
+    assert repository.list_events(run.id) == events_before
 
 
 def test_failed_retry_metrics_are_preserved_per_attempt_and_aggregated(
@@ -704,7 +751,7 @@ def test_partial_numeric_audit_surfaces_after_result_reload(
     ]
 
 
-def test_complete_persists_result_and_resolved_memory(
+def test_complete_persists_result_and_hydrates_legacy_decision_json(
     repository: RunRepository,
     app_settings: AppSettings,
 ) -> None:
@@ -856,78 +903,30 @@ def test_complete_persists_result_and_resolved_memory(
             ),
         )
 
-    repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
+    repository.complete(
+        run.id,
+        result,
+        evidence=evidence,
+    )
     restored = repository.get_result(run.id)
-    due_at = datetime.max.replace(tzinfo=UTC)
-    pending = repository.pending_outcomes(due_at=due_at)
-    assert pending
-    assert repository.pending_outcome_count() == 1
-    with repository.sessions.begin() as session:
-        retained_decision = session.scalar(
-            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
-        )
-        retained_decision.asset_type = "crypto"
-    assert repository.pending_outcomes(due_at=due_at) == []
-    assert repository.pending_outcome_count() == 0
-    repository.mark_outcome_checked(
-        pending[0]["outcome_id"],
-        checked_at=datetime(2026, 7, 25, tzinfo=UTC),
-        next_check_at=datetime(2026, 7, 26, tzinfo=UTC),
-    )
-    repository.resolve_outcome(
-        pending[0]["outcome_id"],
-        observation_start=date(2026, 7, 25),
-        observation_end=date(2026, 8, 1),
-        raw_return=0.08,
-        alpha_return=0.03,
-        reflection="Legacy Crypto outcome must remain passive.",
-    )
-    with repository.sessions() as session:
-        retained_outcome = session.get(OutcomeRecord, pending[0]["outcome_id"])
-        assert retained_outcome.status == "pending"
-        assert retained_outcome.last_checked_at is None
-        assert session.scalar(
-            select(ReflectionRecord).where(
-                ReflectionRecord.outcome_id == pending[0]["outcome_id"]
-            )
-        ) is None
-    with repository.sessions.begin() as session:
-        retained_decision = session.scalar(
-            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
-        )
-        retained_decision.asset_type = "stock"
-    repository.trash_runs((run.id,))
-    assert repository.pending_outcomes(due_at=due_at) == []
-    assert repository.memory_entries() == []
-    repository.restore_runs((run.id,))
-    assert repository.pending_outcomes(due_at=due_at)[0]["outcome_id"] == (
-        pending[0]["outcome_id"]
-    )
-    repository.resolve_outcome(
-        pending[0]["outcome_id"],
-        observation_start=date(2026, 7, 25),
-        observation_end=date(2026, 8, 1),
-        raw_return=0.08,
-        alpha_return=0.03,
-        reflection="The thesis worked because earnings accelerated.",
-    )
-
     assert restored.status is RunStatus.SUCCEEDED
     assert restored.decision == decision
     assert restored.numeric_audit == numeric_audit
     assert restored.evidence == evidence
+    with repository.sessions.begin() as session:
+        retained_decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        retained_decision.decision_json = {
+            **retained_decision.decision_json,
+            "memory_refs": ["memory:legacy-run"],
+        }
+    legacy_restored = repository.get_result(run.id)
+    assert legacy_restored.decision is not None
+    assert "memory_refs" not in legacy_restored.decision.model_dump()
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
-    context = repository.memory_context("NVDA", "stock")
-    assert len(context.items) == 1
-    assert context.items[0].ticker == "NVDA"
-    assert "The thesis worked" in context.items[0].reflection
-    assert "appendix_only_marker" not in context.prompt_text()
-    repository.trash_runs((run.id,))
-    assert repository.memory_context("NVDA", "stock").items == ()
-    assert repository.memory_entries() == []
-    repository.restore_runs((run.id,))
-    assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
+    assert "appendix_only_marker" not in legacy_restored.decision.model_dump_json()
 
 
     with repository.sessions() as session:
@@ -957,7 +956,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert historical_check.comparison_difference is None
 
 
-def test_legacy_crypto_completion_does_not_schedule_outcome(
+def test_legacy_crypto_completion_remains_execution_history_only(
     repository: RunRepository,
     app_settings: AppSettings,
 ) -> None:
@@ -988,7 +987,6 @@ def test_legacy_crypto_completion_does_not_schedule_outcome(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
     )
 
     with repository.sessions() as session:
@@ -996,7 +994,15 @@ def test_legacy_crypto_completion_does_not_schedule_outcome(
             select(DecisionRecord).where(DecisionRecord.run_id == run.id)
         )
         assert decision.asset_type == "crypto"
-        assert session.scalar(select(func.count()).select_from(OutcomeRecord)) == 0
+    with repository.engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "outcomes" not in tables
+    assert "reflections" not in tables
 
 
 def test_failed_run_retains_sealed_evidence_and_analyst_reports(
@@ -1195,7 +1201,7 @@ def test_reports_use_canonical_order_across_result_and_repository(
     ]
 
     repository.seal_evidence(run.id, evidence)
-    repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
+    repository.complete(run.id, result, evidence=evidence)
     restored = repository.get_result(run.id)
 
     assert list(restored.reports) == [

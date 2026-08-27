@@ -19,6 +19,9 @@ function makeRun(
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
     instrument_local_name: null,
+    research_schema_version: status === "succeeded" ? "1" : null,
+    information_cutoff_at: status === "succeeded" ? "2026-07-24T23:59:59Z" : null,
+    method_snapshot: status === "succeeded" ? { llm_provider: "openai" } : null,
     research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
@@ -34,6 +37,9 @@ function makeRun(
       quick_reasoning_effort: "provider_default",
       deep_reasoning_effort: "provider_default",
       output_language: "en",
+      research_kind: "full",
+      full_baseline_run_id: null,
+      make_primary: true,
     },
     config_snapshot: {},
     attempt: 1,
@@ -144,7 +150,6 @@ function result(id: string) {
       executive_summary: "The evidence supports a balanced research opinion.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
-      memory_refs: [],
       catalysts: ["Demand improves"],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
@@ -266,7 +271,7 @@ test("runs, templates, trash, and restores local research", async ({
         json: {
           status: "ok",
           database: "ok",
-          queue: { queued: 0, running: 0, pending_outcomes: 1 },
+          queue: { queued: 0, running: 0 },
           version: "0.5.0",
         },
       });
@@ -339,6 +344,33 @@ test("runs, templates, trash, and restores local research", async ({
           instrument_name: run.instrument_name,
           last_used_at: run.updated_at,
         })),
+      });
+    }
+    const timelineMatch = path.match(/^\/api\/v1\/timelines\/([^/]+)$/);
+    if (timelineMatch) {
+      const instrument = decodeURIComponent(timelineMatch[1]);
+      const nodes = [...runs.values()]
+        .filter((run) => run.request.ticker === instrument)
+        .filter((run) => run.status === "succeeded" && run.research_schema_version)
+        .map((run) => ({
+          id: run.id,
+          cycle_id: run.id,
+          instrument,
+          analysis_date: run.request.analysis_date,
+          research_schema_version: run.research_schema_version,
+          information_cutoff_at: run.information_cutoff_at,
+          method_snapshot: run.method_snapshot,
+          is_primary: run.id === "run-report",
+          trashed_at: run.trashed_at,
+        }));
+      return route.fulfill({
+        json: {
+          timeline: {
+            instrument,
+            primary_cycle_id: nodes[0]?.id ?? null,
+            nodes,
+          },
+        },
       });
     }
     if (path === "/api/v1/runs" && request.method() === "GET") {
@@ -416,38 +448,6 @@ test("runs, templates, trash, and restores local research", async ({
         json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed },
       });
     }
-    if (path === "/api/v1/memory") {
-      const report = runs.get("run-report");
-      if (!report || report.trashed_at || purged.has(report.id)) {
-        return route.fulfill({ json: [] });
-      }
-      return route.fulfill({
-        json: [
-          {
-            run_id: report.id,
-            ticker: report.request.ticker,
-            instrument_name: report.instrument_name,
-            instrument_local_name: report.instrument_local_name,
-            market: "America/New_York",
-            asset_type: "stock",
-            analysis_date: "2026-07-24",
-            profile: report.request.profile,
-            decision: result(report.id).decision,
-            outcome: {
-              status: "resolved",
-              benchmark: "SPY",
-              observation_start: "2026-07-25",
-              observation_end: "2026-08-01",
-              holding_intervals: 5,
-              raw_return: 0.08,
-              alpha_return: 0.03,
-            },
-            reflection: "The evidence was directionally useful.",
-          },
-        ],
-      });
-    }
-
     const artifactMatch = path.match(
       /^\/api\/v1\/runs\/([^/]+)\/artifacts$/,
     );
@@ -610,14 +610,20 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-  await page.getByText("Decision details").click();
-  await expect(page.getByText("Demand improves").first()).toBeVisible();
-  await page
-    .getByRole("link", { name: "Open research decision", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
+  await page.goto("/runs/run-report?view=decision");
+  await expect(
+    page.getByRole("tab", { name: "Decision", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("heading", { name: "Executive summary", exact: true }),
+  ).toBeVisible();
+
+  await page.goto("/timelines/NVDA");
+  await expect(page.getByText("Primary Cycle")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open operational Run →" })).toHaveAttribute(
+    "href",
+    "/runs/run-report",
+  );
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
@@ -632,18 +638,12 @@ test("runs, templates, trash, and restores local research", async ({
     .click();
   await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("No memory entries.")).toBeVisible();
-
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
   const trashedRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
-  await page.goto("/memory");
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-
   const restored = runs.get("run-report")!;
   restored.trashed_at = "2026-06-01T00:00:00Z";
   purged.add("run-report");
@@ -716,4 +716,344 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(shell).not.toHaveClass(/sidebar-open/);
+});
+
+test("compares active and explicitly shown Trash nodes without creating research", async ({
+  page,
+}) => {
+  let comparisonPayload: Record<string, unknown> | null = null;
+  let researchCreateCalls = 0;
+  const full = {
+    id: "comparison-full", cycle_id: "comparison-full", instrument: "NVDA",
+    analysis_date: "2026-07-20", research_schema_version: "1",
+    information_cutoff_at: "2026-07-20T23:59:59Z",
+    method_snapshot: { llm_provider: "fixture-a" }, research_kind: "full",
+    full_baseline_run_id: null, is_baseline_compatible: true,
+    is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+  };
+  const incremental = {
+    id: "comparison-incremental", cycle_id: "comparison-full", instrument: "NVDA",
+    analysis_date: "2026-07-24", research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: { llm_provider: "fixture-b" }, research_kind: "incremental",
+    full_baseline_run_id: "comparison-full", is_baseline_compatible: false,
+    is_cycle_head: false, is_primary: true, is_active: false,
+    trashed_at: "2026-07-25T00:00:00Z",
+  };
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      const nodes = url.searchParams.get("trash_state") === "all"
+        ? [full, incremental]
+        : [full];
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: full.id, nodes,
+        node_total: nodes.length, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      comparisonPayload = request.postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ json: {
+        instrument: "NVDA", cross_cycle: false, method_changed: true,
+        warnings: [{ code: "method_changed", message: "No automatic attribution." }],
+        sides: [
+          { node_id: full.id, cycle_id: full.cycle_id, analysis_date: full.analysis_date,
+            research_schema_version: "1", method_snapshot: full.method_snapshot,
+            research_kind: "full", lifecycle_state: "active", decision: { rating: "hold" } },
+          { node_id: incremental.id, cycle_id: incremental.cycle_id,
+            analysis_date: incremental.analysis_date, research_schema_version: "1",
+            method_snapshot: incremental.method_snapshot, research_kind: "incremental",
+            lifecycle_state: "trashed", collection_summary: { version: "1" },
+            research_availability: { version: "1" }, reassessment: { entries: [] },
+            full_research_required_reasons: [{ code: "attribution.unreliable",
+              message: "Comparison side needs Full research.", origin: "semantic",
+              evidence_refs: [] }],
+            decision: { rating: "bullish" }, performance: {
+              stock: { status: "unavailable", reason: "fixture" }, benchmarks: [],
+            } },
+        ],
+        decision_sections: [{ key: "rating", values: [
+          { state: "recorded", value: "hold" },
+          { state: "recorded", value: "bullish" },
+        ] }],
+      } });
+    }
+    if (url.pathname === "/api/v1/runs" && request.method() === "POST") {
+      researchCreateCalls += 1;
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  await page.goto("/timelines/NVDA");
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
+  await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
+
+  await expect(page.getByRole("region", { name: /Node Comparison|节点对照|ノード比較/ })).toBeVisible();
+  await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
+  await expect(page.getByText("Comparison side needs Full research.")).toBeVisible();
+  expect(comparisonPayload).toEqual({ nodes: [
+    { node_id: full.id, lifecycle_state: "active" },
+    { node_id: incremental.id, lifecycle_state: "trashed" },
+  ] });
+  expect(researchCreateCalls).toBe(0);
+});
+
+test("covers every supported retained-node comparison pair", async ({ page }) => {
+  const makeNode = (
+    id: string,
+    researchKind: "full" | "incremental",
+    cycleId: string,
+  ) => ({
+    id, cycle_id: cycleId, instrument: "NVDA", analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: researchKind,
+    full_baseline_run_id: researchKind === "full" ? null : cycleId,
+    is_baseline_compatible: researchKind === "full", is_cycle_head: true,
+    is_primary: cycleId === "cycle-a", is_active: true, trashed_at: null,
+  });
+  const pairs = [
+    [makeNode("full-a", "full", "cycle-a"), makeNode("full-b", "full", "cycle-b")],
+    [makeNode("full-a", "full", "cycle-a"), makeNode("incremental-a", "incremental", "cycle-a")],
+    [makeNode("incremental-a", "incremental", "cycle-a"), makeNode("incremental-b", "incremental", "cycle-a")],
+    [makeNode("incremental-a", "incremental", "cycle-a"), makeNode("incremental-b", "incremental", "cycle-b")],
+  ];
+  let currentPair = pairs[0];
+  const comparisonPayloads: Record<string, unknown>[] = [];
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: "cycle-a", nodes: currentPair,
+        node_total: 2, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      comparisonPayloads.push(request.postDataJSON() as Record<string, unknown>);
+      const crossCycle = currentPair[0].cycle_id !== currentPair[1].cycle_id;
+      return route.fulfill({ json: {
+        instrument: "NVDA", cross_cycle: crossCycle, method_changed: false,
+        warnings: [], sides: currentPair.map((node) => ({
+          node_id: node.id, cycle_id: node.cycle_id,
+          analysis_date: node.analysis_date, research_schema_version: "1",
+          method_snapshot: {}, research_kind: node.research_kind,
+          lifecycle_state: "active", decision: { rating: "hold" },
+        })), decision_sections: [],
+      } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  for (const [index, pair] of pairs.entries()) {
+    currentPair = pair;
+    await page.goto(`/timelines/NVDA?pair=${index}`);
+    const selectButtons = page.getByRole("button", {
+      name: /Select for comparison|选择用于对照|比較対象に選択/,
+    });
+    await selectButtons.nth(0).click();
+    await selectButtons.nth(0).click();
+    await page.getByRole("button", {
+      name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
+    }).click();
+    await expect(page.getByRole("region", {
+      name: /Node Comparison|节点对照|ノード比較/,
+    })).toBeVisible();
+    expect(comparisonPayloads.at(-1)).toEqual({ nodes: pair.map((node) => ({
+      node_id: node.id, lifecycle_state: "active",
+    })) });
+  }
+});
+
+test("enforces selection cardinality and surfaces every comparison rejection", async ({
+  page,
+}) => {
+  const nodes = ["full-a", "incremental-a", "incremental-b"].map((id, index) => ({
+    id, cycle_id: "full-a", instrument: "NVDA", analysis_date: "2026-07-24",
+    research_schema_version: "1", information_cutoff_at: "2026-07-24T23:59:59Z",
+    method_snapshot: {}, research_kind: index === 0 ? "full" : "incremental",
+    full_baseline_run_id: index === 0 ? null : "full-a",
+    is_baseline_compatible: index === 0, is_cycle_head: index === 2,
+    is_primary: true, is_active: true, trashed_at: null,
+  }));
+  const rejectionMessages = [
+    "Legacy-only nodes are not comparable",
+    "Failed or cancelled nodes are not comparable",
+    "Selected nodes must belong to one Instrument",
+    "Research Node was not found",
+    "Purged Research Nodes cannot be compared",
+    "Trash lifecycle state must be explicit",
+  ];
+  let rejectionMessage = rejectionMessages[0];
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/timelines/NVDA" && request.method() === "GET") {
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: "full-a", nodes,
+        node_total: 3, node_limit: 20, node_offset: 0,
+      } } });
+    }
+    if (url.pathname === "/api/v1/timelines/NVDA/compare") {
+      return route.fulfill({ status: 422, json: { error: {
+        code: "invalid_research_node_comparison", message: rejectionMessage,
+      } } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "not mocked" } });
+  });
+
+  for (const [index, message] of rejectionMessages.entries()) {
+    rejectionMessage = message;
+    await page.goto(`/timelines/NVDA?rejection=${index}`);
+    const compareButton = page.getByRole("button", {
+      name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
+    });
+    const selectButtons = page.getByRole("button", {
+      name: /Select for comparison|选择用于对照|比較対象に選択/,
+    });
+    await expect(compareButton).toBeDisabled();
+    await selectButtons.nth(0).click();
+    await expect(compareButton).toBeDisabled();
+    await selectButtons.nth(0).click();
+    await expect(compareButton).toBeEnabled();
+    await expect(selectButtons.nth(0)).toBeDisabled();
+    await compareButton.click();
+    await expect(page.getByText(message)).toBeVisible();
+    await expect(page.getByRole("region", {
+      name: /Node Comparison|节点对照|ノード比較/,
+    })).toBeHidden();
+  }
+});
+
+test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
+  let stage: "none" | "full" | "incremental" = "none";
+  let incrementalPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+
+    if (path === "/api/v1/capabilities") {
+      return route.fulfill({ json: {
+        profiles: ["fast", "standard", "deep"],
+        analysts: ["market", "social", "news", "fundamentals"],
+        output_languages: ["en", "zh-CN", "ja"],
+        providers: { openai: { label: "OpenAI", api_key_required: true,
+          api_key_configured: true, configured: true, selectable: true,
+          unavailable_reason: null, model_discovery_supported: true } },
+        defaults: { profile: "standard", llm_provider: "openai",
+          quick_model: "gpt-5.4-mini", deep_model: "gpt-5.5",
+          quick_reasoning_effort: "provider_default",
+          deep_reasoning_effort: "provider_default", output_language: "en",
+          lan_enabled: false, trash_retention_days: 30 },
+      } });
+    }
+    if (path === "/api/v1/providers/openai/models") {
+      return route.fulfill({ json: { provider: "openai", models: [
+        { id: "gpt-5.4-mini", label: "GPT quick", compatibility: "supported",
+          reasoning_efforts: ["provider_default"], default_roles: ["quick"] },
+        { id: "gpt-5.5", label: "GPT deep", compatibility: "supported",
+          reasoning_efforts: ["provider_default"], default_roles: ["deep"] },
+      ], source: "fixture", fetched_at: timestamp, stale: false, warning: null } });
+    }
+    if (path === "/api/v1/instruments/recent") return route.fulfill({ json: [] });
+    if (path === "/api/v1/runs" && request.method() === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const isIncremental = payload.research_kind === "incremental";
+      stage = isIncremental ? "incremental" : "full";
+      incrementalPayload = isIncremental ? payload : incrementalPayload;
+      const id = isIncremental ? "incremental-journey" : "full-journey";
+      const run = makeRun(id, "succeeded", { ticker: "NVDA" });
+      run.request = { ...run.request, ...payload };
+      return route.fulfill({ status: 202, json: run });
+    }
+    if (path === "/api/v1/timelines/NVDA") {
+      const full = {
+        id: "full-journey", cycle_id: "full-journey", instrument: "NVDA",
+        analysis_date: "2026-07-20", research_schema_version: "1",
+        information_cutoff_at: "2026-07-20T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture" }, research_kind: "full",
+        full_baseline_run_id: null, is_baseline_compatible: true,
+        is_cycle_head: stage !== "incremental", is_primary: true, is_active: true,
+        trashed_at: null, collection_summary: null, research_availability: null,
+        reassessment: null, decision: result("full-journey").decision,
+        performance: null, cycle_warning: stage === "incremental",
+        full_research_required_reasons: [],
+      };
+      const incremental = {
+        id: "incremental-journey", cycle_id: "full-journey", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: timestamp, method_snapshot: { llm_provider: "fixture" },
+        research_kind: "incremental", full_baseline_run_id: "full-journey",
+        is_baseline_compatible: false, is_cycle_head: true, is_primary: true,
+        is_active: true, trashed_at: null,
+        collection_summary: { version: "1", market: "united_states", domains: [{
+          domain: "news", state: "empty", sources: [{
+            source: "fixture", fallback: false, retrieved_at: timestamp,
+          }], temporal_bases: [], evidence_refs: [],
+        }] },
+        research_availability: { version: "1", domains: [{ domain: "news", status: "missing" }] },
+        reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed",
+          reason: "The bounded update did not change the thesis.", evidence_refs: [] }] },
+        decision: { rating: "Hold", thesis: "Current complete decision" },
+        performance: { stock: { status: "not_yet_observable",
+          reason: "No completed interval." }, benchmarks: [] },
+        cycle_warning: true,
+        full_research_required_reasons: [{ code: "attribution.unresolved",
+          message: "The bounded update cannot resolve attribution.", origin: "semantic",
+          evidence_refs: [] }],
+      };
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: stage === "none" ? null : "full-journey",
+        timeline_warning: stage === "incremental", nodes: stage === "none" ? [] :
+          stage === "full" ? [full] : [full, incremental],
+        node_total: stage === "none" ? 0 : stage === "full" ? 1 : 2,
+        node_limit: 20, node_offset: 0,
+      } } });
+    }
+    const runMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
+    if (runMatch) {
+      const id = runMatch[1];
+      const isIncremental = id === "incremental-journey";
+      const run = makeRun(id, "succeeded", { ticker: "NVDA" });
+      run.request = { ...run.request, research_kind: isIncremental ? "incremental" : "full",
+        full_baseline_run_id: isIncremental ? "full-journey" : null };
+      return route.fulfill({ json: { run, result: result(id), attempts: [],
+        evidence_status: { status: "sealed", digest: "fixture-digest", item_count: 1,
+          table_count: 0, sealed_attempt: 1, sealed_at: timestamp } } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/runs/new");
+  await page.locator("#new-run-ticker").fill("NVDA");
+  await page.locator("#new-run-analysis-date").fill("2026-07-20");
+  await page.locator("form.run-form button").last().click();
+  await expect(page).toHaveURL(/\/runs\/full-journey$/);
+
+  await page.goto("/runs/new");
+  await page.locator("#new-run-ticker").fill("NVDA");
+  await page.locator("#new-run-analysis-date").fill("2026-07-24");
+  await expect(page.locator('input[name="research-kind"]').nth(1)).toBeEnabled();
+  await page.locator('input[name="research-kind"]').nth(1).check();
+  await page.locator("form.run-form select").first().selectOption("full-journey");
+  await page.locator("form.run-form button").last().click();
+  await expect(page).toHaveURL(/\/runs\/incremental-journey$/);
+  expect(incrementalPayload).toMatchObject({ research_kind: "incremental",
+    full_baseline_run_id: "full-journey" });
+
+  await page.goto("/timelines/NVDA");
+  await expect(page.getByText(/Full Research Node|完整研究节点/)).toBeVisible();
+  await expect(page.getByText(/Incremental Research Node|增量研究节点/)).toBeVisible();
+  await expect(page.getByText("Collection Summary")).toBeVisible();
+  await expect(page.getByText("Current complete decision")).toBeVisible();
+  await expect(page.getByText("The bounded update cannot resolve attribution.")).toBeVisible();
+  await expect(page.getByText(/Full research recommended|建议进行完整研究/)).toBeVisible();
 });

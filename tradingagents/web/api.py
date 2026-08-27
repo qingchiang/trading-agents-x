@@ -26,6 +26,8 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
+    ResearchNodeComparison,
+    ResearchTimelinePage,
     RunEvent,
     RunPage,
     RunStatus,
@@ -34,7 +36,10 @@ from tradingagents.application.contracts import (
     report_language_value,
 )
 from tradingagents.application.errors import (
+    IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
+    InvalidIncrementalBaselineError,
+    InvalidResearchNodeComparisonError,
     UnsupportedInstrumentError,
 )
 from tradingagents.application.maintenance import TrashMaintenance
@@ -43,6 +48,7 @@ from tradingagents.application.repository import (
     EvidenceConflictError,
     EvidenceNotSealedError,
     IdempotencyConflictError,
+    InvalidPrimaryResearchCycleError,
     InvalidRunTransitionError,
     RunNotFoundError,
 )
@@ -60,13 +66,15 @@ from .models import (
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
-    MemoryEntry,
+    PrimaryCycleSelectionRequest,
     ProviderModelCatalog,
     RequestValidationErrorResponse,
+    ResearchNodeComparisonRequest,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
     RunDetail,
+    TimelineDetail,
 )
 
 API_PREFIX = "/api/v1"
@@ -131,6 +139,34 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(InvalidPrimaryResearchCycleError)
+    async def invalid_primary_cycle(
+        _request: Request,
+        exc: InvalidPrimaryResearchCycleError,
+    ):
+        return _error(422, "invalid_primary_cycle", str(exc))
+
+    @app.exception_handler(InvalidIncrementalBaselineError)
+    async def invalid_incremental_baseline(
+        _request: Request,
+        exc: InvalidIncrementalBaselineError,
+    ):
+        return _error(422, exc.code, str(exc))
+
+    @app.exception_handler(IncrementalRequestConflictError)
+    async def incremental_request_conflict(
+        _request: Request,
+        exc: IncrementalRequestConflictError,
+    ):
+        return _error(409, exc.code, str(exc))
+
+    @app.exception_handler(InvalidResearchNodeComparisonError)
+    async def invalid_research_node_comparison(
+        _request: Request,
+        exc: InvalidResearchNodeComparisonError,
+    ):
+        return _error(422, exc.code, str(exc))
 
     @app.exception_handler(UnsupportedInstrumentError)
     async def unsupported_instrument(
@@ -334,21 +370,80 @@ def create_app(
     ):
         return repository.recent_instruments(limit=limit)
 
+    @app.get(f"{API_PREFIX}/timelines", response_model=ResearchTimelinePage)
+    def list_timelines(
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        return repository.list_timelines(limit=limit, offset=offset)
+
+    @app.get(
+        f"{API_PREFIX}/timelines/{{instrument}}",
+        response_model=TimelineDetail,
+    )
+    def get_timeline(
+        instrument: str,
+        node_limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        node_offset: Annotated[int, Query(ge=0)] = 0,
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
+    ):
+        return TimelineDetail(
+            timeline=repository.get_timeline(
+                instrument,
+                node_limit=node_limit,
+                node_offset=node_offset,
+                trash_state=trash_state,
+            )
+        )
+
+    @app.put(
+        f"{API_PREFIX}/timelines/{{instrument}}/primary-cycle",
+        response_model=TimelineDetail,
+    )
+    def select_primary_cycle(
+        instrument: str,
+        payload: PrimaryCycleSelectionRequest,
+    ):
+        return TimelineDetail(
+            timeline=repository.select_primary_cycle(instrument, payload.full_run_id)
+        )
+
+    @app.post(
+        f"{API_PREFIX}/timelines/{{instrument}}/compare",
+        response_model=ResearchNodeComparison,
+    )
+    def compare_research_nodes(
+        instrument: str,
+        payload: ResearchNodeComparisonRequest,
+    ):
+        return service.compare_research_nodes(instrument, payload.nodes)
+
     @app.post(
         f"{API_PREFIX}/runs/trash",
         response_model=RunBatchResult,
     )
     def trash_runs(payload: RunBatchRequest):
-        runs, changed = repository.trash_runs(payload.run_ids)
-        return RunBatchResult(runs=runs, changed=changed)
+        result = repository.trash_runs_detailed(
+            payload.run_ids,
+            primary_replacements=payload.primary_replacements,
+        )
+        return RunBatchResult(**result.model_dump())
 
     @app.post(
         f"{API_PREFIX}/runs/restore",
         response_model=RunBatchResult,
     )
     def restore_runs(payload: RunBatchRequest):
-        runs, changed = repository.restore_runs(payload.run_ids)
-        return RunBatchResult(runs=runs, changed=changed)
+        result = repository.restore_runs_detailed(payload.run_ids)
+        return RunBatchResult(**result.model_dump())
+
+    @app.post(
+        f"{API_PREFIX}/runs/purge",
+        response_model=RunBatchResult,
+    )
+    def purge_runs(payload: RunBatchRequest):
+        result = repository.purge_runs_detailed(payload.run_ids)
+        return RunBatchResult(**result.model_dump())
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}", response_model=RunDetail)
     def get_run(run_id: str):
@@ -471,22 +566,6 @@ def create_app(
             },
         )
 
-    @app.get(f"{API_PREFIX}/memory", response_model=list[MemoryEntry])
-    def memory(
-        ticker: str | None = None,
-        market: str | None = None,
-        q: Annotated[str | None, Query(max_length=500)] = None,
-        status: Literal["pending", "resolved"] | None = None,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    ):
-        return repository.memory_entries(
-            ticker=ticker,
-            market=market,
-            q=q,
-            status=status,
-            limit=limit,
-        )
-
     @app.get(
         f"{API_PREFIX}/capabilities",
         response_model=CapabilitiesResponse,
@@ -546,13 +625,11 @@ def create_app(
         queue = {
             "queued": 0,
             "running": 0,
-            "pending_outcomes": 0,
         }
         try:
             counts = repository.active_run_counts()
             queue["queued"] = counts.get("queued", 0)
             queue["running"] = counts.get("running", 0)
-            queue["pending_outcomes"] = repository.pending_outcome_count()
         except Exception:
             database_status = "error"
         return HealthResponse(

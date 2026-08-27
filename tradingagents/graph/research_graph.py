@@ -498,7 +498,6 @@ class ResearchGraph:
                 "asset_type": context.request.asset_type.value,
                 "instrument_context": context.instrument_context,
                 "trade_date": context.request.analysis_date.isoformat(),
-                "past_context": "",
                 "market_report": "",
                 "sentiment_report": "",
                 "news_report": "",
@@ -1013,7 +1012,6 @@ class ResearchGraph:
                 "rebuttals": state.get("rebuttals", []),
             },
             report_mode="full",
-            include_memory=True,
             instructions=(
                 "Rule on every agenda issue even when the correct ruling "
                 "is unresolved. Refer to analyst findings in natural language, "
@@ -1046,7 +1044,6 @@ class ResearchGraph:
                 state=state,
                 node=f"{node}.audit",
                 event_writer=runtime.stream_writer,
-                memory=runtime.context.memory,
             )
         draft = output.value
         self._write_artifact(
@@ -1195,7 +1192,6 @@ class ResearchGraph:
                 artifacts=artifacts,
                 report_mode="full",
                 evidence_refs=RoleContextBuilder(state).primary_evidence_refs(),
-                include_memory=True,
                 instructions=(
                     "For every risk-review role, add at least one structured "
                     "risk_review_adjustment. Keep the rating, thesis, scenarios, "
@@ -1302,15 +1298,12 @@ class ResearchGraph:
                     f"DECISION SYNTHESIS BRIEF:\n{brief.markdown}\n\n"
                     "ALLOWED EVIDENCE REFS:\n"
                     f"{json.dumps(_state_evidence_refs(state))}\n\n"
-                    "ALLOWED MEMORY REFS:\n"
-                    f"{json.dumps(tuple(runtime.context.memory.refs))}\n\n"
                     "REQUIRED RISK REVIEW ROLES:\n"
                     f"{json.dumps(tuple(state.get('risk_reviews', {})))}"
                 ),
                 state=state,
                 node=node,
                 event_writer=runtime.stream_writer,
-                memory=runtime.context.memory,
                 require_risk_adjustments=not fast,
                 output_language=state["output_language"],
                 metrics=self.metrics,
@@ -1400,20 +1393,15 @@ class ResearchGraph:
         artifacts: dict[str, Any] | None = None,
         report_mode: Literal["none", "full", "risk"] = "none",
         evidence_refs: tuple[str, ...] = (),
-        include_memory: bool = False,
         instructions: str = "",
     ) -> RoleContext:
-        context = RoleContextBuilder(
-            state,
-            memory=runtime.context.memory if include_memory else None,
-        ).build(
+        context = RoleContextBuilder(state).build(
             title=title,
             objective=objective,
             stage=stage,
             artifacts=artifacts,
             report_mode=report_mode,
             evidence_refs=evidence_refs,
-            include_memory=include_memory,
             instructions=instructions,
         )
         self._record_role_context(runtime, node=node, context=context)

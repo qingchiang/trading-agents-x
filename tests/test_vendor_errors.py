@@ -71,6 +71,24 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(out, "YF")
 
+    def test_focused_incremental_route_does_not_fall_back_after_rate_limit(self):
+        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+
+        def _throttled(*a, **k):
+            raise AlphaVantageRateLimitError("slow down")
+
+        fallback = mock.Mock(return_value="YF")
+        with mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_stock_data": {"alpha_vantage": _throttled, "yfinance": fallback}},
+            clear=False,
+        ), self.assertRaises(AlphaVantageRateLimitError):
+            interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10",
+                _stop_on_rate_limit=True,
+            )
+        fallback.assert_not_called()
+
     def test_not_configured_falls_through_to_next_vendor(self):
         bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 

@@ -8,12 +8,17 @@ import pytest
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.cn import cn_news, google_news, news_sources
 from tradingagents.dataflows.cn.common import AkShareSchemaError
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.errors import NoMarketDataError, VendorRateLimitError
 from tradingagents.dataflows.news_quality import (
     build_chinese_company_aliases,
     classify_chinese_google_article,
 )
-from tradingagents.provenance import extract_provenance, provenance_quality_issues
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.provenance import (
+    extract_evidence_spans,
+    extract_provenance,
+    provenance_quality_issues,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -345,6 +350,30 @@ def test_google_news_keeps_successful_name_query_when_other_fails(monkeypatch):
 
 
 @pytest.mark.unit
+def test_google_news_incremental_scope_stops_name_fanout_on_rate_limit(monkeypatch):
+    monkeypatch.setattr(
+        google_news,
+        "_company_names",
+        lambda _ticker: ("贵州茅台酒股份有限公司", "贵州茅台"),
+    )
+    fetch = mock.Mock(
+        side_effect=[
+            VendorRateLimitError("Google News 429"),
+            AssertionError("second name query executed after 429"),
+        ]
+    )
+    monkeypatch.setattr(google_news, "_fetch_items", fetch)
+
+    with (
+        stop_on_rate_limit_scope(True),
+        pytest.raises(VendorRateLimitError, match="Google News 429"),
+    ):
+        google_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+
+    assert fetch.call_count == 1
+
+
+@pytest.mark.unit
 def test_small_total_limit_keeps_every_cn_source_eligible(monkeypatch):
     monkeypatch.setattr(news_sources, "get_config", lambda: {"news_article_limit": 1})
 
@@ -362,6 +391,59 @@ def test_cn_assembler_preserves_other_sources_when_one_fails(monkeypatch):
     assert "DISCLOSURES" in result
     assert "<Eastmoney Research unavailable: TimeoutError>" in result
     assert '"source":"CNINFO"' in result
+
+
+@pytest.mark.unit
+def test_cn_assembler_stops_incremental_collection_on_first_rate_limit(monkeypatch):
+    later = mock.Mock(side_effect=AssertionError("later source queried after 429"))
+    monkeypatch.setattr(
+        cn_news,
+        "_disclosure_news",
+        mock.Mock(side_effect=VendorRateLimitError("CNINFO 429")),
+    )
+    monkeypatch.setattr(cn_news, "_research_news", later)
+    monkeypatch.setattr(cn_news, "_google_news", later)
+
+    with (
+        stop_on_rate_limit_scope(True),
+        pytest.raises(VendorRateLimitError, match="CNINFO 429"),
+    ):
+        cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+
+    later.assert_not_called()
+
+
+@pytest.mark.unit
+def test_cn_assembler_binds_each_rendered_source_to_a_pit_span(monkeypatch):
+    monkeypatch.setattr(
+        cn_news,
+        "_disclosure_news",
+        lambda *_args: (
+            "## DISCLOSURES\n\n### [direct] official item\n"
+            "Disclosed: 2026-01-09 10:00 CST"
+        ),
+    )
+    monkeypatch.setattr(
+        cn_news,
+        "_research_news",
+        lambda *_args: (
+            "## RESEARCH\n\n### [direct] broker item\n"
+            "Published: 2026-01-08 CST"
+        ),
+    )
+    monkeypatch.setattr(cn_news, "_google_news", lambda *_args: "No media")
+
+    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+    spans = [span for span in extract_evidence_spans(result) if span.content]
+
+    assert [span.temporal_scope for span in spans] == [
+        "point_in_time",
+        "point_in_time",
+    ]
+    assert [[record.source for record in span.records] for span in spans] == [
+        ["CNINFO"],
+        ["Eastmoney Research"],
+    ]
 
 
 @pytest.mark.unit

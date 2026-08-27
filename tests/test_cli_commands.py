@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime
+from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from alembic import command as alembic_command
+from alembic.config import Config
 from typer.testing import CliRunner
 
 import cli.main as cli
@@ -20,8 +24,10 @@ from tradingagents.application.errors import (
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
 )
+from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
+from tradingagents.persistence import upgrade_database
 
 runner = CliRunner()
 
@@ -68,6 +74,10 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
     run_help = runner.invoke(cli.app, ["run", "--help"])
     assert run_help.exit_code == 0
     assert "--provenance" not in run_help.output
+    worker_help = runner.invoke(cli.app, ["worker", "--help"])
+    assert worker_help.exit_code == 0
+    assert "single-concurrency analysis worker" in worker_help.output
+    assert "outcome-settlement" not in worker_help.output
 
 
 def test_version_exits_without_loading_settings(monkeypatch) -> None:
@@ -303,9 +313,7 @@ def test_run_reports_market_date_resolution_as_a_usage_error(monkeypatch) -> Non
     monkeypatch.setattr(
         cli,
         "market_today",
-        lambda ticker: (_ for _ in ()).throw(
-            ValueError(f"unsupported market symbol: {ticker}")
-        ),
+        lambda ticker: (_ for _ in ()).throw(ValueError(f"unsupported market symbol: {ticker}")),
     )
 
     result = runner.invoke(cli.app, ["run", "INVALID@SYMBOL"])
@@ -354,9 +362,7 @@ def test_serve_uses_the_validated_application_binding(
     assert calls["port"] == 8000
     assert calls["log_level"] == "warning"
     assert calls["use_colors"] is None
-    assert calls["log_config"]["handlers"]["access"]["filters"] == [
-        "successful_static_assets"
-    ]
+    assert calls["log_config"]["handlers"]["access"]["filters"] == ["successful_static_assets"]
 
 
 def test_start_supervises_web_and_worker(
@@ -456,9 +462,7 @@ def test_runs_list_show_and_cancel(
     monkeypatch,
     cli_service: AnalysisService,
 ) -> None:
-    queued = cli_service.enqueue(
-        cli.AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = cli_service.enqueue(cli.AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
     monkeypatch.setattr(cli, "_service", lambda: cli_service)
 
     listed = runner.invoke(cli.app, ["runs", "list", "--json"])
@@ -476,9 +480,7 @@ def test_runs_retry_creates_a_new_attempt(
     monkeypatch,
     cli_service: AnalysisService,
 ) -> None:
-    queued = cli_service.enqueue(
-        cli.AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24")
-    )
+    queued = cli_service.enqueue(cli.AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24"))
     claimed = cli_service.repository.claim_run(queued.id, "test-worker", 300)
     assert claimed.status is RunStatus.RUNNING
     cli_service.repository.fail(queued.id, RuntimeError("provider failed"))
@@ -585,15 +587,113 @@ def test_package_export_requires_output_and_writes_binary(
     assert destination.read_bytes() == payload
 
 
+def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
+    monkeypatch,
+    cli_settings: AppSettings,
+    tmp_path: Path,
+) -> None:
+    upgrade_database(cli_settings)
+    repository = RunRepository(cli_settings)
+    request = cli.AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+    )
+    run, _ = repository.create_run(request, {"fixture": True})
+    repository.engine.dispose()
+    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
+    with resources.as_file(migration_root) as script_location:
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+        config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{cli_settings.database_path}")
+        config.attributes["busy_timeout_ms"] = cli_settings.busy_timeout_ms
+        alembic_command.downgrade(config, "0004_instrument_local_name")
+    repository = RunRepository(cli_settings)
+    with repository.engine.begin() as connection:
+        decision_id = connection.exec_driver_sql(
+            "INSERT INTO decisions "
+            "(run_id, ticker, market, asset_type, analysis_date, rating, "
+            "confidence, decision_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (
+                run.id,
+                request.ticker,
+                "US",
+                "stock",
+                request.analysis_date.isoformat(),
+                "buy",
+                0.5,
+                "{}",
+                "2026-08-20 00:00:00",
+            ),
+        ).scalar_one()
+        connection.exec_driver_sql(
+            "INSERT INTO outcomes "
+            "(decision_id, status, benchmark, holding_intervals, next_check_at) "
+            "VALUES (?, 'pending', 'SPY', 5, '2026-07-24 00:00:00')",
+            (decision_id,),
+        )
+        outcome_id = connection.exec_driver_sql(
+            "SELECT id FROM outcomes WHERE decision_id = ?",
+            (decision_id,),
+        ).scalar_one()
+        connection.exec_driver_sql(
+            "INSERT INTO reflections (outcome_id, text, created_at) "
+            "VALUES (?, ?, '2026-08-20 00:00:00')",
+            (outcome_id, "Legacy reflection."),
+        )
+    repository.engine.dispose()
+
+    destination = tmp_path / "backup" / "pre-migration.db"
+    monkeypatch.setattr(cli, "_settings", lambda: cli_settings)
+    monkeypatch.setattr(
+        cli,
+        "_service",
+        lambda: pytest.fail("backup must not construct AnalysisService"),
+    )
+
+    result = runner.invoke(cli.app, ["db", "backup", str(destination)])
+
+    assert result.exit_code == 0
+    with sqlite3.connect(cli_settings.database_path) as source:
+        assert source.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0004_instrument_local_name",
+        )
+        assert source.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
+        assert source.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
+    with sqlite3.connect(destination) as backup:
+        assert backup.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0004_instrument_local_name",
+        )
+        assert backup.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
+        assert backup.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
+
+    upgraded_settings = cli_settings.model_copy(update={"database_path": destination})
+    upgrade_database(upgraded_settings)
+    upgraded_repository = RunRepository(upgraded_settings)
+    try:
+        assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
+        with sqlite3.connect(destination) as upgraded:
+            assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
+                "0009_cycle_aware_trash",
+            )
+            assert (
+                upgraded.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"
+                ).fetchall()
+                == []
+            )
+    finally:
+        upgraded_repository.engine.dispose()
+
+
 def test_database_backup_is_consistent_and_refuses_overwrite(
     monkeypatch,
     cli_service: AnalysisService,
     tmp_path: Path,
 ) -> None:
-    cli_service.enqueue(
-        cli.AnalysisRequest(ticker="MSFT", analysis_date="2026-07-24")
-    )
-    monkeypatch.setattr(cli, "_service", lambda: cli_service)
+    cli_service.enqueue(cli.AnalysisRequest(ticker="MSFT", analysis_date="2026-07-24"))
+    monkeypatch.setattr(cli, "_settings", lambda: cli_service.settings)
     destination = tmp_path / "backup.db"
 
     created = runner.invoke(cli.app, ["db", "backup", str(destination)])

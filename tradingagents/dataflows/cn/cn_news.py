@@ -5,12 +5,18 @@ from __future__ import annotations
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 
 from ..config import get_config
-from ..errors import NoMarketDataError
+from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_quality import canonical_headline
+from ..rate_limit import stop_on_rate_limit_requested
 from .google_news import get_news as _google_news
 from .news_sources import (
     get_disclosure_news as _disclosure_news,
@@ -25,6 +31,14 @@ _PARTIAL_QUERY_RE = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class _MergeCounts:
+    returned: int
+    duplicates: int
+    kept: int
+    cap_omitted: int
+
+
 def _article_key(paragraph: str) -> str:
     first_line = paragraph.splitlines()[0].removeprefix("### ").strip()
     if first_line.startswith("[") and "] " in first_line:
@@ -34,36 +48,58 @@ def _article_key(paragraph: str) -> str:
     return canonical_headline(first_line)
 
 
-def _dedupe_blocks(blocks: list[str], limit: int) -> list[str]:
+def _dedupe_blocks(
+    blocks: list[str], limit: int
+) -> tuple[list[str], list[_MergeCounts]]:
     """Deduplicate across sources and enforce the final article limit."""
     seen: set[str] = set()
     output = []
+    counts = []
     article_count = 0
     for block in blocks:
         if article_count >= limit:
-            break
+            returned = sum(
+                paragraph.startswith("### ") for paragraph in block.split("\n\n")[1:]
+            )
+            counts.append(_MergeCounts(returned, 0, 0, returned))
+            continue
         paragraphs = block.split("\n\n")
         kept = [paragraphs[0]]
+        returned = 0
+        duplicates = 0
+        cap_omitted = 0
         for paragraph in paragraphs[1:]:
             if not paragraph.startswith("### "):
                 kept.append(paragraph)
                 continue
+            returned += 1
             key = _article_key(paragraph)
             if not key or key in seen:
+                duplicates += 1
                 continue
             seen.add(key)
-            kept.append(paragraph)
-            article_count += 1
-            if article_count >= limit:
-                break
+            if article_count < limit:
+                kept.append(paragraph)
+                article_count += 1
+            else:
+                cap_omitted += 1
+        kept_count = sum(paragraph.startswith("### ") for paragraph in kept[1:])
+        counts.append(
+            _MergeCounts(returned, duplicates, kept_count, cap_omitted)
+        )
         if len(kept) > 1:
             output.append("\n\n".join(kept))
-    return output
+    return output, counts
 
 
 def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
     try:
         return fetch(ticker, start_date, end_date)
+    except VendorRateLimitError:
+        if stop_on_rate_limit_requested():
+            raise
+        logger.warning("CN news sub-feed %s rate-limited for %s", source, ticker)
+        return f"<{source} unavailable: VendorRateLimitError>"
     except Exception as exc:  # noqa: BLE001 - each external feed is isolated
         logger.warning("CN news sub-feed %s failed for %s: %s", source, ticker, exc)
         return f"<{source} unavailable: {type(exc).__name__}>"
@@ -87,23 +123,43 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         ("Eastmoney Research", _research_news),
         ("Google News China", _google_news),
     )
-    with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
-        rendered = list(
-            pool.map(
-                lambda feed: _safe_feed(feed[0], feed[1], ticker, start_date, end_date),
-                feeds,
+    if stop_on_rate_limit_requested():
+        rendered = [
+            _safe_feed(source, fetch, ticker, start_date, end_date)
+            for source, fetch in feeds
+        ]
+    else:
+        with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
+            rendered = list(
+                pool.map(
+                    lambda feed: _safe_feed(
+                        feed[0], feed[1], ticker, start_date, end_date
+                    ),
+                    feeds,
+                )
             )
-        )
     article_limit = max(1, int(get_config()["news_article_limit"]))
-    blocks = _dedupe_blocks(
+    blocks, merged_counts = _dedupe_blocks(
         [item for item in rendered if item.startswith("## ")], article_limit
     )
-    records = []
     notes: list[tuple[str, ProvenanceRecord]] = []
+    bound_blocks: list[str] = []
+    unbound_records: list[ProvenanceRecord] = []
+    data_count_index = 0
+    merged_index = 0
     for (source, _fetch), output in zip(feeds, rendered, strict=True):
         partial_timing = _partial_query_timing(output)
         if output.startswith("## "):
-            timing = f"publication-date filtered; returned_items={output.count(chr(10) + '### ')}"
+            counts = merged_counts[data_count_index]
+            data_count_index += 1
+            timing = (
+                "publication-date filtered; "
+                f"returned_items={counts.returned}; "
+                f"duplicate_items={counts.duplicates}; "
+                f"kept_items={counts.kept}; shared_limit={article_limit}"
+            )
+            if counts.cap_omitted:
+                timing += f"; truncated_by_global_cap={counts.cap_omitted}"
             if partial_timing:
                 timing += f"; {partial_timing}"
         elif output.startswith("<"):
@@ -117,11 +173,20 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             effective=f"{start_date} to {end_date}",
             timing=timing,
         )
-        records.append(record)
         if output.startswith("<"):
             notes.append((output, record))
+        elif output.startswith("## ") and counts.kept:
+            bound_blocks.append(
+                attach_evidence_span(
+                    attach_provenance(blocks[merged_index], record),
+                    temporal_scope="point_in_time",
+                )
+            )
+            merged_index += 1
+        else:
+            unbound_records.append(record)
 
-    if not blocks:
+    if not bound_blocks:
         raise NoMarketDataError(
             ticker,
             detail="no CNINFO announcements, Eastmoney research, or Chinese media news in the window",
@@ -130,8 +195,13 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             ),
         )
     if notes:
-        blocks.append(
-            "### Source availability notes\n"
-            + "\n".join(note for note, _record in notes)
+        bound_blocks.append(
+            attach_provenance(
+                "### Source availability notes\n"
+                + "\n".join(note for note, _record in notes),
+                *(record for _note, record in notes),
+            )
         )
-    return attach_provenance("\n\n".join(blocks), *records)
+    if unbound_records:
+        bound_blocks.append(attach_provenance("", *unbound_records))
+    return "\n\n".join(bound_blocks)

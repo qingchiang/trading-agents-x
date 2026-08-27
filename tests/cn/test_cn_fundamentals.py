@@ -5,8 +5,9 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows.cn import cn_fundamentals, company
+from tradingagents.dataflows.cn import cn_fundamentals, common, company
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 _PROFILE_RETRIEVED_AT = "2026-07-19T02:03:04+00:00"
@@ -111,6 +112,7 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
         and span.content
         and "Market Cap: 123" in span.content
     ).endswith("PE Ratio (TTM): 10")
+    assert "Effective period: 2025-12-31" in output
 
 
 @pytest.mark.unit
@@ -183,6 +185,28 @@ def test_both_china_sources_unavailable_raises_for_router_fallback(monkeypatch):
     assert "CNINFO company profile unavailable" in exc_info.value.availability_notes[0]
     assert "Sina financial abstract unavailable" in exc_info.value.availability_notes[1]
     get_yf.assert_not_called()
+
+
+@pytest.mark.unit
+def test_incremental_fundamentals_stop_before_later_sources_on_rate_limit(
+    monkeypatch,
+):
+    later = mock.Mock(side_effect=AssertionError("later source queried after 429"))
+    monkeypatch.setattr(cn_fundamentals, "is_near_live", lambda *_args: True)
+    monkeypatch.setattr(
+        cn_fundamentals,
+        "get_company_profile_snapshot",
+        mock.Mock(side_effect=common.AkShareRateLimitError("CNINFO 429")),
+    )
+    monkeypatch.setattr(cn_fundamentals, "fetch_finance_records", later)
+
+    with (
+        stop_on_rate_limit_scope(True),
+        pytest.raises(common.AkShareRateLimitError, match="CNINFO 429"),
+    ):
+        cn_fundamentals.get_fundamentals("600519.SS", "2026-07-24")
+
+    later.assert_not_called()
 
 
 @pytest.mark.unit

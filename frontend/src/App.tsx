@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import Layout from "./components/Layout";
 import LoginDialog from "./components/LoginDialog";
 import Dashboard from "./pages/Dashboard";
-import Memory from "./pages/Memory";
 import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
 import Settings from "./pages/Settings";
+import Timeline from "./pages/Timeline";
 import { usePathname } from "./router";
 
 export default function App() {
@@ -24,10 +24,12 @@ export default function App() {
       <NewRun />
     ) : pathname === "/runs" ? (
       <Runs />
+    ) : pathname === "/timelines" ? (
+      <Timeline />
+    ) : /^\/timelines\/[^/]+\/?$/.test(pathname) ? (
+      <Timeline />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (
       <RunDetail />
-    ) : pathname === "/memory" ? (
-      <Memory />
     ) : pathname === "/settings" ? (
       <Settings />
     ) : (

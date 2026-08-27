@@ -6,7 +6,9 @@ from urllib.request import Request
 
 import pytest
 
+from tradingagents.dataflows.errors import VendorTransportError
 from tradingagents.dataflows.jp import http_util
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 
 
 class _Resp:
@@ -70,6 +72,15 @@ class FetchBytesTests(unittest.TestCase):
         err = HTTPError("u", 404, "Not Found", {}, None)
         with mock.patch.object(http_util, "urlopen", side_effect=err):
             self.assertIsNone(http_util.fetch_bytes(_req(), 5, "T"))
+
+    def test_scoped_non_429_http_error_raises_typed_transport_failure(self):
+        err = HTTPError("u", 503, "Unavailable", {}, None)
+        with (
+            mock.patch.object(http_util, "urlopen", side_effect=err),
+            stop_on_rate_limit_scope(True),
+            self.assertRaises(VendorTransportError),
+        ):
+            http_util.fetch_bytes(_req(), 5, "T")
 
     def test_network_error_returns_none(self):
         with mock.patch.object(http_util, "urlopen", side_effect=OSError("boom")):

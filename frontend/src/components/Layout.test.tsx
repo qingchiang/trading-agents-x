@@ -26,11 +26,17 @@ test("distinguishes new-run and run-management navigation", () => {
   expect(screen.getByRole("link", { name: "Runs" })).not.toHaveClass("active");
   newRun.unmount();
 
-  renderLayout("/runs/run-1");
+  const runDetail = renderLayout("/runs/run-1");
   expect(screen.getByRole("link", { name: "Runs" })).toHaveClass("active");
   expect(screen.getByRole("link", { name: "New run" })).not.toHaveClass(
     "active",
   );
+  runDetail.unmount();
+
+  renderLayout("/timelines/7203.T");
+  expect(
+    screen.getByRole("link", { name: "Research Timelines" }),
+  ).toHaveClass("active");
 });
 
 test("shows the concise Simplified Chinese locale label", () => {
@@ -80,7 +86,7 @@ test("closes the mobile drawer after navigation, backdrop, or Escape", () => {
 
   open();
   expect(shell).toHaveClass("sidebar-open");
-  fireEvent.click(screen.getByRole("link", { name: "Memory" }));
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(shell).not.toHaveClass("sidebar-open");
 
   open();

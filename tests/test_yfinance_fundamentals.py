@@ -6,6 +6,8 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows import y_finance as yf_data
+from tradingagents.dataflows.errors import VendorRateLimitError
+from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 
 
 @pytest.mark.unit
@@ -32,6 +34,36 @@ class TestYFinanceFundamentalsLookahead:
         assert "Retrieved at:" in out
         assert "Not point-in-time historical data" in out
         assert "Market Cap: 123" in out
+
+    def test_unscoped_rate_limit_remains_a_sanitized_unavailable_result(self):
+        with mock.patch.object(
+            yf_data, "is_near_live", return_value=True
+        ), mock.patch.object(
+            yf_data, "yf_retry", side_effect=VendorRateLimitError("Yahoo Finance rate limited")
+        ):
+            out = yf_data.get_fundamentals("NVDA", "2026-07-15")
+
+        assert out == "Error retrieving fundamentals for NVDA: Yahoo Finance rate limited"
+
+    def test_focused_rate_limit_bubbles_from_the_real_info_adapter_without_retry(self):
+        calls = []
+
+        class RateLimitedTicker:
+            @property
+            def info(self):
+                calls.append("info")
+                from yfinance.exceptions import YFRateLimitError
+
+                raise YFRateLimitError()
+
+        with mock.patch.object(
+            yf_data, "is_near_live", return_value=True
+        ), mock.patch.object(yf_data.yf, "Ticker", return_value=RateLimitedTicker()), stop_on_rate_limit_scope(
+            True
+        ), pytest.raises(VendorRateLimitError, match="Yahoo Finance rate limited"):
+            yf_data.get_fundamentals("NVDA", "2026-07-15")
+
+        assert calls == ["info"]
 
     def test_us_historical_statement_remains_available_with_period_end_warning(self):
         ticker_obj = mock.MagicMock()

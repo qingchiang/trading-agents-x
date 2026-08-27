@@ -8,6 +8,7 @@ these (or a thin vendor-named subclass) and needs no new ``except`` clause.
     VendorError
     ├── NoMarketDataError          no usable rows (empty result OR stale data)
     ├── VendorRateLimitError       transient throttle -> skip to next vendor
+    ├── VendorTransportError       bounded network/HTTP failure -> preserve limitation
     └── VendorNotConfiguredError   missing API key/config -> vendor unavailable
 
 The number of types is the number of distinct router reactions, not the number
@@ -61,6 +62,10 @@ class NoMarketDataError(VendorError):
 
 class VendorRateLimitError(VendorError):
     """A vendor throttled the request; the router skips to the next vendor."""
+
+
+class VendorTransportError(VendorError):
+    """A bounded vendor request failed before returning a usable response."""
 
 
 class VendorNotConfiguredError(VendorError, ValueError):

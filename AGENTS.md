@@ -99,9 +99,12 @@ silently changing package sources.
 - Vendor failures use the typed taxonomy in
   `tradingagents/dataflows/errors.py`. Preserve actual-source and fallback
   provenance when adding or changing a source.
-- Historical analysis must fail closed for live-only or non-point-in-time data.
-  Graph-facing dates come from workflow state and all results must be truncated
-  to the analysis cutoff.
+- Strict historical/PIT inputs must fail closed for live-only or non-point-in-
+  time data and be truncated to the analysis cutoff. The sole bounded exception
+  is explicitly labeled Near-live Advisory Evidence under the documented market-
+  local zero-to-five-day policy; it retains retrieval-time provenance and never
+  proves historical completeness or absence. Graph-facing dates come from
+  workflow state.
 - Ticker-less global news, macro, and prediction-market methods remain
   market-agnostic. Market-specific multi-source aggregation belongs in an
   assembler because the generic router is first-success fallback.

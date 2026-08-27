@@ -18,6 +18,7 @@ vi.mock("../api/client", () => ({
     providerModels: vi.fn(),
     createRun: vi.fn(),
     run: vi.fn(),
+    timeline: vi.fn(),
     recentInstruments: vi.fn(),
   },
 }));
@@ -110,6 +111,372 @@ beforeEach(async () => {
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
   vi.mocked(api.providerModels).mockResolvedValue(modelCatalog);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: { instrument: "NVDA", primary_cycle_id: null, nodes: [] },
+  });
+});
+
+test("lets a user choose an active Full Baseline for Incremental research", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "NVDA",
+      primary_cycle_id: "full-baseline",
+      nodes: [
+        {
+          id: "full-baseline",
+          analysis_date: "2026-07-20",
+          research_kind: "full",
+          is_active: true,
+          is_baseline_compatible: true,
+        },
+      ],
+    },
+  } as never);
+  vi.mocked(api.createRun).mockResolvedValue({ id: "incremental-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).not.toBeDisabled());
+  fireEvent.click(incremental);
+
+  await screen.findByRole("option", { name: /2026-07-20/ });
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() =>
+    expect(vi.mocked(api.createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        research_kind: "incremental",
+        full_baseline_run_id: "full-baseline",
+      }),
+      expect.any(String),
+    ),
+  );
+});
+
+test("recommends Incremental research and selects a valid baseline for a healthy primary cycle", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "NVDA",
+      primary_cycle_id: "full-baseline",
+      timeline_warning: false,
+      nodes: [
+        {
+          id: "full-baseline",
+          analysis_date: "2026-07-20",
+          research_kind: "full",
+          is_active: true,
+          is_baseline_compatible: true,
+        },
+      ],
+    },
+  } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).toBeChecked());
+  expect(screen.getByLabelText("Full Baseline")).toHaveValue("full-baseline");
+  expect(
+    screen.getByText(
+      "An active Full Baseline is available; Incremental research is recommended, while Full remains available.",
+    ),
+  ).toBeVisible();
+});
+
+test("recommends Full research for a warned primary cycle without disabling Incremental", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "NVDA",
+      primary_cycle_id: "full-baseline",
+      timeline_warning: false,
+      nodes: [
+        {
+          id: "full-baseline",
+          analysis_date: "2026-07-20",
+          research_kind: "full",
+          is_active: true,
+          is_baseline_compatible: true,
+        },
+        {
+          id: "warned-incremental",
+          analysis_date: "2026-07-21",
+          research_kind: "incremental",
+          is_active: true,
+          is_baseline_compatible: false,
+          is_primary: true,
+          cycle_warning: true,
+        },
+      ],
+    },
+  } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  const full = screen.getByRole("radio", { name: /Full research/ });
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).toBeEnabled());
+  expect(full).toBeChecked();
+  expect(incremental).toBeEnabled();
+  expect(
+    screen.getByText(
+      "A Primary Cycle warning recommends Full research; Incremental research remains available.",
+    ),
+  ).toBeVisible();
+  fireEvent.click(incremental);
+  expect(incremental).toBeChecked();
+});
+
+test("finds an eligible Full Baseline beyond the first Timeline page", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 0,
+        nodes: Array.from({ length: 20 }, (_value, index) => ({
+          id: `incremental-${index}`,
+          analysis_date: "2026-07-20",
+          research_kind: "incremental",
+          is_active: true,
+        })),
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 20,
+        nodes: [
+          {
+            id: "late-full-baseline",
+            analysis_date: "2026-07-20",
+            research_kind: "full",
+            is_active: true,
+            is_baseline_compatible: true,
+          },
+        ],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).not.toBeDisabled());
+  expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 0);
+  expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 20);
+  expect(incremental).toBeChecked();
+  fireEvent.click(incremental);
+  expect(
+    await screen.findByRole("option", { name: /late-full-baseline/ }),
+  ).toBeVisible();
+});
+
+test("excludes an incompatible Full Baseline found on a later Timeline page", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 0,
+        nodes: Array.from({ length: 20 }, (_value, index) => ({
+          id: `incremental-${index}`,
+          analysis_date: "2026-07-20",
+          research_kind: "incremental",
+          is_active: true,
+        })),
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 20,
+        nodes: [
+          {
+            id: "incompatible-full-baseline",
+            analysis_date: "2026-07-20",
+            research_kind: "full",
+            is_active: true,
+            is_baseline_compatible: false,
+          },
+        ],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledTimes(2));
+  expect(
+    screen.getByRole("radio", { name: /Incremental research/ }),
+  ).toBeDisabled();
+  expect(screen.getByRole("radio", { name: /Full research/ })).toBeChecked();
+  expect(
+    screen.queryByRole("option", { name: /incompatible-full-baseline/ }),
+  ).not.toBeInTheDocument();
+});
+
+test("keeps a user's Full choice when a later Timeline page arrives", async () => {
+  let resolveSecondPage: (value: unknown) => void;
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 0,
+        nodes: [
+          {
+            id: "first-full-baseline",
+            analysis_date: "2026-07-20",
+            research_kind: "full",
+            is_active: true,
+            is_baseline_compatible: true,
+          },
+        ],
+      },
+    } as never)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecondPage = resolve;
+        }) as never,
+    );
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).toBeChecked());
+  fireEvent.click(screen.getByRole("radio", { name: /Full research/ }));
+  resolveSecondPage!({
+    timeline: {
+      instrument: "NVDA",
+      node_total: 21,
+      node_limit: 20,
+      node_offset: 20,
+      nodes: [
+        {
+          id: "later-full-baseline",
+          analysis_date: "2026-07-19",
+          research_kind: "full",
+          is_active: true,
+          is_baseline_compatible: true,
+        },
+      ],
+    },
+  });
+
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("radio", { name: /Full research/ })).toBeChecked();
+});
+
+test("ignores a stale Timeline response after the instrument changes", async () => {
+  let resolveNvda: (value: unknown) => void;
+  let resolveAapl: (value: unknown) => void;
+  vi.mocked(api.timeline).mockImplementation(
+    (instrument) =>
+      new Promise((resolve) => {
+        if (instrument === "NVDA") resolveNvda = resolve;
+        if (instrument === "AAPL") resolveAapl = resolve;
+      }) as never,
+  );
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  const ticker = screen.getByLabelText(/^Ticker/);
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 0));
+  fireEvent.change(ticker, { target: { value: "AAPL" } });
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("AAPL", 20, 0));
+
+  resolveAapl!({ timeline: { instrument: "AAPL", nodes: [] } });
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).toBeDisabled());
+  resolveNvda!({
+    timeline: {
+      instrument: "NVDA",
+      nodes: [
+        {
+          id: "stale-full-baseline",
+          analysis_date: "2026-07-20",
+          research_kind: "full",
+          is_active: true,
+          is_baseline_compatible: true,
+        },
+      ],
+    },
+  });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(incremental).toBeDisabled();
+  expect(screen.queryByText(/stale-full-baseline/)).not.toBeInTheDocument();
 });
 
 test("reuses the idempotency key when a browser submission is retried", async () => {
@@ -144,6 +511,9 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(vi.mocked(api.createRun).mock.calls[1][0]).not.toHaveProperty(
     "provenance",
   );
+  expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
+    make_primary: true,
+  });
 });
 
 test.each([
