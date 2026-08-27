@@ -663,6 +663,20 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         ]
         failed = repository.list_runs(status=RunStatus.FAILED).items
         assert len(failed) == 1
+        failed_run_id = failed[0].id
+        assert repository.evidence_status(failed_run_id).status == "pending"
+        assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+            baseline.run_id,
+        )
+        with repository.sessions() as session:
+            assert session.get(ResearchNodeRecord, failed_run_id) is None
+            assert session.get(RunEvidenceRecord, failed_run_id) is None
+            assert (
+                session.query(DecisionRecord)
+                .filter(DecisionRecord.run_id == failed_run_id)
+                .count()
+                == 0
+            )
         return
 
     if monolithic_failure == "repair_schema_validation":
@@ -678,7 +692,11 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
 
     result = service.run(request)
 
-    assert all(method != "json_mode" for _schema, method in serializer.calls)
+    assert serializer.calls == [
+        ("IncrementalSynthesis", None),
+        ("_IncrementalReassessmentSection", None),
+        ("_IncrementalDecisionSection", None),
+    ]
     assert result.status is RunStatus.SUCCEEDED
     node = repository.get_timeline("NVDA").nodes[-1]
     assert len(node.reassessment.entries) == len(component_ids)
