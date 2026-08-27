@@ -448,6 +448,33 @@ def test_configured_schema_failure_uses_sectioned_recovery() -> None:
     ]
 
 
+def test_disabled_repair_fails_after_primary_attempt() -> None:
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=""),
+            "parsed": {"role": "bear"},
+            "parsing_error": None,
+        },
+        recovery=AssertionError("repair must not run"),
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        event_writer=events.append,
+        repair_enabled=False,
+    )
+
+    with pytest.raises(StructuredOutputError) as exc_info:
+        _invoke(runner)
+
+    assert exc_info.value.reason_code == "schema_validation"
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+    assert [event["event_type"] for event in events] == ["node.output_failed"]
+
+
 def _decision_payload(evidence_ref: str) -> dict[str, Any]:
     return {
         "rating": "Hold",

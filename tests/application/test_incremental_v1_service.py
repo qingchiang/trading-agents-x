@@ -43,6 +43,7 @@ from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
+from tradingagents.graph.structured_output import StructuredOutputError
 
 
 def _unavailable_domains(request: IncrementalCollectionRequest):
@@ -488,11 +489,19 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert result.metrics.llm_calls == 0
 
 
-@pytest.mark.parametrize("monolithic_failure", ("truncated", "schema_validation"))
-def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
+@pytest.mark.parametrize(
+    ("monolithic_failure", "section_failure"),
+    (
+        ("truncated", False),
+        ("schema_validation", False),
+        ("schema_validation", True),
+    ),
+)
+def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
     app_settings,
     repository,
     monolithic_failure: str,
+    section_failure: bool,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
@@ -540,6 +549,9 @@ def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
         preferred_structured_output_method = "function_calling"
         structured_output_max_tokens = 16_384
 
+        def __init__(self):
+            self.calls: list[tuple[str, str | None]] = []
+
         def with_structured_output(
             self,
             schema,
@@ -549,6 +561,7 @@ def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
             **_kwargs,
         ):
             assert include_raw is True
+            self.calls.append((schema.__name__, method))
             if schema.__name__ == "IncrementalSynthesis":
                 if method == "json_mode":
                     return _Invoker(RuntimeError("monolithic repair unavailable"))
@@ -571,19 +584,26 @@ def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
                     }
                 )
             if schema.__name__ == "_IncrementalReassessmentSection":
-                parsed = {
-                    "reassessment": {
-                        "entries": [
-                            {
-                                "component_id": component_id,
-                                "disposition": "reaffirmed",
-                                "reason": "The bounded update does not change this component.",
-                            }
-                            for component_id in component_ids
-                        ]
-                    },
-                    "full_research_required_reasons": [],
-                }
+                parsed = (
+                    {"reassessment": {"entries": []}}
+                    if section_failure
+                    else {
+                        "reassessment": {
+                            "entries": [
+                                {
+                                    "component_id": component_id,
+                                    "disposition": "reaffirmed",
+                                    "reason": (
+                                        "The bounded update does not change this "
+                                        "component."
+                                    ),
+                                }
+                                for component_id in component_ids
+                            ]
+                        },
+                        "full_research_required_reasons": [],
+                    }
+                )
             elif schema.__name__ == "_IncrementalDecisionSection":
                 parsed = {"decision": baseline_decision.model_dump(mode="json")}
             else:
@@ -615,15 +635,28 @@ def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
 
-    result = service.run(
-        AnalysisRequest(
-            ticker="NVDA",
-            analysis_date=date(2026, 7, 24),
-            research_kind="incremental",
-            full_baseline_run_id=baseline.run_id,
-        )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
     )
 
+    if section_failure:
+        with pytest.raises(StructuredOutputError):
+            service.run(request)
+        assert all(method != "json_mode" for _schema, method in serializer.calls)
+        assert [schema for schema, _method in serializer.calls] == [
+            "IncrementalSynthesis",
+            "_IncrementalReassessmentSection",
+        ]
+        failed = repository.list_runs(status=RunStatus.FAILED).items
+        assert len(failed) == 1
+        return
+
+    result = service.run(request)
+
+    assert all(method != "json_mode" for _schema, method in serializer.calls)
     assert result.status is RunStatus.SUCCEEDED
     node = repository.get_timeline("NVDA").nodes[-1]
     assert len(node.reassessment.entries) == len(component_ids)

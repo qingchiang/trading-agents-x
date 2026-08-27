@@ -98,6 +98,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         event_writer: EventWriter | None = None,
         invoke_config: dict[str, Any] | None = None,
         repair_mode: Literal["json_mode", "preferred"] = "json_mode",
+        repair_enabled: bool = True,
         include_candidate_in_repair: bool = False,
         candidate_only_repair: bool = False,
         repair_instructions: str | None = None,
@@ -113,6 +114,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         self.event_writer = event_writer
         self.invoke_config = invoke_config
         self.repair_mode = repair_mode
+        self.repair_enabled = repair_enabled
         self.include_candidate_in_repair = include_candidate_in_repair
         self.candidate_only_repair = candidate_only_repair
         self.repair_instructions = repair_instructions
@@ -249,6 +251,30 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                 schema=self.schema.__name__,
                 reason_code=failure_reason,
                 validation_issues=failure_validation_issues,
+            )
+
+        if not self.repair_enabled:
+            self._emit(
+                "node.output_failed",
+                method=primary_generation_method,
+                reason_code=primary_reason,
+                validation_issues=primary_validation_issues,
+            )
+            raise StructuredOutputError(
+                node=self.node,
+                schema=self.schema.__name__,
+                reason_code=primary_reason,
+                validation_issues=primary_validation_issues,
+                candidate=primary_candidate,
+                failures=(
+                    StructuredOutputFailure(
+                        phase="initial",
+                        method=primary_generation_method,
+                        reason_code=primary_reason,
+                        validation_issues=primary_validation_issues,
+                        candidate=primary_candidate,
+                    ),
+                ),
             )
 
         recovery_method = (

@@ -1170,6 +1170,7 @@ class AnalysisService:
                 validator=lambda value: value,
                 node="incremental.synthesis.reassessment",
                 event_writer=event_writer,
+                repair_enabled=False,
                 invoke_config={
                     "metadata": {
                         "research_node": "incremental.synthesis.reassessment",
@@ -1201,6 +1202,7 @@ class AnalysisService:
                 validator=lambda value: value,
                 node="incremental.synthesis.decision",
                 event_writer=event_writer,
+                repair_enabled=False,
                 invoke_config={
                     "metadata": {
                         "research_node": "incremental.synthesis.decision",
