@@ -1250,6 +1250,7 @@ class AnalysisService:
                 ),
                 truncation_recovery=sectioned_recovery,
                 sectioned_recovery_reasons=("output_truncated", "schema_validation"),
+                sectioned_recovery_after_repair=False,
             ).invoke(
                 serializer_prompt,
                 example=example,

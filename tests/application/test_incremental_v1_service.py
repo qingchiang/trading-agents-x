@@ -495,6 +495,7 @@ def test_incremental_service_commits_simplified_actual_result_products(
         ("truncated", False),
         ("schema_validation", False),
         ("schema_validation", True),
+        ("repair_schema_validation", False),
     ),
 )
 def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
@@ -564,7 +565,17 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
             self.calls.append((schema.__name__, method))
             if schema.__name__ == "IncrementalSynthesis":
                 if method == "json_mode":
+                    if monolithic_failure == "repair_schema_validation":
+                        return _Invoker(
+                            {
+                                "raw": AIMessage(content="{}"),
+                                "parsed": {"reassessment": {"entries": []}},
+                                "parsing_error": None,
+                            }
+                        )
                     return _Invoker(RuntimeError("monolithic repair unavailable"))
+                if monolithic_failure == "repair_schema_validation":
+                    return _Invoker(RuntimeError("primary unavailable"))
                 if monolithic_failure == "schema_validation":
                     return _Invoker(
                         {
@@ -649,6 +660,17 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         assert [schema for schema, _method in serializer.calls] == [
             "IncrementalSynthesis",
             "_IncrementalReassessmentSection",
+        ]
+        failed = repository.list_runs(status=RunStatus.FAILED).items
+        assert len(failed) == 1
+        return
+
+    if monolithic_failure == "repair_schema_validation":
+        with pytest.raises(StructuredOutputError):
+            service.run(request)
+        assert serializer.calls == [
+            ("IncrementalSynthesis", None),
+            ("IncrementalSynthesis", "json_mode"),
         ]
         failed = repository.list_runs(status=RunStatus.FAILED).items
         assert len(failed) == 1

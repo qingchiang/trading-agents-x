@@ -475,6 +475,34 @@ def test_disabled_repair_fails_after_primary_attempt() -> None:
     assert [event["event_type"] for event in events] == ["node.output_failed"]
 
 
+def test_sectioned_recovery_can_be_disabled_after_generic_repair() -> None:
+    llm = _FakeLLM(
+        primary=RuntimeError("primary unavailable"),
+        recovery={
+            "raw": AIMessage(content=""),
+            "parsed": {"role": "bear"},
+            "parsing_error": None,
+        },
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        truncation_recovery=lambda: (_ for _ in ()).throw(
+            AssertionError("sectioned recovery must not run after generic repair")
+        ),
+        sectioned_recovery_reasons=("schema_validation",),
+        sectioned_recovery_after_repair=False,
+    )
+
+    with pytest.raises(StructuredOutputError) as exc_info:
+        _invoke(runner)
+
+    assert exc_info.value.reason_code == "schema_validation"
+    assert [method for method, _prompt in llm.calls] == ["tool_call", "json_mode"]
+
+
 def _decision_payload(evidence_ref: str) -> dict[str, Any]:
     return {
         "rating": "Hold",
