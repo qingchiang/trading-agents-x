@@ -27,6 +27,10 @@ from tradingagents.dataflows.interface import (
     validate_market_routing,
 )
 from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.graph.deliberation import (
+    ResearchDecisionCoreDraft,
+    ResearchScenarioCoreDraft,
+)
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
 from tradingagents.graph.structured_output import (
     StructuredOutputResult,
@@ -105,11 +109,59 @@ class _IncrementalReassessmentSection(BaseModel):
 
 
 class _IncrementalDecisionSection(BaseModel):
-    """Bounded truncation-recovery section for the complete current Decision."""
+    """Bounded recovery section for the current qualitative Decision core."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    decision: ResearchDecision
+    decision: ResearchDecisionCoreDraft
+
+
+def _incremental_decision_core(decision: ResearchDecision) -> ResearchDecisionCoreDraft:
+    return ResearchDecisionCoreDraft(
+        rating=decision.rating,
+        confidence=decision.confidence,
+        executive_summary=decision.executive_summary,
+        thesis=decision.thesis,
+        evidence_refs=decision.evidence_refs,
+        catalysts=decision.catalysts,
+        risks=decision.risks,
+        invalidation_conditions=decision.invalidation_conditions,
+        unresolved_questions=decision.unresolved_questions,
+        time_horizon=decision.time_horizon,
+        scenarios=tuple(
+            ResearchScenarioCoreDraft(
+                kind=scenario.kind,
+                core_assumptions=scenario.core_assumptions,
+                outcome=scenario.outcome,
+                evidence_refs=scenario.evidence_refs,
+            )
+            for scenario in decision.scenarios
+        ),
+        risk_review_adjustments=decision.risk_review_adjustments,
+    )
+
+
+def _incremental_decision_from_core(
+    core: ResearchDecisionCoreDraft,
+    baseline: ResearchDecision,
+) -> ResearchDecision:
+    baseline_scenarios = {scenario.kind: scenario for scenario in baseline.scenarios}
+    payload = core.model_dump(mode="python")
+    payload["scenarios"] = tuple(
+        {
+            **scenario.model_dump(mode="python"),
+            "reference_ranges": baseline_scenarios[scenario.kind].reference_ranges,
+        }
+        for scenario in core.scenarios
+    )
+    for field in (
+        "valuation_assessment",
+        "market_reference_levels",
+        "calculation_records",
+        "numeric_audit_status",
+    ):
+        payload[field] = getattr(baseline, field)
+    return ResearchDecision.model_validate(payload)
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -1164,6 +1216,7 @@ class AnalysisService:
 
         def sectioned_recovery() -> StructuredOutputResult[IncrementalSynthesis]:
             bounded_input = synthesis_input.model_dump_json(indent=2)
+            baseline_decision = synthesis_input.full_baseline_decision
             reassessment = StructuredOutputRunner(
                 llm=serializer_llm,
                 schema=_IncrementalReassessmentSection,
@@ -1196,7 +1249,7 @@ class AnalysisService:
                 },
                 allowed_evidence_refs=allowed_evidence_refs,
             ).value
-            decision = StructuredOutputRunner(
+            decision_core = StructuredOutputRunner(
                 llm=serializer_llm,
                 schema=_IncrementalDecisionSection,
                 validator=lambda value: value,
@@ -1209,25 +1262,36 @@ class AnalysisService:
                     }
                 },
                 repair_instructions=(
-                    "Return one complete current Research Decision using only "
+                    "Return one complete current qualitative Decision core using only "
                     "permitted Evidence references."
                 ),
             ).invoke(
                 (
-                    "Recover only the complete current Research Decision from the "
-                    "semantic brief and bounded input. Do not serialize the Research "
-                    "Reassessment or Full Research Required reasons. "
+                    "Recover only the complete current qualitative Research Decision "
+                    "core from the semantic brief and bounded input. Include exactly "
+                    "base, bull, and bear scenarios. Do not serialize the Research "
+                    "Reassessment, Full Research Required reasons, or any optional "
+                    "numeric appendix; the application preserves the audited numeric "
+                    "appendix from the direct Full Baseline. "
                     f"Write all human-readable prose in {output_language}.\n\n"
                     f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
                     f"BOUNDED INPUT:\n{bounded_input}"
                 ),
-                example={"decision": example["decision"]},
+                example={
+                    "decision": _incremental_decision_core(
+                        baseline_decision
+                    ).model_dump(mode="json")
+                },
                 allowed_evidence_refs=allowed_evidence_refs,
             ).value
+            decision = _incremental_decision_from_core(
+                decision_core.decision,
+                baseline_decision,
+            )
             return StructuredOutputResult(
                 value=IncrementalSynthesis(
                     reassessment=reassessment.reassessment,
-                    decision=decision.decision,
+                    decision=decision,
                     full_research_required_reasons=(
                         reassessment.full_research_required_reasons
                     ),

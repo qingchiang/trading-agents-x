@@ -25,6 +25,7 @@ from tradingagents.application.contracts import (
     IncrementalEvidenceCandidate,
     MarketSeriesPoint,
     MarketSeriesResult,
+    NumericAuditStatus,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -40,7 +41,12 @@ from tradingagents.application.errors import (
 )
 from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import EvidenceConflictError
-from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
+from tradingagents.application.service import (
+    AnalysisService,
+    _incremental_decision_core,
+    _incremental_decision_from_core,
+    default_incremental_synthesizer,
+)
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
 from tradingagents.graph.structured_output import StructuredOutputError
@@ -616,7 +622,18 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
                     }
                 )
             elif schema.__name__ == "_IncrementalDecisionSection":
-                parsed = {"decision": baseline_decision.model_dump(mode="json")}
+                decision_schema = next(
+                    definition
+                    for definition in schema.model_json_schema()["$defs"].values()
+                    if "rating" in definition.get("properties", {})
+                )
+                assert "market_reference_levels" not in decision_schema["properties"]
+                assert "calculation_records" not in decision_schema["properties"]
+                parsed = {
+                    "decision": _incremental_decision_core(
+                        baseline_decision
+                    ).model_dump(mode="json")
+                }
             else:
                 raise AssertionError(f"unexpected schema: {schema.__name__}")
             return _Invoker(
@@ -705,6 +722,20 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         and event.payload["method"] == "sectioned_recovery"
         for event in repository.list_events(result.run_id)
     )
+
+
+def test_incremental_decision_core_preserves_baseline_numeric_appendix() -> None:
+    baseline = research_decision().model_copy(
+        update={"numeric_audit_status": NumericAuditStatus.NOT_APPLICABLE}
+    )
+    core = _incremental_decision_core(baseline).model_copy(
+        update={"thesis": "Updated qualitative thesis."}
+    )
+
+    decision = _incremental_decision_from_core(core, baseline)
+
+    assert decision.thesis == "Updated qualitative thesis."
+    assert decision.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
 
 
 def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
