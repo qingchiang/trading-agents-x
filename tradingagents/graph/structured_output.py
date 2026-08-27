@@ -150,8 +150,9 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         if primary is not None:
             try:
                 response = self._invoke(primary, primary_prompt)
-            except Exception:
+            except Exception as exc:
                 primary_reason = "provider_error"
+                primary_validation_issues = _provider_validation_issues(exc)
             else:
                 parsed, raw, parsing_error = _unpack_response(
                     response,
@@ -317,8 +318,9 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                         **bind_kwargs,
                     )
                 )
-            except Exception:
+            except Exception as exc:
                 failure_reason = "provider_error"
+                failure_validation_issues = _provider_validation_issues(exc)
             else:
                 response_available = True
         if response_available:
@@ -532,6 +534,14 @@ def _is_truncated(raw: Any) -> bool:
         return False
     finish_reason = metadata.get("finish_reason")
     return finish_reason in {"length", "max_tokens", "max_output_tokens"}
+
+
+def _provider_validation_issues(exc: Exception) -> tuple[str, ...]:
+    """Retain a stable HTTP status without persisting provider content."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and 400 <= status_code <= 599:
+        return (f"provider.http_{status_code}",)
+    return ()
 
 
 def _strict_json_object(raw: Any) -> dict[str, Any]:

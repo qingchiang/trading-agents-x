@@ -368,6 +368,27 @@ def test_two_invalid_outputs_fail_without_leaking_provider_content() -> None:
     assert secret not in json.dumps(events)
 
 
+def test_provider_failure_retains_only_safe_http_diagnostics() -> None:
+    class _ProviderUnavailableError(RuntimeError):
+        status_code = 503
+
+    secret = "authorization=private-value"
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary=_ProviderUnavailableError(secret),
+        recovery=_ProviderUnavailableError(secret),
+    )
+
+    with pytest.raises(StructuredOutputError) as error:
+        _invoke(_runner(llm, events))
+
+    assert error.value.reason_code == "provider_error"
+    assert error.value.validation_issues == ("provider.http_503",)
+    assert events[-1]["payload"]["validation_issues"] == ["provider.http_503"]
+    assert secret not in str(error.value)
+    assert secret not in json.dumps(events)
+
+
 def test_truncated_primary_output_uses_specific_recovery_reason() -> None:
     events: list[dict[str, Any]] = []
     llm = _FakeLLM(

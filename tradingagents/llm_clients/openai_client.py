@@ -153,6 +153,13 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        # langchain-openai normalizes ``max_tokens`` to OpenAI's newer
+        # ``max_completion_tokens`` field. DeepSeek's Chat Completions API
+        # still documents and consumes ``max_tokens``; leaving the normalized
+        # name in place can silently fall back to the provider's lower default.
+        normalized_max_tokens = payload.pop("max_completion_tokens", None)
+        if normalized_max_tokens is not None:
+            payload.setdefault("max_tokens", normalized_max_tokens)
         outgoing = payload.get("messages", [])
         for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
             if not isinstance(message, AIMessage):

@@ -137,6 +137,21 @@ class TestDeepSeekReasoningContent:
         payload = client._get_request_payload([HumanMessage(content="Analyze.")])
         assert payload["reasoning_effort"] == "low"
 
+    def test_chat_completions_uses_deepseek_token_budget_field(self):
+        client = DeepSeekChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key="placeholder",
+            base_url="https://api.deepseek.com",
+        )
+
+        payload = client._get_request_payload(
+            [HumanMessage(content="Serialize the result.")],
+            max_tokens=16_384,
+        )
+
+        assert payload["max_tokens"] == 16_384
+        assert "max_completion_tokens" not in payload
+
 
 # ---------------------------------------------------------------------------
 # Capability-driven structured output

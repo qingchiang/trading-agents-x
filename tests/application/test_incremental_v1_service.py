@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import pytest
+from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
@@ -37,6 +38,7 @@ from tradingagents.application.errors import (
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
 )
+from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.dataflows.config import get_config
@@ -484,6 +486,142 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
     assert result.metrics.llm_calls == 0
+
+
+def test_truncated_incremental_synthesis_commits_via_sectioned_recovery(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    baseline_decision = repository.get_result(baseline.run_id).decision
+    assert baseline_decision is not None
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A newly published filing.",
+        )
+    )
+    component_ids = (
+        "executive_summary",
+        "thesis",
+        "risks.0",
+        "invalidation_conditions.0",
+        "scenarios.base.outcome",
+        "scenarios.base.core_assumptions.0",
+        "scenarios.bull.outcome",
+        "scenarios.bull.core_assumptions.0",
+        "scenarios.bear.outcome",
+        "scenarios.bear.core_assumptions.0",
+    )
+
+    class _Invoker:
+        def __init__(self, response):
+            self.response = response
+
+        def invoke(self, _prompt, config=None):
+            del config
+            if isinstance(self.response, BaseException):
+                raise self.response
+            return self.response
+
+    class _SemanticLLM:
+        def invoke(self, _prompt, config=None):
+            del config
+            return AIMessage(content="The bounded update reaffirms the baseline.")
+
+    class _SerializerLLM:
+        preferred_structured_output_method = "function_calling"
+        structured_output_max_tokens = 16_384
+
+        def with_structured_output(
+            self,
+            schema,
+            *,
+            method=None,
+            include_raw=False,
+            **_kwargs,
+        ):
+            assert include_raw is True
+            if schema.__name__ == "IncrementalSynthesis":
+                if method == "json_mode":
+                    return _Invoker(RuntimeError("monolithic repair unavailable"))
+                return _Invoker(
+                    {
+                        "raw": AIMessage(
+                            content="",
+                            response_metadata={"finish_reason": "length"},
+                        ),
+                        "parsed": None,
+                        "parsing_error": ValueError("truncated"),
+                    }
+                )
+            if schema.__name__ == "_IncrementalReassessmentSection":
+                parsed = {
+                    "reassessment": {
+                        "entries": [
+                            {
+                                "component_id": component_id,
+                                "disposition": "reaffirmed",
+                                "reason": "The bounded update does not change this component.",
+                            }
+                            for component_id in component_ids
+                        ]
+                    },
+                    "full_research_required_reasons": [],
+                }
+            elif schema.__name__ == "_IncrementalDecisionSection":
+                parsed = {"decision": baseline_decision.model_dump(mode="json")}
+            else:
+                raise AssertionError(f"unexpected schema: {schema.__name__}")
+            return _Invoker(
+                {
+                    "raw": AIMessage(content=""),
+                    "parsed": parsed,
+                    "parsing_error": None,
+                }
+            )
+
+    serializer = _SerializerLLM()
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: RunLLMs(
+            quick=_SemanticLLM(),
+            deep=_SemanticLLM(),
+            quick_serializer=serializer,
+            deep_serializer=serializer,
+        ),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_synthesizer=None,
+        now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    node = repository.get_timeline("NVDA").nodes[-1]
+    assert len(node.reassessment.entries) == len(component_ids)
+    assert any(
+        event.event_type == "node.output_recovered"
+        and event.payload["method"] == "sectioned_recovery"
+        for event in repository.list_events(result.run_id)
+    )
 
 
 def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(

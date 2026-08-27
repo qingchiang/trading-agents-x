@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -28,7 +28,10 @@ from tradingagents.dataflows.interface import (
 )
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
-from tradingagents.graph.structured_output import StructuredOutputRunner
+from tradingagents.graph.structured_output import (
+    StructuredOutputResult,
+    StructuredOutputRunner,
+)
 from tradingagents.persistence import upgrade_database
 from tradingagents.version import __version__
 
@@ -36,6 +39,7 @@ from .contracts import (
     CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisRequest,
     AnalysisResult,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     FullResearchRequiredReason,
     IncrementalCollectionPreflight,
@@ -46,6 +50,7 @@ from .contracts import (
     PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
+    ResearchDecision,
     ResearchNodeComparison,
     ResearchNodeComparisonSelection,
     ResearchReassessment,
@@ -88,6 +93,23 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[RunEvent], None]
 EligibilityResolver = Callable[[str], Any]
 IncrementalSynthesizer = Callable[[IncrementalSynthesisInput], IncrementalSynthesis]
+
+
+class _IncrementalReassessmentSection(BaseModel):
+    """Bounded truncation-recovery section for baseline component review."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reassessment: ResearchReassessment
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class _IncrementalDecisionSection(BaseModel):
+    """Bounded truncation-recovery section for the complete current Decision."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: ResearchDecision
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -1131,6 +1153,86 @@ class AnalysisService:
             "decision": {"rating": "hold", "thesis": "Complete current decision."},
             "full_research_required_reasons": [],
         }
+        allowed_evidence_refs = tuple(
+            dict.fromkeys(
+                (
+                    *synthesis_input.permitted_baseline_evidence_refs,
+                    *(item.ref for item in synthesis_input.incremental_evidence.items),
+                )
+            )
+        )
+
+        def sectioned_recovery() -> StructuredOutputResult[IncrementalSynthesis]:
+            bounded_input = synthesis_input.model_dump_json(indent=2)
+            reassessment = StructuredOutputRunner(
+                llm=serializer_llm,
+                schema=_IncrementalReassessmentSection,
+                validator=lambda value: value,
+                node="incremental.synthesis.reassessment",
+                event_writer=event_writer,
+                invoke_config={
+                    "metadata": {
+                        "research_node": "incremental.synthesis.reassessment",
+                    }
+                },
+                repair_instructions=(
+                    "Preserve every baseline component ID, typed reason code, "
+                    "and Evidence reference exactly."
+                ),
+            ).invoke(
+                (
+                    "Recover only the complete Research Reassessment and any "
+                    "Full Research Required reasons from the semantic brief and "
+                    "bounded input. Reassess every Full Baseline Decision Component "
+                    "with a concise reason. Do not serialize the current Decision. "
+                    f"Write all human-readable prose in {output_language}.\n\n"
+                    f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
+                    f"BOUNDED INPUT:\n{bounded_input}"
+                ),
+                example={
+                    "reassessment": example["reassessment"],
+                    "full_research_required_reasons": [],
+                },
+                allowed_evidence_refs=allowed_evidence_refs,
+            ).value
+            decision = StructuredOutputRunner(
+                llm=serializer_llm,
+                schema=_IncrementalDecisionSection,
+                validator=lambda value: value,
+                node="incremental.synthesis.decision",
+                event_writer=event_writer,
+                invoke_config={
+                    "metadata": {
+                        "research_node": "incremental.synthesis.decision",
+                    }
+                },
+                repair_instructions=(
+                    "Return one complete current Research Decision using only "
+                    "permitted Evidence references."
+                ),
+            ).invoke(
+                (
+                    "Recover only the complete current Research Decision from the "
+                    "semantic brief and bounded input. Do not serialize the Research "
+                    "Reassessment or Full Research Required reasons. "
+                    f"Write all human-readable prose in {output_language}.\n\n"
+                    f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
+                    f"BOUNDED INPUT:\n{bounded_input}"
+                ),
+                example={"decision": example["decision"]},
+                allowed_evidence_refs=allowed_evidence_refs,
+            ).value
+            return StructuredOutputResult(
+                value=IncrementalSynthesis(
+                    reassessment=reassessment.reassessment,
+                    decision=decision.decision,
+                    full_research_required_reasons=(
+                        reassessment.full_research_required_reasons
+                    ),
+                ),
+                generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+            )
+
         with metrics.phase("incremental.synthesis.serialize", event_writer=event_writer):
             output = StructuredOutputRunner(
                 llm=serializer_llm,
@@ -1144,17 +1246,11 @@ class AnalysisService:
                     f"{output_language}. Preserve IDs, enums, Evidence refs, and "
                     "typed collection limitations exactly."
                 ),
+                truncation_recovery=sectioned_recovery,
             ).invoke(
                 serializer_prompt,
                 example=example,
-                allowed_evidence_refs=tuple(
-                    dict.fromkeys(
-                        (
-                            *synthesis_input.permitted_baseline_evidence_refs,
-                            *(item.ref for item in synthesis_input.incremental_evidence.items),
-                        )
-                    )
-                ),
+                allowed_evidence_refs=allowed_evidence_refs,
             )
         return output.value
 
