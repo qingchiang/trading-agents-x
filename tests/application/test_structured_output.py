@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
 from tradingagents.graph.deliberation import invoke_research_decision
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
+    StructuredOutputResult,
     StructuredOutputRunner,
 )
 
@@ -410,6 +411,41 @@ def test_truncated_primary_output_uses_specific_recovery_reason() -> None:
     _invoke(_runner(llm, events))
 
     assert events[0]["payload"]["reason_code"] == "output_truncated"
+
+
+def test_configured_schema_failure_uses_sectioned_recovery() -> None:
+    events: list[dict[str, Any]] = []
+    invalid = {
+        "raw": AIMessage(content=""),
+        "parsed": {"role": "bear"},
+        "parsing_error": None,
+    }
+    llm = _FakeLLM(
+        primary=invalid,
+        recovery=AssertionError("generic repair must not run"),
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        event_writer=events.append,
+        truncation_recovery=lambda: StructuredOutputResult(
+            value=_review(),
+            generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+        ),
+        sectioned_recovery_reasons=("output_truncated", "schema_validation"),
+    )
+
+    result = _invoke(runner)
+
+    assert result.value == _review()
+    assert result.generation_method is ArtifactGenerationMethod.SECTIONED_RECOVERY
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+    assert [event["event_type"] for event in events] == [
+        "node.output_retry",
+        "node.output_recovered",
+    ]
 
 
 def _decision_payload(evidence_ref: str) -> dict[str, Any]:

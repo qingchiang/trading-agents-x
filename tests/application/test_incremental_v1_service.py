@@ -488,9 +488,11 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert result.metrics.llm_calls == 0
 
 
-def test_truncated_incremental_synthesis_commits_via_sectioned_recovery(
+@pytest.mark.parametrize("monolithic_failure", ("truncated", "schema_validation"))
+def test_failed_monolithic_incremental_synthesis_commits_via_sectioned_recovery(
     app_settings,
     repository,
+    monolithic_failure: str,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
@@ -550,6 +552,14 @@ def test_truncated_incremental_synthesis_commits_via_sectioned_recovery(
             if schema.__name__ == "IncrementalSynthesis":
                 if method == "json_mode":
                     return _Invoker(RuntimeError("monolithic repair unavailable"))
+                if monolithic_failure == "schema_validation":
+                    return _Invoker(
+                        {
+                            "raw": AIMessage(content="{}"),
+                            "parsed": {"reassessment": {"entries": []}},
+                            "parsing_error": None,
+                        }
+                    )
                 return _Invoker(
                     {
                         "raw": AIMessage(

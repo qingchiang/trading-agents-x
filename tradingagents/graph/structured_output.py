@@ -104,6 +104,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
         ) = None,
+        sectioned_recovery_reasons: tuple[str, ...] = ("output_truncated",),
     ):
         self.llm = llm
         self.schema = schema
@@ -116,6 +117,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         self.candidate_only_repair = candidate_only_repair
         self.repair_instructions = repair_instructions
         self.truncation_recovery = truncation_recovery
+        self.sectioned_recovery_reasons = sectioned_recovery_reasons
 
     def invoke(
         self,
@@ -201,7 +203,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                         )
 
         if (
-            primary_reason == "output_truncated"
+            primary_reason in self.sectioned_recovery_reasons
             and self.truncation_recovery is not None
         ):
             self._emit(
@@ -371,7 +373,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                     )
 
         if (
-            failure_reason == "output_truncated"
+            failure_reason in self.sectioned_recovery_reasons
             and self.truncation_recovery is not None
         ):
             self._emit(

@@ -1247,6 +1247,7 @@ class AnalysisService:
                     "typed collection limitations exactly."
                 ),
                 truncation_recovery=sectioned_recovery,
+                sectioned_recovery_reasons=("output_truncated", "schema_validation"),
             ).invoke(
                 serializer_prompt,
                 example=example,
