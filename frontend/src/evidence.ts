@@ -12,6 +12,7 @@ export type EvidenceDisplayGroup = {
   evidenceTypes: string[];
   quality: NonNullable<EvidenceItem["quality"]>;
   fallback: boolean;
+  origins: ("current" | "baseline")[];
 };
 
 export type EvidenceReferenceIndex = {
@@ -40,23 +41,39 @@ const qualityRank: Record<
 
 export function buildEvidenceReferenceIndex(
   evidence: EvidenceBundle | null,
+  baselineEvidence: EvidenceBundle | null = null,
 ): EvidenceReferenceIndex {
-  const grouped = new Map<string, EvidenceItem[]>();
-  for (const item of evidence?.items ?? []) {
+  const grouped = new Map<
+    string,
+    { item: EvidenceItem; origin: "current" | "baseline" }[]
+  >();
+  const entries = [
+    ...(evidence?.items ?? []).map((item) => ({
+      item,
+      origin: "current" as const,
+    })),
+    ...(baselineEvidence?.items ?? []).map((item) => ({
+      item,
+      origin: "baseline" as const,
+    })),
+  ];
+  for (const entry of entries) {
+    const item = entry.item;
     const key =
       item.content !== null &&
       item.content !== undefined &&
       item.content.length > 0
         ? `content:${item.content}`
         : `ref:${item.ref}`;
-    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   }
 
   const aliases: Record<string, string> = {};
   const primaryRefs: Record<string, string> = {};
   const refsByAlias: Record<string, string[]> = {};
   const groups = Array.from(grouped.values()).map(
-    (items, index): EvidenceDisplayGroup => {
+    (entries, index): EvidenceDisplayGroup => {
+      const items = entries.map((entry) => entry.item);
       const alias = `E${String(index + 1).padStart(2, "0")}`;
       const refs = items.map((item) => item.ref);
       const primaryRef = refs[0];
@@ -93,6 +110,7 @@ export function buildEvidenceReferenceIndex(
             : worst;
         }, "high"),
         fallback: items.some((item) => item.fallback),
+        origins: Array.from(new Set(entries.map((entry) => entry.origin))),
       };
     },
   );

@@ -7,6 +7,7 @@ import {
   type AnalystReport,
   type Capabilities,
   type EvidenceBundle,
+  type IncrementalAnalysisBrief,
   type ResearchArtifact,
   type ResearchDecision,
   type ResearchNodeView,
@@ -15,6 +16,7 @@ import {
   type StructuredRecoveryNotice,
 } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
+import EvidenceLinks from "../components/EvidenceLinks";
 import RunMetricsPanel from "../components/RunMetricsPanel";
 import {
   buildEvidenceReferenceIndex,
@@ -35,12 +37,28 @@ import {
   type ActivityStage,
   type ActivityState,
 } from "../runActivity";
+import {
+  baselineComponentText,
+  groupReassessment,
+  reassessmentDispositionCounts,
+  type ReassessmentGroupKey,
+} from "../reassessment";
 
 const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
+const ResearchMarkdownReader = lazy(() =>
+  import("../components/AnalystReportView").then((module) => ({
+    default: module.ResearchMarkdownReader,
+  })),
+);
 const DeliberationView = lazy(() => import("../components/DeliberationView"));
 const EvidenceTableView = lazy(() => import("../components/EvidenceTableView"));
 const Markdown = lazy(() => import("../components/Markdown"));
 const ResearchDecisionView = lazy(() => import("../components/ResearchDecisionView"));
+const ResearchDecisionContentView = lazy(() =>
+  import("../components/ResearchDecisionView").then((module) => ({
+    default: module.ResearchDecisionContent,
+  })),
+);
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
@@ -76,6 +94,7 @@ const eventNames = [
 ];
 const viewNames = [
   "incremental",
+  "brief",
   "reassessment",
   "timeline",
   "deliberation",
@@ -99,6 +118,7 @@ export default function RunDetail() {
   const [detail, setDetail] = useState<RunDetailType | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [evidence, setEvidence] = useState<EvidenceBundle | null>(null);
+  const [baselineEvidence, setBaselineEvidence] = useState<EvidenceBundle | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
@@ -112,17 +132,15 @@ export default function RunDetail() {
   const requestedView = searchParams.get("view");
   const isIncremental = detail?.run.research_kind === "incremental";
   const availableViews: ViewName[] = isIncremental
-    ? ["incremental", "reassessment", "evidence", "timeline"]
+    ? ["decision", "brief", "reassessment", "evidence", "timeline"]
     : ["decision", "reports", "deliberation", "evidence", "timeline"];
   const defaultView: ViewName =
-    detail?.run.status === "succeeded"
-      ? isIncremental
-        ? "incremental"
-        : "decision"
-      : "timeline";
+    detail?.run.status === "succeeded" ? "decision" : "timeline";
+  const normalizedRequestedView =
+    requestedView === "incremental" ? "decision" : requestedView;
   const activeView: ViewName =
-    isViewName(requestedView) && availableViews.includes(requestedView)
-      ? requestedView
+    isViewName(normalizedRequestedView) && availableViews.includes(normalizedRequestedView)
+      ? normalizedRequestedView
       : defaultView;
   const requestedReport = searchParams.get("report") ?? "";
   const focusedEvidence = searchParams.get("ref") ?? "";
@@ -234,9 +252,13 @@ export default function RunDetail() {
   const activeReport = reportNames.includes(requestedReport)
     ? requestedReport
     : (reportNames[0] ?? "");
-  const evidenceIndex = useMemo(
+  const currentEvidenceIndex = useMemo(
     () => buildEvidenceReferenceIndex(evidence),
     [evidence],
+  );
+  const evidenceIndex = useMemo(
+    () => buildEvidenceReferenceIndex(evidence, baselineEvidence),
+    [baselineEvidence, evidence],
   );
   const decision = useMemo(
     () =>
@@ -275,7 +297,7 @@ export default function RunDetail() {
   useEffect(() => {
     if (activeView !== "evidence" || !focusedEvidence) return;
     const targetRef =
-      evidenceIndex.primaryRefs[focusedEvidence] ?? focusedEvidence;
+      currentEvidenceIndex.primaryRefs[focusedEvidence] ?? focusedEvidence;
     const target = document.getElementById(`evidence-${targetRef}`);
     target?.focus();
     target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -283,8 +305,33 @@ export default function RunDetail() {
     activeView,
     evidence?.digest,
     evidence?.items.length,
-    evidenceIndex.primaryRefs,
+    currentEvidenceIndex.primaryRefs,
     focusedEvidence,
+  ]);
+
+  useEffect(() => {
+    setBaselineEvidence(null);
+  }, [runId]);
+
+  useEffect(() => {
+    const baselineRunId = detail?.incremental_context?.full_baseline.run_id;
+    if (
+      !baselineRunId ||
+      baselineEvidence ||
+      !["decision", "brief", "reassessment"].includes(activeView)
+    ) return;
+    let active = true;
+    void api.evidence(baselineRunId).then(
+      (bundle) => active && setBaselineEvidence(bundle),
+      () => active && setBaselineEvidence(null),
+    );
+    return () => {
+      active = false;
+    };
+  }, [
+    activeView,
+    baselineEvidence,
+    detail?.incremental_context?.full_baseline.run_id,
   ]);
 
   const selectView = useCallback(
@@ -539,12 +586,34 @@ export default function RunDetail() {
       </nav>
 
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
-        {activeView === "incremental" && detail.research_node && (
-          <IncrementalDetailPanel node={detail.research_node} />
+        {activeView === "decision" && isIncremental && detail.research_node && (
+          <IncrementalDecisionPanel
+            node={detail.research_node}
+            decision={decision}
+            numericAudit={detail.result?.numeric_audit}
+            evidenceIndex={evidenceIndex}
+            onEvidence={openSourceDrawer}
+            onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
+          />
+        )}
+
+        {activeView === "brief" && isIncremental && (
+          <IncrementalBriefPanel
+            brief={detail.incremental_context?.analysis_brief ?? null}
+            runId={run.id}
+            evidenceIndex={evidenceIndex}
+            onEvidence={openSourceDrawer}
+          />
         )}
 
         {activeView === "reassessment" && detail.research_node && (
-          <ReassessmentPanel node={detail.research_node} />
+          <ReassessmentPanel
+            node={detail.research_node}
+            baselineDecision={detail.incremental_context?.full_baseline.decision ?? null}
+            currentDecision={decision}
+            evidenceIndex={evidenceIndex}
+            onEvidence={openSourceDrawer}
+          />
         )}
 
         {activeView === "timeline" && (
@@ -568,9 +637,10 @@ export default function RunDetail() {
             focusedRef={focusedEvidence}
             onReturn={returnFromEvidence}
             returnLabel={returnViewLabel(t, returnView)}
-            evidenceIndex={evidenceIndex}
+            evidenceIndex={currentEvidenceIndex}
             onEvidence={openEvidence}
             incremental={isIncremental}
+            incrementalNode={isIncremental ? detail.research_node ?? null : null}
           />
         )}
         {activeView === "reports" && (
@@ -584,7 +654,7 @@ export default function RunDetail() {
             evidenceIndex={evidenceIndex}
           />
         )}
-        {activeView === "decision" && (
+        {activeView === "decision" && !isIncremental && (
           <DecisionPanel
             decision={decision}
             numericAudit={detail.result?.numeric_audit}
@@ -613,101 +683,181 @@ export default function RunDetail() {
   );
 }
 
-function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
+function IncrementalDecisionPanel({
+  node,
+  decision,
+  numericAudit,
+  evidenceIndex,
+  onEvidence,
+  onOpenWarnings,
+}: {
+  node: ResearchNodeView;
+  decision: ResearchDecision | null;
+  numericAudit: AnalysisResult["numeric_audit"];
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+  onOpenWarnings: () => void;
+}) {
   const { t } = useTranslation();
+  if (!decision) {
+    return (
+      <article className="panel audit-panel">
+        <div className="empty-state">{t("noDecision")}</div>
+      </article>
+    );
+  }
   return (
-    <article className="panel incremental-detail-panel" id="run-view-incremental" role="tabpanel">
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">{t("incrementalResearch")}</p>
-          <h2>{t("incrementalUpdateSummary")}</h2>
-        </div>
-        {node.decision && (
-          <div className="decision-summary-meta">
-            <strong>{node.decision.rating}</strong>
-            <span>{t("confidencePercent", { value: Math.round(node.decision.confidence * 100) })}</span>
-          </div>
+    <article
+      className="panel audit-panel decision-panel-v2 incremental-decision-panel"
+      id="run-view-decision"
+      role="tabpanel"
+    >
+      <div className="incremental-decision-context">
+        <span className="advancement-status">
+          {t("informationAdvancement")}: {" "}
+          {advancementLabel(
+            t,
+            node.information_advancement?.reasons ?? [],
+          )}
+        </span>
+        {(node.full_research_required_reasons?.length ?? 0) > 0 && (
+          <section className="research-warning-block" role="status">
+            <h2>{t("fullResearchRecommended")}</h2>
+            {node.full_research_required_reasons?.map((reason) => (
+              <p key={reason.code}>{reason.message}</p>
+            ))}
+          </section>
         )}
       </div>
-      {node.decision && (
-        <section className="incremental-thesis">
-          <h3>{t("thesis")}</h3>
-          <p>{node.decision.thesis}</p>
-        </section>
-      )}
-      <div className="incremental-detail-grid">
-        <section>
-          <h3>{t("informationAdvancement")}</h3>
-          <p>{node.information_advancement?.reasons?.join(", ") || t("notRecorded")}</p>
-        </section>
-        <section>
-          <h3>{t("researchAvailability")}</h3>
-          <ul className="compact-list">
-            {(node.research_availability?.domains?.length ?? 0) > 0 ? (
-              node.research_availability?.domains.map((domain) => (
-                <li key={domain.domain}>
-                  <strong>{t(`${domain.domain}Analyst`)}</strong>
-                  <span>{t(`availability_${domain.status}`)}</span>
-                </li>
-              ))
-            ) : <li>{t("notRecorded")}</li>}
-          </ul>
-        </section>
-        <section>
-          <h3>{t("collectionSummary")}</h3>
-          <ul className="compact-list">
-            {(node.collection_summary?.domains?.length ?? 0) > 0 ? (
-              node.collection_summary?.domains.map((domain) => (
-                <li key={domain.domain}>
-                  <strong>{t(`${domain.domain}Analyst`)}</strong>
-                  <span>{t(`collection_${domain.state}`)}</span>
-                  {domain.diagnostic && <p>{domain.diagnostic.code}</p>}
-                </li>
-              ))
-            ) : <li>{t("notRecorded")}</li>}
-          </ul>
-        </section>
-        <section>
-          <h3>{t("reassessment")}</h3>
-          <ReassessmentEntries node={node} />
-        </section>
-        <section>
-          <h3>{t("performance")}</h3>
-          <p>
-            {node.performance?.stock.calculation
-              ? `${t("stockReturn")}: ${new Intl.NumberFormat(undefined, {
-                  style: "percent",
-                  maximumFractionDigits: 2,
-                }).format(node.performance.stock.calculation.unrounded_return)}`
-              : node.performance?.stock.reason ??
-                (node.performance?.stock.status
-                  ? t(`performance_${node.performance.stock.status}`)
-                  : null) ??
-                t("notRecorded")}
-          </p>
-        </section>
-      </div>
-      {(node.full_research_required_reasons?.length ?? 0) > 0 && (
-        <section className="research-warning-block">
-          <h3>{t("fullResearchRecommended")}</h3>
-          {node.full_research_required_reasons?.map((reason) => (
-            <p key={reason.code}>{reason.message}</p>
-          ))}
-        </section>
-      )}
-      <details className="audit-disclosure">
-        <summary>{t("auditDetails")}</summary>
-        <pre>{JSON.stringify({ performance: node.performance, method_snapshot: node.method_snapshot }, null, 2)}</pre>
-      </details>
+      <ResearchDecisionContentView
+        decision={decision}
+        numericAudit={numericAudit}
+        evidenceIndex={evidenceIndex}
+        onEvidence={onEvidence}
+        onOpenWarnings={onOpenWarnings}
+      />
+      <PerformanceSection node={node} />
     </article>
   );
 }
 
-function ReassessmentPanel({ node }: { node: ResearchNodeView }) {
+function IncrementalBriefPanel({
+  brief,
+  runId,
+  evidenceIndex,
+  onEvidence,
+}: {
+  brief: IncrementalAnalysisBrief | null;
+  runId: string;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <article
-      className="panel incremental-detail-panel"
+      className="panel audit-panel report-panel reader-panel"
+      id="run-view-brief"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("incrementalResearch")}</p>
+          <h2>{t("analysisBrief")}</h2>
+        </div>
+      </div>
+      {!brief ? (
+        <div className="empty-state">{t("historicalBriefUnavailable")}</div>
+      ) : (
+        <ResearchMarkdownReader
+          markdown={brief.markdown}
+          sections={brief.report_sections}
+          runId={runId}
+          reportKey="incremental-brief"
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+          after={
+            <BriefAuditMetadata
+              brief={brief}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+            />
+          }
+        />
+      )}
+    </article>
+  );
+}
+
+function BriefAuditMetadata({
+  brief,
+  evidenceIndex,
+  onEvidence,
+}: {
+  brief: IncrementalAnalysisBrief;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <details className="report-metadata audit-details">
+      <summary>
+        <strong>{t("auditDetails")}</strong>
+        <span className="details-chevron" aria-hidden="true" />
+      </summary>
+      <div className="audit-details-body">
+        <dl className="definition-list compact-definition-list">
+          <div>
+            <dt>{t("promptVersion")}</dt>
+            <dd>{brief.prompt_version ?? t("notRecorded")}</dd>
+          </div>
+          <div>
+            <dt>{t("generationMethod")}</dt>
+            <dd>{brief.generation_method ?? t("notRecorded")}</dd>
+          </div>
+        </dl>
+        {(brief.warnings?.length ?? 0) > 0 && (
+          <div>
+            <strong>{t("warnings")}</strong>
+            <ul>
+              {brief.warnings?.map((warning) => (
+                <li key={warningKey(warning)}>{warning.message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <EvidenceLinks
+          refs={brief.evidence_refs ?? []}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+      </div>
+    </details>
+  );
+}
+
+function ReassessmentPanel({
+  node,
+  baselineDecision,
+  currentDecision,
+  evidenceIndex,
+  onEvidence,
+}: {
+  node: ResearchNodeView;
+  baselineDecision: ResearchDecision | null;
+  currentDecision: ResearchDecision | null;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  const entries = node.reassessment?.entries ?? [];
+  const counts = reassessmentDispositionCounts(entries);
+  const groups =
+    baselineDecision && currentDecision
+      ? groupReassessment(entries, currentDecision)
+      : [];
+  return (
+    <article
+      className="panel audit-panel incremental-reassessment-panel"
       id="run-view-reassessment"
       role="tabpanel"
     >
@@ -717,25 +867,261 @@ function ReassessmentPanel({ node }: { node: ResearchNodeView }) {
           <h2>{t("reassessment")}</h2>
         </div>
       </div>
-      <ReassessmentEntries node={node} />
+      <div className="reassessment-counts" aria-label={t("reassessmentSummary")}>
+        {[
+          "strengthened",
+          "weakened",
+          "overturned",
+          "unresolved",
+          "reaffirmed",
+        ].map((disposition) => (
+          <span
+            className={`reassessment-count ${disposition}`}
+            key={disposition}
+          >
+            {t(`reassessment_${disposition}`)}{" "}
+            <strong>{counts[disposition] ?? 0}</strong>
+          </span>
+        ))}
+      </div>
+      {!baselineDecision || !currentDecision ? (
+        <div className="empty-state">{t("baselineDecisionUnavailable")}</div>
+      ) : groups.length === 0 ? (
+        <div className="empty-state">{t("notRecorded")}</div>
+      ) : (
+        <div className="reassessment-groups">
+          {groups.map((group) => {
+            const changed = group.entries.filter(
+              (entry) => entry.disposition !== "reaffirmed",
+            );
+            const reaffirmed = group.entries.filter(
+              (entry) => entry.disposition === "reaffirmed",
+            );
+            return (
+              <details
+                className="reassessment-group"
+                open={changed.length > 0}
+                key={group.key}
+              >
+                <summary>
+                  <span>{t(reassessmentGroupLabel(group.key))}</span>
+                  <small>
+                    {t("changedReassessmentCount", {
+                      changed: changed.length,
+                      total: group.entries.length,
+                    })}
+                  </small>
+                </summary>
+                <section className="reassessment-current-snapshot">
+                  <h3>{t("currentDecisionSnapshot")}</h3>
+                  {group.currentSnapshot.length > 0 ? (
+                    <ul>
+                      {group.currentSnapshot.map((item, index) => (
+                        <li key={`${index}:${item}`}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>{t("notRecorded")}</p>
+                  )}
+                </section>
+                <div className="reassessment-entry-list">
+                  {changed.map((entry) => (
+                    <ReassessmentEntryCard
+                      entry={entry}
+                      baselineDecision={baselineDecision}
+                      evidenceIndex={evidenceIndex}
+                      onEvidence={onEvidence}
+                      key={entry.component_id}
+                    />
+                  ))}
+                  {reaffirmed.length > 0 && (
+                    <details className="reaffirmed-list">
+                      <summary>
+                        {t("showReaffirmed", { count: reaffirmed.length })}
+                      </summary>
+                      {reaffirmed.map((entry) => (
+                        <ReassessmentEntryCard
+                          entry={entry}
+                          baselineDecision={baselineDecision}
+                          evidenceIndex={evidenceIndex}
+                          onEvidence={onEvidence}
+                          key={entry.component_id}
+                        />
+                      ))}
+                    </details>
+                  )}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      )}
     </article>
   );
 }
 
-function ReassessmentEntries({ node }: { node: ResearchNodeView }) {
+function ReassessmentEntryCard({
+  entry,
+  baselineDecision,
+  evidenceIndex,
+  onEvidence,
+}: {
+  entry: NonNullable<ResearchNodeView["reassessment"]>["entries"][number];
+  baselineDecision: ResearchDecision;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
   const { t } = useTranslation();
-  const entries = node.reassessment?.entries ?? [];
+  const baselineText = baselineComponentText(baselineDecision, entry.component_id);
   return (
-    <ul className="compact-list">
-      {entries.length > 0 ? entries.map((entry) => (
-        <li key={entry.component_id}>
-          <strong>{entry.component_id}</strong>
-          <span>{t(`reassessment_${entry.disposition}`)}</span>
-          <p>{entry.reason}</p>
-        </li>
-      )) : <li>{t("notRecorded")}</li>}
-    </ul>
+    <article className={`reassessment-entry ${entry.disposition}`}>
+      <span className="reassessment-disposition">
+        {t(`reassessment_${entry.disposition}`)}
+      </span>
+      <div>
+        <h4>{t("baselineContent")}</h4>
+        <p>{baselineText ?? t("notRecorded")}</p>
+      </div>
+      <div>
+        <h4>{t("reassessmentReason")}</h4>
+        <p>{entry.reason}</p>
+      </div>
+      <EvidenceLinks
+        refs={entry.evidence_refs ?? []}
+        evidenceIndex={evidenceIndex}
+        onEvidence={onEvidence}
+        compact
+      />
+      <details className="audit-disclosure">
+        <summary>{t("auditDetails")}</summary>
+        <code>{entry.component_id}</code>
+      </details>
+    </article>
   );
+}
+
+function PerformanceSection({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  const performance = node.performance;
+  if (!performance) return null;
+  return (
+    <section className="decision-section incremental-performance-section">
+      <div className="decision-section-heading">
+        <div>
+          <p className="eyebrow">{t("sinceFullBaseline")}</p>
+          <h2>{t("performance")}</h2>
+        </div>
+      </div>
+      <div className="performance-card-grid">
+        <PerformanceCard
+          label={t("currentInstrument")}
+          component={performance.stock}
+        />
+        {(performance.benchmarks ?? []).map((benchmark) => (
+          <PerformanceCard
+            label={benchmark.name}
+            component={benchmark.component}
+            reportedDifference={benchmark.reported_difference}
+            key={benchmark.name}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PerformanceCard({
+  label,
+  component,
+  reportedDifference,
+}: {
+  label: string;
+  component: NonNullable<ResearchNodeView["performance"]>["stock"];
+  reportedDifference?: number | null;
+}) {
+  const { t } = useTranslation();
+  const calculation = component.calculation;
+  return (
+    <article className={`performance-card ${component.status}`}>
+      <header>
+        <strong>{label}</strong>
+        <span>{t(`performance_${component.status}`)}</span>
+      </header>
+      {calculation ? (
+        <>
+          <strong className="performance-return">
+            {formatReturn(calculation.unrounded_return)}
+          </strong>
+          <small>
+            {calculation.start_session} → {calculation.end_session}
+          </small>
+        </>
+      ) : (
+        <p>{component.reason ?? t("notRecorded")}</p>
+      )}
+      {reportedDifference !== null && reportedDifference !== undefined && (
+        <p className="reported-difference">
+          {t("reportedBenchmarkDifference")}:{" "}
+          <strong>{formatReturn(reportedDifference)}</strong>
+        </p>
+      )}
+      {calculation && (
+        <details className="audit-disclosure">
+          <summary>{t("auditDetails")}</summary>
+          <dl className="definition-list compact-definition-list">
+            <div>
+              <dt>{t("provider")}</dt>
+              <dd>{calculation.provider}</dd>
+            </div>
+            <div>
+              <dt>{t("fallback")}</dt>
+              <dd>{calculation.fallback ? t("yes") : t("no")}</dd>
+            </div>
+            <div>
+              <dt>{t("adjustmentBasis")}</dt>
+              <dd>{calculation.adjustment_basis}</dd>
+            </div>
+            <div>
+              <dt>{t("informationCutoff")}</dt>
+              <dd>
+                {calculation.baseline_information_cutoff_at} →{" "}
+                {calculation.target_information_cutoff_at}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("retrievedAt")}</dt>
+              <dd>{calculation.retrieved_at}</dd>
+            </div>
+          </dl>
+        </details>
+      )}
+    </article>
+  );
+}
+
+function formatReturn(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "percent",
+    maximumFractionDigits: 2,
+    signDisplay: "exceptZero",
+  }).format(value);
+}
+
+function advancementLabel(t: TFunction, reasons: string[]): string {
+  if (reasons.length === 0) return t("notRecorded");
+  const labels: Record<string, string> = {
+    admissible_observation: "advancementAdmissibleObservation",
+    completed_stock_session: "advancementCompletedMarketSession",
+    newly_completed_market_session: "advancementCompletedMarketSession",
+    near_live_advisory: "advancementNearLiveAdvisory",
+  };
+  return reasons
+    .map((reason) => t(labels[reason] ?? "advancementOther", { reason }))
+    .join(", ");
+}
+
+function reassessmentGroupLabel(group: ReassessmentGroupKey): string {
+  return `reassessmentGroup_${group}`;
 }
 
 function TimelinePanel({
@@ -883,6 +1269,7 @@ function EvidencePanel({
   evidenceIndex,
   onEvidence,
   incremental,
+  incrementalNode,
 }: {
   evidence: EvidenceBundle | null;
   evidenceStatus: RunDetailType["evidence_status"]["status"];
@@ -893,6 +1280,7 @@ function EvidencePanel({
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
   incremental: boolean;
+  incrementalNode: ResearchNodeView | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -917,6 +1305,45 @@ function EvidencePanel({
           <span className="event-count">{evidenceIndex.groups.length}</span>
         </div>
       </div>
+      {incremental && incrementalNode && (
+        <div className="evidence-update-overview">
+          <section>
+            <h3>{t("informationAdvancement")}</h3>
+            <p>
+              {advancementLabel(
+                t,
+                incrementalNode.information_advancement?.reasons ?? [],
+              )}
+            </p>
+          </section>
+          <section>
+            <h3>{t("researchAvailability")}</h3>
+            <div className="availability-row">
+              {(incrementalNode.research_availability?.domains ?? []).map((domain) => (
+                <span
+                  className={`availability-chip ${domain.status}`}
+                  key={domain.domain}
+                >
+                  {t(`${domain.domain}Analyst`)} · {t(`availability_${domain.status}`)}
+                </span>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h3>{t("collectionSummary")}</h3>
+            <div className="availability-row">
+              {(incrementalNode.collection_summary?.domains ?? []).map((domain) => (
+                <span
+                  className={`availability-chip ${domain.state}`}
+                  key={domain.domain}
+                >
+                  {t(`${domain.domain}Analyst`)} · {t(`collection_${domain.state}`)}
+                </span>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       {!evidence ? (
         <div className="empty-state">
           {evidenceStatus === "pending" &&
@@ -926,29 +1353,23 @@ function EvidencePanel({
         </div>
       ) : (
         <>
-          <dl className="bundle-summary">
-            <div>
-              <dt>{t("evidenceDigest")}</dt>
-              <dd>{evidence.digest ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("analysisDate")}</dt>
-              <dd>{evidence.analysis_date}</dd>
-            </div>
-            <div>
-              <dt>{t("version")}</dt>
-              <dd>{evidence.version ?? "1"}</dd>
-            </div>
-            <div>
-              <dt>{t("displayedEvidence")}</dt>
-              <dd>
-                {t("evidenceBodiesSummary", {
-                  groups: evidenceIndex.groups.length,
-                  items: evidence.items.length,
-                })}
-              </dd>
-            </div>
-          </dl>
+          {incremental ? (
+            <details className="audit-details evidence-bundle-audit">
+              <summary>
+                <strong>{t("evidenceBundleAudit")}</strong>
+                <span>{t("auditDetails")}</span>
+              </summary>
+              <EvidenceBundleSummary
+                evidence={evidence}
+                evidenceIndex={evidenceIndex}
+              />
+            </details>
+          ) : (
+            <EvidenceBundleSummary
+              evidence={evidence}
+              evidenceIndex={evidenceIndex}
+            />
+          )}
           <div className="evidence-list">
             {evidenceIndex.groups.map((group) => (
               <EvidenceCard
@@ -974,6 +1395,41 @@ function EvidencePanel({
         </>
       )}
     </article>
+  );
+}
+
+function EvidenceBundleSummary({
+  evidence,
+  evidenceIndex,
+}: {
+  evidence: EvidenceBundle;
+  evidenceIndex: EvidenceReferenceIndex;
+}) {
+  const { t } = useTranslation();
+  return (
+    <dl className="bundle-summary">
+      <div>
+        <dt>{t("evidenceDigest")}</dt>
+        <dd>{evidence.digest ?? "—"}</dd>
+      </div>
+      <div>
+        <dt>{t("analysisDate")}</dt>
+        <dd>{evidence.analysis_date}</dd>
+      </div>
+      <div>
+        <dt>{t("version")}</dt>
+        <dd>{evidence.version ?? "1"}</dd>
+      </div>
+      <div>
+        <dt>{t("displayedEvidence")}</dt>
+        <dd>
+          {t("evidenceBodiesSummary", {
+            groups: evidenceIndex.groups.length,
+            items: evidence.items.length,
+          })}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -1132,6 +1588,14 @@ function EvidenceSourceDrawer({
         ) : (
           <>
             <dl className="evidence-metadata">
+              <div>
+                <dt>{t("evidenceOrigin")}</dt>
+                <dd>
+                  {group.origins
+                    .map((origin) => t(`evidenceOrigin_${origin}`))
+                    .join(", ")}
+                </dd>
+              </div>
               <div>
                 <dt>{t("quality")}</dt>
                 <dd>{group.quality}</dd>
@@ -1581,6 +2045,7 @@ function reportLabel(t: TFunction, name: string): string {
 function returnViewLabel(t: TFunction, view: ReturnViewName): string {
   const labels: Record<ReturnViewName, string> = {
     incremental: "returnToIncrementalSummary",
+    brief: "returnToAnalysisBrief",
     reassessment: "returnToReassessment",
     timeline: "returnToActivity",
     deliberation: "returnToDeliberation",
@@ -1592,6 +2057,7 @@ function returnViewLabel(t: TFunction, view: ReturnViewName): string {
 
 function viewLabel(view: ViewName, incremental: boolean): string {
   if (view === "decision") return "overview";
+  if (view === "brief") return "analysisBrief";
   if (view === "timeline") return "activity";
   if (view === "evidence" && incremental) return "evidenceUpdates";
   return view;

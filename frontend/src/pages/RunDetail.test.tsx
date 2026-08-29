@@ -871,24 +871,104 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     research_availability: { domains: [] },
     information_advancement: {
       advanced: true,
-      reasons: ["A new filing changed the decision."],
+      reasons: ["completed_stock_session"],
     },
-    performance: null,
-    reassessment: { entries: [] },
-    full_research_required_reasons: [],
+    performance: {
+      stock: {
+        status: "calculated",
+        calculation: performanceCalculation(0.12),
+      },
+      benchmarks: [
+        {
+          name: "S&P 500",
+          component: {
+            status: "calculated",
+            calculation: performanceCalculation(0.04),
+          },
+          reported_difference: 0.08,
+        },
+        {
+          name: "NASDAQ 100",
+          component: {
+            status: "calculated",
+            calculation: performanceCalculation(0.06),
+          },
+          reported_difference: 0.06,
+        },
+      ],
+    },
+    reassessment: {
+      entries: [
+        {
+          component_id: "thesis",
+          disposition: "weakened",
+          reason: "The new filing adds uncertainty.",
+          evidence_refs: ["ev_baseline0001"],
+        },
+        {
+          component_id: "risks.0",
+          disposition: "reaffirmed",
+          reason: "Demand risk remains.",
+          evidence_refs: ["ev_0123456789ab"],
+        },
+      ],
+    },
+    full_research_required_reasons: [
+      { code: "scope_gap", message: "A complete refresh would resolve the scope gap." },
+    ],
   } as never;
+  incremental.incremental_context = {
+    analysis_brief: {
+      markdown: "# Key update\n\nThe filing changes the outlook.[^ev_baseline0001]",
+      report_sections: [
+        {
+          id: "incremental.section_1",
+          title: "Key update",
+          anchor: "key-update",
+          source_refs: ["ev_baseline0001"],
+        },
+      ],
+      evidence_refs: ["ev_baseline0001"],
+      warnings: [],
+      prompt_version: "incremental-analysis-brief-v1",
+      generation_method: "markdown_audited",
+    },
+    full_baseline: {
+      run_id: "full-baseline",
+      analysis_date: "2026-07-20",
+      decision: detail.result!.decision!,
+    },
+  };
+  const baselineEvidence = structuredClone(detail.result!.evidence!);
+  baselineEvidence.digest = "baseline-digest";
+  baselineEvidence.items[0].ref = "ev_baseline0001";
   vi.mocked(api.run).mockResolvedValue(incremental);
+  vi.mocked(api.evidence).mockImplementation(async (runId) => {
+    expect(runId).toBe("full-baseline");
+    return baselineEvidence;
+  });
 
   render(
-    <Router initialPath="/runs/run-1">
+    <Router initialPath="/runs/run-1?view=incremental">
       <RunDetail />
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "Incremental update summary" })).toBeVisible();
-  expect(screen.getByText("A new filing changed the decision.")).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
+  expect(screen.getByText("Balanced research summary.")).toBeVisible();
+  expect(screen.getByText(/Newly completed market session/)).toBeVisible();
+  expect(screen.getByText("A complete refresh would resolve the scope gap.")).toBeVisible();
+  expect(screen.getByText("Current instrument")).toBeVisible();
+  expect(screen.getByText("S&P 500")).toBeVisible();
+  expect(screen.getByText("NASDAQ 100")).toBeVisible();
+  expect(screen.getAllByText(/Reported benchmark difference/)).toHaveLength(2);
+  expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Deliberation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Analysis brief" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
@@ -896,7 +976,91 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "href",
     "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
   );
+
+  await waitFor(() => expect(api.evidence).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
+  const briefHeading = await screen.findByRole("heading", { name: "Key update" });
+  expect(briefHeading).toBeVisible();
+  expect(briefHeading.closest("article")).toHaveTextContent(
+    "The filing changes the outlook.",
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Reassessment" }));
+  expect(await screen.findByText("The new filing adds uncertainty.")).toBeVisible();
+  expect(screen.getByText("1 changed · 1 total")).toBeVisible();
+  const reaffirmedSummary = screen.getByText("Show 1 reaffirmed item");
+  expect(reaffirmedSummary).toBeInTheDocument();
+  expect(reaffirmedSummary.closest("details")).not.toHaveAttribute("open");
 });
+
+test("keeps baseline Evidence out of Evidence updates and supports historical briefs", async () => {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.research_kind = "incremental";
+  incremental.run.full_baseline_run_id = "full-baseline";
+  incremental.research_node = {
+    id: "run-1",
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_kind: "incremental",
+    full_baseline_run_id: "full-baseline",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T20:00:00Z",
+    method_snapshot: {},
+    is_active: true,
+    is_primary: true,
+    is_cycle_head: true,
+    is_baseline_compatible: true,
+    cycle_id: "full-baseline",
+    collection_summary: { version: "1", domains: [] },
+    research_availability: { version: "1", domains: [] },
+    information_advancement: { advanced: false, reasons: [] },
+    performance: null,
+    reassessment: { entries: [] },
+    full_research_required_reasons: [],
+  } as never;
+  incremental.incremental_context = {
+    analysis_brief: null,
+    full_baseline: {
+      run_id: "full-baseline",
+      analysis_date: "2026-07-20",
+      decision: detail.result!.decision!,
+    },
+  };
+  vi.mocked(api.run).mockResolvedValue(incremental);
+
+  render(
+    <Router initialPath="/runs/run-1?view=evidence">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Collection Summary" })).toBeVisible();
+  expect(api.evidence).not.toHaveBeenCalled();
+  expect(screen.getByText("Price snapshot · Composite snapshot")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
+  expect(
+    await screen.findByText("This historical run did not record an analysis brief."),
+  ).toBeVisible();
+  await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
+});
+
+function performanceCalculation(unroundedReturn: number) {
+  return {
+    provider: "fixture-feed",
+    fallback: false,
+    adjustment_basis: "split-adjusted close",
+    retrieved_at: "2026-07-24T20:05:00Z",
+    baseline_information_cutoff_at: "2026-07-20T20:00:00Z",
+    target_information_cutoff_at: "2026-07-24T20:00:00Z",
+    start_session: "2026-07-20",
+    end_session: "2026-07-24",
+    start_value: 100,
+    end_value: 112,
+    formula: "(end / start) - 1",
+    unrounded_return: unroundedReturn,
+  };
+}
 
 test("loads only Run Detail initially and refreshes open deliberation artifacts on SSE", async () => {
   render(

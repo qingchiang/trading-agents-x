@@ -2852,6 +2852,37 @@ label small {
   gap: 3px;
 }
 
+.evidence-update-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px 22px;
+  background: #f7faff;
+  border-block: 1px solid var(--line-soft);
+}
+
+.evidence-update-overview section {
+  min-width: 0;
+  padding: 13px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.evidence-update-overview h3,
+.evidence-update-overview p {
+  margin: 0;
+}
+
+.evidence-update-overview h3 {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.evidence-bundle-audit {
+  margin: 16px 22px 0;
+}
+
 .compact-list p {
   margin: 0;
 }
@@ -3116,6 +3147,10 @@ label small {
   .incremental-product-grid,
   .incremental-detail-grid,
   .comparison-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .evidence-update-overview {
     grid-template-columns: 1fr;
   }
 

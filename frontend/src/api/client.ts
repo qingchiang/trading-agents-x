@@ -10,6 +10,10 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type RunCreationTemplate = components["schemas"]["RunCreationTemplate"];
 export type TimelineDetail = components["schemas"]["TimelineDetail"];
 export type ResearchNodeView = components["schemas"]["ResearchNodeView"];
+export type IncrementalAnalysisBrief =
+  components["schemas"]["IncrementalAnalysisBrief"];
+export type IncrementalRunContext =
+  components["schemas"]["IncrementalRunContext"];
 export type ResearchCycleView = components["schemas"]["ResearchCycleView"];
 export type FullBaselineCandidate = components["schemas"]["FullBaselineCandidate"];
 export type FullBaselineCandidates = components["schemas"]["FullBaselineCandidates"];
