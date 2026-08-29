@@ -1174,6 +1174,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
   await page.goto("/timelines/NVDA");
   await expect(page.locator(".research-node-card.full")).toBeVisible();
   await expect(page.locator(".research-node-card.incremental")).toBeVisible();
+  await page.getByText(/Update details|更新详情|更新詳細/).click();
   await expect(
     page.getByText(/Research Availability|研究可用性|リサーチ可用性/),
   ).toBeVisible();
