@@ -67,6 +67,11 @@ _EN_LABELS = {
     ),
     "research_decision": "Research Decision",
     "no_decision": "No final decision was recorded.",
+    "incremental_products": "Incremental Research Products",
+    "information_advancement": "Information advancement",
+    "research_availability": "Research availability",
+    "reassessment": "Baseline reassessment",
+    "full_research_required": "Full Research required",
     "warnings": "Warnings",
     "no_warnings": "No structured warnings were recorded.",
     "performance": "Performance",
@@ -276,6 +281,11 @@ _ZH_LABELS = {
     "decision_brief_notice": "非正式结论，尚未通过 Final 决策契约审计。",
     "research_decision": "最终结论",
     "no_decision": "未记录最终研究结论。",
+    "incremental_products": "增量研究产物",
+    "information_advancement": "信息推进",
+    "research_availability": "研究可用性",
+    "reassessment": "基线再评估",
+    "full_research_required": "需要完整研究",
     "warnings": "警告",
     "no_warnings": "未记录结构化警告。",
     "performance": "性能指标",
@@ -461,6 +471,11 @@ _JA_LABELS = {
     ),
     "research_decision": "最終結論",
     "no_decision": "最終結論は記録されていません。",
+    "incremental_products": "増分リサーチ成果物",
+    "information_advancement": "情報の前進",
+    "research_availability": "リサーチ可用性",
+    "reassessment": "ベースライン再評価",
+    "full_research_required": "フルリサーチが必要",
     "warnings": "警告",
     "no_warnings": "構造化された警告は記録されていません。",
     "performance": "パフォーマンス指標",
@@ -734,6 +749,31 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             ]
         )
 
+    node = run_export.research_node
+    if node is not None and node.research_kind == "incremental":
+        sections.extend(["", f"## {labels['incremental_products']}", ""])
+        if node.information_advancement is not None:
+            reasons = ", ".join(node.information_advancement.reasons) or "—"
+            sections.append(f"- {labels['information_advancement']}: {reasons}")
+        if node.research_availability is not None:
+            availability = ", ".join(
+                f"{item.domain}: {item.status.value}"
+                for item in node.research_availability.domains
+            )
+            sections.append(f"- {labels['research_availability']}: {availability}")
+        if node.reassessment is not None:
+            sections.extend(["", f"### {labels['reassessment']}", ""])
+            sections.extend(
+                f"- `{entry.component_id}`: {entry.disposition.value} — {entry.reason}"
+                for entry in node.reassessment.entries
+            )
+        if node.full_research_required_reasons:
+            sections.extend(["", f"### {labels['full_research_required']}", ""])
+            sections.extend(
+                f"- `{reason.code}`: {reason.message}"
+                for reason in node.full_research_required_reasons
+            )
+
     if result.numeric_audit is not None:
         sections.extend(
             [
@@ -958,6 +998,11 @@ def render_run_export_package(run_export: RunExport) -> bytes:
                 "schema_version": run_export.schema_version,
                 "run": run_export.run.model_dump(mode="json"),
                 "result": run_export.result.model_dump(mode="json"),
+                "research_node": (
+                    run_export.research_node.model_dump(mode="json")
+                    if run_export.research_node is not None
+                    else None
+                ),
                 "attempts": [attempt.model_dump(mode="json") for attempt in run_export.attempts],
             }
         ),

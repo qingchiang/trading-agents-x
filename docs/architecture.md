@@ -259,6 +259,30 @@ the issuer name as of the analysis date. Resolution failure does not fail
 research. The recent-instruments API deduplicates non-trashed runs by ticker and
 never derives names from LLM output.
 
+### Research workbench Web contracts
+
+The Timeline Web API is cycle-shaped rather than a flat Node feed. A
+`ResearchTimeline` contains whole `cycles`; every cycle carries one Full
+`baseline` followed by its chronological `increments`. Pagination uses
+`cycle_limit` and `cycle_offset`, so a Full-rooted cycle is never divided
+between pages. The Primary cycle is returned first and other cycles are ordered
+by Full analysis date descending. This contract intentionally replaces the
+pre-redesign `nodes` envelope without a compatibility layer.
+
+New Run uses two bounded read models instead of loading Run Detail or scanning
+Timeline pages. `baseline-candidates` returns only active, compatible Full
+baselines before the requested date, with decision and display-name context.
+`creation-template` returns only the terminal Run request snapshot and lineage
+needed by the form; it does not read reports, Evidence, or artifacts. Run Detail
+and Run Export embed the committed `research_node` products so Incremental
+views and exports can render collection, availability, advancement,
+performance, reassessment, and Full Research Required reasons directly.
+
+Instrument names are current display metadata. New Incremental Runs inherit
+their Full baseline names before best-effort resolution, and reads fall back to
+the Full baseline for historical Incremental rows with missing names. No name
+is treated as PIT Evidence or model output.
+
 ### Database
 
 Alembic manages application tables:

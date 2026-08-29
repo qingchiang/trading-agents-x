@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -28,15 +28,16 @@ from .contracts import (
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceSealView,
+    FullBaselineCandidate,
     IncrementalNodeProducts,
     JudgeDraft,
     NumericAuditStatus,
-    PrimaryCycleCandidate,
     RebuttalReview,
     RecentInstrument,
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchCase,
+    ResearchCycleView,
     ResearchDecision,
     ResearchNodeComparison,
     ResearchNodeComparisonSelection,
@@ -390,6 +391,7 @@ class RunRepository:
         *,
         trash_state: RunTrashState = RunTrashState.ACTIVE,
         status: RunStatus | None = None,
+        research_kind: Literal["full", "incremental"] | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -403,6 +405,12 @@ class RunRepository:
             filters.append(RunRecord.trashed_at.is_not(None))
         if status is not None:
             filters.append(RunRecord.status == status.value)
+        if research_kind == "incremental":
+            filters.append(RunRecord.research_kind == "incremental")
+        elif research_kind == "full":
+            filters.append(
+                or_(RunRecord.research_kind == "full", RunRecord.research_kind.is_(None))
+            )
         if q and (query := q.strip().casefold()):
             filters.append(
                 or_(
@@ -433,7 +441,12 @@ class RunRepository:
                 )
             )
         stmt = (
-            select(RunRecord, DecisionRecord.rating, ResearchNodeRecord.run_id)
+            select(
+                RunRecord,
+                DecisionRecord.rating,
+                DecisionRecord.confidence,
+                ResearchNodeRecord.run_id,
+            )
             .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
             .outerjoin(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
             .where(*filters)
@@ -445,8 +458,21 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating, node_run_id is not None)
-                    for record, rating, node_run_id in session.execute(stmt)
+                    self._summary(
+                        record,
+                        rating,
+                        confidence,
+                        node_run_id is not None,
+                        instrument_name=self._effective_instrument_names(
+                            session,
+                            record,
+                        )[0],
+                        instrument_local_name=self._effective_instrument_names(
+                            session,
+                            record,
+                        )[1],
+                    )
+                    for record, rating, confidence, node_run_id in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -2159,8 +2185,8 @@ class RunRepository:
         self,
         instrument: str,
         *,
-        node_limit: int = 50,
-        node_offset: int = 0,
+        cycle_limit: int = 50,
+        cycle_offset: int = 0,
         trash_state: RunTrashState | str = RunTrashState.ACTIVE,
     ) -> ResearchTimeline:
         """Return derived Cycles without copying Run products into a Timeline."""
@@ -2185,15 +2211,32 @@ class RunRepository:
                 ).scalars()
             )
         trash_state = RunTrashState(trash_state)
-        rows = [
-            row
-            for row in all_rows
-            if trash_state is RunTrashState.ALL
-            or (trash_state is RunTrashState.ACTIVE and row[0].trashed_at is None)
-            or (trash_state is RunTrashState.TRASHED and row[0].trashed_at is not None)
-        ]
-        node_total = len(rows)
-        page_rows = rows[node_offset : node_offset + node_limit]
+        full_rows = [(run, node) for run, node in all_rows if node.research_kind == "full"]
+        increments_by_cycle: dict[str, list[tuple[RunRecord, ResearchNodeRecord]]] = {}
+        for run, node in all_rows:
+            if node.research_kind == "incremental" and node.full_baseline_run_id:
+                increments_by_cycle.setdefault(node.full_baseline_run_id, []).append((run, node))
+        visible_cycles = []
+        for full_row in full_rows:
+            full_run, _full_node = full_row
+            increments = increments_by_cycle.get(full_run.id, [])
+            if trash_state is RunTrashState.ACTIVE and full_run.trashed_at is not None:
+                continue
+            if trash_state is RunTrashState.TRASHED and not (
+                full_run.trashed_at is not None
+                or any(run.trashed_at is not None for run, _node in increments)
+            ):
+                continue
+            visible_cycles.append(full_row)
+        visible_cycles.sort(
+            key=lambda row: (
+                0 if primary is not None and row[0].id == primary.full_run_id else 1,
+                -RunRequestSnapshot.model_validate(row[0].request_json).analysis_date.toordinal(),
+                row[0].id,
+            )
+        )
+        cycle_total = len(visible_cycles)
+        page_full_rows = visible_cycles[cycle_offset : cycle_offset + cycle_limit]
         products_by_id = {
             run.id: (
                 IncrementalNodeProducts.model_validate(node.incremental_products_json)
@@ -2207,108 +2250,138 @@ class RunRepository:
             for decision in decision_records
         }
         cycle_warning_by_id = {
-            run.id: any(
+            full_run.id: any(
                 other_run.trashed_at is None
-                and other_node.full_baseline_run_id
-                == (run.id if node.research_kind == "full" else node.full_baseline_run_id)
+                and other_node.full_baseline_run_id == full_run.id
                 and bool(
                     products_by_id[other_run.id]
                     and products_by_id[other_run.id].full_research_required_reasons
                 )
                 for other_run, other_node in all_rows
             )
-            for run, node in rows
+            for full_run, _full_node in full_rows
         }
         primary_warning = bool(primary and cycle_warning_by_id.get(primary.full_run_id))
+
+        def hydrate_node(run: RunRecord, node: ResearchNodeRecord) -> ResearchNodeView:
+            cycle_id = run.id if node.research_kind == "full" else node.full_baseline_run_id
+            assert cycle_id is not None
+            active_cycle_rows = [
+                (other_run, other_node)
+                for other_run, other_node in all_rows
+                if other_run.trashed_at is None
+                and (
+                    other_run.id if other_node.research_kind == "full"
+                    else other_node.full_baseline_run_id
+                )
+                == cycle_id
+            ]
+            head_id = (
+                max(
+                    active_cycle_rows,
+                    key=lambda row: (
+                        RunRequestSnapshot.model_validate(row[0].request_json).analysis_date,
+                        row[0].id,
+                    ),
+                )[0].id
+                if active_cycle_rows
+                else None
+            )
+            products = products_by_id[run.id]
+            return ResearchNodeView(
+                id=run.id,
+                cycle_id=cycle_id,
+                instrument=instrument,
+                analysis_date=RunRequestSnapshot.model_validate(run.request_json).analysis_date,
+                research_schema_version=run.research_schema_version,
+                information_cutoff_at=_aware(run.information_cutoff_at),
+                method_snapshot=run.method_snapshot_json or {},
+                research_kind=node.research_kind,
+                full_baseline_run_id=node.full_baseline_run_id,
+                is_baseline_compatible=(
+                    node.research_kind == "full"
+                    and run.research_schema_version == CURRENT_RESEARCH_SCHEMA_VERSION
+                ),
+                is_cycle_head=run.id == head_id,
+                is_primary=(primary is not None and primary.full_run_id == cycle_id),
+                is_active=run.trashed_at is None,
+                trashed_at=_aware(run.trashed_at),
+                trash_cascade_full_run_id=run.trash_cascade_full_run_id,
+                collection_summary=products.collection_summary if products else None,
+                research_availability=products.research_availability if products else None,
+                information_advancement=products.information_advancement if products else None,
+                performance=products.performance if products else None,
+                reassessment=products.reassessment if products else None,
+                decision=decisions_by_id.get(run.id),
+                full_research_required_reasons=(
+                    products.full_research_required_reasons if products else ()
+                ),
+                cycle_warning=cycle_warning_by_id.get(cycle_id, False),
+            )
+
+        identity_rows = sorted(
+            all_rows,
+            key=lambda row: (
+                0 if primary is not None and row[0].id == primary.full_run_id else 1,
+                -RunRequestSnapshot.model_validate(row[0].request_json).analysis_date.toordinal(),
+            ),
+        )
+        instrument_name = next(
+            (run.instrument_name for run, _node in identity_rows if run.instrument_name),
+            None,
+        )
+        instrument_local_name = next(
+            (
+                run.instrument_local_name
+                for run, _node in identity_rows
+                if run.instrument_local_name
+            ),
+            None,
+        )
         return ResearchTimeline(
             instrument=instrument,
+            instrument_name=instrument_name,
+            instrument_local_name=instrument_local_name,
             primary_cycle_id=primary.full_run_id if primary else None,
-            active_full_cycles=tuple(
-                PrimaryCycleCandidate(
-                    id=run.id,
-                    analysis_date=RunRequestSnapshot.model_validate(
-                        run.request_json
-                    ).analysis_date,
-                )
-                for run, node in all_rows
-                if node.research_kind == "full" and run.trashed_at is None
-            ),
-            nodes=tuple(
-                ResearchNodeView(
-                    id=run.id,
-                    cycle_id=(
-                        run.id if node.research_kind == "full" else node.full_baseline_run_id
-                    ),
-                    instrument=instrument,
-                    analysis_date=RunRequestSnapshot.model_validate(run.request_json).analysis_date,
-                    research_schema_version=run.research_schema_version,
-                    information_cutoff_at=_aware(run.information_cutoff_at),
-                    method_snapshot=run.method_snapshot_json or {},
-                    research_kind=node.research_kind,
-                    full_baseline_run_id=node.full_baseline_run_id,
-                    is_baseline_compatible=(
-                        node.research_kind == "full"
-                        and run.research_schema_version == CURRENT_RESEARCH_SCHEMA_VERSION
-                    ),
-                    is_cycle_head=(
-                        run.trashed_at is None
-                        and not any(
-                            other_node.full_baseline_run_id
-                            == (
-                                run.id
-                                if node.research_kind == "full"
-                                else node.full_baseline_run_id
-                            )
-                            and other_run.trashed_at is None
-                            and RunRequestSnapshot.model_validate(
-                                other_run.request_json
-                            ).analysis_date
-                            > RunRequestSnapshot.model_validate(run.request_json).analysis_date
-                            for other_run, other_node in all_rows
+            cycles=tuple(
+                ResearchCycleView(
+                    id=full_run.id,
+                    is_primary=bool(primary and primary.full_run_id == full_run.id),
+                    cycle_warning=cycle_warning_by_id.get(full_run.id, False),
+                    head_run_id=max(
+                        [full_run, *(run for run, _node in increments_by_cycle.get(full_run.id, []))],
+                        key=lambda candidate: (
+                            candidate.trashed_at is None,
+                            RunRequestSnapshot.model_validate(candidate.request_json).analysis_date,
+                            candidate.id,
+                        ),
+                    ).id,
+                    baseline=hydrate_node(full_run, full_node),
+                    increments=tuple(
+                        hydrate_node(run, node)
+                        for run, node in sorted(
+                            increments_by_cycle.get(full_run.id, []),
+                            key=lambda row: (
+                                RunRequestSnapshot.model_validate(row[0].request_json).analysis_date,
+                                row[0].id,
+                            ),
+                        )
+                        if trash_state is RunTrashState.ALL
+                        or (
+                            trash_state is RunTrashState.ACTIVE
+                            and run.trashed_at is None
+                        )
+                        or (
+                            trash_state is RunTrashState.TRASHED
+                            and run.trashed_at is not None
                         )
                     ),
-                    is_primary=(
-                        primary is not None
-                        and primary.full_run_id
-                        == (run.id if node.research_kind == "full" else node.full_baseline_run_id)
-                    ),
-                    is_active=run.trashed_at is None,
-                    trashed_at=_aware(run.trashed_at),
-                    trash_cascade_full_run_id=run.trash_cascade_full_run_id,
-                    collection_summary=(
-                        products_by_id[run.id].collection_summary
-                        if products_by_id[run.id]
-                        else None
-                    ),
-                    research_availability=(
-                        products_by_id[run.id].research_availability
-                        if products_by_id[run.id]
-                        else None
-                    ),
-                    information_advancement=(
-                        products_by_id[run.id].information_advancement
-                        if products_by_id[run.id]
-                        else None
-                    ),
-                    performance=(
-                        products_by_id[run.id].performance if products_by_id[run.id] else None
-                    ),
-                    reassessment=(
-                        products_by_id[run.id].reassessment if products_by_id[run.id] else None
-                    ),
-                    decision=decisions_by_id.get(run.id),
-                    full_research_required_reasons=(
-                        products_by_id[run.id].full_research_required_reasons
-                        if products_by_id[run.id]
-                        else ()
-                    ),
-                    cycle_warning=cycle_warning_by_id[run.id],
                 )
-                for run, node in page_rows
+                for full_run, full_node in page_full_rows
             ),
-            node_total=node_total,
-            node_limit=node_limit,
-            node_offset=node_offset,
+            cycle_total=cycle_total,
+            cycle_limit=cycle_limit,
+            cycle_offset=cycle_offset,
             timeline_warning=primary_warning,
         )
 
@@ -2444,37 +2517,282 @@ class RunRepository:
             ),
         )
 
+    def get_research_node(self, run_id: str) -> ResearchNodeView | None:
+        """Return one Run-backed Research Node with its derived Cycle state."""
+        with self.sessions() as session:
+            row = session.execute(
+                select(RunRecord, ResearchNodeRecord)
+                .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                .where(RunRecord.id == run_id)
+            ).one_or_none()
+            if row is None:
+                return None
+            run, node = row
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            cycle_id = run.id if node.research_kind == "full" else node.full_baseline_run_id
+            assert cycle_id is not None
+            cycle_rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(
+                        or_(
+                            ResearchNodeRecord.run_id == cycle_id,
+                            ResearchNodeRecord.full_baseline_run_id == cycle_id,
+                        )
+                    )
+                )
+            )
+            primary = session.get(PrimaryResearchCycleRecord, request.ticker)
+            decision_record = session.scalar(
+                select(DecisionRecord).where(DecisionRecord.run_id == run_id)
+            )
+        active_rows = [item for item in cycle_rows if item[0].trashed_at is None]
+        head_id = (
+            max(
+                active_rows,
+                key=lambda item: (
+                    RunRequestSnapshot.model_validate(item[0].request_json).analysis_date,
+                    item[0].id,
+                ),
+            )[0].id
+            if active_rows
+            else None
+        )
+        products = (
+            IncrementalNodeProducts.model_validate(node.incremental_products_json)
+            if node.incremental_products_json
+            else None
+        )
+        cycle_warning = any(
+            other_run.trashed_at is None
+            and other_node.research_kind == "incremental"
+            and bool(
+                other_node.incremental_products_json
+                and IncrementalNodeProducts.model_validate(
+                    other_node.incremental_products_json
+                ).full_research_required_reasons
+            )
+            for other_run, other_node in cycle_rows
+        )
+        return ResearchNodeView(
+            id=run.id,
+            cycle_id=cycle_id,
+            instrument=request.ticker,
+            analysis_date=request.analysis_date,
+            research_schema_version=run.research_schema_version,
+            information_cutoff_at=_aware(run.information_cutoff_at),
+            method_snapshot=run.method_snapshot_json or {},
+            research_kind=node.research_kind,
+            full_baseline_run_id=node.full_baseline_run_id,
+            is_baseline_compatible=(
+                node.research_kind == "full"
+                and run.research_schema_version == CURRENT_RESEARCH_SCHEMA_VERSION
+            ),
+            is_cycle_head=run.id == head_id,
+            is_primary=bool(primary and primary.full_run_id == cycle_id),
+            is_active=run.trashed_at is None,
+            trashed_at=_aware(run.trashed_at),
+            trash_cascade_full_run_id=run.trash_cascade_full_run_id,
+            collection_summary=products.collection_summary if products else None,
+            research_availability=products.research_availability if products else None,
+            information_advancement=products.information_advancement if products else None,
+            performance=products.performance if products else None,
+            reassessment=products.reassessment if products else None,
+            decision=(
+                ResearchDecision.model_validate(decision_record.decision_json)
+                if decision_record
+                else None
+            ),
+            full_research_required_reasons=(
+                products.full_research_required_reasons if products else ()
+            ),
+            cycle_warning=cycle_warning,
+        )
+
     def list_timelines(self, *, limit: int = 50, offset: int = 0) -> ResearchTimelinePage:
         """List derived Timelines without introducing a second product store."""
-        ticker = func.json_extract(RunRecord.request_json, "$.ticker")
-        stmt = (
-            select(
-                ticker.label("instrument"),
-                PrimaryResearchCycleRecord.full_run_id.label("primary_cycle_id"),
-                func.count(ResearchNodeRecord.run_id).label("node_count"),
-            )
-            .select_from(RunRecord)
-            .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
-            .outerjoin(
-                PrimaryResearchCycleRecord,
-                PrimaryResearchCycleRecord.instrument == ticker,
-            )
-            .where(RunRecord.trashed_at.is_(None))
-            .group_by(ticker, PrimaryResearchCycleRecord.full_run_id)
-            .order_by(ticker)
-        )
-        count_stmt = select(func.count()).select_from(stmt.subquery())
         with self.sessions() as session:
-            items = tuple(
-                ResearchTimelineSummary(
-                    instrument=str(row.instrument),
-                    primary_cycle_id=row.primary_cycle_id,
-                    node_count=int(row.node_count),
+            rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(RunRecord.trashed_at.is_(None))
                 )
-                for row in session.execute(stmt.offset(offset).limit(limit)).mappings()
             )
-            total = int(session.scalar(count_stmt) or 0)
-        return ResearchTimelinePage(items=items, total=total, limit=limit, offset=offset)
+            primary_by_instrument = {
+                record.instrument: record.full_run_id
+                for record in session.scalars(select(PrimaryResearchCycleRecord))
+            }
+            decisions_by_id = {
+                record.run_id: ResearchDecision.model_validate(record.decision_json)
+                for record in session.scalars(
+                    select(DecisionRecord).where(
+                        DecisionRecord.run_id.in_([run.id for run, _node in rows])
+                    )
+                )
+            }
+        grouped: dict[str, list[tuple[RunRecord, ResearchNodeRecord]]] = {}
+        for run, node in rows:
+            ticker = RunRequestSnapshot.model_validate(run.request_json).ticker
+            grouped.setdefault(ticker, []).append((run, node))
+        summaries = []
+        for instrument, instrument_rows in grouped.items():
+            primary_id = primary_by_instrument.get(instrument)
+            primary_rows = [
+                (run, node)
+                for run, node in instrument_rows
+                if (run.id if node.research_kind == "full" else node.full_baseline_run_id)
+                == primary_id
+            ]
+            primary_head = (
+                max(
+                    primary_rows,
+                    key=lambda row: (
+                        RunRequestSnapshot.model_validate(row[0].request_json).analysis_date,
+                        row[0].id,
+                    ),
+                )[0]
+                if primary_rows
+                else None
+            )
+            primary_decision = decisions_by_id.get(primary_head.id) if primary_head else None
+            identity_rows = sorted(
+                instrument_rows,
+                key=lambda row: (
+                    0 if row[0].id == primary_id else 1,
+                    -RunRequestSnapshot.model_validate(row[0].request_json).analysis_date.toordinal(),
+                ),
+            )
+            timeline_warning = any(
+                node.research_kind == "incremental"
+                and node.full_baseline_run_id == primary_id
+                and bool(
+                    node.incremental_products_json
+                    and IncrementalNodeProducts.model_validate(
+                        node.incremental_products_json
+                    ).full_research_required_reasons
+                )
+                for _run, node in instrument_rows
+            )
+            summaries.append(
+                ResearchTimelineSummary(
+                    instrument=instrument,
+                    instrument_name=next(
+                        (run.instrument_name for run, _node in identity_rows if run.instrument_name),
+                        None,
+                    ),
+                    instrument_local_name=next(
+                        (
+                            run.instrument_local_name
+                            for run, _node in identity_rows
+                            if run.instrument_local_name
+                        ),
+                        None,
+                    ),
+                    primary_cycle_id=primary_id,
+                    full_cycle_count=sum(
+                        node.research_kind == "full" for _run, node in instrument_rows
+                    ),
+                    incremental_node_count=sum(
+                        node.research_kind == "incremental" for _run, node in instrument_rows
+                    ),
+                    latest_analysis_date=max(
+                        RunRequestSnapshot.model_validate(run.request_json).analysis_date
+                        for run, _node in instrument_rows
+                    ),
+                    primary_rating=primary_decision.rating if primary_decision else None,
+                    primary_confidence=(
+                        primary_decision.confidence if primary_decision else None
+                    ),
+                    timeline_warning=timeline_warning,
+                )
+            )
+        summaries.sort(key=lambda item: (-item.latest_analysis_date.toordinal(), item.instrument))
+        total = len(summaries)
+        return ResearchTimelinePage(
+            items=tuple(summaries[offset : offset + limit]),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_full_baseline_candidates(
+        self,
+        instrument: str,
+        *,
+        before: date,
+    ) -> tuple[FullBaselineCandidate, ...]:
+        """Return active compatible Full Baselines without hydrating a Timeline page."""
+        with self.sessions() as session:
+            primary = session.get(PrimaryResearchCycleRecord, instrument)
+            rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord, DecisionRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
+                    .where(
+                        func.json_extract(RunRecord.request_json, "$.ticker") == instrument,
+                        ResearchNodeRecord.research_kind == "full",
+                        RunRecord.status == RunStatus.SUCCEEDED.value,
+                        RunRecord.trashed_at.is_(None),
+                        RunRecord.research_schema_version == CURRENT_RESEARCH_SCHEMA_VERSION,
+                        func.json_extract(RunRecord.request_json, "$.analysis_date")
+                        < before.isoformat(),
+                    )
+                )
+            )
+            child_rows = list(
+                session.execute(
+                    select(RunRecord, ResearchNodeRecord)
+                    .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                    .where(
+                        ResearchNodeRecord.full_baseline_run_id.in_(
+                            [run.id for run, _node, _decision in rows]
+                        ),
+                        RunRecord.trashed_at.is_(None),
+                    )
+                )
+            )
+        warned_cycles = {
+            node.full_baseline_run_id
+            for _run, node in child_rows
+            if node.incremental_products_json
+            and IncrementalNodeProducts.model_validate(
+                node.incremental_products_json
+            ).full_research_required_reasons
+        }
+        candidates = []
+        for run, _node, decision_record in rows:
+            request = RunRequestSnapshot.model_validate(run.request_json)
+            decision = (
+                ResearchDecision.model_validate(decision_record.decision_json)
+                if decision_record
+                else None
+            )
+            candidates.append(
+                FullBaselineCandidate(
+                    id=run.id,
+                    analysis_date=request.analysis_date,
+                    is_primary=bool(primary and primary.full_run_id == run.id),
+                    instrument_name=run.instrument_name,
+                    instrument_local_name=run.instrument_local_name,
+                    rating=decision.rating if decision else None,
+                    confidence=decision.confidence if decision else None,
+                    thesis=decision.thesis if decision else None,
+                    cycle_warning=run.id in warned_cycles,
+                )
+            )
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda item: (
+                    0 if item.is_primary else 1,
+                    -item.analysis_date.toordinal(),
+                    item.id,
+                ),
+            )
+        )
 
     def fail(
         self,
@@ -2768,24 +3086,63 @@ class RunRepository:
         session: Session,
         record: RunRecord,
     ) -> RunView:
+        instrument_name, instrument_local_name = cls._effective_instrument_names(
+            session,
+            record,
+        )
         return cls._view(
             record,
             is_research_node=(
                 session.get(ResearchNodeRecord, record.id) is not None
             ),
+        ).model_copy(
+            update={
+                "instrument_name": instrument_name,
+                "instrument_local_name": instrument_local_name,
+            }
         )
+
+    @staticmethod
+    def _effective_instrument_names(
+        session: Session,
+        record: RunRecord,
+    ) -> tuple[str | None, str | None]:
+        instrument_name = record.instrument_name
+        instrument_local_name = record.instrument_local_name
+        if (
+            record.research_kind == "incremental"
+            and record.full_baseline_run_id
+            and (instrument_name is None or instrument_local_name is None)
+        ):
+            baseline = session.get(RunRecord, record.full_baseline_run_id)
+            if baseline is not None:
+                instrument_name = instrument_name or baseline.instrument_name
+                instrument_local_name = (
+                    instrument_local_name or baseline.instrument_local_name
+                )
+        return instrument_name, instrument_local_name
 
     @classmethod
     def _summary(
         cls,
         record: RunRecord,
         rating: str | None,
+        confidence: float | None,
         is_research_node: bool,
+        *,
+        instrument_name: str | None = None,
+        instrument_local_name: str | None = None,
     ) -> RunSummaryView:
         return RunSummaryView(
             **cls._view(
                 record,
                 is_research_node=is_research_node,
+            ).model_copy(
+                update={
+                    "instrument_name": instrument_name,
+                    "instrument_local_name": instrument_local_name,
+                }
             ).model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
+            research_confidence=confidence,
         )

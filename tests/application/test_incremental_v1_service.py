@@ -85,6 +85,8 @@ def _incremental_service(
     collector,
     synthesizer=default_incremental_synthesizer,
     eligibility_resolver=_equity_resolver,
+    identity_resolver=lambda symbol, _date: {"company_name": symbol},
+    local_name_resolver=lambda _ticker, _date, _config: None,
     now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
 ) -> AnalysisService:
     return AnalysisService(
@@ -92,9 +94,9 @@ def _incremental_service(
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
-        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        identity_resolver=identity_resolver,
         eligibility_resolver=eligibility_resolver,
-        local_name_resolver=lambda _ticker, _date, _config: None,
+        local_name_resolver=local_name_resolver,
         incremental_collector=collector,
         incremental_synthesizer=synthesizer,
         now=now,
@@ -225,7 +227,7 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
 
     assert synthesis_inputs == []
     assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 def _full_fundamentals_graph(content: str):
@@ -342,7 +344,7 @@ PE Ratio (TTM): 42"""
 
     assert synthesis_inputs == []
     assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 def test_real_full_fundamentals_field_change_advances_information(
@@ -400,7 +402,7 @@ Market Cap: 456"""
     )
 
     assert len(synthesis_inputs) == 1
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
         baseline.run_id,
         result.run_id,
     )
@@ -413,6 +415,8 @@ def test_incremental_service_commits_simplified_actual_result_products(
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
+    repository.set_instrument_name(baseline.run_id, "NVIDIA Corporation")
+    repository.set_instrument_local_name(baseline.run_id, "英伟达")
     candidate = IncrementalEvidenceCandidate(
         evidence=EvidenceItem.create(
             source="fixture.news",
@@ -472,7 +476,8 @@ def test_incremental_service_commits_simplified_actual_result_products(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    node = repository.get_research_node(result.run_id)
+    assert node is not None
     assert node.collection_summary is not None
     assert {item.domain: item.state.value for item in node.collection_summary.domains} == {
         "fundamentals": "unavailable",
@@ -493,6 +498,64 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
     assert result.metrics.llm_calls == 0
+    assert result.instrument_name == "NVIDIA Corporation"
+    assert result.instrument_local_name == "英伟达"
+    assert repository.get_run(result.run_id).instrument_name == "NVIDIA Corporation"
+    assert repository.get_run(result.run_id).instrument_local_name == "英伟达"
+    with repository.sessions.begin() as session:
+        historical = session.get(RunRecord, result.run_id)
+        historical.instrument_name = None
+        historical.instrument_local_name = None
+    assert repository.get_run(result.run_id).instrument_name == "NVIDIA Corporation"
+    assert repository.get_run(result.run_id).instrument_local_name == "英伟达"
+
+
+def test_incremental_name_resolution_failure_does_not_block_research(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, baseline.run_id)
+        record.instrument_name = None
+        record.instrument_local_name = None
+
+    def fail_identity(_ticker, _date):
+        raise RuntimeError("identity unavailable")
+
+    def fail_local_name(_ticker, _date, _config):
+        raise RuntimeError("local name unavailable")
+
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A newly published filing.",
+        )
+    )
+
+    result = _incremental_service(
+        app_settings,
+        repository,
+        collector=lambda request: _pit_collection(request, candidate),
+        identity_resolver=fail_identity,
+        local_name_resolver=fail_local_name,
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert result.instrument_name is None
+    assert result.instrument_local_name is None
 
 
 @pytest.mark.parametrize(
@@ -682,7 +745,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         assert len(failed) == 1
         failed_run_id = failed[0].id
         assert repository.evidence_status(failed_run_id).status == "pending"
-        assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+        assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
             baseline.run_id,
         )
         with repository.sessions() as session:
@@ -715,7 +778,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         ("_IncrementalDecisionSection", None),
     ]
     assert result.status is RunStatus.SUCCEEDED
-    node = repository.get_timeline("NVDA").nodes[-1]
+    node = repository.get_timeline("NVDA").all_nodes[-1]
     assert len(node.reassessment.entries) == len(component_ids)
     assert any(
         event.event_type == "node.output_recovered"
@@ -821,7 +884,7 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
         )
 
     assert calls == 3
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 def test_incremental_retry_uses_the_retained_run_dataflow_configuration(
@@ -918,7 +981,7 @@ def test_incremental_commit_revalidates_baseline_schema_after_synthesis(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 def test_incremental_service_rejects_no_information_advancement_before_synthesis(
@@ -957,7 +1020,7 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     assert synthesized == []
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
     assert any(
         event.event_type == "incremental.no_advancement"
         for event in repository.list_events(failed[0].id)
@@ -1064,7 +1127,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
     assert node.information_advancement.reasons == (
         "admissible_observation",
         "completed_stock_session",
@@ -1274,7 +1337,7 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
     calculation = node.performance.benchmarks[0].component.calculation
     assert calculation is not None
     assert calculation.start_session == date(2026, 7, 20)
@@ -1343,7 +1406,7 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
     fundamentals = next(
         item for item in node.collection_summary.domains if item.domain == "fundamentals"
     )
@@ -1511,7 +1574,7 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id)
+    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
     domains = {item.domain: item for item in node.collection_summary.domains}
     assert domains["fundamentals"].state.value == "partial"
     assert domains["market"].diagnostic.code == "provider_failure"
@@ -1594,7 +1657,7 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
     with repository.sessions() as session:
         assert session.query(DecisionRecord).count() == 1
         assert session.query(ResearchNodeRecord).count() == 1
@@ -1688,7 +1751,7 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
     assert len(synthesis_inputs) == 1
     assert sibling_ref not in synthesis_inputs[0].permitted_baseline_evidence_refs
     assert sibling_ref not in {item.ref for item in synthesis_inputs[0].incremental_evidence.items}
-    assert {node.id for node in repository.get_timeline("NVDA").nodes} == {
+    assert {node.id for node in repository.get_timeline("NVDA").all_nodes} == {
         baseline.run_id,
         first.run_id,
     }
@@ -1753,7 +1816,7 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
@@ -1816,7 +1879,7 @@ def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
 
 
 @pytest.mark.parametrize("mutation_phase", ["collection", "synthesis"])
@@ -1923,7 +1986,7 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
     else:
         result = service.run(request)
         node = next(
-            item for item in repository.get_timeline("NVDA").nodes if item.id == result.run_id
+            item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id
         )
         assert node.full_research_required_reasons[0].evidence_refs == ()
 

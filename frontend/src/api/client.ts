@@ -7,7 +7,12 @@ export type RunSummaryView = components["schemas"]["RunSummaryView"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
+export type RunCreationTemplate = components["schemas"]["RunCreationTemplate"];
 export type TimelineDetail = components["schemas"]["TimelineDetail"];
+export type ResearchNodeView = components["schemas"]["ResearchNodeView"];
+export type ResearchCycleView = components["schemas"]["ResearchCycleView"];
+export type FullBaselineCandidate = components["schemas"]["FullBaselineCandidate"];
+export type FullBaselineCandidates = components["schemas"]["FullBaselineCandidates"];
 export type ResearchNodeComparison =
   components["schemas"]["ResearchNodeComparison"];
 export type ResearchNodeComparisonSelection =
@@ -133,14 +138,22 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  creationTemplate: (id: string) =>
+    request<RunCreationTemplate>(
+      `/api/v1/runs/${encodeURIComponent(id)}/creation-template`,
+    ),
   timeline: (
     instrument: string,
-    nodeLimit = 20,
-    nodeOffset = 0,
+    cycleLimit = 20,
+    cycleOffset = 0,
     trashState: "active" | "trashed" | "all" = "active",
   ) =>
     request<TimelineDetail>(
-      `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}&trash_state=${trashState}`,
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}`,
+    ),
+  baselineCandidates: (instrument: string, before: string) =>
+    request<FullBaselineCandidates>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/baseline-candidates?before=${encodeURIComponent(before)}`,
     ),
   compareResearchNodes: (
     instrument: string,

@@ -422,6 +422,12 @@ class AnalysisService:
                 )
             },
         }
+        if request.research_kind == "incremental":
+            method_snapshot["prompt_versions"] = {
+                "incremental_synthesis": "v1-bounded-full-baseline",
+            }
+            method_snapshot.pop("quick_model", None)
+            method_snapshot.pop("quick_reasoning_effort", None)
         canonical = json.dumps(
             method_snapshot,
             ensure_ascii=True,
@@ -536,6 +542,58 @@ class AnalysisService:
                         request,
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
+                    if instrument_name is None and baseline.instrument_name is not None:
+                        instrument_name = baseline.instrument_name
+                        self.repository.set_instrument_name(run.id, instrument_name)
+                    if (
+                        instrument_local_name is None
+                        and baseline.instrument_local_name is not None
+                    ):
+                        instrument_local_name = baseline.instrument_local_name
+                        self.repository.set_instrument_local_name(
+                            run.id,
+                            instrument_local_name,
+                        )
+                    if instrument_name is None or instrument_local_name is None:
+                        with use_config(dataflow_config, merge=False):
+                            if instrument_name is None:
+                                try:
+                                    identity = self.identity_resolver(
+                                        request.ticker,
+                                        request.analysis_date.isoformat(),
+                                    )
+                                except Exception as exc:
+                                    logger.warning(
+                                        "instrument identity resolution failed for incremental run %s: %s",
+                                        run.id,
+                                        type(exc).__name__,
+                                    )
+                                else:
+                                    instrument_name = _instrument_display_name(identity)
+                                    if instrument_name is not None:
+                                        self.repository.set_instrument_name(
+                                            run.id,
+                                            instrument_name,
+                                        )
+                            if instrument_local_name is None:
+                                try:
+                                    instrument_local_name = self.local_name_resolver(
+                                        request.ticker,
+                                        request.analysis_date.isoformat(),
+                                        dataflow_config,
+                                    )
+                                except Exception as exc:
+                                    logger.warning(
+                                        "local instrument name resolution failed for incremental run %s: %s",
+                                        run.id,
+                                        type(exc).__name__,
+                                    )
+                                else:
+                                    if instrument_local_name is not None:
+                                        self.repository.set_instrument_local_name(
+                                            run.id,
+                                            instrument_local_name,
+                                        )
                     baseline_evidence = self.repository.get_evidence(baseline.id)
                     with use_config(dataflow_config, merge=False):
                         collection, evidence_items, performance, sealed_at = (
@@ -658,6 +716,8 @@ class AnalysisService:
                         run_id=run.id,
                         status=RunStatus.SUCCEEDED,
                         instrument=request.ticker,
+                        instrument_name=instrument_name,
+                        instrument_local_name=instrument_local_name,
                         reports={},
                         decision=synthesis.decision,
                         evidence=incremental_evidence,
@@ -1099,6 +1159,7 @@ class AnalysisService:
         return RunExport(
             run=run,
             result=result,
+            research_node=self.repository.get_research_node(run_id),
             evidence=result.evidence,
             artifacts=tuple(self.repository.list_artifacts(run_id)),
             attempts=self.repository.list_attempts(run_id),
@@ -1153,7 +1214,11 @@ class AnalysisService:
         on_event: EventHandler | None,
     ) -> IncrementalSynthesis:
         """Use the run-scoped reasoning and serializer clients for required synthesis."""
-        llms = self.llm_factory(run_settings, callbacks=[metrics])
+        llms = self.llm_factory(
+            run_settings,
+            callbacks=[metrics],
+            purpose="incremental",
+        )
         if isinstance(llms, RunLLMs):
             semantic_llm = llms.deep
             serializer_llm = llms.deep_serializer

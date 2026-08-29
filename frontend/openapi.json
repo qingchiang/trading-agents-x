@@ -1746,6 +1746,121 @@
         "title": "EvidenceValueLocator",
         "type": "object"
       },
+      "FullBaselineCandidate": {
+        "additionalProperties": false,
+        "description": "One active Full Baseline eligible before a requested analysis cutoff.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "cycle_warning": {
+            "default": false,
+            "title": "Cycle Warning",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "is_primary": {
+            "default": false,
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thesis"
+          }
+        },
+        "required": [
+          "id",
+          "analysis_date"
+        ],
+        "title": "FullBaselineCandidate",
+        "type": "object"
+      },
+      "FullBaselineCandidates": {
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "format": "date",
+            "title": "Before",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FullBaselineCandidate"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instrument",
+          "before"
+        ],
+        "title": "FullBaselineCandidates",
+        "type": "object"
+      },
       "FullResearchRequiredReason": {
         "additionalProperties": false,
         "properties": {
@@ -2807,27 +2922,6 @@
         "title": "PerformanceObservation",
         "type": "object"
       },
-      "PrimaryCycleCandidate": {
-        "additionalProperties": false,
-        "description": "One active Full Cycle eligible for explicit Primary selection.",
-        "properties": {
-          "analysis_date": {
-            "format": "date",
-            "title": "Analysis Date",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "analysis_date"
-        ],
-        "title": "PrimaryCycleCandidate",
-        "type": "object"
-      },
       "PrimaryCycleSelectionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3395,6 +3489,48 @@
           "markdown"
         ],
         "title": "ResearchCase",
+        "type": "object"
+      },
+      "ResearchCycleView": {
+        "additionalProperties": false,
+        "description": "One Full-rooted Research Cycle returned as an indivisible UI unit.",
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/ResearchNodeView"
+          },
+          "cycle_warning": {
+            "default": false,
+            "title": "Cycle Warning",
+            "type": "boolean"
+          },
+          "head_run_id": {
+            "title": "Head Run Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "increments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchNodeView"
+            },
+            "title": "Increments",
+            "type": "array"
+          },
+          "is_primary": {
+            "default": false,
+            "title": "Is Primary",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "head_run_id",
+          "baseline"
+        ],
+        "title": "ResearchCycleView",
         "type": "object"
       },
       "ResearchDecision": {
@@ -4111,44 +4247,58 @@
       "ResearchTimeline": {
         "additionalProperties": false,
         "properties": {
-          "active_full_cycles": {
+          "cycle_limit": {
+            "default": 50,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Cycle Limit",
+            "type": "integer"
+          },
+          "cycle_offset": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cycle Offset",
+            "type": "integer"
+          },
+          "cycle_total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cycle Total",
+            "type": "integer"
+          },
+          "cycles": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/PrimaryCycleCandidate"
+              "$ref": "#/components/schemas/ResearchCycleView"
             },
-            "title": "Active Full Cycles",
+            "title": "Cycles",
             "type": "array"
           },
           "instrument": {
             "title": "Instrument",
             "type": "string"
           },
-          "node_limit": {
-            "default": 50,
-            "maximum": 200.0,
-            "minimum": 1.0,
-            "title": "Node Limit",
-            "type": "integer"
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
           },
-          "node_offset": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Node Offset",
-            "type": "integer"
-          },
-          "node_total": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Node Total",
-            "type": "integer"
-          },
-          "nodes": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ResearchNodeView"
-            },
-            "title": "Nodes",
-            "type": "array"
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
           },
           "primary_cycle_id": {
             "anyOf": [
@@ -4213,14 +4363,60 @@
         "additionalProperties": false,
         "description": "Derived Timeline identity and stable, non-duplicated summary metadata.",
         "properties": {
+          "full_cycle_count": {
+            "minimum": 1.0,
+            "title": "Full Cycle Count",
+            "type": "integer"
+          },
+          "incremental_node_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Incremental Node Count",
+            "type": "integer"
+          },
           "instrument": {
             "title": "Instrument",
             "type": "string"
           },
-          "node_count": {
-            "minimum": 1.0,
-            "title": "Node Count",
-            "type": "integer"
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "latest_analysis_date": {
+            "format": "date",
+            "title": "Latest Analysis Date",
+            "type": "string"
+          },
+          "primary_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Confidence"
           },
           "primary_cycle_id": {
             "anyOf": [
@@ -4232,11 +4428,27 @@
               }
             ],
             "title": "Primary Cycle Id"
+          },
+          "primary_rating": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeline_warning": {
+            "default": false,
+            "title": "Timeline Warning",
+            "type": "boolean"
           }
         },
         "required": [
           "instrument",
-          "node_count"
+          "full_cycle_count",
+          "latest_analysis_date"
         ],
         "title": "ResearchTimelineSummary",
         "type": "object"
@@ -4675,6 +4887,84 @@
         "title": "RunCreateRequest",
         "type": "object"
       },
+      "RunCreationTemplate": {
+        "additionalProperties": false,
+        "properties": {
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRequestSnapshot"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            ],
+            "title": "Request"
+          },
+          "research_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Kind"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "request"
+        ],
+        "title": "RunCreationTemplate",
+        "type": "object"
+      },
       "RunDetail": {
         "additionalProperties": false,
         "properties": {
@@ -4688,6 +4978,16 @@
           },
           "evidence_status": {
             "$ref": "#/components/schemas/EvidenceSealView"
+          },
+          "research_node": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchNodeView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "result": {
             "anyOf": [
@@ -5246,6 +5546,19 @@
               }
             ],
             "title": "Request"
+          },
+          "research_confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Confidence"
           },
           "research_kind": {
             "anyOf": [
@@ -6027,6 +6340,26 @@
           },
           {
             "in": "query",
+            "name": "research_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "full",
+                    "incremental"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Research Kind"
+            }
+          },
+          {
+            "in": "query",
             "name": "q",
             "required": false,
             "schema": {
@@ -6452,6 +6785,45 @@
         "summary": "Cancel Run"
       }
     },
+    "/api/v1/runs/{run_id}/creation-template": {
+      "get": {
+        "operationId": "get_run_creation_template_api_v1_runs__run_id__creation_template_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCreationTemplate"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Creation Template"
+      }
+    },
     "/api/v1/runs/{run_id}/events": {
       "get": {
         "operationId": "stream_events_api_v1_runs__run_id__events_get",
@@ -6709,24 +7081,24 @@
           },
           {
             "in": "query",
-            "name": "node_limit",
+            "name": "cycle_limit",
             "required": false,
             "schema": {
               "default": 50,
               "maximum": 200,
               "minimum": 1,
-              "title": "Node Limit",
+              "title": "Cycle Limit",
               "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "node_offset",
+            "name": "cycle_offset",
             "required": false,
             "schema": {
               "default": 0,
               "minimum": 0,
-              "title": "Node Offset",
+              "title": "Cycle Offset",
               "type": "integer"
             }
           },
@@ -6763,6 +7135,55 @@
           }
         },
         "summary": "Get Timeline"
+      }
+    },
+    "/api/v1/timelines/{instrument}/baseline-candidates": {
+      "get": {
+        "operationId": "baseline_candidates_api_v1_timelines__instrument__baseline_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instrument",
+            "required": true,
+            "schema": {
+              "title": "Instrument",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Before",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FullBaselineCandidates"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Baseline Candidates"
       }
     },
     "/api/v1/timelines/{instrument}/compare": {

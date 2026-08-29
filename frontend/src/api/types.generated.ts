@@ -241,6 +241,22 @@ export interface components {
       row_id?: string | null;
       table_id?: string | null;
     };
+    FullBaselineCandidate: {
+      analysis_date: string;
+      confidence?: number | null;
+      cycle_warning?: boolean;
+      id: string;
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      is_primary?: boolean;
+      rating?: components["schemas"]["ResearchRating"] | null;
+      thesis?: string | null;
+    };
+    FullBaselineCandidates: {
+      before: string;
+      instrument: string;
+      items?: components["schemas"]["FullBaselineCandidate"][];
+    };
     FullResearchRequiredReason: {
       code: "thesis.material_reversal" | "identity.uncertain" | "attribution.unreliable" | "evidence.material_conflict";
       evidence_refs?: string[];
@@ -394,10 +410,6 @@ export interface components {
       benchmarks?: components["schemas"]["BenchmarkContext"][];
       stock: components["schemas"]["PerformanceComponent"];
     };
-    PrimaryCycleCandidate: {
-      analysis_date: string;
-      id: string;
-    };
     PrimaryCycleSelectionRequest: {
       full_run_id: string;
     };
@@ -484,6 +496,14 @@ export interface components {
     ResearchCase: {
       markdown: string;
       role: "bull" | "bear";
+    };
+    ResearchCycleView: {
+      baseline: components["schemas"]["ResearchNodeView"];
+      cycle_warning?: boolean;
+      head_run_id: string;
+      id: string;
+      increments?: components["schemas"]["ResearchNodeView"][];
+      is_primary?: boolean;
     };
     ResearchDecision: {
       calculation_records?: components["schemas"]["CalculationRecord"][];
@@ -591,12 +611,13 @@ export interface components {
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchTimeline: {
-      active_full_cycles?: components["schemas"]["PrimaryCycleCandidate"][];
+      cycle_limit?: number;
+      cycle_offset?: number;
+      cycle_total?: number;
+      cycles?: components["schemas"]["ResearchCycleView"][];
       instrument: string;
-      node_limit?: number;
-      node_offset?: number;
-      node_total?: number;
-      nodes?: components["schemas"]["ResearchNodeView"][];
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
       primary_cycle_id?: string | null;
       timeline_warning?: boolean;
     };
@@ -607,9 +628,16 @@ export interface components {
       total: number;
     };
     ResearchTimelineSummary: {
+      full_cycle_count: number;
+      incremental_node_count?: number;
       instrument: string;
-      node_count: number;
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      latest_analysis_date: string;
+      primary_confidence?: number | null;
       primary_cycle_id?: string | null;
+      primary_rating?: components["schemas"]["ResearchRating"] | null;
+      timeline_warning?: boolean;
     };
     ResearchWarning: {
       code?: string;
@@ -666,9 +694,19 @@ export interface components {
       source_run_id?: string | null;
       ticker: string;
     };
+    RunCreationTemplate: {
+      full_baseline_run_id?: string | null;
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_kind?: "full" | "incremental" | null;
+      run_id: string;
+      status: components["schemas"]["RunStatus"];
+    };
     RunDetail: {
       attempts?: components["schemas"]["RunAttemptView"][];
       evidence_status: components["schemas"]["EvidenceSealView"];
+      research_node?: components["schemas"]["ResearchNodeView"] | null;
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];
     };
@@ -742,6 +780,7 @@ export interface components {
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_confidence?: number | null;
       research_kind?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
       research_schema_version?: string | null;
