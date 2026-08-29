@@ -2649,6 +2649,216 @@ label small {
   cursor: pointer;
 }
 
+.comparison-modal-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(5 13 24 / 68%);
+  backdrop-filter: blur(5px);
+}
+
+.comparison-modal {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(1320px, 100%);
+  height: min(880px, calc(100vh - 48px));
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 18px;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 38%);
+}
+
+.comparison-modal-header {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.comparison-modal-header h2 {
+  margin: 4px 0;
+  font-size: 25px;
+}
+
+.comparison-modal-header > div:first-child > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.comparison-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.comparison-modal-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 24px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.comparison-modal-controls label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.comparison-modal-scroll {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  padding: 20px 24px 28px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.comparison-warning-list {
+  padding: 12px 14px;
+  color: #765817;
+  background: var(--amber-soft);
+  border-radius: 9px;
+}
+
+.comparison-warning-list p {
+  margin: 0;
+}
+
+.comparison-modal .comparison-decision-table {
+  margin-top: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.comparison-modal .comparison-decision-table table {
+  margin: 0;
+}
+
+.comparison-modal .comparison-decision-table thead th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: #f4f7fb;
+}
+
+.comparison-modal .comparison-decision-table thead th:not(:first-child) {
+  display: table-cell;
+}
+
+.comparison-modal .comparison-decision-table thead th span:last-child {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.comparison-modal .comparison-decision-table td {
+  white-space: pre-line;
+}
+
+.comparison-disclosure {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.comparison-disclosure > summary {
+  padding: 14px 16px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.comparison-disclosure.audit > summary {
+  color: var(--muted);
+}
+
+.comparison-disclosure-body {
+  padding: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.comparison-section-list {
+  display: grid;
+  gap: 12px;
+}
+
+.comparison-section-list > section {
+  padding: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.comparison-section-list h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.comparison-side-by-side {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.comparison-side-by-side > div {
+  min-width: 0;
+  padding: 12px;
+  white-space: pre-line;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.comparison-side-by-side > div > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.comparison-raw-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.comparison-raw-sides > div {
+  min-width: 0;
+}
+
+.comparison-raw-sides h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.comparison-raw-sides pre {
+  max-height: 360px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d9e2ef;
+  background: var(--navy-900);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .research-cycle-list {
   display: grid;
   gap: 24px;
@@ -2786,6 +2996,76 @@ label small {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.incremental-products {
+  display: grid;
+  gap: 12px;
+}
+
+.incremental-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.incremental-summary-strip > section {
+  min-width: 0;
+  padding: 12px 13px;
+  background: rgb(248 250 252 / 78%);
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+}
+
+.incremental-summary-strip h4,
+.incremental-update-detail-grid h4 {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.incremental-summary-strip p,
+.incremental-update-detail-grid p {
+  margin: 0;
+}
+
+.timeline-performance-summary {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.incremental-update-details {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+}
+
+.incremental-update-details > summary {
+  padding: 11px 13px;
+  color: var(--blue-dark);
+  font-size: 13px;
+  font-weight: 750;
+  background: #f7faff;
+  cursor: pointer;
+}
+
+.incremental-update-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 13px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.incremental-update-detail-grid > section {
+  min-width: 0;
+}
+
+.timeline-reassessment-list .audit-disclosure {
+  margin-top: 3px;
 }
 
 .incremental-product-grid > section,
@@ -3146,6 +3426,8 @@ label small {
 
   .incremental-product-grid,
   .incremental-detail-grid,
+  .incremental-update-detail-grid,
+  .comparison-raw-sides,
   .comparison-grid {
     grid-template-columns: 1fr;
   }
@@ -3157,6 +3439,70 @@ label small {
 }
 
 @media (max-width: 640px) {
+  .comparison-modal-backdrop {
+    display: block;
+    padding: 0;
+  }
+
+  .comparison-modal {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .comparison-modal-header {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .comparison-modal-actions {
+    justify-content: flex-start;
+  }
+
+  .comparison-modal-controls {
+    justify-content: flex-start;
+    padding-inline: 16px;
+  }
+
+  .comparison-modal-scroll {
+    padding: 14px 16px 22px;
+  }
+
+  .comparison-side-by-side {
+    grid-template-columns: 1fr;
+  }
+
+  .comparison-modal .comparison-decision-table table,
+  .comparison-modal .comparison-decision-table thead,
+  .comparison-modal .comparison-decision-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .comparison-modal .comparison-decision-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .comparison-modal .comparison-decision-table th:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .comparison-modal .comparison-decision-table th,
+  .comparison-modal .comparison-decision-table td {
+    display: block;
+    min-width: 0;
+    width: auto;
+  }
+
+  .comparison-modal .comparison-decision-table tbody th {
+    background: #f7f9fc;
+    border-top: 1px solid var(--line);
+  }
+
   .page-header,
   .run-heading {
     display: grid;

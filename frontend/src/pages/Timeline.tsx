@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
@@ -54,98 +62,133 @@ function DecisionSummary({ node }: { node: ResearchNodeView }) {
 function IncrementalProducts({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
   const collectionDomains = node.collection_summary?.domains ?? [];
+  const availabilityDomains = node.research_availability?.domains ?? [];
+  const reassessmentEntries = node.reassessment?.entries ?? [];
+  const changedEntries = reassessmentEntries.filter(
+    (entry) => entry.disposition !== "reaffirmed",
+  );
   return (
-    <div className="incremental-product-grid">
-      <section>
-        <h4>{t("informationAdvancement")}</h4>
-        <p>{node.information_advancement?.reasons?.join(", ") || t("notRecorded")}</p>
-      </section>
-      <section>
-        <h4>{t("researchAvailability")}</h4>
-        <div className="availability-row">
-          {node.research_availability?.domains?.map((domain) => (
-            <span className={`availability-chip ${domain.status}`} key={domain.domain}>
-              {t(`${domain.domain}Analyst`)} · {t(`availability_${domain.status}`)}
-            </span>
-          )) ?? <span>{t("notRecorded")}</span>}
-        </div>
-      </section>
-      <details>
-        <summary>{t("collectionSummary")}</summary>
-        {collectionDomains.length > 0 ? (
-          <ul className="compact-list collection-summary-list">
-            {collectionDomains.map((domain) => (
-              <li key={domain.domain}>
-                <div className="collection-domain-heading">
-                  <strong>{t(`${domain.domain}Analyst`)}</strong>
-                  <span className={`availability-chip ${domain.state}`}>
-                    {t(`collection_${domain.state}`)}
-                  </span>
-                </div>
-                {(domain.sources?.length ?? 0) > 0 && (
-                  <ul className="collection-source-list">
-                    {domain.sources?.map((source, index) => (
-                      <li key={`${source.source}-${source.retrieved_at}-${index}`}>
-                        <span>{source.source}</span>
-                        {source.fallback && <span className="muted-copy"> · {t("fallback")}</span>}
-                        {source.diagnostic && (
-                          <span className="muted-copy"> · {source.diagnostic.code}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {domain.diagnostic && <p className="muted-copy">{domain.diagnostic.code}</p>}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted-copy">{t("notRecorded")}</p>
+    <div className="incremental-products">
+      <div className="incremental-summary-strip">
+        <section>
+          <h4>{t("advancementType")}</h4>
+          <p>
+            {advancementSummary(
+              t,
+              node.information_advancement?.reasons ?? [],
+            )}
+          </p>
+        </section>
+        {node.performance && (
+          <section>
+            <h4>{t("performanceSummary")}</h4>
+            <PerformanceSummary node={node} />
+          </section>
         )}
-      </details>
-      {node.reassessment && (
-        <details>
-          <summary>{t("reassessment")}</summary>
-          <ul className="compact-list">
-            {node.reassessment.entries.map((entry) => (
-              <li key={entry.component_id}>
-                <strong>{entry.component_id}</strong>
-                <span>{t(`reassessment_${entry.disposition}`)}</span>
-                <p>{entry.reason}</p>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {node.performance && (
-        <details>
-          <summary>{t("performance")}</summary>
-          <dl className="definition-list compact-definition-list">
-            <div>
-              <dt>{t("stockReturn")}</dt>
-              <dd>
-                {t(`performance_${node.performance.stock.status}`)}
-                {node.performance.stock.calculation
-                  ? ` · ${formatPercent(node.performance.stock.calculation.unrounded_return)}`
-                  : node.performance.stock.reason
-                    ? ` · ${node.performance.stock.reason}`
-                    : ""}
-              </dd>
+        {node.reassessment && (
+          <section>
+            <h4>{t("reassessmentChanges")}</h4>
+            <p>
+              {t("nonReaffirmedCount", { count: changedEntries.length })}
+            </p>
+          </section>
+        )}
+      </div>
+
+      <details className="incremental-update-details">
+        <summary>{t("updateDetails")}</summary>
+        <div className="incremental-update-detail-grid">
+          <section>
+            <h4>{t("researchAvailability")}</h4>
+            <div className="availability-row">
+              {availabilityDomains.length > 0 ? (
+                availabilityDomains.map((domain) => (
+                  <span
+                    className={`availability-chip ${domain.status}`}
+                    key={domain.domain}
+                  >
+                    {t(`${domain.domain}Analyst`)} ·{" "}
+                    {t(`availability_${domain.status}`)}
+                  </span>
+                ))
+              ) : (
+                <span className="muted-copy">{t("notRecorded")}</span>
+              )}
             </div>
-            {(node.performance.benchmarks ?? []).map((benchmark) => (
-              <div key={benchmark.name}>
-                <dt>{benchmark.name}</dt>
-                <dd>
-                  {t(`performance_${benchmark.component.status}`)}
-                  {benchmark.component.calculation
-                    ? ` · ${formatPercent(benchmark.component.calculation.unrounded_return)}`
-                    : ""}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
+          </section>
+          <section>
+            <h4>{t("collectionSummary")}</h4>
+            {collectionDomains.length > 0 ? (
+              <ul className="compact-list collection-summary-list">
+                {collectionDomains.map((domain) => (
+                  <li key={domain.domain}>
+                    <div className="collection-domain-heading">
+                      <strong>{t(`${domain.domain}Analyst`)}</strong>
+                      <span className={`availability-chip ${domain.state}`}>
+                        {t(`collection_${domain.state}`)}
+                      </span>
+                    </div>
+                    {((domain.sources?.length ?? 0) > 0 ||
+                      domain.diagnostic) && (
+                      <details className="audit-disclosure">
+                        <summary>{t("auditDetails")}</summary>
+                        {(domain.sources?.length ?? 0) > 0 && (
+                          <ul className="collection-source-list">
+                            {domain.sources?.map((source, index) => (
+                              <li
+                                key={`${source.source}-${source.retrieved_at}-${index}`}
+                              >
+                                <span>{source.source}</span>
+                                {source.fallback && (
+                                  <span className="muted-copy">
+                                    {" "}· {t("fallback")}
+                                  </span>
+                                )}
+                                {source.diagnostic && (
+                                  <span className="muted-copy">
+                                    {" "}· {source.diagnostic.code}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {domain.diagnostic && (
+                          <p className="muted-copy">
+                            {domain.diagnostic.code}
+                          </p>
+                        )}
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-copy">{t("notRecorded")}</p>
+            )}
+          </section>
+          <section>
+            <h4>{t("reassessment")}</h4>
+            {reassessmentEntries.length > 0 ? (
+              <ul className="compact-list timeline-reassessment-list">
+                {reassessmentEntries.map((entry) => (
+                  <li key={entry.component_id}>
+                    <strong>{t(`reassessment_${entry.disposition}`)}</strong>
+                    <p>{entry.reason}</p>
+                    <details className="audit-disclosure">
+                      <summary>{t("auditDetails")}</summary>
+                      <code>{entry.component_id}</code>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-copy">{t("notRecorded")}</p>
+            )}
+          </section>
+        </div>
+      </details>
+
       {(node.full_research_required_reasons?.length ?? 0) > 0 && (
         <section className="research-warning-block" role="status">
           <h4>{t("fullResearchRecommended")}</h4>
@@ -154,6 +197,25 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
           ))}
         </section>
       )}
+    </div>
+  );
+}
+
+function PerformanceSummary({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  const performance = node.performance;
+  if (!performance) return null;
+  return (
+    <div className="timeline-performance-summary">
+      <span>{performanceComponentText(t, t("stockReturn"), performance.stock)}</span>
+      {(performance.benchmarks ?? []).map((benchmark) => (
+        <span key={benchmark.name}>
+          {performanceComponentText(t, benchmark.name, benchmark.component)}
+          {benchmark.reported_difference != null && (
+            <> · {t("reportedBenchmarkDifference")}: {formatPercent(benchmark.reported_difference)}</>
+          )}
+        </span>
+      ))}
     </div>
   );
 }
@@ -268,6 +330,7 @@ const STRUCTURED_VALUE_LABELS: Record<string, string> = {
   as_of_date: "asOfDate",
   core_assumptions: "coreAssumptions",
   evidence_refs: "evidenceRefs",
+  kind: "scenario",
   limitations: "limitations",
   outcome: "scenarioOutcome",
   reference_ranges: "scenarioReferenceRange",
@@ -319,8 +382,10 @@ function ComparisonValue({ value }: { value: unknown }) {
 
 function DecisionComparisonValue({
   comparisonValue,
+  sectionKey,
 }: {
   comparisonValue: ResearchNodeComparison["decision_sections"][number]["values"][number] | undefined;
+  sectionKey?: string;
 }) {
   const { t } = useTranslation();
   if (!comparisonValue || comparisonValue.state === "not_recorded_under_this_schema") {
@@ -332,69 +397,578 @@ function DecisionComparisonValue({
   if (comparisonValue.state === "empty") {
     return <span className="muted-copy">{t("comparisonEmpty")}</span>;
   }
+  if (
+    sectionKey === "confidence" &&
+    typeof comparisonValue.value === "number"
+  ) {
+    return <Confidence value={comparisonValue.value} />;
+  }
   return <StructuredComparisonValue value={comparisonValue.value} />;
 }
 
-function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison }) {
+const CORE_DECISION_FIELDS = new Set([
+  "rating",
+  "confidence",
+  "executive_summary",
+  "thesis",
+  "catalysts",
+  "risks",
+  "invalidation_conditions",
+]);
+const RAW_DECISION_FIELDS = new Set([
+  "evidence_refs",
+  "calculation_records",
+  "numeric_audit_status",
+]);
+
+type ComparisonSide = ResearchNodeComparison["sides"][number];
+type ComparisonSection = ResearchNodeComparison["decision_sections"][number];
+type ProductComparisonRow = {
+  key: string;
+  label: string;
+  values: [unknown, unknown];
+};
+
+function NodeComparisonModal({
+  comparison,
+  onClose,
+}: {
+  comparison: ResearchNodeComparison;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
-  const [left, right] = comparison.sides;
-  const reassessment = (side: (typeof comparison.sides)[number]) =>
-    side.reassessment?.entries
-      .map((entry) => `${entry.component_id}: ${t(`reassessment_${entry.disposition}`)}`)
-      .join(", ");
-  const performance = (side: (typeof comparison.sides)[number]) => {
-    const stock = side.performance?.stock;
-    if (!stock) return null;
-    return stock.calculation
-      ? `${t("stockReturn")}: ${formatPercent(stock.calculation.unrounded_return)}`
-      : `${t("stockReturn")}: ${t(`performance_${stock.status}`)}${stock.reason ? ` · ${stock.reason}` : ""}`;
-  };
-  const method = (side: (typeof comparison.sides)[number]) =>
-    [side.method_snapshot.llm_provider, side.method_snapshot.deep_model]
-      .filter(Boolean)
-      .join(" / ") || null;
-  const productRows: [string, unknown, unknown][] = [
-    [t("informationAdvancement"), left.information_advancement?.reasons?.join(", "), right.information_advancement?.reasons?.join(", ")],
-    [t("researchAvailability"), left.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", "), right.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", ")],
-    [t("reassessment"), reassessment(left), reassessment(right)],
-    [t("performance"), performance(left), performance(right)],
-    [t("fullResearchRecommended"), left.full_research_required_reasons?.map((reason) => reason.message).join(", "), right.full_research_required_reasons?.map((reason) => reason.message).join(", ")],
-    [t("method"), method(left), method(right)],
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [swapped, setSwapped] = useState(false);
+  const [changedOnly, setChangedOnly] = useState(true);
+  const sideIndexes: [number, number] = swapped ? [1, 0] : [0, 1];
+  const sides = sideIndexes.map((index) => comparison.sides[index]) as [
+    ComparisonSide,
+    ComparisonSide,
   ];
-  return (
-    <section className="panel comparison-panel" aria-label={t("nodeComparison")}>
-      <div className="panel-header">
-        <div><p className="eyebrow">{t("nodeComparison")}</p><h2>{t("selectedResearchNodes")}</h2></div>
-        <span>{t(comparison.cross_cycle ? "crossCycleComparison" : "sameCycleComparison")}</span>
-      </div>
-      {comparison.method_changed && <div className="notice" role="status">{t("methodChanged")}</div>}
-      <div className="table-wrap comparison-decision-table">
-        <table>
-          <thead><tr><th>{t("decisionSection")}</th>{[left, right].map((side) => <th key={side.node_id}><KindBadge kind={side.research_kind} /> {side.analysis_date}</th>)}</tr></thead>
-          <tbody>
-            {comparison.decision_sections.map((section) => (
-              <tr key={section.key}>
-                <th scope="row">{comparisonFieldLabel(t, section.key)}</th>
-                <td><DecisionComparisonValue comparisonValue={section.values[0]} /></td>
-                <td><DecisionComparisonValue comparisonValue={section.values[1]} /></td>
-              </tr>
-            ))}
-            {productRows.map(([label, leftValue, rightValue]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td><ComparisonValue value={leftValue} /></td>
-                <td><ComparisonValue value={rightValue} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <details className="audit-disclosure">
-        <summary>{t("auditDetails")}</summary>
-        <div className="comparison-grid">{comparison.sides.map((side) => <pre key={side.node_id}>{JSON.stringify(side, null, 2)}</pre>)}</div>
-      </details>
-    </section>
+  const coreSections = filterDecisionSections(
+    comparison.decision_sections.filter((section) =>
+      CORE_DECISION_FIELDS.has(section.key),
+    ),
+    changedOnly,
   );
+  const extendedSections = filterDecisionSections(
+    comparison.decision_sections.filter(
+      (section) =>
+        !CORE_DECISION_FIELDS.has(section.key) &&
+        !RAW_DECISION_FIELDS.has(section.key),
+    ),
+    changedOnly,
+  );
+  const rawSections = filterDecisionSections(
+    comparison.decision_sections.filter((section) =>
+      RAW_DECISION_FIELDS.has(section.key),
+    ),
+    changedOnly,
+  );
+  const primaryProducts = filterProductRows(
+    [
+      productRow(
+        "performance",
+        t("performance"),
+        comparison.sides,
+        (side) => performanceComparisonText(t, side),
+      ),
+      productRow(
+        "full-research-required",
+        t("fullResearchRecommended"),
+        comparison.sides,
+        (side) =>
+          side.full_research_required_reasons
+            ?.map((reason) => reason.message)
+            .join("\n") || null,
+      ),
+    ],
+    changedOnly,
+  );
+  const updateProducts = filterProductRows(
+    [
+      productRow(
+        "advancement",
+        t("informationAdvancement"),
+        comparison.sides,
+        (side) =>
+          side.information_advancement
+            ? advancementSummary(
+                t,
+                side.information_advancement.reasons ?? [],
+              )
+            : null,
+      ),
+      productRow(
+        "availability",
+        t("researchAvailability"),
+        comparison.sides,
+        (side) => availabilityComparisonText(t, side),
+      ),
+      productRow(
+        "reassessment",
+        t("reassessment"),
+        comparison.sides,
+        (side) => reassessmentComparisonText(t, side),
+      ),
+      productRow("method", t("method"), comparison.sides, methodSummary),
+    ],
+    changedOnly,
+  );
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = focusableElements(dialogRef.current);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="comparison-modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="comparison-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+      >
+        <header className="comparison-modal-header">
+          <div>
+            <p className="eyebrow">{t("selectedResearchNodes")}</p>
+            <h2 id={titleId}>{t("nodeComparison")}</h2>
+            <span>
+              {t(
+                comparison.cross_cycle
+                  ? "crossCycleComparison"
+                  : "sameCycleComparison",
+              )}
+            </span>
+          </div>
+          <div className="comparison-modal-actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => setSwapped((value) => !value)}
+            >
+              {t("swapComparisonSides")}
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              className="button"
+              onClick={onClose}
+            >
+              {t("close")}
+            </button>
+          </div>
+        </header>
+
+        <div className="comparison-modal-controls">
+          <label>
+            <input
+              type="checkbox"
+              checked={changedOnly}
+              onChange={(event) => setChangedOnly(event.target.checked)}
+            />
+            {t("showChangedOnly")}
+          </label>
+        </div>
+
+        <div className="comparison-modal-scroll">
+          {comparison.method_changed && (
+            <div className="notice" role="status">
+              {t("methodChanged")}
+            </div>
+          )}
+          {(comparison.warnings?.length ?? 0) > 0 && (
+            <div className="comparison-warning-list">
+              {comparison.warnings?.map((warning) => (
+                <p key={warning.code}>{warning.message}</p>
+              ))}
+            </div>
+          )}
+
+          <ComparisonTable
+            sections={coreSections}
+            productRows={primaryProducts}
+            sides={sides}
+            sideIndexes={sideIndexes}
+          />
+
+          <ComparisonDisclosure title={t("extendedConclusions")}>
+            <ComparisonSectionList
+              sections={extendedSections}
+              sides={sides}
+              sideIndexes={sideIndexes}
+            />
+          </ComparisonDisclosure>
+
+          <ComparisonDisclosure title={t("updateAudit")}>
+            <ComparisonProductList
+              rows={updateProducts}
+              sides={sides}
+              sideIndexes={sideIndexes}
+            />
+          </ComparisonDisclosure>
+
+          <ComparisonDisclosure title={t("rawAudit")} audit>
+            <ComparisonSectionList
+              sections={rawSections}
+              sides={sides}
+              sideIndexes={sideIndexes}
+            />
+            <section className="comparison-raw-sides">
+              {sides.map((side) => (
+                <div key={side.node_id}>
+                  <h3>{side.analysis_date}</h3>
+                  <dl className="definition-list compact-definition-list">
+                    <div>
+                      <dt>{t("researchSchema")}</dt>
+                      <dd>{side.research_schema_version}</dd>
+                    </div>
+                  </dl>
+                  <pre>{JSON.stringify(side, null, 2)}</pre>
+                </div>
+              ))}
+            </section>
+          </ComparisonDisclosure>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ComparisonTable({
+  sections,
+  productRows,
+  sides,
+  sideIndexes,
+}: {
+  sections: ComparisonSection[];
+  productRows: ProductComparisonRow[];
+  sides: [ComparisonSide, ComparisonSide];
+  sideIndexes: [number, number];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="table-wrap comparison-decision-table">
+      <table>
+        <thead>
+          <tr>
+            <th>{t("decisionSection")}</th>
+            {sides.map((side) => (
+              <th key={side.node_id}>
+                <KindBadge kind={side.research_kind} />
+                <span>{side.analysis_date}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sections.map((section) => (
+            <tr key={section.key}>
+              <th scope="row">{comparisonFieldLabel(t, section.key)}</th>
+              {sideIndexes.map((sideIndex) => (
+                <td key={sideIndex}>
+                  <DecisionComparisonValue
+                    comparisonValue={section.values[sideIndex]}
+                    sectionKey={section.key}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+          {productRows.map((row) => (
+            <tr key={row.key}>
+              <th scope="row">{row.label}</th>
+              {sideIndexes.map((sideIndex) => (
+                <td key={sideIndex}>
+                  <ComparisonValue value={row.values[sideIndex]} />
+                </td>
+              ))}
+            </tr>
+          ))}
+          {sections.length === 0 && productRows.length === 0 && (
+            <tr>
+              <td colSpan={3} className="muted-copy">
+                {t("comparisonNoChangedSections")}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComparisonDisclosure({
+  title,
+  audit = false,
+  children,
+}: {
+  title: string;
+  audit?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className={`comparison-disclosure ${audit ? "audit" : ""}`}>
+      <summary>{title}</summary>
+      <div className="comparison-disclosure-body">{children}</div>
+    </details>
+  );
+}
+
+function ComparisonSectionList({
+  sections,
+  sides,
+  sideIndexes,
+}: {
+  sections: ComparisonSection[];
+  sides: [ComparisonSide, ComparisonSide];
+  sideIndexes: [number, number];
+}) {
+  const { t } = useTranslation();
+  if (sections.length === 0) {
+    return <p className="muted-copy">{t("comparisonNoChangedSections")}</p>;
+  }
+  return (
+    <div className="comparison-section-list">
+      {sections.map((section) => (
+        <section key={section.key}>
+          <h3>{comparisonFieldLabel(t, section.key)}</h3>
+          <div className="comparison-side-by-side">
+            {sideIndexes.map((sideIndex, position) => (
+              <div key={sideIndex}>
+                <strong>{sides[position].analysis_date}</strong>
+                <DecisionComparisonValue
+                  comparisonValue={section.values[sideIndex]}
+                  sectionKey={section.key}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function ComparisonProductList({
+  rows,
+  sides,
+  sideIndexes,
+}: {
+  rows: ProductComparisonRow[];
+  sides: [ComparisonSide, ComparisonSide];
+  sideIndexes: [number, number];
+}) {
+  const { t } = useTranslation();
+  if (rows.length === 0) {
+    return <p className="muted-copy">{t("comparisonNoChangedSections")}</p>;
+  }
+  return (
+    <div className="comparison-section-list">
+      {rows.map((row) => (
+        <section key={row.key}>
+          <h3>{row.label}</h3>
+          <div className="comparison-side-by-side">
+            {sideIndexes.map((sideIndex, position) => (
+              <div key={sideIndex}>
+                <strong>{sides[position].analysis_date}</strong>
+                <ComparisonValue value={row.values[sideIndex]} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function filterDecisionSections(
+  sections: ComparisonSection[],
+  changedOnly: boolean,
+) {
+  if (!changedOnly) return sections;
+  return sections.filter(
+    (section) => !comparisonValuesEqual(section.values[0], section.values[1]),
+  );
+}
+
+function comparisonValuesEqual(
+  left: ComparisonSection["values"][number] | undefined,
+  right: ComparisonSection["values"][number] | undefined,
+) {
+  return stableJson(left ?? null) === stableJson(right ?? null);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function productRow(
+  key: string,
+  label: string,
+  sides: ResearchNodeComparison["sides"],
+  value: (side: ComparisonSide) => unknown,
+): ProductComparisonRow {
+  return {
+    key,
+    label,
+    values: [value(sides[0]), value(sides[1])],
+  };
+}
+
+function filterProductRows(
+  rows: ProductComparisonRow[],
+  changedOnly: boolean,
+) {
+  if (!changedOnly) return rows;
+  return rows.filter(
+    (row) => stableJson(row.values[0]) !== stableJson(row.values[1]),
+  );
+}
+
+function advancementSummary(t: TFunction, reasons: string[]): string {
+  if (reasons.length === 0) return t("noInformationAdvancement");
+  const labels: Record<string, string> = {
+    admissible_observation: "advancementAdmissibleObservation",
+    completed_stock_session: "advancementCompletedMarketSession",
+    newly_completed_market_session: "advancementCompletedMarketSession",
+    near_live_advisory: "advancementNearLiveAdvisory",
+  };
+  return reasons
+    .map((reason) => t(labels[reason] ?? "advancementOther", { reason }))
+    .join(", ");
+}
+
+function performanceComponentText(
+  t: TFunction,
+  label: string,
+  component: NonNullable<ResearchNodeView["performance"]>["stock"],
+): string {
+  if (component.calculation) {
+    return `${label}: ${formatPercent(component.calculation.unrounded_return)}`;
+  }
+  return `${label}: ${t(`performance_${component.status}`)}${
+    component.reason ? ` · ${component.reason}` : ""
+  }`;
+}
+
+function performanceComparisonText(
+  t: TFunction,
+  side: ComparisonSide,
+): string | null {
+  const performance = side.performance;
+  if (!performance) return null;
+  return [
+    performanceComponentText(t, t("stockReturn"), performance.stock),
+    ...(performance.benchmarks ?? []).map((benchmark) => {
+      const summary = performanceComponentText(
+        t,
+        benchmark.name,
+        benchmark.component,
+      );
+      return benchmark.reported_difference == null
+        ? summary
+        : `${summary} · ${t("reportedBenchmarkDifference")}: ${formatPercent(
+            benchmark.reported_difference,
+          )}`;
+    }),
+  ].join("\n");
+}
+
+function availabilityComparisonText(
+  t: TFunction,
+  side: ComparisonSide,
+): string | null {
+  const domains = side.research_availability?.domains ?? [];
+  if (domains.length === 0) return null;
+  return domains
+    .map(
+      (domain) =>
+        `${t(`${domain.domain}Analyst`)}: ${t(
+          `availability_${domain.status}`,
+        )}`,
+    )
+    .join(", ");
+}
+
+function reassessmentComparisonText(
+  t: TFunction,
+  side: ComparisonSide,
+): string | null {
+  const entries = side.reassessment?.entries ?? [];
+  if (entries.length === 0) return null;
+  return entries
+    .map(
+      (entry) =>
+        `${entry.component_id}: ${t(
+          `reassessment_${entry.disposition}`,
+        )} · ${entry.reason}`,
+    )
+    .join("\n");
+}
+
+function methodSummary(side: ComparisonSide): string | null {
+  return [side.method_snapshot.llm_provider, side.method_snapshot.deep_model]
+    .filter(Boolean)
+    .join(" / ") || null;
+}
+
+function focusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => {
+    if (element.hasAttribute("hidden")) return false;
+    const closedDetails = element.closest("details:not([open])");
+    if (!closedDetails) return true;
+    return closedDetails.querySelector(":scope > summary") === element;
+  });
 }
 
 export default function Timeline() {
@@ -416,6 +990,7 @@ export default function Timeline() {
   const [replacementPrimary, setReplacementPrimary] = useState("");
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [error, setError] = useState("");
+  const closeComparison = useCallback(() => setComparison(null), []);
 
   const cycles = detail?.timeline.cycles ?? [];
   const cycleTotal = detail?.timeline.cycle_total ?? 0;
@@ -544,7 +1119,12 @@ export default function Timeline() {
           <button className="button primary" disabled={comparisonNodes.length !== 2 || comparisonBusy} onClick={() => void compareSelected()}>{t("compareSelectedNodes")}</button>
         </aside>
       )}
-      {comparison && <NodeComparisonView comparison={comparison} />}
+      {comparison && (
+        <NodeComparisonModal
+          comparison={comparison}
+          onClose={closeComparison}
+        />
+      )}
       <div className="research-cycle-list">
         {cycles.map((cycle) => (
           <section className={`research-cycle ${cycle.is_primary ? "primary" : ""}`} key={cycle.id}>

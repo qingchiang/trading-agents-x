@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -75,10 +81,49 @@ function node(
     research_availability: kind === "incremental" ? { domains: [] } : null,
     information_advancement:
       kind === "incremental"
-        ? { advanced: true, reasons: ["New filing materially changes the view."] }
+        ? { advanced: true, reasons: ["admissible_observation"] }
         : null,
-    performance: null,
-    reassessment: null,
+    performance:
+      kind === "incremental"
+        ? {
+            stock: {
+              status: "calculated",
+              calculation: {
+                adjustment_basis: "split adjusted",
+                baseline_information_cutoff_at: "2026-07-20T21:00:00Z",
+                end_session: date,
+                end_value: 105,
+                formula: "(end / start) - 1",
+                provider: "test",
+                retrieved_at: `${date}T22:00:00Z`,
+                start_session: "2026-07-20",
+                start_value: 100,
+                target_information_cutoff_at: `${date}T21:00:00Z`,
+                unrounded_return: 0.05,
+              },
+            },
+            benchmarks: [],
+          }
+        : null,
+    reassessment:
+      kind === "incremental"
+        ? {
+            entries: [
+              {
+                component_id: "thesis",
+                disposition: "weakened",
+                reason: "The new filing weakens the baseline thesis.",
+                evidence_refs: [],
+              },
+              {
+                component_id: "risks.0",
+                disposition: "reaffirmed",
+                reason: "The existing risk remains.",
+                evidence_refs: [],
+              },
+            ],
+          }
+        : null,
     full_research_required_reasons: [],
   } as unknown as ResearchNodeView;
 }
@@ -159,10 +204,18 @@ test("renders a Full root and a structurally distinct Incremental child", async 
   expect(screen.getByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("Full baseline thesis")).toBeVisible();
   expect(screen.getByText("Incremental thesis changed")).toBeVisible();
-  expect(screen.getByText("New filing materially changes the view.")).toBeVisible();
-  fireEvent.click(screen.getByText("Collection Summary"));
+  expect(screen.getByText("New admissible observation")).toBeVisible();
+  expect(screen.getByText("Stock return: 5%")).toBeVisible();
+  expect(screen.getByText("1 non-reaffirmed item")).toBeVisible();
+  fireEvent.click(screen.getByText("Update details"));
+  expect(screen.getByText("Collection Summary")).toBeVisible();
   expect(screen.getByText("News")).toBeVisible();
   expect(screen.getByText("Partial")).toBeVisible();
+  const incrementalCard = document.querySelector<HTMLElement>(
+    ".research-node-card.incremental",
+  );
+  expect(incrementalCard).not.toBeNull();
+  fireEvent.click(within(incrementalCard!).getAllByText("Audit details")[0]);
   expect(screen.getByText("sec")).toBeVisible();
   expect(screen.getByText("coverage.partial")).toBeVisible();
   expect(document.querySelector(".research-node-card.full")).toBeInTheDocument();
@@ -185,7 +238,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
           confidence: 0.84,
           thesis: "Full baseline thesis",
         },
-        method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" },
+        method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.4" },
       },
       {
         node_id: "increment-1",
@@ -255,6 +308,13 @@ test("selects human-readable nodes and renders a structured comparison", async (
         ],
       },
       {
+        key: "confidence",
+        values: [
+          { state: "recorded", value: 0.84 },
+          { state: "recorded", value: 0.84 },
+        ],
+      },
+      {
         key: "executive_summary",
         values: [
           { state: "not_recorded_under_this_schema" },
@@ -293,22 +353,55 @@ test("selects human-readable nodes and renders a structured comparison", async (
   fireEvent.click(selectors[0]);
   fireEvent.click(selectors[1]);
   expect(screen.getByText(/2026-07-25 · Hold/)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
+  const compareButton = screen.getByRole("button", {
+    name: "Compare selected nodes",
+  });
+  compareButton.focus();
+  fireEvent.click(compareButton);
 
-  const comparisonTable = await screen.findByRole("table");
-  expect(comparisonTable).toHaveTextContent("Incremental thesis changed");
-  expect(comparisonTable).toHaveTextContent("Not Recorded Under This Schema");
-  expect(comparisonTable).toHaveTextContent("Null");
-  expect(comparisonTable).toHaveTextContent("Empty");
-  expect(comparisonTable).toHaveTextContent("Updated outcome");
-  expect(comparisonTable).toHaveTextContent("earnings: Weakened");
-  expect(comparisonTable).toHaveTextContent("Stock return: 12%");
-  expect(comparisonTable).toHaveTextContent("Refresh the complete baseline.");
-  expect(comparisonTable).toHaveTextContent("openai / gpt-5.5");
+  const dialog = await screen.findByRole("dialog", { name: "Node Comparison" });
+  expect(document.body.style.overflow).toBe("hidden");
+  expect(within(dialog).getByText("Incremental thesis changed")).toBeVisible();
+  expect(within(dialog).queryByText("84% confidence")).not.toBeInTheDocument();
+
+  fireEvent.click(within(dialog).getByText("Extended conclusions"));
+  expect(within(dialog).getByText("Not Recorded Under This Schema")).toBeVisible();
+  expect(within(dialog).getByText("Null")).toBeVisible();
+  expect(within(dialog).getByText("Empty")).toBeVisible();
+  expect(within(dialog).getByText("Updated outcome")).toBeVisible();
+
+  fireEvent.click(within(dialog).getByText("Update audit"));
+  expect(within(dialog).getByText(/earnings: Weakened/)).toBeVisible();
+  expect(within(dialog).getByText(/openai \/ gpt-5.5/)).toBeVisible();
+  expect(within(dialog).getByText(/Stock return: 12%/)).toBeVisible();
+  expect(
+    within(dialog).getByText("Refresh the complete baseline."),
+  ).toBeVisible();
+
+  fireEvent.click(
+    within(dialog).getByRole("checkbox", {
+      name: "Show changed sections only",
+    }),
+  );
+  expect(within(dialog).getAllByText("84% confidence")).toHaveLength(2);
+
+  let headers = within(dialog).getAllByRole("columnheader");
+  expect(headers[1]).toHaveTextContent("Full research");
+  expect(headers[2]).toHaveTextContent("Incremental research");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Swap sides" }));
+  headers = within(dialog).getAllByRole("columnheader");
+  expect(headers[1]).toHaveTextContent("Incremental research");
+  expect(headers[2]).toHaveTextContent("Full research");
+  expect(api.compareResearchNodes).toHaveBeenCalledTimes(1);
   expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
     { node_id: "full-primary", lifecycle_state: "active" },
     { node_id: "increment-1", lifecycle_state: "active" },
   ]);
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Node Comparison" })).not.toBeInTheDocument();
+  expect(document.body.style.overflow).toBe("");
+  expect(compareButton).toHaveFocus();
 });
 
 test("changes Primary Research using a human-readable cycle", async () => {

@@ -872,7 +872,10 @@ test("compares active and explicitly shown Trash nodes without creating research
   await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
   await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
 
-  await expect(page.getByRole("region", { name: /Node Comparison|节点对照|ノード比較/ })).toBeVisible();
+  const comparisonDialog = page.getByRole("dialog", {
+    name: /Node Comparison|节点对照|ノード比較/,
+  });
+  await expect(comparisonDialog).toBeVisible();
   await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
   await expect(
     page.getByText("Comparison side needs Full research.", { exact: true }),
@@ -882,6 +885,15 @@ test("compares active and explicitly shown Trash nodes without creating research
     { node_id: incremental.id, lifecycle_state: "trashed" },
   ] });
   expect(researchCreateCalls).toBe(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const dialogBox = await comparisonDialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox?.x).toBe(0);
+  expect(dialogBox?.y).toBe(0);
+  expect(dialogBox?.width).toBe(390);
+  expect(dialogBox?.height).toBe(844);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
 });
 
 test("covers every supported retained-node comparison pair", async ({ page }) => {
@@ -950,7 +962,7 @@ test("covers every supported retained-node comparison pair", async ({ page }) =>
     await page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     }).click();
-    await expect(page.getByRole("region", {
+    await expect(page.getByRole("dialog", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeVisible();
     expect(comparisonPayloads.at(-1)).toEqual({ nodes: pair.map((node) => ({
@@ -1017,7 +1029,7 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
     await expect(selectButtons.nth(0)).toBeDisabled();
     await compareButton.click();
     await expect(page.getByText(message)).toBeVisible();
-    await expect(page.getByRole("region", {
+    await expect(page.getByRole("dialog", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeHidden();
   }
