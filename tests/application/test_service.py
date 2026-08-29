@@ -1596,7 +1596,7 @@ def test_service_export_reads_the_durable_result(
     assert "Fixture thesis" in body
     if format == "json":
         payload = json.loads(body)
-        assert payload["schema_version"] == "10"
+        assert payload["schema_version"] == "11"
         assert payload["run"]["id"] == result.run_id
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]

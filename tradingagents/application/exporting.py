@@ -68,6 +68,9 @@ _EN_LABELS = {
     "research_decision": "Research Decision",
     "no_decision": "No final decision was recorded.",
     "incremental_products": "Incremental Research Products",
+    "incremental_brief": "Incremental Analysis Brief",
+    "historical_brief_missing": "This historical run did not record an analysis brief.",
+    "full_baseline_context": "Full Baseline Context",
     "information_advancement": "Information advancement",
     "research_availability": "Research availability",
     "reassessment": "Baseline reassessment",
@@ -282,6 +285,9 @@ _ZH_LABELS = {
     "research_decision": "最终结论",
     "no_decision": "未记录最终研究结论。",
     "incremental_products": "增量研究产物",
+    "incremental_brief": "增量分析简报",
+    "historical_brief_missing": "此历史运行未记录分析简报。",
+    "full_baseline_context": "完整研究基线上下文",
     "information_advancement": "信息推进",
     "research_availability": "研究可用性",
     "reassessment": "基线再评估",
@@ -472,6 +478,9 @@ _JA_LABELS = {
     "research_decision": "最終結論",
     "no_decision": "最終結論は記録されていません。",
     "incremental_products": "増分リサーチ成果物",
+    "incremental_brief": "増分分析ブリーフ",
+    "historical_brief_missing": "この過去の実行には分析ブリーフが記録されていません。",
+    "full_baseline_context": "フルリサーチ基準コンテキスト",
     "information_advancement": "情報の前進",
     "research_availability": "リサーチ可用性",
     "reassessment": "ベースライン再評価",
@@ -658,7 +667,12 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
     labels = _export_labels(run_export)
-    evidence_aliases = _evidence_aliases(run_export.evidence)
+    baseline_evidence = (
+        run_export.incremental_context.full_baseline_evidence
+        if run_export.incremental_context is not None
+        else None
+    )
+    evidence_aliases = _evidence_aliases(run_export.evidence, baseline_evidence)
     process_artifacts = tuple(
         artifact
         for artifact in run_export.artifacts
@@ -752,13 +766,22 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     node = run_export.research_node
     if node is not None and node.research_kind == "incremental":
         sections.extend(["", f"## {labels['incremental_products']}", ""])
+        brief = (
+            run_export.incremental_context.analysis_brief
+            if run_export.incremental_context is not None
+            else None
+        )
+        sections.extend([f"### {labels['incremental_brief']}", ""])
+        if brief is None:
+            sections.append(f"_{labels['historical_brief_missing']}_")
+        else:
+            sections.append(_render_export_markdown(brief.markdown, evidence_aliases))
         if node.information_advancement is not None:
             reasons = ", ".join(node.information_advancement.reasons) or "—"
             sections.append(f"- {labels['information_advancement']}: {reasons}")
         if node.research_availability is not None:
             availability = ", ".join(
-                f"{item.domain}: {item.status.value}"
-                for item in node.research_availability.domains
+                f"{item.domain}: {item.status.value}" for item in node.research_availability.domains
             )
             sections.append(f"- {labels['research_availability']}: {availability}")
         if node.reassessment is not None:
@@ -772,6 +795,22 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             sections.extend(
                 f"- `{reason.code}`: {reason.message}"
                 for reason in node.full_research_required_reasons
+            )
+        context = run_export.incremental_context
+        if context is not None:
+            sections.extend(
+                [
+                    "",
+                    f"### {labels['full_baseline_context']}",
+                    "",
+                    f"- {labels['run']}: `{context.full_baseline.run_id}`",
+                    f"- {labels['analysis_date']}: `{context.full_baseline.analysis_date}`",
+                    "",
+                    _render_export_markdown(
+                        _render_research_decision(context.full_baseline.decision, labels),
+                        evidence_aliases,
+                    ),
+                ]
             )
 
     if result.numeric_audit is not None:
@@ -1004,6 +1043,11 @@ def render_run_export_package(run_export: RunExport) -> bytes:
                     else None
                 ),
                 "attempts": [attempt.model_dump(mode="json") for attempt in run_export.attempts],
+                "incremental_context": (
+                    run_export.incremental_context.model_dump(mode="json")
+                    if run_export.incremental_context is not None
+                    else None
+                ),
             }
         ),
         "artifacts.json": _json_bytes(
@@ -1016,6 +1060,11 @@ def render_run_export_package(run_export: RunExport) -> bytes:
     if run_export.evidence is not None:
         for table in run_export.evidence.tables:
             payloads[f"tables/{table.id}.csv"] = _evidence_table_csv(table)
+    if run_export.incremental_context is not None:
+        baseline_evidence = run_export.incremental_context.full_baseline_evidence
+        payloads["baseline/evidence.json"] = _json_bytes(baseline_evidence.model_dump(mode="json"))
+        for table in baseline_evidence.tables:
+            payloads[f"baseline/tables/{table.id}.csv"] = _evidence_table_csv(table)
 
     manifest = {
         "schema_version": "1",
@@ -1116,11 +1165,12 @@ def _render_analyst_report(
     return "\n".join(lines)
 
 
-def _evidence_aliases(evidence: Any) -> dict[str, str]:
-    if evidence is None:
-        return {}
+def _evidence_aliases(*evidence_bundles: Any) -> dict[str, str]:
+    items = tuple(
+        item for evidence in evidence_bundles if evidence is not None for item in evidence.items
+    )
     aliases: dict[str, str] = {}
-    for index, group in enumerate(group_evidence_by_content(evidence.items), 1):
+    for index, group in enumerate(group_evidence_by_content(items), 1):
         alias = f"E{index:02d}"
         for ref in group.refs:
             aliases[ref] = alias
@@ -1306,9 +1356,9 @@ def _render_research_decision(
                 f"- {labels['method']}: {assessment.method}",
                 (
                     f"- {labels['range']}: "
-                f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
-                f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
-                f"{assessment.unit}"
+                    f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
+                    f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
+                    f"{assessment.unit}"
                 ),
                 f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
                 (
@@ -1438,9 +1488,7 @@ def _calculation_uses(
                     )
                     if item is not None
                 ),
-                labels["calculation_use.scenario"].format(
-                    scenario=labels[scenario.kind.value]
-                ),
+                labels["calculation_use.scenario"].format(scenario=labels[scenario.kind.value]),
             )
     if content.valuation_assessment is not None:
         add(
@@ -1468,9 +1516,7 @@ def _decision_component_label(component_path: str, labels: ExportLabels) -> str:
         return labels["risk_response"]
     match = re.fullmatch(r"scenarios\.(base|bull|bear)\..+", component_path)
     if match:
-        return labels["calculation_use.scenario"].format(
-            scenario=labels[match.group(1)]
-        )
+        return labels["calculation_use.scenario"].format(scenario=labels[match.group(1)])
     return labels["calculation_use.decision_claim"]
 
 
@@ -1563,8 +1609,7 @@ def _render_numeric_audit_appendix(
         for item in appendix.omitted_components:
             lines.append(
                 f"- **{_numeric_omission_label(item, labels)}** "
-                f"(`{item.component_path}`): "
-                + ", ".join(f"`{code}`" for code in item.issue_codes)
+                f"(`{item.component_path}`): " + ", ".join(f"`{code}`" for code in item.issue_codes)
             )
     for snapshot in appendix.snapshots:
         phase_label = labels.enum_name("numeric_phase", snapshot.phase.value)

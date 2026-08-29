@@ -5,15 +5,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from tradingagents.application.contracts import ResearchWarning
+from tradingagents.application.contracts import ReportSection, ResearchWarning
 
 _EVIDENCE_CITATION_RE = re.compile(r"\[\^(ev_[A-Za-z0-9_-]+)\]")
-_EVIDENCE_DEFINITION_RE = re.compile(
-    r"^(?P<indent> {0,3})\[\^(?P<ref>ev_[A-Za-z0-9_-]+)\]:"
-)
+_EVIDENCE_DEFINITION_RE = re.compile(r"^(?P<indent> {0,3})\[\^(?P<ref>ev_[A-Za-z0-9_-]+)\]:")
 _FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})")
 _INDENTED_CONTINUATION_RE = re.compile(r"^(?: {4}|\t)")
 _INLINE_CODE_RE = re.compile(r"(`+)(.*?)(\1)")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+_VALID_CITATION_RE = re.compile(r"\[\^(ev_[a-f0-9]{12})\]")
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,50 @@ class NormalizedEvidenceMarkdown:
     markdown: str
     evidence_refs: tuple[str, ...]
     warnings: tuple[ResearchWarning, ...]
+
+
+def parse_markdown_sections(
+    markdown: str,
+    *,
+    namespace: str,
+    fallback_title: str,
+) -> tuple[ReportSection, ...]:
+    """Extract stable navigation sections from already-normalized Markdown."""
+
+    matches = list(_HEADING_RE.finditer(markdown))
+    if not matches:
+        return (
+            ReportSection(
+                id=f"{namespace}.root",
+                title=fallback_title,
+                anchor=f"{namespace}-root",
+                source_refs=tuple(dict.fromkeys(_VALID_CITATION_RE.findall(markdown))),
+            ),
+        )
+    sections = []
+    used: dict[str, int] = {}
+    for index, match in enumerate(matches):
+        title = re.sub(
+            r"\s+\[\^ev_[a-f0-9]{12}\]\s*$",
+            "",
+            match.group(2),
+        ).strip()
+        slug = re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")
+        if not slug:
+            slug = f"section-{index + 1}"
+        used[slug] = used.get(slug, 0) + 1
+        suffix = f"-{used[slug]}" if used[slug] > 1 else ""
+        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        body = markdown[match.start() : body_end]
+        sections.append(
+            ReportSection(
+                id=f"{namespace}.section_{index + 1}",
+                title=title,
+                anchor=f"{namespace}-{slug}{suffix}",
+                source_refs=tuple(dict.fromkeys(_VALID_CITATION_RE.findall(body))),
+            )
+        )
+    return tuple(sections)
 
 
 def normalize_evidence_markdown(

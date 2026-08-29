@@ -1953,6 +1953,108 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IncrementalAnalysisBrief": {
+        "additionalProperties": false,
+        "description": "User-readable Incremental analysis produced by the semantic synthesis pass.",
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "generation_method": {
+            "const": "markdown_audited",
+            "default": "markdown_audited",
+            "title": "Generation Method",
+            "type": "string"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "prompt_version": {
+            "const": "incremental-analysis-brief-v1",
+            "default": "incremental-analysis-brief-v1",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "report_sections": {
+            "items": {
+              "$ref": "#/components/schemas/ReportSection"
+            },
+            "minItems": 1,
+            "title": "Report Sections",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "markdown",
+          "report_sections"
+        ],
+        "title": "IncrementalAnalysisBrief",
+        "type": "object"
+      },
+      "IncrementalBaselineContext": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ResearchDecision"
+          },
+          "run_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "analysis_date",
+          "decision"
+        ],
+        "title": "IncrementalBaselineContext",
+        "type": "object"
+      },
+      "IncrementalRunContext": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalAnalysisBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "full_baseline": {
+            "$ref": "#/components/schemas/IncrementalBaselineContext"
+          }
+        },
+        "required": [
+          "full_baseline"
+        ],
+        "title": "IncrementalRunContext",
+        "type": "object"
+      },
       "InformationAdvancement": {
         "additionalProperties": false,
         "description": "Deterministic answer to whether collection can justify an Incremental Node.",
@@ -5035,6 +5137,16 @@
           },
           "evidence_status": {
             "$ref": "#/components/schemas/EvidenceSealView"
+          },
+          "incremental_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalRunContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "research_node": {
             "anyOf": [

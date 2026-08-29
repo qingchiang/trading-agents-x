@@ -251,9 +251,7 @@ def create_app(
             return await call_next(request)
         if not auth.validate(request.cookies.get(COOKIE_NAME)):
             return _error(401, "authentication_required", "LAN session required")
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(
-            request
-        ):
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(request):
             return _error(403, "origin_mismatch", "Request origin is not allowed")
         return await call_next(request)
 
@@ -314,7 +312,7 @@ def create_app(
                                         }
                                     ],
                                 },
-                            }
+                            },
                         }
                     }
                 },
@@ -496,6 +494,7 @@ def create_app(
             research_node=repository.get_research_node(run_id),
             attempts=repository.list_attempts(run_id),
             evidence_status=repository.evidence_status(run_id),
+            incremental_context=repository.get_incremental_context(run_id),
         )
 
     @app.get(
@@ -556,11 +555,7 @@ def create_app(
                     for event in events:
                         cursor = event.sequence
                         data = event.model_dump_json()
-                        yield (
-                            f"id: {event.sequence}\n"
-                            f"event: {event.event_type}\n"
-                            f"data: {data}\n\n"
-                        )
+                        yield (f"id: {event.sequence}\nevent: {event.event_type}\ndata: {data}\n\n")
                 else:
                     idle_ticks += 1
                     view = repository.get_run(run_id)
@@ -638,9 +633,7 @@ def create_app(
                 "deep_model": defaults.deep_model,
                 "quick_reasoning_effort": defaults.quick_reasoning_effort,
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
-                "output_language": report_language_value(
-                    defaults.output_language
-                ),
+                "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
                 "trash_retention_days": settings.trash_retention_days,
             },

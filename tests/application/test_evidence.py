@@ -484,11 +484,7 @@ def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
     assert len(csv_table.rows) == 28
     assert csv_table.columns[0].data_type is TableDataType.DATE
     assert csv_table.columns[1].data_type is TableDataType.NUMBER
-    assert all(
-        not cell.source_refs
-        for row in csv_table.rows
-        for cell in row.cells.values()
-    )
+    assert all(not cell.source_refs for row in csv_table.rows for cell in row.cells.values())
     assert csv_table.evidence_refs == (first.ref, second.ref)
 
 
@@ -629,7 +625,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
 
     markdown = render_run_export_markdown(run_export)
 
-    assert run_export.schema_version == "10"
+    assert run_export.schema_version == "11"
     assert "Decision Synthesis Brief" in markdown
     assert "Non-final reasoning draft" in markdown
     assert "Non-final synthesis.[E01]" in markdown
@@ -889,9 +885,7 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
                         rounded_canonical_result=82.1,
                         calculation_status=NumericCalculationStatus.VERIFIED,
                         display_status=NumericDisplayStatus.MISMATCHED,
-                        issue_codes=(
-                            "numeric.requirement.req_forward_pe.result_mismatch",
-                        ),
+                        issue_codes=("numeric.requirement.req_forward_pe.result_mismatch",),
                     ),
                 ),
                 snapshots=(),
@@ -900,9 +894,7 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
                         component_path="risks.0",
                         component_type=NumericAuditComponentType.DECISION_CLAIM,
                         reference_label="Remaining EPS",
-                        issue_codes=(
-                            "numeric.requirement.req_eps_remaining.missing_calculation",
-                        ),
+                        issue_codes=("numeric.requirement.req_eps_remaining.missing_calculation",),
                     ),
                 ),
             ),
@@ -974,14 +966,8 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
 
     assert "## Performance" in markdown
     assert "- Input tokens: `1200`" in markdown
-    assert (
-        "| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | "
-        "4.000s |"
-    ) in markdown
-    assert (
-        "| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | "
-        "2.500s |"
-    ) in markdown
+    assert ("| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | 4.000s |") in markdown
+    assert ("| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | 2.500s |") in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
 
 
@@ -1037,9 +1023,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     interpretation="Observation only, not an entry order.",
                     evidence_refs=("ev_0123456789ab",),
                     date_evidence_refs=("ev_0123456789ab",),
-                    source_locator=EvidenceValueLocator(
-                        evidence_ref="ev_0123456789ab"
-                    ),
+                    source_locator=EvidenceValueLocator(evidence_ref="ev_0123456789ab"),
                 ),
                 MarketReferenceLevel(
                     label="Unclassified signal",
@@ -1140,9 +1124,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                         component_path="numeric.calculation.calc_valuation",
                         component_type=NumericAuditComponentType.CALCULATION,
                         reference_label="calc_valuation",
-                        issue_codes=(
-                            "numeric.calculation.calc_valuation.formula.invalid_syntax",
-                        ),
+                        issue_codes=("numeric.calculation.calc_valuation.formula.invalid_syntax",),
                     ),
                 ),
             ),

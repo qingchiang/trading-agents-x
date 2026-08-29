@@ -227,7 +227,9 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
 
     assert synthesis_inputs == []
     assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 def _full_fundamentals_graph(content: str):
@@ -344,7 +346,9 @@ PE Ratio (TTM): 42"""
 
     assert synthesis_inputs == []
     assert repository.list_runs(status=RunStatus.FAILED).items[0].id != baseline.run_id
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 def test_real_full_fundamentals_field_change_advances_information(
@@ -494,6 +498,8 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert node.information_advancement.reasons == ("admissible_observation",)
     assert node.performance.stock.status.value == "unavailable"
     assert node.reassessment is not None
+    assert repository.get_incremental_context(result.run_id).analysis_brief is not None
+    assert repository.get_incremental_context(result.run_id).full_baseline.run_id == baseline.run_id
     assert node.decision is not None
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
@@ -502,6 +508,12 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert result.instrument_local_name == "英伟达"
     assert repository.get_run(result.run_id).instrument_name == "NVIDIA Corporation"
     assert repository.get_run(result.run_id).instrument_local_name == "英伟达"
+    with repository.sessions.begin() as session:
+        historical_node = session.get(ResearchNodeRecord, result.run_id)
+        products = dict(historical_node.incremental_products_json)
+        products.pop("analysis_brief")
+        historical_node.incremental_products_json = products
+    assert repository.get_incremental_context(result.run_id).analysis_brief is None
     with repository.sessions.begin() as session:
         historical = session.get(RunRecord, result.run_id)
         historical.instrument_name = None
@@ -632,7 +644,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         ):
             assert include_raw is True
             self.calls.append((schema.__name__, method))
-            if schema.__name__ == "IncrementalSynthesis":
+            if schema.__name__ == "_IncrementalSynthesisPayload":
                 if method == "json_mode":
                     if monolithic_failure == "repair_schema_validation":
                         return _Invoker(
@@ -674,8 +686,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
                                     "component_id": component_id,
                                     "disposition": "reaffirmed",
                                     "reason": (
-                                        "The bounded update does not change this "
-                                        "component."
+                                        "The bounded update does not change this component."
                                     ),
                                 }
                                 for component_id in component_ids
@@ -693,9 +704,9 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
                 assert "market_reference_levels" not in decision_schema["properties"]
                 assert "calculation_records" not in decision_schema["properties"]
                 parsed = {
-                    "decision": _incremental_decision_core(
-                        baseline_decision
-                    ).model_dump(mode="json")
+                    "decision": _incremental_decision_core(baseline_decision).model_dump(
+                        mode="json"
+                    )
                 }
             else:
                 raise AssertionError(f"unexpected schema: {schema.__name__}")
@@ -738,7 +749,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
             service.run(request)
         assert all(method != "json_mode" for _schema, method in serializer.calls)
         assert [schema for schema, _method in serializer.calls] == [
-            "IncrementalSynthesis",
+            "_IncrementalSynthesisPayload",
             "_IncrementalReassessmentSection",
         ]
         failed = repository.list_runs(status=RunStatus.FAILED).items
@@ -752,9 +763,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
             assert session.get(ResearchNodeRecord, failed_run_id) is None
             assert session.get(RunEvidenceRecord, failed_run_id) is None
             assert (
-                session.query(DecisionRecord)
-                .filter(DecisionRecord.run_id == failed_run_id)
-                .count()
+                session.query(DecisionRecord).filter(DecisionRecord.run_id == failed_run_id).count()
                 == 0
             )
         return
@@ -763,8 +772,8 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
         with pytest.raises(StructuredOutputError):
             service.run(request)
         assert serializer.calls == [
-            ("IncrementalSynthesis", None),
-            ("IncrementalSynthesis", "json_mode"),
+            ("_IncrementalSynthesisPayload", None),
+            ("_IncrementalSynthesisPayload", "json_mode"),
         ]
         failed = repository.list_runs(status=RunStatus.FAILED).items
         assert len(failed) == 1
@@ -773,7 +782,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
     result = service.run(request)
 
     assert serializer.calls == [
-        ("IncrementalSynthesis", None),
+        ("_IncrementalSynthesisPayload", None),
         ("_IncrementalReassessmentSection", None),
         ("_IncrementalDecisionSection", None),
     ]
@@ -884,7 +893,9 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
         )
 
     assert calls == 3
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 def test_incremental_retry_uses_the_retained_run_dataflow_configuration(
@@ -981,7 +992,9 @@ def test_incremental_commit_revalidates_baseline_schema_after_synthesis(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 def test_incremental_service_rejects_no_information_advancement_before_synthesis(
@@ -1020,7 +1033,9 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     assert synthesized == []
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
     assert any(
         event.event_type == "incremental.no_advancement"
         for event in repository.list_events(failed[0].id)
@@ -1127,7 +1142,9 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
+    node = next(
+        item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id
+    )
     assert node.information_advancement.reasons == (
         "admissible_observation",
         "completed_stock_session",
@@ -1337,7 +1354,9 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
+    node = next(
+        item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id
+    )
     calculation = node.performance.benchmarks[0].component.calculation
     assert calculation is not None
     assert calculation.start_session == date(2026, 7, 20)
@@ -1406,7 +1425,9 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
+    node = next(
+        item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id
+    )
     fundamentals = next(
         item for item in node.collection_summary.domains if item.domain == "fundamentals"
     )
@@ -1574,7 +1595,9 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    node = next(item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id)
+    node = next(
+        item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id
+    )
     domains = {item.domain: item for item in node.collection_summary.domains}
     assert domains["fundamentals"].state.value == "partial"
     assert domains["market"].diagnostic.code == "provider_failure"
@@ -1657,7 +1680,9 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
     with repository.sessions() as session:
         assert session.query(DecisionRecord).count() == 1
         assert session.query(ResearchNodeRecord).count() == 1
@@ -1816,7 +1841,9 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
@@ -1879,7 +1906,9 @@ def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
             )
         )
 
-    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (baseline.run_id,)
+    assert tuple(node.id for node in repository.get_timeline("NVDA").all_nodes) == (
+        baseline.run_id,
+    )
 
 
 @pytest.mark.parametrize("mutation_phase", ["collection", "synthesis"])

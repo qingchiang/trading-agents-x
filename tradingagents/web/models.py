@@ -13,6 +13,7 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     EvidenceSealView,
     FullBaselineCandidate,
+    IncrementalRunContext,
     ResearchNodeComparisonSelection,
     ResearchNodeView,
     ResearchTimeline,
@@ -72,6 +73,7 @@ class RunDetail(ApiModel):
     research_node: ResearchNodeView | None = None
     attempts: tuple[RunAttemptView, ...] = ()
     evidence_status: EvidenceSealView
+    incremental_context: IncrementalRunContext | None = None
 
 
 class RunCreationTemplate(ApiModel):
@@ -116,9 +118,7 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(
-            self.model_dump(exclude={"source_run_id"})
-        )
+        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}))
 
 
 class RunBatchRequest(ApiModel):

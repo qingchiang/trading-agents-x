@@ -272,6 +272,23 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    IncrementalAnalysisBrief: {
+      evidence_refs?: string[];
+      generation_method?: string;
+      markdown: string;
+      prompt_version?: string;
+      report_sections: components["schemas"]["ReportSection"][];
+      warnings?: components["schemas"]["ResearchWarning"][];
+    };
+    IncrementalBaselineContext: {
+      analysis_date: string;
+      decision: components["schemas"]["ResearchDecision"];
+      run_id: string;
+    };
+    IncrementalRunContext: {
+      analysis_brief?: components["schemas"]["IncrementalAnalysisBrief"] | null;
+      full_baseline: components["schemas"]["IncrementalBaselineContext"];
+    };
     InformationAdvancement: {
       advanced: boolean;
       observation_ids?: string[];
@@ -714,6 +731,7 @@ export interface components {
     RunDetail: {
       attempts?: components["schemas"]["RunAttemptView"][];
       evidence_status: components["schemas"]["EvidenceSealView"];
+      incremental_context?: components["schemas"]["IncrementalRunContext"] | null;
       research_node?: components["schemas"]["ResearchNodeView"] | null;
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];

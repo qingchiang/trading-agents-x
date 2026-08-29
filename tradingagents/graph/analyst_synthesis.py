@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -24,7 +23,10 @@ from tradingagents.application.contracts import (
     ReportSection,
     ResearchWarning,
 )
-from tradingagents.application.markdown_evidence import normalize_evidence_markdown
+from tradingagents.application.markdown_evidence import (
+    normalize_evidence_markdown,
+    parse_markdown_sections,
+)
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
@@ -46,8 +48,6 @@ from tradingagents.provenance import (
     provenance_quality_issues,
 )
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
-_CITATION_RE = re.compile(r"\[\^(ev_[a-f0-9]{12})\]")
 _ANALYST_QUALITY_RULES = {
     "market": (
         "Distinguish trend, momentum, volatility, and noise. Compare price and "
@@ -103,10 +103,7 @@ class AnalystAuditDraft(FrozenModel):
         claim_ids = tuple(claim.id for claim in self.key_claims)
         if len(claim_ids) != len(set(claim_ids)):
             raise ValueError("analyst audit claim IDs must be unique")
-        if not any(
-            claim.importance is ClaimImportance.PRIMARY
-            for claim in self.key_claims
-        ):
+        if not any(claim.importance is ClaimImportance.PRIMARY for claim in self.key_claims):
             raise ValueError("analyst audit requires a primary claim")
         return self
 
@@ -134,9 +131,7 @@ def evidence_warnings(
             warnings.append(
                 ResearchWarning(
                     code=f"evidence.{issue.code}",
-                    message=(
-                        f"{issue.evidence} ({issue.source}): {issue.reason}"
-                    ),
+                    message=(f"{issue.evidence} ({issue.source}): {issue.reason}"),
                     evidence_ref=item.ref,
                     source=issue.source,
                 )
@@ -265,9 +260,7 @@ def invoke_analyst_report(
         if _is_truncated(response):
             continuation = writer_llm.invoke(
                 _continuation_prompt(markdown, output_language),
-                config={
-                    "metadata": {"research_node": f"{node}.report"}
-                },
+                config={"metadata": {"research_node": f"{node}.report"}},
             )
             if _is_truncated(continuation):
                 raise StructuredOutputError(
@@ -280,14 +273,12 @@ def invoke_analyst_report(
                 _message_text(continuation),
             )
 
-    markdown, sections, cited_refs, citation_warnings = (
-        normalize_report_citations(markdown, bundle=bundle, analyst=analyst)
+    markdown, sections, cited_refs, citation_warnings = normalize_report_citations(
+        markdown, bundle=bundle, analyst=analyst
     )
     fallback_refs = _prepared_source_refs(prepared_evidence, bundle)
     source_refs = tuple(dict.fromkeys((*cited_refs, *fallback_refs)))
-    base_warnings = tuple(
-        dict.fromkeys((*warnings, *citation_warnings))
-    )
+    base_warnings = tuple(dict.fromkeys((*warnings, *citation_warnings)))
 
     audit_phase = (
         metrics.phase(f"{node}.audit", event_writer=event_writer)
@@ -325,13 +316,9 @@ def invoke_analyst_report(
                 key_claims=(),
                 source_refs=source_refs,
                 audit_status=ReportAuditStatus.INCOMPLETE,
-                warnings=tuple(
-                    dict.fromkeys((*base_warnings, incomplete_warning))
-                ),
+                warnings=tuple(dict.fromkeys((*base_warnings, incomplete_warning))),
             ),
-            generation_method=(
-                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-            ),
+            generation_method=(ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE),
         )
 
     audit = audit_result.value
@@ -356,16 +343,8 @@ def invoke_analyst_report(
         dict.fromkeys(
             (
                 *source_refs,
-                *(
-                    ref
-                    for claim in key_claims
-                    for ref in claim.evidence_refs
-                ),
-                *(
-                    ref
-                    for section in audited_sections
-                    for ref in section.source_refs
-                ),
+                *(ref for claim in key_claims for ref in claim.evidence_refs),
+                *(ref for section in audited_sections for ref in section.source_refs),
             )
         )
     )
@@ -375,9 +354,7 @@ def invoke_analyst_report(
             markdown=markdown,
             report_sections=audited_sections,
             confidence=(
-                confidence_override
-                if confidence_override is not None
-                else audit.confidence
+                confidence_override if confidence_override is not None else audit.confidence
             ),
             key_claims=key_claims,
             source_refs=audited_refs,
@@ -555,41 +532,11 @@ def _parse_report_sections(
     *,
     analyst: str,
 ) -> tuple[ReportSection, ...]:
-    matches = list(_HEADING_RE.finditer(markdown))
-    if not matches:
-        return (
-            ReportSection(
-                id=f"{analyst}.root",
-                title=analyst.title(),
-                anchor=f"{analyst}-root",
-                source_refs=tuple(
-                    dict.fromkeys(_CITATION_RE.findall(markdown))
-                ),
-            ),
-        )
-    sections = []
-    used: dict[str, int] = {}
-    for index, match in enumerate(matches):
-        title = re.sub(r"\s+\[\^ev_[a-f0-9]{12}\]\s*$", "", match.group(2)).strip()
-        slug = re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")
-        if not slug:
-            slug = f"section-{index + 1}"
-        used[slug] = used.get(slug, 0) + 1
-        suffix = f"-{used[slug]}" if used[slug] > 1 else ""
-        anchor = f"{analyst}-{slug}{suffix}"
-        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
-        body = markdown[match.start():body_end]
-        sections.append(
-            ReportSection(
-                id=f"{analyst}.section_{index + 1}",
-                title=title,
-                anchor=anchor,
-                source_refs=tuple(
-                    dict.fromkeys(_CITATION_RE.findall(body))
-                ),
-            )
-        )
-    return tuple(sections)
+    return parse_markdown_sections(
+        markdown,
+        namespace=analyst,
+        fallback_title=analyst.title(),
+    )
 
 
 def _prepared_source_refs(
@@ -599,18 +546,13 @@ def _prepared_source_refs(
     if prepared is None:
         return tuple(item.ref for item in bundle.items)
     refs = []
-    table_refs = {
-        table.id: table.evidence_refs
-        for table in bundle.tables
-    }
+    table_refs = {table.id: table.evidence_refs for table in bundle.tables}
     for lookup in prepared.lookups:
         if lookup.evidence_ref:
             refs.append(lookup.evidence_ref)
         if lookup.table_id:
             refs.extend(table_refs.get(lookup.table_id, ()))
-    return tuple(dict.fromkeys(refs)) or tuple(
-        item.ref for item in bundle.items
-    )
+    return tuple(dict.fromkeys(refs)) or tuple(item.ref for item in bundle.items)
 
 
 def _message_text(response: Any) -> str:
@@ -631,9 +573,7 @@ def _message_text(response: Any) -> str:
 def _is_truncated(response: Any) -> bool:
     metadata = getattr(response, "response_metadata", None) or {}
     finish_reason = str(
-        metadata.get("finish_reason")
-        or metadata.get("stop_reason")
-        or ""
+        metadata.get("finish_reason") or metadata.get("stop_reason") or ""
     ).casefold()
     return finish_reason in {"length", "max_tokens", "max_output_tokens"}
 
