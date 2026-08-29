@@ -2561,6 +2561,42 @@ label small {
   margin: 0 0 8px;
 }
 
+.collection-domain-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.collection-source-list,
+.comparison-value-list {
+  display: grid;
+  gap: 4px;
+  margin: 3px 0 0;
+  padding-left: 18px;
+}
+
+.comparison-value-fields {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.comparison-value-fields > div {
+  display: grid;
+  gap: 2px;
+}
+
+.comparison-value-fields dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comparison-value-fields dd {
+  margin: 0;
+}
+
 .compact-list {
   display: grid;
   gap: 10px;

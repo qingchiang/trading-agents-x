@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -52,6 +53,7 @@ function DecisionSummary({ node }: { node: ResearchNodeView }) {
 
 function IncrementalProducts({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
+  const collectionDomains = node.collection_summary?.domains ?? [];
   return (
     <div className="incremental-product-grid">
       <section>
@@ -68,6 +70,39 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
           )) ?? <span>{t("notRecorded")}</span>}
         </div>
       </section>
+      <details>
+        <summary>{t("collectionSummary")}</summary>
+        {collectionDomains.length > 0 ? (
+          <ul className="compact-list collection-summary-list">
+            {collectionDomains.map((domain) => (
+              <li key={domain.domain}>
+                <div className="collection-domain-heading">
+                  <strong>{t(`${domain.domain}Analyst`)}</strong>
+                  <span className={`availability-chip ${domain.state}`}>
+                    {t(`collection_${domain.state}`)}
+                  </span>
+                </div>
+                {(domain.sources?.length ?? 0) > 0 && (
+                  <ul className="collection-source-list">
+                    {domain.sources?.map((source, index) => (
+                      <li key={`${source.source}-${source.retrieved_at}-${index}`}>
+                        <span>{source.source}</span>
+                        {source.fallback && <span className="muted-copy"> · {t("fallback")}</span>}
+                        {source.diagnostic && (
+                          <span className="muted-copy"> · {source.diagnostic.code}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {domain.diagnostic && <p className="muted-copy">{domain.diagnostic.code}</p>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted-copy">{t("notRecorded")}</p>
+        )}
+      </details>
       {node.reassessment && (
         <details>
           <summary>{t("reassessment")}</summary>
@@ -210,13 +245,94 @@ function NodeCard({
   );
 }
 
+const DECISION_FIELD_LABELS: Record<string, string> = {
+  rating: "researchRating",
+  confidence: "confidence",
+  executive_summary: "executiveSummary",
+  thesis: "thesis",
+  evidence_refs: "evidenceRefs",
+  catalysts: "catalysts",
+  risks: "risks",
+  invalidation_conditions: "invalidation",
+  unresolved_questions: "unresolvedQuestions",
+  time_horizon: "horizon",
+  scenarios: "scenarios",
+  valuation_assessment: "valuationAssessment",
+  market_reference_levels: "marketReferenceLevels",
+  calculation_records: "calculationRecords",
+  risk_review_adjustments: "riskReviewAdjustments",
+  numeric_audit_status: "numericAuditStatus",
+};
+
+const STRUCTURED_VALUE_LABELS: Record<string, string> = {
+  as_of_date: "asOfDate",
+  core_assumptions: "coreAssumptions",
+  evidence_refs: "evidenceRefs",
+  limitations: "limitations",
+  outcome: "scenarioOutcome",
+  reference_ranges: "scenarioReferenceRange",
+};
+
+function comparisonFieldLabel(t: TFunction, key: string) {
+  const translationKey = DECISION_FIELD_LABELS[key] ?? STRUCTURED_VALUE_LABELS[key];
+  return translationKey ? t(translationKey) : key;
+}
+
+function StructuredComparisonValue({ value }: { value: unknown }) {
+  const { t } = useTranslation();
+  if (value === null || value === undefined) {
+    return <span className="muted-copy">{t("notApplicable")}</span>;
+  }
+  if (typeof value === "boolean") return <span>{t(value ? "yes" : "no")}</span>;
+  if (typeof value === "string" || typeof value === "number") return <span>{value}</span>;
+  if (Array.isArray(value)) {
+    return (
+      <ul className="comparison-value-list">
+        {value.map((item, index) => (
+          <li key={index}><StructuredComparisonValue value={item} /></li>
+        ))}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    return (
+      <dl className="comparison-value-fields">
+        {Object.entries(value).map(([key, nestedValue]) => (
+          <div key={key}>
+            <dt>{comparisonFieldLabel(t, key)}</dt>
+            <dd><StructuredComparisonValue value={nestedValue} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <span>{String(value)}</span>;
+}
+
 function ComparisonValue({ value }: { value: unknown }) {
   const { t } = useTranslation();
   if (value === null || value === undefined || value === "") {
     return <span className="muted-copy">{t("notApplicable")}</span>;
   }
-  if (typeof value === "string" || typeof value === "number") return <span>{value}</span>;
-  return <span>{JSON.stringify(value)}</span>;
+  return <StructuredComparisonValue value={value} />;
+}
+
+function DecisionComparisonValue({
+  comparisonValue,
+}: {
+  comparisonValue: ResearchNodeComparison["decision_sections"][number]["values"][number] | undefined;
+}) {
+  const { t } = useTranslation();
+  if (!comparisonValue || comparisonValue.state === "not_recorded_under_this_schema") {
+    return <span className="muted-copy">{t("notRecordedUnderThisSchema")}</span>;
+  }
+  if (comparisonValue.state === "null") {
+    return <span className="muted-copy">{t("comparisonNull")}</span>;
+  }
+  if (comparisonValue.state === "empty") {
+    return <span className="muted-copy">{t("comparisonEmpty")}</span>;
+  }
+  return <StructuredComparisonValue value={comparisonValue.value} />;
 }
 
 function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison }) {
@@ -237,10 +353,7 @@ function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison
     [side.method_snapshot.llm_provider, side.method_snapshot.deep_model]
       .filter(Boolean)
       .join(" / ") || null;
-  const rows: [string, unknown, unknown][] = [
-    [t("researchRating"), left.decision?.rating, right.decision?.rating],
-    [t("confidence"), left.decision?.confidence, right.decision?.confidence],
-    [t("thesis"), left.decision?.thesis, right.decision?.thesis],
+  const productRows: [string, unknown, unknown][] = [
     [t("informationAdvancement"), left.information_advancement?.reasons?.join(", "), right.information_advancement?.reasons?.join(", ")],
     [t("researchAvailability"), left.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", "), right.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", ")],
     [t("reassessment"), reassessment(left), reassessment(right)],
@@ -258,7 +371,22 @@ function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison
       <div className="table-wrap comparison-decision-table">
         <table>
           <thead><tr><th>{t("decisionSection")}</th>{[left, right].map((side) => <th key={side.node_id}><KindBadge kind={side.research_kind} /> {side.analysis_date}</th>)}</tr></thead>
-          <tbody>{rows.map(([label, leftValue, rightValue]) => <tr key={label}><th scope="row">{label}</th><td><ComparisonValue value={leftValue} /></td><td><ComparisonValue value={rightValue} /></td></tr>)}</tbody>
+          <tbody>
+            {comparison.decision_sections.map((section) => (
+              <tr key={section.key}>
+                <th scope="row">{comparisonFieldLabel(t, section.key)}</th>
+                <td><DecisionComparisonValue comparisonValue={section.values[0]} /></td>
+                <td><DecisionComparisonValue comparisonValue={section.values[1]} /></td>
+              </tr>
+            ))}
+            {productRows.map(([label, leftValue, rightValue]) => (
+              <tr key={label}>
+                <th scope="row">{label}</th>
+                <td><ComparisonValue value={leftValue} /></td>
+                <td><ComparisonValue value={rightValue} /></td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
       <details className="audit-disclosure">

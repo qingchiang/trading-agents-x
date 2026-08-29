@@ -634,6 +634,8 @@ const en = {
     asOfDate: "As-of date",
     limitations: "Limitations",
     marketReferenceLevels: "Market reference levels",
+    calculationRecords: "Verified calculations",
+    numericAuditStatus: "Numeric audit status",
     marketReferenceNotice:
       "Reference observations only; these are not mandatory entry, stop, or take-profit instructions.",
     riskReviewAdjustments: "Final committee response to risk review",
@@ -1275,6 +1277,8 @@ const zhCN = {
     asOfDate: "基准日期",
     limitations: "局限",
     marketReferenceLevels: "市场参考位置",
+    calculationRecords: "已验证计算",
+    numericAuditStatus: "数值审计状态",
     marketReferenceNotice:
       "仅作为市场观察参考，不代表必须执行的入场、止损或止盈指令。",
     riskReviewAdjustments: "最终委员会对风险复核的处理",
@@ -1930,6 +1934,8 @@ const ja = {
     asOfDate: "基準日",
     limitations: "制約",
     marketReferenceLevels: "市場参考水準",
+    calculationRecords: "検証済み計算",
+    numericAuditStatus: "数値監査ステータス",
     marketReferenceNotice:
       "市場観察の参考値であり、必須のエントリー、損切り、利確指示ではありません。",
     riskReviewAdjustments: "最終委員会によるリスク審査への対応",

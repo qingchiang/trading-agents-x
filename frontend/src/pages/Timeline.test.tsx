@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { api, type ResearchNodeView, type TimelineDetail } from "../api/client";
+import {
+  api,
+  type ResearchNodeComparison,
+  type ResearchNodeView,
+  type TimelineDetail,
+} from "../api/client";
 import i18n from "../i18n";
 import { Router } from "../router";
 import Timeline from "./Timeline";
@@ -47,7 +52,26 @@ function node(
     is_primary: id === "full-primary",
     is_cycle_head: kind === "incremental",
     cycle_warning: false,
-    collection_summary: kind === "incremental" ? { domains: [] } : null,
+    collection_summary:
+      kind === "incremental"
+        ? {
+            market: "united_states",
+            version: "1",
+            domains: [
+              {
+                domain: "news",
+                state: "partial",
+                diagnostic: { code: "coverage.partial" },
+                sources: [
+                  {
+                    source: "sec",
+                    retrieved_at: `${date}T20:00:00Z`,
+                  },
+                ],
+              },
+            ],
+          }
+        : null,
     research_availability: kind === "incremental" ? { domains: [] } : null,
     information_advancement:
       kind === "incremental"
@@ -136,21 +160,133 @@ test("renders a Full root and a structurally distinct Incremental child", async 
   expect(screen.getByText("Full baseline thesis")).toBeVisible();
   expect(screen.getByText("Incremental thesis changed")).toBeVisible();
   expect(screen.getByText("New filing materially changes the view.")).toBeVisible();
+  fireEvent.click(screen.getByText("Collection Summary"));
+  expect(screen.getByText("News")).toBeVisible();
+  expect(screen.getByText("Partial")).toBeVisible();
+  expect(screen.getByText("sec")).toBeVisible();
+  expect(screen.getByText("coverage.partial")).toBeVisible();
   expect(document.querySelector(".research-node-card.full")).toBeInTheDocument();
   expect(document.querySelector(".research-node-card.incremental")).toBeInTheDocument();
 });
 
 test("selects human-readable nodes and renders a structured comparison", async () => {
-  vi.mocked(api.compareResearchNodes).mockResolvedValue({
+  const comparison: ResearchNodeComparison = {
     instrument: "NVDA",
     sides: [
-      { node_id: "full-primary", research_kind: "full", analysis_date: "2026-07-20", decision: { rating: "Overweight", confidence: 0.84, thesis: "Full baseline thesis" }, method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" } },
-      { node_id: "increment-1", research_kind: "incremental", analysis_date: "2026-07-25", decision: { rating: "Hold", confidence: 0.63, thesis: "Incremental thesis changed" }, information_advancement: { reasons: ["Material update"] }, reassessment: { entries: [{ component_id: "earnings", disposition: "weakened", reason: "Margins declined." }] }, performance: { stock: { status: "calculated", calculation: { unrounded_return: 0.12 } }, benchmarks: [] }, full_research_required_reasons: [{ code: "coverage.gap", message: "Refresh the complete baseline.", origin: "semantic", evidence_refs: [] }], method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" } },
+      {
+        node_id: "full-primary",
+        cycle_id: "full-primary",
+        lifecycle_state: "active",
+        research_kind: "full",
+        research_schema_version: "1",
+        analysis_date: "2026-07-20",
+        decision: {
+          rating: "Overweight",
+          confidence: 0.84,
+          thesis: "Full baseline thesis",
+        },
+        method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" },
+      },
+      {
+        node_id: "increment-1",
+        cycle_id: "full-primary",
+        lifecycle_state: "active",
+        research_kind: "incremental",
+        research_schema_version: "1",
+        analysis_date: "2026-07-25",
+        decision: {
+          rating: "Hold",
+          confidence: 0.63,
+          thesis: "Incremental thesis changed",
+        },
+        information_advancement: { advanced: true, reasons: ["admissible_observation"] },
+        reassessment: {
+          entries: [
+            {
+              component_id: "earnings",
+              disposition: "weakened",
+              reason: "Margins declined.",
+            },
+          ],
+        },
+        performance: {
+          stock: {
+            status: "calculated",
+            calculation: {
+              adjustment_basis: "split adjusted",
+              baseline_information_cutoff_at: "2026-07-20T21:00:00Z",
+              end_session: "2026-07-25",
+              end_value: 112,
+              formula: "(end / start) - 1",
+              provider: "test",
+              retrieved_at: "2026-07-25T22:00:00Z",
+              start_session: "2026-07-20",
+              start_value: 100,
+              target_information_cutoff_at: "2026-07-25T21:00:00Z",
+              unrounded_return: 0.12,
+            },
+          },
+          benchmarks: [],
+        },
+        full_research_required_reasons: [
+          {
+            code: "evidence.material_conflict",
+            message: "Refresh the complete baseline.",
+            origin: "semantic",
+            evidence_refs: [],
+          },
+        ],
+        method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" },
+      },
+    ],
+    decision_sections: [
+      {
+        key: "rating",
+        values: [
+          { state: "recorded", value: "Overweight" },
+          { state: "recorded", value: "Hold" },
+        ],
+      },
+      {
+        key: "thesis",
+        values: [
+          { state: "recorded", value: "Full baseline thesis" },
+          { state: "recorded", value: "Incremental thesis changed" },
+        ],
+      },
+      {
+        key: "executive_summary",
+        values: [
+          { state: "not_recorded_under_this_schema" },
+          { state: "recorded", value: "New summary" },
+        ],
+      },
+      {
+        key: "valuation_assessment",
+        values: [
+          { state: "null" },
+          { state: "empty", value: {} },
+        ],
+      },
+      {
+        key: "scenarios",
+        values: [
+          {
+            state: "recorded",
+            value: [{ kind: "base", outcome: "Baseline outcome" }],
+          },
+          {
+            state: "recorded",
+            value: [{ kind: "base", outcome: "Updated outcome" }],
+          },
+        ],
+      },
     ],
     cross_cycle: false,
     method_changed: false,
     warnings: [],
-  } as never);
+  };
+  vi.mocked(api.compareResearchNodes).mockResolvedValue(comparison);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
   const selectors = await screen.findAllByRole("button", { name: "Select for comparison" });
@@ -159,12 +295,16 @@ test("selects human-readable nodes and renders a structured comparison", async (
   expect(screen.getByText(/2026-07-25 · Hold/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Compare selected nodes" }));
 
-  const comparison = await screen.findByRole("table");
-  expect(comparison).toHaveTextContent("Incremental thesis changed");
-  expect(comparison).toHaveTextContent("earnings: Weakened");
-  expect(comparison).toHaveTextContent("Stock return: 12%");
-  expect(comparison).toHaveTextContent("Refresh the complete baseline.");
-  expect(comparison).toHaveTextContent("openai / gpt-5.5");
+  const comparisonTable = await screen.findByRole("table");
+  expect(comparisonTable).toHaveTextContent("Incremental thesis changed");
+  expect(comparisonTable).toHaveTextContent("Not Recorded Under This Schema");
+  expect(comparisonTable).toHaveTextContent("Null");
+  expect(comparisonTable).toHaveTextContent("Empty");
+  expect(comparisonTable).toHaveTextContent("Updated outcome");
+  expect(comparisonTable).toHaveTextContent("earnings: Weakened");
+  expect(comparisonTable).toHaveTextContent("Stock return: 12%");
+  expect(comparisonTable).toHaveTextContent("Refresh the complete baseline.");
+  expect(comparisonTable).toHaveTextContent("openai / gpt-5.5");
   expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
     { node_id: "full-primary", lifecycle_state: "active" },
     { node_id: "increment-1", lifecycle_state: "active" },
