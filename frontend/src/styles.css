@@ -568,6 +568,7 @@ tbody tr:hover {
 .instrument-identity {
   display: inline-grid;
   gap: 4px;
+  width: 100%;
   min-width: 0;
 }
 
@@ -592,7 +593,7 @@ tbody tr:hover {
 }
 
 .instrument-alternate-name {
-  flex: 0 1 33%;
+  flex: 0 20 33%;
   max-width: min(280px, 33%);
   min-width: 0;
   overflow: hidden;

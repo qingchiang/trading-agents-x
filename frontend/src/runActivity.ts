@@ -53,6 +53,7 @@ export interface ActivityAttempt {
   state: ActivityState;
   workUnits: ActivityWorkUnit[];
   currentStage: ActivityStage;
+  stageStates: Partial<Record<ActivityStage, ActivityState>>;
 }
 
 export function aggregateRunActivity(
@@ -87,16 +88,62 @@ export function aggregateRunActivity(
         firstSequence: unitEvents[0].sequence,
         lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
       }));
-      const lastActive = [...workUnits]
-        .reverse()
-        .find((unit) => unit.state !== "completed") ?? workUnits.at(-1);
+      const currentUnit = currentWorkUnit(attemptEvents, workUnits);
       return {
         attempt,
         state: attemptState(attemptEvents, workUnits),
         workUnits,
-        currentStage: lastActive?.stage ?? "workflow",
+        currentStage: currentUnit?.stage ?? "workflow",
+        stageStates: aggregateStageStates(workUnits),
       };
     });
+}
+
+function currentWorkUnit(
+  events: RunEvent[],
+  units: ActivityWorkUnit[],
+): ActivityWorkUnit | undefined {
+  const terminal = [...events].reverse().find((event) =>
+    ["run.succeeded", "run.failed", "run.cancelled"].includes(event.event_type),
+  );
+  if (terminal) {
+    return units.find((unit) => unit.events.includes(terminal));
+  }
+  const newestFirst = [...units].sort(
+    (left, right) => right.lastSequence - left.lastSequence,
+  );
+  return newestFirst.find((unit) =>
+    ["pending", "running", "retrying", "failed"].includes(unit.state),
+  ) ?? newestFirst[0];
+}
+
+function aggregateStageStates(
+  units: ActivityWorkUnit[],
+): Partial<Record<ActivityStage, ActivityState>> {
+  const grouped = new Map<ActivityStage, ActivityState[]>();
+  for (const unit of units) {
+    const states = grouped.get(unit.stage) ?? [];
+    states.push(unit.state);
+    grouped.set(unit.stage, states);
+  }
+  return Object.fromEntries(
+    [...grouped].map(([stage, states]) => [stage, aggregateState(states)]),
+  );
+}
+
+function aggregateState(states: ActivityState[]): ActivityState {
+  for (const state of [
+    "failed",
+    "retrying",
+    "running",
+    "degraded",
+    "recovered",
+    "completed",
+    "pending",
+  ] as const) {
+    if (states.includes(state)) return state;
+  }
+  return "pending";
 }
 
 function activityNode(event: RunEvent): string {
@@ -142,7 +189,8 @@ function eventState(event: RunEvent): ActivityState | null {
     event.event_type.endsWith("completed") ||
     event.event_type === "artifact.created" ||
     event.event_type === "evidence.sealed" ||
-    event.event_type === "run.succeeded"
+    event.event_type === "run.succeeded" ||
+    event.event_type === "run.cancelled"
   ) return "completed";
   if (event.event_type.endsWith("started") || event.event_type === "run.resumed") return "running";
   return null;
@@ -153,9 +201,13 @@ function attemptState(events: RunEvent[], units: ActivityWorkUnit[]): ActivitySt
   if (terminal?.event_type === "run.failed") return "failed";
   if (terminal?.event_type === "run.succeeded" || terminal?.event_type === "run.cancelled") return "completed";
   if (units.some((unit) => unit.state === "failed")) return "failed";
-  if (units.some((unit) => unit.state === "degraded")) return "degraded";
   if (units.some((unit) => unit.state === "retrying")) return "retrying";
+  if (units.some((unit) => unit.state === "running")) return "running";
+  if (units.some((unit) => unit.state === "degraded")) return "degraded";
   if (units.some((unit) => unit.state === "recovered")) return "recovered";
+  if (units.length > 0 && units.every((unit) => unit.state === "completed")) {
+    return "completed";
+  }
   return "running";
 }
 

@@ -1,5 +1,29 @@
 import i18n from "i18next";
+import type { TFunction } from "i18next";
 import { initReactI18next } from "react-i18next";
+
+export function localizePerformanceReason(
+  t: TFunction,
+  reason: string | null | undefined,
+): string {
+  if (!reason) return t("notRecorded");
+  const reasonKeys: Record<string, string> = {
+    no_usable_stock_market_series: "performanceReasonNoMarketSeries",
+    "No usable stock market series was collected.":
+      "performanceReasonNoMarketSeries",
+    no_eligible_endpoint_sessions: "performanceReasonMissingEndpointSessions",
+    "The series does not contain both eligible endpoint sessions.":
+      "performanceReasonMissingEndpointSessions",
+    same_completed_session: "performanceReasonSameCompletedSession",
+    "Both cutoffs resolve to the same completed session.":
+      "performanceReasonSameCompletedSession",
+    benchmark_unavailable: "performanceReasonBenchmarkUnavailable",
+  };
+  if (/^Benchmark unavailable: .+\.$/.test(reason)) {
+    return t("performanceReasonBenchmarkUnavailable");
+  }
+  return t(reasonKeys[reason] ?? "performanceReasonUnavailable");
+}
 
 const en = {
   translation: {
@@ -263,6 +287,13 @@ const en = {
     performance_calculated: "Calculated",
     performance_not_yet_observable: "Not yet observable",
     performance_unavailable: "Unavailable",
+    performanceReasonNoMarketSeries: "No usable stock market series was collected.",
+    performanceReasonMissingEndpointSessions:
+      "The series does not contain both eligible endpoint sessions.",
+    performanceReasonSameCompletedSession:
+      "Both cutoffs resolve to the same completed session.",
+    performanceReasonBenchmarkUnavailable: "Benchmark market data is unavailable.",
+    performanceReasonUnavailable: "Performance reason is unavailable.",
     reassessment_reaffirmed: "Reaffirmed",
     reassessment_strengthened: "Strengthened",
     reassessment_weakened: "Weakened",
@@ -1016,6 +1047,11 @@ const zhCN = {
     performance_calculated: "已计算",
     performance_not_yet_observable: "尚不可观察",
     performance_unavailable: "不可用",
+    performanceReasonNoMarketSeries: "未采集到可用的股票市场数据序列。",
+    performanceReasonMissingEndpointSessions: "该数据序列不包含两个符合条件的端点交易日。",
+    performanceReasonSameCompletedSession: "两个截止点对应同一个已完成交易日。",
+    performanceReasonBenchmarkUnavailable: "基准市场数据不可用。",
+    performanceReasonUnavailable: "表现原因不可用。",
     reassessment_reaffirmed: "维持",
     reassessment_strengthened: "增强",
     reassessment_weakened: "减弱",
@@ -1747,6 +1783,13 @@ const ja = {
     performance_calculated: "計算済み",
     performance_not_yet_observable: "まだ観測不可",
     performance_unavailable: "利用不可",
+    performanceReasonNoMarketSeries: "利用可能な株価市場系列が収集されていません。",
+    performanceReasonMissingEndpointSessions:
+      "この系列には適格な両方の端点セッションがありません。",
+    performanceReasonSameCompletedSession:
+      "両方のカットオフは同じ完了済みセッションに対応しています。",
+    performanceReasonBenchmarkUnavailable: "ベンチマークの市場データを利用できません。",
+    performanceReasonUnavailable: "パフォーマンス理由を利用できません。",
     reassessment_reaffirmed: "再確認",
     reassessment_strengthened: "強化",
     reassessment_weakened: "弱化",

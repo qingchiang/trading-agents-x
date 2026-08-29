@@ -45,6 +45,7 @@ import {
   reassessmentDispositionCounts,
   type ReassessmentGroupKey,
 } from "../reassessment";
+import { localizePerformanceReason } from "../i18n";
 
 const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
 const ResearchMarkdownReader = lazy(() =>
@@ -1059,7 +1060,7 @@ function PerformanceCard({
           </small>
         </>
       ) : (
-        <p>{component.reason ?? t("notRecorded")}</p>
+        <p>{localizePerformanceReason(t, component.reason)}</p>
       )}
       {reportedDifference !== null && reportedDifference !== undefined && (
         <p className="reported-difference">
@@ -1142,9 +1143,6 @@ function TimelinePanel({
   const stages = researchKind === "incremental"
     ? (["collection", "incremental_semantic", "incremental_serialization", "commit"] as ActivityStage[])
     : (["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit"] as ActivityStage[]);
-  const latestStates = new Map<ActivityStage, ActivityState>();
-  for (const unit of latest?.workUnits ?? []) latestStates.set(unit.stage, unit.state);
-
   return (
     <article
       className="panel audit-panel timeline-panel"
@@ -1169,7 +1167,7 @@ function TimelinePanel({
           </div>
           <ol className="activity-stage-track" aria-label={t("researchProgress") }>
             {stages.map((stage) => {
-              const state = latestStates.get(stage) ?? "pending";
+              const state = latest.stageStates[stage] ?? "pending";
               return (
                 <li className={state} key={stage}>
                   <span aria-hidden="true" />

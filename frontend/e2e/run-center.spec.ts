@@ -10,6 +10,7 @@ function makeRun(
   options: {
     ticker?: string;
     instrumentName?: string;
+    instrumentLocalName?: string;
     trashedAt?: string | null;
     sourceRunId?: string | null;
   } = {},
@@ -18,7 +19,7 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
-    instrument_local_name: null,
+    instrument_local_name: options.instrumentLocalName ?? null,
     research_schema_version: status === "succeeded" ? "1" : null,
     information_cutoff_at: status === "succeeded" ? "2026-07-24T23:59:59Z" : null,
     method_snapshot: status === "succeeded" ? { llm_provider: "openai" } : null,
@@ -307,6 +308,14 @@ test("runs, templates, trash, and restores local research", async ({
       makeRun("run-report", "succeeded", {
         ticker: "NVDA",
         instrumentName: "NVIDIA Corporation",
+      }),
+    ],
+    [
+      "run-daiichi",
+      makeRun("run-daiichi", "succeeded", {
+        ticker: "4568.T",
+        instrumentName: "DAIICHI SANKYO COMPANY LIMITED",
+        instrumentLocalName: "第一三共",
       }),
     ],
   ]);
@@ -706,6 +715,44 @@ test("runs, templates, trash, and restores local research", async ({
   );
 
   await page.goto("/runs");
+  const runsSearch = page.locator("#runs-search");
+  const runsKind = page.locator("#runs-kind");
+  const applyFilters = page.getByRole("button", { name: "Apply", exact: true });
+  const [searchBox, kindBox, applyBox] = await Promise.all([
+    runsSearch.boundingBox(),
+    runsKind.boundingBox(),
+    applyFilters.boundingBox(),
+  ]);
+  expect(searchBox).not.toBeNull();
+  expect(kindBox).not.toBeNull();
+  expect(applyBox).not.toBeNull();
+  expect(Math.abs(
+    ((searchBox?.y ?? 0) + (searchBox?.height ?? 0)) -
+    ((applyBox?.y ?? 0) + (applyBox?.height ?? 0)),
+  )).toBeLessThanOrEqual(1);
+  expect(applyBox?.x ?? 0).toBeGreaterThan((kindBox?.x ?? 0) + (kindBox?.width ?? 0));
+
+  const daiichiIdentity = page
+    .getByRole("row")
+    .filter({ hasText: "4568.T" })
+    .locator(".instrument-identity");
+  const nameGeometry = await daiichiIdentity.evaluate((element) => {
+    const primary = element.querySelector<HTMLElement>(".instrument-primary-name");
+    const alternate = element.querySelector<HTMLElement>(".instrument-alternate-name");
+    if (!primary || !alternate) throw new Error("instrument names not found");
+    return {
+      primaryWidth: primary.getBoundingClientRect().width,
+      alternateWidth: alternate.getBoundingClientRect().width,
+      primaryClientWidth: primary.clientWidth,
+      primaryScrollWidth: primary.scrollWidth,
+      alternateClientWidth: alternate.clientWidth,
+      alternateScrollWidth: alternate.scrollWidth,
+    };
+  });
+  expect(nameGeometry.primaryWidth).toBeGreaterThan(nameGeometry.alternateWidth);
+  expect(nameGeometry.primaryScrollWidth).toBeLessThanOrEqual(nameGeometry.primaryClientWidth);
+  expect(nameGeometry.alternateScrollWidth).toBeGreaterThan(nameGeometry.alternateClientWidth);
+
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Move to Trash (1)" }).click();

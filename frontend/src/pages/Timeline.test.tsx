@@ -222,6 +222,52 @@ test("renders a Full root and a structurally distinct Incremental child", async 
   expect(document.querySelector(".research-node-card.incremental")).toBeInTheDocument();
 });
 
+test.each([
+  [
+    "en",
+    "Stock return: Not yet observable · Both cutoffs resolve to the same completed session.",
+    "S&P 500: Unavailable · Benchmark market data is unavailable.",
+  ],
+  [
+    "zh-CN",
+    "股票回报: 尚不可观察 · 两个截止点对应同一个已完成交易日。",
+    "S&P 500: 不可用 · 基准市场数据不可用。",
+  ],
+  [
+    "ja",
+    "株価リターン: まだ観測不可 · 両方のカットオフは同じ完了済みセッションに対応しています。",
+    "S&P 500: 利用不可 · ベンチマークの市場データを利用できません。",
+  ],
+])(
+  "localizes stock and benchmark performance reasons in %s",
+  async (language, knownReason, fallback) => {
+    const current = detail();
+    current.timeline.cycles![0].increments![0].performance = {
+      stock: {
+        status: "not_yet_observable",
+        reason: "Both cutoffs resolve to the same completed session.",
+      },
+      benchmarks: [
+        {
+          name: "S&P 500",
+          component: {
+            status: "unavailable",
+            reason: "Benchmark unavailable: calendar.unavailable.",
+          },
+        },
+      ],
+    } as never;
+    await i18n.changeLanguage(language);
+    vi.mocked(api.timeline).mockResolvedValue(current);
+
+    render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+    expect(await screen.findByText(knownReason)).toBeVisible();
+    expect(screen.getByText(fallback)).toBeVisible();
+    expect(screen.queryByText("calendar.unavailable")).not.toBeInTheDocument();
+  },
+);
+
 test("selects human-readable nodes and renders a structured comparison", async () => {
   const comparison: ResearchNodeComparison = {
     instrument: "NVDA",

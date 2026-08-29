@@ -22,6 +22,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import { Link, usePathname } from "../router";
+import { localizePerformanceReason } from "../i18n";
 
 const CYCLE_PAGE_SIZE = 12;
 
@@ -892,7 +893,7 @@ function performanceComponentText(
     return `${label}: ${formatPercent(component.calculation.unrounded_return)}`;
   }
   return `${label}: ${t(`performance_${component.status}`)}${
-    component.reason ? ` · ${component.reason}` : ""
+    component.reason ? ` · ${localizePerformanceReason(t, component.reason)}` : ""
   }`;
 }
 

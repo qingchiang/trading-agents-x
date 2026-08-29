@@ -1093,6 +1093,62 @@ function performanceCalculation(unroundedReturn: number) {
   };
 }
 
+function incrementalDetailWithPerformanceReason(reason: string): RunDetailType {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.research_kind = "incremental";
+  incremental.run.full_baseline_run_id = "full-baseline";
+  incremental.run.is_research_node = true;
+  incremental.research_node = {
+    id: "run-1",
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_kind: "incremental",
+    full_baseline_run_id: "full-baseline",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T20:00:00Z",
+    method_snapshot: {},
+    decision: incremental.result!.decision,
+    is_active: true,
+    is_primary: true,
+    is_cycle_head: true,
+    cycle_warning: false,
+    collection_summary: { domains: [] },
+    research_availability: { domains: [] },
+    information_advancement: { advanced: false, reasons: [] },
+    performance: {
+      stock: { status: "unavailable", reason },
+      benchmarks: [],
+    },
+    reassessment: { entries: [] },
+    full_research_required_reasons: [],
+  } as never;
+  return incremental;
+}
+
+test.each([
+  ["en", "Performance reason is unavailable."],
+  ["zh-CN", "表现原因不可用。"],
+  ["ja", "パフォーマンス理由を利用できません。"],
+])(
+  "uses a localized fallback instead of an unknown performance reason in %s",
+  async (language, fallback) => {
+    const unknownReason = "A future backend performance reason.";
+    await act(() => i18n.changeLanguage(language));
+    vi.mocked(api.run).mockResolvedValue(
+      incrementalDetailWithPerformanceReason(unknownReason),
+    );
+
+    render(
+      <Router initialPath="/runs/run-1">
+        <RunDetail />
+      </Router>,
+    );
+
+    expect(await screen.findByText(fallback)).toBeVisible();
+    expect(screen.queryByText(unknownReason)).not.toBeInTheDocument();
+  },
+);
+
 test("loads only Run Detail initially and refreshes open deliberation artifacts on SSE", async () => {
   render(
     <Router initialPath="/runs/run-1">
