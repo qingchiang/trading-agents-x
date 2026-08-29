@@ -138,7 +138,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
     instrument: "NVDA",
     sides: [
       { node_id: "full-primary", research_kind: "full", analysis_date: "2026-07-20", decision: { rating: "Overweight", confidence: 0.84, thesis: "Full baseline thesis" }, method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" } },
-      { node_id: "increment-1", research_kind: "incremental", analysis_date: "2026-07-25", decision: { rating: "Hold", confidence: 0.63, thesis: "Incremental thesis changed" }, information_advancement: { reasons: ["Material update"] }, reassessment: { entries: [{ component_id: "earnings", disposition: "weakened", reason: "Margins declined." }] }, performance: { stock: { status: "calculated", calculation: { unrounded_return: 0.12 } }, benchmarks: [] }, method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" } },
+      { node_id: "increment-1", research_kind: "incremental", analysis_date: "2026-07-25", decision: { rating: "Hold", confidence: 0.63, thesis: "Incremental thesis changed" }, information_advancement: { reasons: ["Material update"] }, reassessment: { entries: [{ component_id: "earnings", disposition: "weakened", reason: "Margins declined." }] }, performance: { stock: { status: "calculated", calculation: { unrounded_return: 0.12 } }, benchmarks: [] }, full_research_required_reasons: [{ code: "coverage.gap", message: "Refresh the complete baseline.", origin: "semantic", evidence_refs: [] }], method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" } },
     ],
     cross_cycle: false,
     method_changed: false,
@@ -156,6 +156,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
   expect(comparison).toHaveTextContent("Incremental thesis changed");
   expect(comparison).toHaveTextContent("earnings: Weakened");
   expect(comparison).toHaveTextContent("Stock return: 12%");
+  expect(comparison).toHaveTextContent("Refresh the complete baseline.");
   expect(comparison).toHaveTextContent("openai / gpt-5.5");
   expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
     { node_id: "full-primary", lifecycle_state: "active" },

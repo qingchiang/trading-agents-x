@@ -499,7 +499,9 @@ test("restores deliberation and resolves evidence references across run views", 
       name: "Open evidence ev_0123456789ab",
     })[0],
   );
-  expect(screen.getByRole("dialog", { name: "Source details" })).toBeVisible();
+  expect(
+    await screen.findByRole("dialog", { name: "Source details" }),
+  ).toBeVisible();
   expect(
     screen.getByRole("tab", { name: "Deliberation" }),
   ).toHaveAttribute("aria-selected", "true");
@@ -530,7 +532,7 @@ test("restores deliberation and resolves evidence references across run views", 
   );
 
   fireEvent.click(screen.getByRole("tab", { name: "Reports" }));
-  const fundamentalsTab = screen.getByRole("button", {
+  const fundamentalsTab = await screen.findByRole("button", {
     name: "Fundamentals",
   });
   const marketTab = screen.getByRole("button", { name: "Market" });

@@ -49,7 +49,8 @@ Markdown 禁用原始 HTML，并在显示前清洗。
 ## 快速开始
 
 支持 Python 3.12–3.14 和 uv 0.12.1 或更高版本。只有开发前端时才需要
-Node.js；发布 wheel 已携带编译后的 Web 静态资源。
+Node.js 22.12 或更高的 Node 22 版本；仓库的 `.nvmrc` 会选择受支持的主版本。
+发布 wheel 已携带编译后的 Web 静态资源。
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh

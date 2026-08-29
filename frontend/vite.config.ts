@@ -12,6 +12,7 @@ export default defineConfig({
   build: {
     outDir: "../tradingagents/web/static",
     emptyOutDir: true,
+    manifest: true,
     sourcemap: false,
   },
   test: {

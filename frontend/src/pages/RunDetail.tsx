@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,12 +14,7 @@ import {
   type RunEvent,
   type StructuredRecoveryNotice,
 } from "../api/client";
-import AnalystReportView from "../components/AnalystReportView";
-import DeliberationView from "../components/DeliberationView";
-import EvidenceTableView from "../components/EvidenceTableView";
 import { InstrumentIdentity } from "../components/Instruments";
-import Markdown from "../components/Markdown";
-import ResearchDecisionView from "../components/ResearchDecisionView";
 import RunMetricsPanel from "../components/RunMetricsPanel";
 import {
   buildEvidenceReferenceIndex,
@@ -35,6 +30,12 @@ import {
   useParams,
 } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
+
+const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
+const DeliberationView = lazy(() => import("../components/DeliberationView"));
+const EvidenceTableView = lazy(() => import("../components/EvidenceTableView"));
+const Markdown = lazy(() => import("../components/Markdown"));
+const ResearchDecisionView = lazy(() => import("../components/ResearchDecisionView"));
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
@@ -533,52 +534,54 @@ export default function RunDetail() {
         ))}
       </nav>
 
-      {activeView === "incremental" && detail.research_node && (
-        <IncrementalDetailPanel node={detail.research_node} />
-      )}
+      <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
+        {activeView === "incremental" && detail.research_node && (
+          <IncrementalDetailPanel node={detail.research_node} />
+        )}
 
-      {activeView === "timeline" && (
-        <TimelinePanel events={events} />
-      )}
-      {activeView === "deliberation" && (
-        <DeliberationPanel
-          artifacts={artifacts}
-          onEvidence={openSourceDrawer}
-          evidenceIndex={evidenceIndex}
-        />
-      )}
-      {activeView === "evidence" && (
-        <EvidencePanel
-          evidence={evidence}
-          evidenceStatus={detail.evidence_status.status}
-          runStatus={run.status}
-          focusedRef={focusedEvidence}
-          onReturn={returnFromEvidence}
-          returnLabel={returnViewLabel(t, returnView)}
-          evidenceIndex={evidenceIndex}
-          onEvidence={openEvidence}
-        />
-      )}
-      {activeView === "reports" && (
-        <ReportsPanel
-          runId={run.id}
-          reports={reports}
-          reportNames={reportNames}
-          activeReport={activeReport}
-          onReport={selectReport}
-          onEvidence={openSourceDrawer}
-          evidenceIndex={evidenceIndex}
-        />
-      )}
-      {activeView === "decision" && (
-        <DecisionPanel
-          decision={decision}
-          numericAudit={detail.result?.numeric_audit}
-          onEvidence={openSourceDrawer}
-          evidenceIndex={evidenceIndex}
-          onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
-        />
-      )}
+        {activeView === "timeline" && (
+          <TimelinePanel events={events} />
+        )}
+        {activeView === "deliberation" && (
+          <DeliberationPanel
+            artifacts={artifacts}
+            onEvidence={openSourceDrawer}
+            evidenceIndex={evidenceIndex}
+          />
+        )}
+        {activeView === "evidence" && (
+          <EvidencePanel
+            evidence={evidence}
+            evidenceStatus={detail.evidence_status.status}
+            runStatus={run.status}
+            focusedRef={focusedEvidence}
+            onReturn={returnFromEvidence}
+            returnLabel={returnViewLabel(t, returnView)}
+            evidenceIndex={evidenceIndex}
+            onEvidence={openEvidence}
+          />
+        )}
+        {activeView === "reports" && (
+          <ReportsPanel
+            runId={run.id}
+            reports={reports}
+            reportNames={reportNames}
+            activeReport={activeReport}
+            onReport={selectReport}
+            onEvidence={openSourceDrawer}
+            evidenceIndex={evidenceIndex}
+          />
+        )}
+        {activeView === "decision" && (
+          <DecisionPanel
+            decision={decision}
+            numericAudit={detail.result?.numeric_audit}
+            onEvidence={openSourceDrawer}
+            evidenceIndex={evidenceIndex}
+            onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
+          />
+        )}
+      </Suspense>
 
       <RunMetricsPanel
         metrics={run.metrics}
@@ -586,12 +589,14 @@ export default function RunDetail() {
         events={events}
         artifacts={artifacts}
       />
-      <EvidenceSourceDrawer
-        evidenceRef={sourceDrawerRef}
-        evidenceIndex={evidenceIndex}
-        onClose={() => setSourceDrawerRef(null)}
-        key={sourceDrawerRef ?? "closed"}
-      />
+      <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
+        <EvidenceSourceDrawer
+          evidenceRef={sourceDrawerRef}
+          evidenceIndex={evidenceIndex}
+          onClose={() => setSourceDrawerRef(null)}
+          key={sourceDrawerRef ?? "closed"}
+        />
+      </Suspense>
     </section>
   );
 }

@@ -245,6 +245,7 @@ function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison
     [t("researchAvailability"), left.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", "), right.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", ")],
     [t("reassessment"), reassessment(left), reassessment(right)],
     [t("performance"), performance(left), performance(right)],
+    [t("fullResearchRecommended"), left.full_research_required_reasons?.map((reason) => reason.message).join(", "), right.full_research_required_reasons?.map((reason) => reason.message).join(", ")],
     [t("method"), method(left), method(right)],
   ];
   return (
