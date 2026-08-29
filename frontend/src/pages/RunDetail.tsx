@@ -30,6 +30,11 @@ import {
   useParams,
 } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
+import {
+  aggregateRunActivity,
+  type ActivityStage,
+  type ActivityState,
+} from "../runActivity";
 
 const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
 const DeliberationView = lazy(() => import("../components/DeliberationView"));
@@ -39,7 +44,6 @@ const ResearchDecisionView = lazy(() => import("../components/ResearchDecisionVi
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
-const timelineOrderStorageKey = "tradingagents-timeline-order";
 const eventNames = [
   "run.queued",
   "run.started",
@@ -82,7 +86,6 @@ const viewNames = [
 
 type ViewName = (typeof viewNames)[number];
 type ReturnViewName = Exclude<ViewName, "evidence">;
-type TimelineOrder = "newest" | "oldest";
 type ArtifactContent = ResearchArtifact["content"];
 type VisibleWarning =
   | string
@@ -545,7 +548,10 @@ export default function RunDetail() {
         )}
 
         {activeView === "timeline" && (
-          <TimelinePanel events={events} />
+          <TimelinePanel
+            events={events}
+            researchKind={isIncremental ? "incremental" : "full"}
+          />
         )}
         {activeView === "deliberation" && (
           <DeliberationPanel
@@ -732,23 +738,24 @@ function ReassessmentEntries({ node }: { node: ResearchNodeView }) {
   );
 }
 
-function TimelinePanel({ events }: { events: RunEvent[] }) {
+function TimelinePanel({
+  events,
+  researchKind,
+}: {
+  events: RunEvent[];
+  researchKind: "full" | "incremental";
+}) {
   const { t } = useTranslation();
-  const [order, setOrder] = useState<TimelineOrder>(readTimelineOrder);
-  const orderedEvents = useMemo(
-    () =>
-      [...events].sort((left, right) =>
-        order === "newest"
-          ? right.sequence - left.sequence
-          : left.sequence - right.sequence,
-      ),
-    [events, order],
+  const attempts = useMemo(
+    () => aggregateRunActivity(events, researchKind),
+    [events, researchKind],
   );
-
-  const updateOrder = (next: TimelineOrder) => {
-    setOrder(next);
-    localStorage.setItem(timelineOrderStorageKey, next);
-  };
+  const latest = attempts[0];
+  const stages = researchKind === "incremental"
+    ? (["collection", "incremental_semantic", "incremental_serialization", "commit"] as ActivityStage[])
+    : (["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit"] as ActivityStage[]);
+  const latestStates = new Map<ActivityStage, ActivityState>();
+  for (const unit of latest?.workUnits ?? []) latestStates.set(unit.stage, unit.state);
 
   return (
     <article
@@ -762,52 +769,66 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
           <h2>{t("activity")}</h2>
         </div>
         <div className="timeline-controls">
-          <div
-            className="timeline-order"
-            role="group"
-            aria-label={t("timelineOrder")}
-          >
-            <button
-              type="button"
-              className={order === "newest" ? "active" : ""}
-              aria-pressed={order === "newest"}
-              onClick={() => updateOrder("newest")}
-            >
-              {t("latestFirst")}
-            </button>
-            <button
-              type="button"
-              className={order === "oldest" ? "active" : ""}
-              aria-pressed={order === "oldest"}
-              onClick={() => updateOrder("oldest")}
-            >
-              {t("earliestFirst")}
-            </button>
-          </div>
           <span className="event-count">{events.length}</span>
         </div>
       </div>
-      <div className="timeline">
-        {orderedEvents.map((event) => (
-          <div className="timeline-item" key={event.sequence}>
-            <span className="timeline-dot" />
-            <div>
-              <strong>{eventLabel(t, event)}</strong>
-              <small>
-                #{event.sequence} · {formatTime(event.created_at)}
-              </small>
-              <details className="audit-disclosure event-audit">
-                <summary>{t("auditDetails")}</summary>
-                <code>
-                  {JSON.stringify({
-                    event_type: event.event_type,
-                    node: event.node,
-                    payload: event.payload ?? {},
-                  })}
-                </code>
-              </details>
-            </div>
+      {latest && (
+        <div className="activity-stage-overview">
+          <div className="activity-live-summary" aria-live="polite" aria-atomic="true">
+            <span>{t("currentResearchStage")}</span>
+            <strong>{t(activityStageLabel(latest.currentStage))}</strong>
+            <small>{t(activityStateLabel(latest.state))}</small>
           </div>
+          <ol className="activity-stage-track" aria-label={t("researchProgress") }>
+            {stages.map((stage) => {
+              const state = latestStates.get(stage) ?? "pending";
+              return (
+                <li className={state} key={stage}>
+                  <span aria-hidden="true" />
+                  <small>{t(activityStageLabel(stage))}</small>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+      <div className="activity-attempts">
+        {attempts.map((attempt, attemptIndex) => (
+          <details className={`activity-attempt ${attempt.state}`} open={attemptIndex === 0} key={attempt.attempt}>
+            <summary>
+              <span>{t("researchAttempt", { count: attempt.attempt })}</span>
+              <span className={`activity-state ${attempt.state}`}>{t(activityStateLabel(attempt.state))}</span>
+            </summary>
+            <div className="activity-work-units">
+              {attempt.workUnits.map((unit) => (
+                <article className={`activity-work-unit ${unit.state}`} key={unit.key}>
+                  <span className="activity-work-marker" aria-hidden="true" />
+                  <div>
+                    <strong>
+                      {t(activityStageLabel(unit.stage))}
+                      {unit.role ? ` · ${activityRoleLabel(t, unit.role)}` : ""}
+                      {` · ${t(activityStateLabel(unit.state))}`}
+                    </strong>
+                    <code className="activity-node-key">{unit.node}</code>
+                    <small>
+                      #{unit.firstSequence}–{unit.lastSequence} · {formatTime(unit.events.at(-1)?.created_at ?? "")}
+                    </small>
+                    <details className="audit-disclosure event-audit">
+                      <summary>{t("auditDetails")}</summary>
+                      <ul className="activity-raw-events">
+                        {unit.events.map((event) => (
+                          <li key={event.sequence}>
+                            <strong>{eventLabel(t, event)}</strong>
+                            <code>{JSON.stringify({ sequence: event.sequence, event_type: event.event_type, payload: event.payload ?? {} })}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </details>
         ))}
         {events.length === 0 && (
           <div className="empty-state">{t("waitingForEvents")}</div>
@@ -1629,10 +1650,19 @@ function runDetailPath(
   return `/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ""}`;
 }
 
-function readTimelineOrder(): TimelineOrder {
-  return localStorage.getItem(timelineOrderStorageKey) === "oldest"
-    ? "oldest"
-    : "newest";
+function activityStageLabel(stage: ActivityStage): string {
+  return `activityStage_${stage}`;
+}
+
+function activityStateLabel(state: ActivityState): string {
+  return `activityState_${state}`;
+}
+
+function activityRoleLabel(t: TFunction, role: string): string {
+  const analystKey = `${role}Analyst`;
+  return ["market", "social", "news", "fundamentals"].includes(role)
+    ? t(analystKey)
+    : t(`activityRole_${role}`);
 }
 
 function cleanupLabel(

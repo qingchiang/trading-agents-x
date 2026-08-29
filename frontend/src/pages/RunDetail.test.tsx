@@ -646,18 +646,10 @@ test("restores deliberation and resolves evidence references across run views", 
   act(() => FakeEventSource.instance.emit("run.succeeded", event));
 
   fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
-  const newest = await screen.findByText(/#7/);
-  const older = screen.getByText(/#6/);
-  expect(
-    newest.compareDocumentPosition(older) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  ).not.toBe(0);
-  fireEvent.click(screen.getByRole("button", { name: "Earliest first" }));
-  expect(
-    older.compareDocumentPosition(newest) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  ).not.toBe(0);
-  expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
+  expect((await screen.findAllByText("Commit complete"))[0]).toBeVisible();
+  expect(screen.getByText("judge.research")).toBeVisible();
+  expect(screen.getByText("run.lifecycle")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Earliest first" })).not.toBeInTheDocument();
   expect(FakeEventSource.instance.closed).toBe(true);
   await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2));
   expect(api.artifacts).toHaveBeenCalledTimes(1);
@@ -978,11 +970,11 @@ test("localizes Incremental activity while keeping raw event data in audit detai
     } as RunEvent),
   );
 
-  expect(await screen.findByText("Update collection completed")).toBeVisible();
-  expect(screen.queryByText("incremental.collect")).not.toBeInTheDocument();
+  expect(await screen.findByText("Collection · Completed")).toBeVisible();
+  expect(screen.getByText("incremental.collect")).toBeVisible();
   fireEvent.click(screen.getByText("Audit details"));
   expect(screen.getByText(/incremental\.collection_completed/)).toBeVisible();
-  expect(screen.getByText(/incremental\.collect/)).toBeVisible();
+  expect(screen.getAllByText(/incremental\.collect/).some((element) => element.matches("code"))).toBe(true);
 });
 
 test("shows trashed retention details and restores without deleting data", async () => {

@@ -64,9 +64,13 @@ export function InstrumentIdentity({
   const content = (
     <>
       <span className="instrument-name-line">
-        <PrimaryTag className="instrument-primary-name">{primary}</PrimaryTag>
+        <PrimaryTag className="instrument-primary-name" title={primary}>
+          {primary}
+        </PrimaryTag>
         {alternate && (
-          <span className="instrument-alternate-name">{alternate}</span>
+          <span className="instrument-alternate-name" title={alternate}>
+            {alternate}
+          </span>
         )}
       </span>
       {names.length > 0 && (
@@ -76,13 +80,19 @@ export function InstrumentIdentity({
   );
   if (prominent) {
     return (
-      <div className="instrument-identity prominent">
+      <div
+        className="instrument-identity prominent"
+        aria-label={[...names, ticker].join(", ")}
+      >
         {content}
       </div>
     );
   }
   return (
-    <span className="instrument-identity">
+    <span
+      className="instrument-identity"
+      aria-label={[...names, ticker].join(", ")}
+    >
       {content}
     </span>
   );

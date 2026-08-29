@@ -126,7 +126,18 @@ test("filters and atomically trashes eligible runs with instrument names", async
   expect(screen.getByText("英伟达")).toBeVisible();
   expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
   expect(screen.getByText("82% confidence")).toBeVisible();
-  expect(screen.getByText("Incremental research · openai / deep")).toBeVisible();
+  expect(screen.getByText("1 information domain")).toBeVisible();
+  fireEvent.click(screen.getAllByRole("button", { name: "Configuration" })[0]);
+  const configuration = screen.getByRole("dialog", {
+    name: "Research configuration",
+  });
+  expect(configuration).toHaveTextContent("Market");
+  expect(configuration).toHaveTextContent("openai");
+  expect(configuration).toHaveTextContent("deep");
+  expect(configuration).toHaveTextContent("Provider default");
+  expect(configuration).not.toHaveTextContent("Quick model");
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Research configuration" })).not.toBeInTheDocument();
   expect(screen.getByText("—")).toHaveClass("research-rating-badge");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
