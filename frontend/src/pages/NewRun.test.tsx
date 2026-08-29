@@ -490,6 +490,7 @@ test("locks the update intent to Incremental fields and keeps the root Full base
       name: /Primary Cycle · 2026-07-20 · Overweight · 82%/,
     }),
   ).toBeInTheDocument();
+  expect(screen.getByLabelText("Full Baseline")).toBeDisabled();
   expect(screen.getByLabelText(/^Analysis date/)).toHaveValue("2026-08-29");
 
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
@@ -500,6 +501,51 @@ test("locks the update intent to Incremental fields and keeps the root Full base
     source_run_id: "increment-source",
     analysis_date: "2026-08-29",
   });
+});
+
+test("blocks a locked update when its requested Full baseline is no longer eligible", async () => {
+  vi.mocked(api.creationTemplate).mockResolvedValue({
+    run_id: "increment-source",
+    status: "succeeded",
+    research_kind: "incremental",
+    full_baseline_run_id: "expired-baseline",
+    request: {
+      ticker: "NVDA",
+      analysis_date: "2026-07-24",
+      asset_type: "stock",
+      profile: "deep",
+      analysts: ["market"],
+      llm_provider: "openai",
+      quick_model: "legacy-quick",
+      deep_model: "gpt-5.5",
+      quick_reasoning_effort: "low",
+      deep_reasoning_effort: "high",
+      output_language: "en",
+      research_kind: "incremental",
+      full_baseline_run_id: "expired-baseline",
+    },
+  });
+  vi.mocked(api.baselineCandidates).mockResolvedValue({
+    instrument: "NVDA",
+    before: "2026-08-29",
+    items: [baseline("different-baseline")],
+  });
+
+  render(
+    <Router initialPath="/runs/new?intent=update&from_run=increment-source&full_baseline_run_id=expired-baseline">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByText(
+      "The requested Full Baseline is no longer active, compatible, or earlier than this update date.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByLabelText("Full Baseline")).toHaveValue("");
+  expect(screen.getByLabelText("Full Baseline")).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Queue research/ })).toBeDisabled();
+  expect(api.createRun).not.toHaveBeenCalled();
 });
 
 test("falls back to configured defaults when a source provider is unavailable", async () => {

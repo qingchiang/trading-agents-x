@@ -32,6 +32,7 @@ from .contracts import (
     IncrementalNodeProducts,
     JudgeDraft,
     NumericAuditStatus,
+    PrimaryCycleCandidate,
     RebuttalReview,
     RecentInstrument,
     ResearchArtifact,
@@ -2343,6 +2344,41 @@ class RunRepository:
             instrument_name=instrument_name,
             instrument_local_name=instrument_local_name,
             primary_cycle_id=primary.full_run_id if primary else None,
+            active_full_cycles=tuple(
+                PrimaryCycleCandidate(
+                    id=run.id,
+                    analysis_date=RunRequestSnapshot.model_validate(
+                        run.request_json
+                    ).analysis_date,
+                    is_primary=bool(primary and primary.full_run_id == run.id),
+                    rating=(
+                        decisions_by_id[run.id].rating
+                        if run.id in decisions_by_id
+                        else None
+                    ),
+                    confidence=(
+                        decisions_by_id[run.id].confidence
+                        if run.id in decisions_by_id
+                        else None
+                    ),
+                )
+                for run, _node in sorted(
+                    (
+                        (run, node)
+                        for run, node in full_rows
+                        if run.trashed_at is None
+                    ),
+                    key=lambda row: (
+                        0
+                        if primary is not None and row[0].id == primary.full_run_id
+                        else 1,
+                        -RunRequestSnapshot.model_validate(
+                            row[0].request_json
+                        ).analysis_date.toordinal(),
+                        row[0].id,
+                    ),
+                )
+            ),
             cycles=tuple(
                 ResearchCycleView(
                     id=full_run.id,

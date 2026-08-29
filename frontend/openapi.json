@@ -2922,6 +2922,55 @@
         "title": "PerformanceObservation",
         "type": "object"
       },
+      "PrimaryCycleCandidate": {
+        "additionalProperties": false,
+        "description": "One active Full Cycle eligible for explicit Primary replacement.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_primary": {
+            "default": false,
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "analysis_date"
+        ],
+        "title": "PrimaryCycleCandidate",
+        "type": "object"
+      },
       "PrimaryCycleSelectionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4247,6 +4296,14 @@
       "ResearchTimeline": {
         "additionalProperties": false,
         "properties": {
+          "active_full_cycles": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PrimaryCycleCandidate"
+            },
+            "title": "Active Full Cycles",
+            "type": "array"
+          },
           "cycle_limit": {
             "default": 50,
             "maximum": 200.0,

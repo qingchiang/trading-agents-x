@@ -68,6 +68,13 @@ function detail(): TimelineDetail {
       instrument_name: "NVIDIA Corporation",
       instrument_local_name: "英伟达",
       primary_cycle_id: baseline.id,
+      active_full_cycles: [{
+        id: baseline.id,
+        analysis_date: baseline.analysis_date,
+        is_primary: true,
+        rating: baseline.decision?.rating,
+        confidence: baseline.decision?.confidence,
+      }],
       cycles: [{
         id: baseline.id,
         is_primary: true,
@@ -168,6 +175,7 @@ test("changes Primary Research using a human-readable cycle", async () => {
   const current = detail();
   const second = node("full-secondary", "full", "2026-07-10", "Hold");
   current.timeline.cycles!.push({ id: second.id, is_primary: false, cycle_warning: false, head_run_id: second.id, baseline: second, increments: [] });
+  current.timeline.active_full_cycles!.push({ id: second.id, analysis_date: second.analysis_date, is_primary: false, rating: second.decision?.rating, confidence: second.decision?.confidence });
   current.timeline.cycle_total = 2;
   vi.mocked(api.timeline).mockResolvedValue(current);
   vi.mocked(api.selectPrimaryCycle).mockResolvedValue(current);
@@ -181,6 +189,7 @@ test("requires an explicit Primary replacement when trashing the primary Full cy
   const current = detail();
   const second = node("full-secondary", "full", "2026-07-10", "Hold");
   current.timeline.cycles!.push({ id: second.id, is_primary: false, cycle_warning: false, head_run_id: second.id, baseline: second, increments: [] });
+  current.timeline.active_full_cycles!.push({ id: second.id, analysis_date: second.analysis_date, is_primary: false, rating: second.decision?.rating, confidence: second.decision?.confidence });
   current.timeline.cycle_total = 2;
   vi.mocked(api.timeline).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
@@ -190,6 +199,28 @@ test("requires an explicit Primary replacement when trashing the primary Full cy
   fireEvent.click(screen.getByRole("button", { name: "Confirm Trash" }));
 
   await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(["full-primary"], { "full-primary": "full-secondary" }));
+});
+
+test("offers Primary replacement cycles outside the current Timeline page", async () => {
+  const current = detail();
+  current.timeline.cycle_total = 13;
+  current.timeline.active_full_cycles = [
+    ...(current.timeline.active_full_cycles ?? []),
+    {
+      id: "full-off-page",
+      analysis_date: "2026-06-30",
+      is_primary: false,
+      rating: "Hold",
+      confidence: 0.58,
+    },
+  ];
+  vi.mocked(api.timeline).mockResolvedValue(current);
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Move Cycle to Trash" }));
+  expect(
+    screen.getByRole("option", { name: "2026-06-30 · Hold · 58%" }),
+  ).toBeVisible();
 });
 
 test("paginates complete cycles without using the retired node contract", async () => {

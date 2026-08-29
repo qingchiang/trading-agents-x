@@ -930,6 +930,15 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     assert payload["cycle_total"] == 1
     assert payload["cycle_limit"] == 50
     assert payload["cycle_offset"] == 0
+    assert payload["active_full_cycles"] == [
+        {
+            "id": run.id,
+            "analysis_date": "2026-07-24",
+            "is_primary": True,
+            "rating": "Hold",
+            "confidence": 0.6,
+        }
+    ]
     assert payload["cycles"] == [
         {
             "id": run.id,
@@ -1032,6 +1041,11 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
     assert first_page.json()["timeline"]["cycle_limit"] == 2
     assert first_page.json()["timeline"]["cycle_offset"] == 0
     assert second_page.json()["timeline"]["cycle_offset"] == 2
+    assert len(first_page.json()["timeline"]["active_full_cycles"]) == 3
+    assert (
+        first_page.json()["timeline"]["active_full_cycles"]
+        == second_page.json()["timeline"]["active_full_cycles"]
+    )
     assert [cycle["id"] for cycle in first_page.json()["timeline"]["cycles"]] == [
         oldest,
         sorted(same_cutoff)[0],

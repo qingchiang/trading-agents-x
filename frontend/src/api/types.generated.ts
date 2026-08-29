@@ -410,6 +410,13 @@ export interface components {
       benchmarks?: components["schemas"]["BenchmarkContext"][];
       stock: components["schemas"]["PerformanceComponent"];
     };
+    PrimaryCycleCandidate: {
+      analysis_date: string;
+      confidence?: number | null;
+      id: string;
+      is_primary?: boolean;
+      rating?: components["schemas"]["ResearchRating"] | null;
+    };
     PrimaryCycleSelectionRequest: {
       full_run_id: string;
     };
@@ -611,6 +618,7 @@ export interface components {
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchTimeline: {
+      active_full_cycles?: components["schemas"]["PrimaryCycleCandidate"][];
       cycle_limit?: number;
       cycle_offset?: number;
       cycle_total?: number;

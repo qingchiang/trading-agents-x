@@ -692,7 +692,7 @@ test("runs, templates, trash, and restores local research", async ({
 
   await page.goto("/runs/run-report?view=decision");
   await expect(
-    page.getByRole("tab", { name: "Decision", exact: true }),
+    page.getByRole("tab", { name: "Overview", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),

@@ -292,7 +292,7 @@ export default function Timeline() {
   const cycles = detail?.timeline.cycles ?? [];
   const cycleTotal = detail?.timeline.cycle_total ?? 0;
   const cycleLimit = detail?.timeline.cycle_limit ?? CYCLE_PAGE_SIZE;
-  const activeFullCycles = cycles.filter((cycle) => cycle.baseline.is_active);
+  const activeFullCycles = detail?.timeline.active_full_cycles ?? [];
   const filteredTimelines = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return timelines?.items ?? [];
@@ -438,7 +438,7 @@ export default function Timeline() {
         <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={lifecycleBusy} onCancel={() => { setPendingNode(null); setLifecycleMode(null); }} onConfirm={() => void applyLifecycle()}>
           <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
           {lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && (
-            <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={(event) => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter((cycle) => cycle.id !== pendingNode.id).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.baseline.analysis_date} · {cycle.baseline.decision?.rating ?? t("notRecorded")} · {cycle.baseline.decision?.confidence == null ? t("notRecorded") : `${Math.round(cycle.baseline.decision.confidence * 100)}%`}</option>)}</select></label>
+            <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={(event) => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter((cycle) => cycle.id !== pendingNode.id).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.analysis_date} · {cycle.rating ?? t("notRecorded")} · {cycle.confidence == null ? t("notRecorded") : `${Math.round(cycle.confidence * 100)}%`}</option>)}</select></label>
           )}
         </ConfirmDialog>
       )}

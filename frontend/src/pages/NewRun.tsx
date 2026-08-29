@@ -65,6 +65,7 @@ export default function NewRun() {
   const [fullBaselines, setFullBaselines] = useState<FullBaselineCandidate[]>([]);
   const [fullBaselineRunId, setFullBaselineRunId] = useState("");
   const [primaryCycleWarned, setPrimaryCycleWarned] = useState(false);
+  const [baselineEligibilityError, setBaselineEligibilityError] = useState("");
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -78,6 +79,7 @@ export default function NewRun() {
     const instrument = ticker.trim().toUpperCase();
     setFullBaselines([]);
     setPrimaryCycleWarned(false);
+    setBaselineEligibilityError("");
     if (!instrument) return () => {
       active = false;
     };
@@ -86,11 +88,22 @@ export default function NewRun() {
       if (!active) return;
       const baselines = response.items ?? [];
       const primaryWarning = baselines.find((item) => item.is_primary)?.cycle_warning ?? false;
+      const requestedBaselineEligible = Boolean(
+        entry.baseline && baselines.some((item) => item.id === entry.baseline),
+      );
       setFullBaselines(baselines);
       setPrimaryCycleWarned(primaryWarning);
+      setBaselineEligibilityError(
+        lockedKind === "incremental" && !requestedBaselineEligible
+          ? t("requestedBaselineUnavailable")
+          : "",
+      );
       setFullBaselineRunId((current) => {
         const requested = entry.baseline;
-        if (requested && baselines.some((item) => item.id === requested)) return requested;
+        if (lockedKind === "incremental") {
+          return requestedBaselineEligible ? requested : "";
+        }
+        if (requestedBaselineEligible) return requested;
         if (baselineSelectedByUser.current && baselines.some((item) => item.id === current)) {
           return current;
         }
@@ -107,12 +120,15 @@ export default function NewRun() {
         if (active) {
           setFullBaselines([]);
           setFullBaselineRunId("");
+          if (lockedKind === "incremental") {
+            setBaselineEligibilityError(t("requestedBaselineUnavailable"));
+          }
         }
       });
     return () => {
       active = false;
     };
-  }, [analysisDate, entry.baseline, lockedKind, ticker]);
+  }, [analysisDate, entry.baseline, lockedKind, t, ticker]);
 
   useEffect(() => {
     let active = true;
@@ -509,12 +525,16 @@ export default function NewRun() {
                   {t("fullBaseline")}
                   <select
                     value={fullBaselineRunId}
+                    disabled={lockedKind === "incremental"}
                     onChange={(event) => {
                       baselineSelectedByUser.current = true;
                       setFullBaselineRunId(event.target.value);
                     }}
                     required
                   >
+                    {!fullBaselineRunId && (
+                      <option value="">{t("selectFullBaseline")}</option>
+                    )}
                     {fullBaselines.map((baseline) => (
                       <option key={baseline.id} value={baseline.id}>
                         {baseline.is_primary ? `${t("primaryCycle")} · ` : ""}
@@ -526,6 +546,11 @@ export default function NewRun() {
                     ))}
                   </select>
                 </label>
+                {baselineEligibilityError && (
+                  <div className="alert" role="alert">
+                    {baselineEligibilityError}
+                  </div>
+                )}
                 {fullBaselines.find((item) => item.id === fullBaselineRunId) && (
                   <BaselinePreview
                     baseline={fullBaselines.find((item) => item.id === fullBaselineRunId)!}

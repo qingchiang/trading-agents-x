@@ -1752,11 +1752,22 @@ class ResearchCycleView(FrozenModel):
     increments: tuple[ResearchNodeView, ...] = ()
 
 
+class PrimaryCycleCandidate(FrozenModel):
+    """One active Full Cycle eligible for explicit Primary replacement."""
+
+    id: str
+    analysis_date: date
+    is_primary: bool = False
+    rating: ResearchRating | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class ResearchTimeline(FrozenModel):
     instrument: str
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     primary_cycle_id: str | None = None
+    active_full_cycles: tuple[PrimaryCycleCandidate, ...] = ()
     cycles: tuple[ResearchCycleView, ...] = ()
     cycle_total: int = Field(default=0, ge=0)
     cycle_limit: int = Field(default=50, ge=1, le=200)

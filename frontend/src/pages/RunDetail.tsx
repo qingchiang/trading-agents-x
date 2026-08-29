@@ -72,6 +72,7 @@ const eventNames = [
 ];
 const viewNames = [
   "incremental",
+  "reassessment",
   "timeline",
   "deliberation",
   "evidence",
@@ -100,6 +101,7 @@ export default function RunDetail() {
   const [error, setError] = useState("");
   const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
   const [warningOpenRequest, setWarningOpenRequest] = useState(0);
+  const [artifactRefreshRequest, setArtifactRefreshRequest] = useState(0);
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -107,7 +109,7 @@ export default function RunDetail() {
   const requestedView = searchParams.get("view");
   const isIncremental = detail?.run.research_kind === "incremental";
   const availableViews: ViewName[] = isIncremental
-    ? ["incremental", "evidence", "timeline"]
+    ? ["incremental", "reassessment", "evidence", "timeline"]
     : ["decision", "reports", "deliberation", "evidence", "timeline"];
   const defaultView: ViewName =
     detail?.run.status === "succeeded"
@@ -134,11 +136,7 @@ export default function RunDetail() {
   }, [runId, t]);
 
   useEffect(() => {
-    const needsArtifacts =
-      activeView === "deliberation" ||
-      activeView === "reports" ||
-      (activeView === "decision" && detail?.result?.decision == null);
-    if (!needsArtifacts || artifacts.length > 0) return;
+    if (activeView !== "deliberation") return;
     let active = true;
     void api.artifacts(runId).then(
       (items) => active && setArtifacts(items),
@@ -148,7 +146,7 @@ export default function RunDetail() {
     return () => {
       active = false;
     };
-  }, [activeView, artifacts.length, detail?.result?.decision, runId, t]);
+  }, [activeView, artifactRefreshRequest, runId, t]);
 
   useEffect(() => {
     void refresh();
@@ -169,11 +167,13 @@ export default function RunDetail() {
       if (
         event.event_type === "node.completed" ||
         event.event_type === "evidence.sealed" ||
-        event.event_type === "artifact.created" ||
         event.event_type.startsWith("incremental.") ||
         event.event_type.startsWith("run.")
       ) {
         void refresh();
+      }
+      if (event.event_type === "artifact.created") {
+        setArtifactRefreshRequest((current) => current + 1);
       }
       if (
         event.event_type === "run.succeeded" ||
@@ -193,6 +193,7 @@ export default function RunDetail() {
   }, [runId, refresh]);
 
   useEffect(() => {
+    if (!detail?.run.trashed_at) return;
     let active = true;
     void api
       .capabilities()
@@ -205,7 +206,7 @@ export default function RunDetail() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [detail?.run.trashed_at]);
 
   const reports = useMemo<Record<string, AnalystReport | string>>(() => {
     const completed = detail?.result?.reports ?? {};
@@ -529,7 +530,7 @@ export default function RunDetail() {
             onClick={() => selectView(view)}
             key={view}
           >
-            {t(view)}
+            {t(viewLabel(view, isIncremental))}
           </button>
         ))}
       </nav>
@@ -537,6 +538,10 @@ export default function RunDetail() {
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         {activeView === "incremental" && detail.research_node && (
           <IncrementalDetailPanel node={detail.research_node} />
+        )}
+
+        {activeView === "reassessment" && detail.research_node && (
+          <ReassessmentPanel node={detail.research_node} />
         )}
 
         {activeView === "timeline" && (
@@ -559,6 +564,7 @@ export default function RunDetail() {
             returnLabel={returnViewLabel(t, returnView)}
             evidenceIndex={evidenceIndex}
             onEvidence={openEvidence}
+            incremental={isIncremental}
           />
         )}
         {activeView === "reports" && (
@@ -631,37 +637,33 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
         <section>
           <h3>{t("researchAvailability")}</h3>
           <ul className="compact-list">
-            {node.research_availability?.domains?.map((domain) => (
-              <li key={domain.domain}>
-                <strong>{t(`${domain.domain}Analyst`)}</strong>
-                <span>{t(`availability_${domain.status}`)}</span>
-              </li>
-            )) ?? <li>{t("notRecorded")}</li>}
+            {(node.research_availability?.domains?.length ?? 0) > 0 ? (
+              node.research_availability?.domains.map((domain) => (
+                <li key={domain.domain}>
+                  <strong>{t(`${domain.domain}Analyst`)}</strong>
+                  <span>{t(`availability_${domain.status}`)}</span>
+                </li>
+              ))
+            ) : <li>{t("notRecorded")}</li>}
           </ul>
         </section>
         <section>
           <h3>{t("collectionSummary")}</h3>
           <ul className="compact-list">
-            {node.collection_summary?.domains?.map((domain) => (
-              <li key={domain.domain}>
-                <strong>{t(`${domain.domain}Analyst`)}</strong>
-                <span>{t(`collection_${domain.state}`)}</span>
-                {domain.diagnostic && <p>{domain.diagnostic.code}</p>}
-              </li>
-            )) ?? <li>{t("notRecorded")}</li>}
+            {(node.collection_summary?.domains?.length ?? 0) > 0 ? (
+              node.collection_summary?.domains.map((domain) => (
+                <li key={domain.domain}>
+                  <strong>{t(`${domain.domain}Analyst`)}</strong>
+                  <span>{t(`collection_${domain.state}`)}</span>
+                  {domain.diagnostic && <p>{domain.diagnostic.code}</p>}
+                </li>
+              ))
+            ) : <li>{t("notRecorded")}</li>}
           </ul>
         </section>
         <section>
           <h3>{t("reassessment")}</h3>
-          <ul className="compact-list">
-            {node.reassessment?.entries?.map((entry) => (
-              <li key={entry.component_id}>
-                <strong>{entry.component_id}</strong>
-                <span>{t(`reassessment_${entry.disposition}`)}</span>
-                <p>{entry.reason}</p>
-              </li>
-            )) ?? <li>{t("notRecorded")}</li>}
-          </ul>
+          <ReassessmentEntries node={node} />
         </section>
         <section>
           <h3>{t("performance")}</h3>
@@ -695,6 +697,41 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
   );
 }
 
+function ReassessmentPanel({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  return (
+    <article
+      className="panel incremental-detail-panel"
+      id="run-view-reassessment"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("incrementalResearch")}</p>
+          <h2>{t("reassessment")}</h2>
+        </div>
+      </div>
+      <ReassessmentEntries node={node} />
+    </article>
+  );
+}
+
+function ReassessmentEntries({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  const entries = node.reassessment?.entries ?? [];
+  return (
+    <ul className="compact-list">
+      {entries.length > 0 ? entries.map((entry) => (
+        <li key={entry.component_id}>
+          <strong>{entry.component_id}</strong>
+          <span>{t(`reassessment_${entry.disposition}`)}</span>
+          <p>{entry.reason}</p>
+        </li>
+      )) : <li>{t("notRecorded")}</li>}
+    </ul>
+  );
+}
+
 function TimelinePanel({ events }: { events: RunEvent[] }) {
   const { t } = useTranslation();
   const [order, setOrder] = useState<TimelineOrder>(readTimelineOrder);
@@ -722,7 +759,7 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
       <div className="panel-header">
         <div>
           <p className="eyebrow">{t("liveEvents")}</p>
-          <h2>{t("timeline")}</h2>
+          <h2>{t("activity")}</h2>
         </div>
         <div className="timeline-controls">
           <div
@@ -755,16 +792,20 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
           <div className="timeline-item" key={event.sequence}>
             <span className="timeline-dot" />
             <div>
-              <strong>{event.node || event.event_type}</strong>
+              <strong>{eventLabel(t, event)}</strong>
               <small>
                 #{event.sequence} · {formatTime(event.created_at)}
               </small>
-              {Object.keys(event.payload ?? {}).length > 0 && (
-                <details className="audit-disclosure event-audit">
-                  <summary>{t("auditDetails")}</summary>
-                  <code>{JSON.stringify(event.payload ?? {})}</code>
-                </details>
-              )}
+              <details className="audit-disclosure event-audit">
+                <summary>{t("auditDetails")}</summary>
+                <code>
+                  {JSON.stringify({
+                    event_type: event.event_type,
+                    node: event.node,
+                    payload: event.payload ?? {},
+                  })}
+                </code>
+              </details>
             </div>
           </div>
         ))}
@@ -820,6 +861,7 @@ function EvidencePanel({
   returnLabel,
   evidenceIndex,
   onEvidence,
+  incremental,
 }: {
   evidence: EvidenceBundle | null;
   evidenceStatus: RunDetailType["evidence_status"]["status"];
@@ -829,6 +871,7 @@ function EvidencePanel({
   returnLabel: string;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  incremental: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -840,7 +883,7 @@ function EvidencePanel({
       <div className="panel-header">
         <div>
           <p className="eyebrow">{t("evidenceBundle")}</p>
-          <h2>{t("evidence")}</h2>
+          <h2>{t(incremental ? "evidenceUpdates" : "evidence")}</h2>
         </div>
         <div className="evidence-panel-actions">
           <button
@@ -1517,12 +1560,55 @@ function reportLabel(t: TFunction, name: string): string {
 function returnViewLabel(t: TFunction, view: ReturnViewName): string {
   const labels: Record<ReturnViewName, string> = {
     incremental: "returnToIncrementalSummary",
-    timeline: "returnToTimeline",
+    reassessment: "returnToReassessment",
+    timeline: "returnToActivity",
     deliberation: "returnToDeliberation",
     reports: "returnToReports",
-    decision: "returnToDecision",
+    decision: "returnToOverview",
   };
   return t(labels[view]);
+}
+
+function viewLabel(view: ViewName, incremental: boolean): string {
+  if (view === "decision") return "overview";
+  if (view === "timeline") return "activity";
+  if (view === "evidence" && incremental) return "evidenceUpdates";
+  return view;
+}
+
+const eventLabelKeys: Record<string, string> = {
+  "run.queued": "statusQueued",
+  "run.started": "eventRunStarted",
+  "run.resumed": "eventRunResumed",
+  "run.succeeded": "statusSucceeded",
+  "run.failed": "statusFailed",
+  "run.cancelled": "statusCancelled",
+  "run.cancel_requested": "eventCancellationRequested",
+  "run.retry_queued": "eventRetryQueued",
+  "node.started": "eventNodeStarted",
+  "node.completed": "eventNodeCompleted",
+  "phase.started": "eventPhaseStarted",
+  "phase.completed": "eventPhaseCompleted",
+  "node.context_prepared": "eventContextPrepared",
+  "evidence.sealed": "eventEvidenceSealed",
+  "node.output_retry": "eventOutputRetry",
+  "node.output_recovered": "eventOutputRecovered",
+  "node.output_failed": "eventOutputFailed",
+  "node.numeric_audit_retry": "eventNumericAuditUpdated",
+  "node.numeric_audit_recovered": "eventNumericAuditUpdated",
+  "node.numeric_audit_degraded": "eventNumericAuditUpdated",
+  "decision.numeric_display_scale_normalized": "eventDecisionNormalized",
+  "decision.numeric_singleton_promoted": "eventDecisionNormalized",
+  "decision.numeric_range_reordered": "eventDecisionNormalized",
+  "artifact.created": "eventArtifactCreated",
+  "incremental.collection_completed": "eventIncrementalCollectionCompleted",
+  "incremental.no_advancement": "eventIncrementalNoAdvancement",
+  "incremental.synthesis_started": "eventIncrementalSynthesisStarted",
+  "incremental.synthesis_completed": "eventIncrementalSynthesisCompleted",
+};
+
+function eventLabel(t: TFunction, event: RunEvent): string {
+  return t(eventLabelKeys[event.event_type] ?? "eventWorkflowActivity");
 }
 
 function runDetailPath(

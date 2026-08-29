@@ -268,6 +268,9 @@ The Timeline Web API is cycle-shaped rather than a flat Node feed. A
 between pages. The Primary cycle is returned first and other cycles are ordered
 by Full analysis date descending. This contract intentionally replaces the
 pre-redesign `nodes` envelope without a compatibility layer.
+`active_full_cycles` remains unpaginated and contains the compact decision
+context required to choose a valid replacement before trashing a Primary
+cycle; it does not hydrate reports, Evidence, or Incremental products.
 
 New Run uses two bounded read models instead of loading Run Detail or scanning
 Timeline pages. `baseline-candidates` returns only active, compatible Full

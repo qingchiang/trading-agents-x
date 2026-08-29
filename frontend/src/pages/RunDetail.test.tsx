@@ -12,6 +12,7 @@ import {
   api,
   type Capabilities,
   type ResearchArtifact,
+  type ResearchNodeView,
   type RunDetail as RunDetailType,
   type RunEvent,
 } from "../api/client";
@@ -477,7 +478,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(screen.getByText("debate.agenda.serialize")).not.toBeVisible();
   fireEvent.click(screen.getByText("Structured recoveries"));
   expect(screen.getByText("debate.agenda.serialize")).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Decision" })).toHaveAttribute(
+  expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -590,7 +591,7 @@ test("restores deliberation and resolves evidence references across run views", 
     screen.queryByText("ev_0123456789ab", { exact: true }),
   ).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
   expect(screen.getByText("Technical support")).toBeVisible();
   expect(screen.getByText("Analyst target range")).toBeVisible();
@@ -630,7 +631,7 @@ test("restores deliberation and resolves evidence references across run views", 
     created_at: "2026-07-24T00:00:50Z",
   } as RunEvent;
   act(() => FakeEventSource.instance.emit("artifact.created", artifactEvent));
-  await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2));
+  expect(api.run).toHaveBeenCalledTimes(1);
   expect(api.artifacts).toHaveBeenCalledTimes(1);
 
   const event = {
@@ -644,7 +645,7 @@ test("restores deliberation and resolves evidence references across run views", 
   } as RunEvent;
   act(() => FakeEventSource.instance.emit("run.succeeded", event));
 
-  fireEvent.click(screen.getByRole("tab", { name: "Agent timeline" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
   const newest = await screen.findByText(/#7/);
   const older = screen.getByText(/#6/);
   expect(
@@ -658,7 +659,7 @@ test("restores deliberation and resolves evidence references across run views", 
   ).not.toBe(0);
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
   expect(FakeEventSource.instance.closed).toBe(true);
-  await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2));
   expect(api.artifacts).toHaveBeenCalledTimes(1);
 });
 
@@ -896,10 +897,92 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByText("A new filing changed the decision.")).toBeVisible();
   expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Deliberation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
     "href",
     "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
   );
+});
+
+test("loads only Run Detail initially and refreshes open deliberation artifacts on SSE", async () => {
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("tab", { name: "Overview" })).toBeVisible();
+  expect(api.capabilities).not.toHaveBeenCalled();
+  expect(api.artifacts).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
+  await waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(1));
+
+  act(() =>
+    FakeEventSource.instance.emit("artifact.created", {
+      run_id: "run-1",
+      sequence: 8,
+      attempt: 1,
+      event_type: "artifact.created",
+      node: "judge.research",
+      payload: { artifact_id: "artifact-new" },
+      created_at: "2026-07-24T00:01:10Z",
+    } as RunEvent),
+  );
+
+  await waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(2));
+});
+
+test("localizes Incremental activity while keeping raw event data in audit details", async () => {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.research_kind = "incremental";
+  incremental.run.full_baseline_run_id = "full-baseline";
+  incremental.run.is_research_node = true;
+  incremental.research_node = {
+    id: "run-1",
+    cycle_id: "full-baseline",
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_kind: "incremental",
+    full_baseline_run_id: "full-baseline",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T20:00:00Z",
+    method_snapshot: {},
+    is_baseline_compatible: false,
+    is_active: true,
+    is_primary: true,
+    is_cycle_head: true,
+    cycle_warning: false,
+    full_research_required_reasons: [],
+  } as ResearchNodeView;
+  vi.mocked(api.run).mockResolvedValue(incremental);
+
+  render(
+    <Router initialPath="/runs/run-1?view=timeline">
+      <RunDetail />
+    </Router>,
+  );
+  await screen.findByRole("tab", { name: "Activity" });
+
+  act(() =>
+    FakeEventSource.instance.emit("incremental.collection_completed", {
+      run_id: "run-1",
+      sequence: 9,
+      attempt: 1,
+      event_type: "incremental.collection_completed",
+      node: "incremental.collect",
+      payload: { domains: 4 },
+      created_at: "2026-07-24T00:01:20Z",
+    } as RunEvent),
+  );
+
+  expect(await screen.findByText("Update collection completed")).toBeVisible();
+  expect(screen.queryByText("incremental.collect")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Audit details"));
+  expect(screen.getByText(/incremental\.collection_completed/)).toBeVisible();
+  expect(screen.getByText(/incremental\.collect/)).toBeVisible();
 });
 
 test("shows trashed retention details and restores without deleting data", async () => {
@@ -1230,7 +1313,7 @@ test("loads sealed evidence immediately when the SSE seal event arrives", async 
   expect(api.evidence).not.toHaveBeenCalled();
 });
 
-test("shows preserved decision artifacts for an unsuccessful run", async () => {
+test("shows preserved decision artifacts after opening deliberation for an unsuccessful run", async () => {
   const decisionArtifact = {
     id: "artifact-decision",
     run_id: "run-1",
@@ -1264,11 +1347,13 @@ test("shows preserved decision artifacts for an unsuccessful run", async () => {
   ]);
 
   render(
-    <Router initialPath="/runs/run-1?view=decision">
+    <Router initialPath="/runs/run-1?view=deliberation">
       <RunDetail />
     </Router>,
   );
 
+  await screen.findByRole("heading", { name: "Deliberation" });
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
   expect(screen.getByText(/Partial research is available/)).toBeVisible();
 });
