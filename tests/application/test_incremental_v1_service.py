@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import pytest
+from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
@@ -24,6 +25,7 @@ from tradingagents.application.contracts import (
     IncrementalEvidenceCandidate,
     MarketSeriesPoint,
     MarketSeriesResult,
+    NumericAuditStatus,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -37,10 +39,17 @@ from tradingagents.application.errors import (
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
 )
+from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import EvidenceConflictError
-from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
+from tradingagents.application.service import (
+    AnalysisService,
+    _incremental_decision_core,
+    _incremental_decision_from_core,
+    default_incremental_synthesizer,
+)
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
+from tradingagents.graph.structured_output import StructuredOutputError
 
 
 def _unavailable_domains(request: IncrementalCollectionRequest):
@@ -484,6 +493,249 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
     assert result.metrics.llm_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("monolithic_failure", "section_failure"),
+    (
+        ("truncated", False),
+        ("schema_validation", False),
+        ("schema_validation", True),
+        ("repair_schema_validation", False),
+    ),
+)
+def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
+    app_settings,
+    repository,
+    monolithic_failure: str,
+    section_failure: bool,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    baseline_decision = repository.get_result(baseline.run_id).decision
+    assert baseline_decision is not None
+    candidate = IncrementalEvidenceCandidate(
+        evidence=EvidenceItem.create(
+            source="fixture.news",
+            evidence_type="filing",
+            requested_date=date(2026, 7, 24),
+            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+            content="A newly published filing.",
+        )
+    )
+    component_ids = (
+        "executive_summary",
+        "thesis",
+        "risks.0",
+        "invalidation_conditions.0",
+        "scenarios.base.outcome",
+        "scenarios.base.core_assumptions.0",
+        "scenarios.bull.outcome",
+        "scenarios.bull.core_assumptions.0",
+        "scenarios.bear.outcome",
+        "scenarios.bear.core_assumptions.0",
+    )
+
+    class _Invoker:
+        def __init__(self, response):
+            self.response = response
+
+        def invoke(self, _prompt, config=None):
+            del config
+            if isinstance(self.response, BaseException):
+                raise self.response
+            return self.response
+
+    class _SemanticLLM:
+        def invoke(self, _prompt, config=None):
+            del config
+            return AIMessage(content="The bounded update reaffirms the baseline.")
+
+    class _SerializerLLM:
+        preferred_structured_output_method = "function_calling"
+        structured_output_max_tokens = 16_384
+
+        def __init__(self):
+            self.calls: list[tuple[str, str | None]] = []
+
+        def with_structured_output(
+            self,
+            schema,
+            *,
+            method=None,
+            include_raw=False,
+            **_kwargs,
+        ):
+            assert include_raw is True
+            self.calls.append((schema.__name__, method))
+            if schema.__name__ == "IncrementalSynthesis":
+                if method == "json_mode":
+                    if monolithic_failure == "repair_schema_validation":
+                        return _Invoker(
+                            {
+                                "raw": AIMessage(content="{}"),
+                                "parsed": {"reassessment": {"entries": []}},
+                                "parsing_error": None,
+                            }
+                        )
+                    return _Invoker(RuntimeError("monolithic repair unavailable"))
+                if monolithic_failure == "repair_schema_validation":
+                    return _Invoker(RuntimeError("primary unavailable"))
+                if monolithic_failure == "schema_validation":
+                    return _Invoker(
+                        {
+                            "raw": AIMessage(content="{}"),
+                            "parsed": {"reassessment": {"entries": []}},
+                            "parsing_error": None,
+                        }
+                    )
+                return _Invoker(
+                    {
+                        "raw": AIMessage(
+                            content="",
+                            response_metadata={"finish_reason": "length"},
+                        ),
+                        "parsed": None,
+                        "parsing_error": ValueError("truncated"),
+                    }
+                )
+            if schema.__name__ == "_IncrementalReassessmentSection":
+                parsed = (
+                    {"reassessment": {"entries": []}}
+                    if section_failure
+                    else {
+                        "reassessment": {
+                            "entries": [
+                                {
+                                    "component_id": component_id,
+                                    "disposition": "reaffirmed",
+                                    "reason": (
+                                        "The bounded update does not change this "
+                                        "component."
+                                    ),
+                                }
+                                for component_id in component_ids
+                            ]
+                        },
+                        "full_research_required_reasons": [],
+                    }
+                )
+            elif schema.__name__ == "_IncrementalDecisionSection":
+                decision_schema = next(
+                    definition
+                    for definition in schema.model_json_schema()["$defs"].values()
+                    if "rating" in definition.get("properties", {})
+                )
+                assert "market_reference_levels" not in decision_schema["properties"]
+                assert "calculation_records" not in decision_schema["properties"]
+                parsed = {
+                    "decision": _incremental_decision_core(
+                        baseline_decision
+                    ).model_dump(mode="json")
+                }
+            else:
+                raise AssertionError(f"unexpected schema: {schema.__name__}")
+            return _Invoker(
+                {
+                    "raw": AIMessage(content=""),
+                    "parsed": parsed,
+                    "parsing_error": None,
+                }
+            )
+
+    serializer = _SerializerLLM()
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: RunLLMs(
+            quick=_SemanticLLM(),
+            deep=_SemanticLLM(),
+            quick_serializer=serializer,
+            deep_serializer=serializer,
+        ),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_synthesizer=None,
+        now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
+    )
+
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    if section_failure:
+        with pytest.raises(StructuredOutputError):
+            service.run(request)
+        assert all(method != "json_mode" for _schema, method in serializer.calls)
+        assert [schema for schema, _method in serializer.calls] == [
+            "IncrementalSynthesis",
+            "_IncrementalReassessmentSection",
+        ]
+        failed = repository.list_runs(status=RunStatus.FAILED).items
+        assert len(failed) == 1
+        failed_run_id = failed[0].id
+        assert repository.evidence_status(failed_run_id).status == "pending"
+        assert tuple(node.id for node in repository.get_timeline("NVDA").nodes) == (
+            baseline.run_id,
+        )
+        with repository.sessions() as session:
+            assert session.get(ResearchNodeRecord, failed_run_id) is None
+            assert session.get(RunEvidenceRecord, failed_run_id) is None
+            assert (
+                session.query(DecisionRecord)
+                .filter(DecisionRecord.run_id == failed_run_id)
+                .count()
+                == 0
+            )
+        return
+
+    if monolithic_failure == "repair_schema_validation":
+        with pytest.raises(StructuredOutputError):
+            service.run(request)
+        assert serializer.calls == [
+            ("IncrementalSynthesis", None),
+            ("IncrementalSynthesis", "json_mode"),
+        ]
+        failed = repository.list_runs(status=RunStatus.FAILED).items
+        assert len(failed) == 1
+        return
+
+    result = service.run(request)
+
+    assert serializer.calls == [
+        ("IncrementalSynthesis", None),
+        ("_IncrementalReassessmentSection", None),
+        ("_IncrementalDecisionSection", None),
+    ]
+    assert result.status is RunStatus.SUCCEEDED
+    node = repository.get_timeline("NVDA").nodes[-1]
+    assert len(node.reassessment.entries) == len(component_ids)
+    assert any(
+        event.event_type == "node.output_recovered"
+        and event.payload["method"] == "sectioned_recovery"
+        for event in repository.list_events(result.run_id)
+    )
+
+
+def test_incremental_decision_core_preserves_baseline_numeric_appendix() -> None:
+    baseline = research_decision().model_copy(
+        update={"numeric_audit_status": NumericAuditStatus.NOT_APPLICABLE}
+    )
+    core = _incremental_decision_core(baseline).model_copy(
+        update={"thesis": "Updated qualitative thesis."}
+    )
+
+    decision = _incremental_decision_from_core(core, baseline)
+
+    assert decision.thesis == "Updated qualitative thesis."
+    assert decision.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
 
 
 def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(

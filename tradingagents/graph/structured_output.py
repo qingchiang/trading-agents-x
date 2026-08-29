@@ -98,12 +98,15 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         event_writer: EventWriter | None = None,
         invoke_config: dict[str, Any] | None = None,
         repair_mode: Literal["json_mode", "preferred"] = "json_mode",
+        repair_enabled: bool = True,
         include_candidate_in_repair: bool = False,
         candidate_only_repair: bool = False,
         repair_instructions: str | None = None,
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
         ) = None,
+        sectioned_recovery_reasons: tuple[str, ...] = ("output_truncated",),
+        sectioned_recovery_after_repair: bool = True,
     ):
         self.llm = llm
         self.schema = schema
@@ -112,10 +115,13 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         self.event_writer = event_writer
         self.invoke_config = invoke_config
         self.repair_mode = repair_mode
+        self.repair_enabled = repair_enabled
         self.include_candidate_in_repair = include_candidate_in_repair
         self.candidate_only_repair = candidate_only_repair
         self.repair_instructions = repair_instructions
         self.truncation_recovery = truncation_recovery
+        self.sectioned_recovery_reasons = sectioned_recovery_reasons
+        self.sectioned_recovery_after_repair = sectioned_recovery_after_repair
 
     def invoke(
         self,
@@ -150,8 +156,9 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         if primary is not None:
             try:
                 response = self._invoke(primary, primary_prompt)
-            except Exception:
+            except Exception as exc:
                 primary_reason = "provider_error"
+                primary_validation_issues = _provider_validation_issues(exc)
             else:
                 parsed, raw, parsing_error = _unpack_response(
                     response,
@@ -200,7 +207,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                         )
 
         if (
-            primary_reason == "output_truncated"
+            primary_reason in self.sectioned_recovery_reasons
             and self.truncation_recovery is not None
         ):
             self._emit(
@@ -246,6 +253,30 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                 schema=self.schema.__name__,
                 reason_code=failure_reason,
                 validation_issues=failure_validation_issues,
+            )
+
+        if not self.repair_enabled:
+            self._emit(
+                "node.output_failed",
+                method=primary_generation_method,
+                reason_code=primary_reason,
+                validation_issues=primary_validation_issues,
+            )
+            raise StructuredOutputError(
+                node=self.node,
+                schema=self.schema.__name__,
+                reason_code=primary_reason,
+                validation_issues=primary_validation_issues,
+                candidate=primary_candidate,
+                failures=(
+                    StructuredOutputFailure(
+                        phase="initial",
+                        method=primary_generation_method,
+                        reason_code=primary_reason,
+                        validation_issues=primary_validation_issues,
+                        candidate=primary_candidate,
+                    ),
+                ),
             )
 
         recovery_method = (
@@ -317,8 +348,9 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                         **bind_kwargs,
                     )
                 )
-            except Exception:
+            except Exception as exc:
                 failure_reason = "provider_error"
+                failure_validation_issues = _provider_validation_issues(exc)
             else:
                 response_available = True
         if response_available:
@@ -369,7 +401,8 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                     )
 
         if (
-            failure_reason == "output_truncated"
+            self.sectioned_recovery_after_repair
+            and failure_reason in self.sectioned_recovery_reasons
             and self.truncation_recovery is not None
         ):
             self._emit(
@@ -532,6 +565,14 @@ def _is_truncated(raw: Any) -> bool:
         return False
     finish_reason = metadata.get("finish_reason")
     return finish_reason in {"length", "max_tokens", "max_output_tokens"}
+
+
+def _provider_validation_issues(exc: Exception) -> tuple[str, ...]:
+    """Retain a stable HTTP status without persisting provider content."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and 400 <= status_code <= 599:
+        return (f"provider.http_{status_code}",)
+    return ()
 
 
 def _strict_json_object(raw: Any) -> dict[str, Any]:

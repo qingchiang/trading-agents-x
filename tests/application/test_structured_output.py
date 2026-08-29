@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
 from tradingagents.graph.deliberation import invoke_research_decision
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
+    StructuredOutputResult,
     StructuredOutputRunner,
 )
 
@@ -368,6 +369,27 @@ def test_two_invalid_outputs_fail_without_leaking_provider_content() -> None:
     assert secret not in json.dumps(events)
 
 
+def test_provider_failure_retains_only_safe_http_diagnostics() -> None:
+    class _ProviderUnavailableError(RuntimeError):
+        status_code = 503
+
+    secret = "authorization=private-value"
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary=_ProviderUnavailableError(secret),
+        recovery=_ProviderUnavailableError(secret),
+    )
+
+    with pytest.raises(StructuredOutputError) as error:
+        _invoke(_runner(llm, events))
+
+    assert error.value.reason_code == "provider_error"
+    assert error.value.validation_issues == ("provider.http_503",)
+    assert events[-1]["payload"]["validation_issues"] == ["provider.http_503"]
+    assert secret not in str(error.value)
+    assert secret not in json.dumps(events)
+
+
 def test_truncated_primary_output_uses_specific_recovery_reason() -> None:
     events: list[dict[str, Any]] = []
     llm = _FakeLLM(
@@ -389,6 +411,96 @@ def test_truncated_primary_output_uses_specific_recovery_reason() -> None:
     _invoke(_runner(llm, events))
 
     assert events[0]["payload"]["reason_code"] == "output_truncated"
+
+
+def test_configured_schema_failure_uses_sectioned_recovery() -> None:
+    events: list[dict[str, Any]] = []
+    invalid = {
+        "raw": AIMessage(content=""),
+        "parsed": {"role": "bear"},
+        "parsing_error": None,
+    }
+    llm = _FakeLLM(
+        primary=invalid,
+        recovery=AssertionError("generic repair must not run"),
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        event_writer=events.append,
+        truncation_recovery=lambda: StructuredOutputResult(
+            value=_review(),
+            generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+        ),
+        sectioned_recovery_reasons=("output_truncated", "schema_validation"),
+    )
+
+    result = _invoke(runner)
+
+    assert result.value == _review()
+    assert result.generation_method is ArtifactGenerationMethod.SECTIONED_RECOVERY
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+    assert [event["event_type"] for event in events] == [
+        "node.output_retry",
+        "node.output_recovered",
+    ]
+
+
+def test_disabled_repair_fails_after_primary_attempt() -> None:
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=""),
+            "parsed": {"role": "bear"},
+            "parsing_error": None,
+        },
+        recovery=AssertionError("repair must not run"),
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        event_writer=events.append,
+        repair_enabled=False,
+    )
+
+    with pytest.raises(StructuredOutputError) as exc_info:
+        _invoke(runner)
+
+    assert exc_info.value.reason_code == "schema_validation"
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+    assert [event["event_type"] for event in events] == ["node.output_failed"]
+
+
+def test_sectioned_recovery_can_be_disabled_after_generic_repair() -> None:
+    llm = _FakeLLM(
+        primary=RuntimeError("primary unavailable"),
+        recovery={
+            "raw": AIMessage(content=""),
+            "parsed": {"role": "bear"},
+            "parsing_error": None,
+        },
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        truncation_recovery=lambda: (_ for _ in ()).throw(
+            AssertionError("sectioned recovery must not run after generic repair")
+        ),
+        sectioned_recovery_reasons=("schema_validation",),
+        sectioned_recovery_after_repair=False,
+    )
+
+    with pytest.raises(StructuredOutputError) as exc_info:
+        _invoke(runner)
+
+    assert exc_info.value.reason_code == "schema_validation"
+    assert [method for method, _prompt in llm.calls] == ["tool_call", "json_mode"]
 
 
 def _decision_payload(evidence_ref: str) -> dict[str, Any]:
