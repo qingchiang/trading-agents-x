@@ -106,9 +106,12 @@ beforeEach(async () => {
 });
 
 test("filters and atomically trashes eligible runs with instrument names", async () => {
+  const incremental = run("run-1", "NVDA", "succeeded");
+  incremental.research_kind = "incremental";
+  incremental.research_confidence = 0.82;
   vi.mocked(api.runs).mockResolvedValue(
     page([
-      run("run-1", "NVDA", "succeeded"),
+      incremental,
       run("run-2", "AAPL", "running"),
     ]),
   );
@@ -122,6 +125,8 @@ test("filters and atomically trashes eligible runs with instrument names", async
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("英伟达")).toBeVisible();
   expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
+  expect(screen.getByText("82% confidence")).toBeVisible();
+  expect(screen.getByText("Incremental research · openai / deep")).toBeVisible();
   expect(screen.getByText("—")).toHaveClass("research-rating-badge");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
@@ -156,11 +161,14 @@ test("filters and atomically trashes eligible runs with instrument names", async
   fireEvent.change(screen.getByLabelText("Status"), {
     target: { value: "succeeded" },
   });
+  fireEvent.change(screen.getByLabelText("Research kind"), {
+    target: { value: "incremental" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
   await waitFor(() =>
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/runs?q=nvidia&status=succeeded",
+      "/runs?q=nvidia&status=succeeded&research_kind=incremental",
     ),
   );
   await waitFor(() => {
@@ -170,6 +178,7 @@ test("filters and atomically trashes eligible runs with instrument names", async
       trash_state: "active",
       q: "nvidia",
       status: "succeeded",
+      research_kind: "incremental",
       limit: "20",
       offset: "0",
     });

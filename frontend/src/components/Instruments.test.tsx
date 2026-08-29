@@ -13,8 +13,17 @@ test("shows a distinct local name before the general name", () => {
   );
 
   expect(screen.getByText("7203.T")).toBeVisible();
-  expect(screen.getByText("トヨタ自動車")).toBeVisible();
-  expect(screen.getByText("Toyota Motor Corporation")).toBeVisible();
+  expect(screen.getByText("トヨタ自動車")).toHaveClass("instrument-primary-name");
+  expect(screen.getByText("Toyota Motor Corporation")).toHaveClass(
+    "instrument-alternate-name",
+  );
+  expect(screen.getByText("7203.T")).toHaveClass("instrument-ticker");
+});
+
+test("uses the ticker as the primary identity only when names are unavailable", () => {
+  render(<InstrumentIdentity ticker="NVDA" />);
+
+  expect(screen.getByText("NVDA")).toHaveClass("instrument-primary-name");
 });
 
 test("deduplicates equivalent local and general names", () => {

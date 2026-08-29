@@ -58,32 +58,32 @@ export function InstrumentIdentity({
   prominent?: boolean;
 }) {
   const names = distinctNames(instrumentLocalName, instrumentName);
+  const primary = names[0] ?? ticker;
+  const alternate = names[1];
+  const PrimaryTag = prominent ? "h1" : "strong";
+  const content = (
+    <>
+      <span className="instrument-name-line">
+        <PrimaryTag className="instrument-primary-name">{primary}</PrimaryTag>
+        {alternate && (
+          <span className="instrument-alternate-name">{alternate}</span>
+        )}
+      </span>
+      {names.length > 0 && (
+        <span className="instrument-ticker">{ticker}</span>
+      )}
+    </>
+  );
   if (prominent) {
     return (
       <div className="instrument-identity prominent">
-        <h1 className="ticker">{ticker}</h1>
-        <InstrumentNames names={names} />
+        {content}
       </div>
     );
   }
   return (
     <span className="instrument-identity">
-      <strong className="ticker">{ticker}</strong>
-      <InstrumentNames names={names} />
-    </span>
-  );
-}
-
-function InstrumentNames({ names }: { names: string[] }) {
-  if (names.length === 0) return null;
-  return (
-    <span className="instrument-name">
-      {names.map((name, index) => (
-        <span key={name}>
-          {index > 0 && <i aria-hidden="true"> · </i>}
-          <span>{name}</span>
-        </span>
-      ))}
+      {content}
     </span>
   );
 }

@@ -629,7 +629,7 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
             {node.research_availability?.domains?.map((domain) => (
               <li key={domain.domain}>
                 <strong>{t(`${domain.domain}Analyst`)}</strong>
-                <span>{t(domain.status)}</span>
+                <span>{t(`availability_${domain.status}`)}</span>
               </li>
             )) ?? <li>{t("notRecorded")}</li>}
           </ul>
@@ -640,7 +640,7 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
             {node.collection_summary?.domains?.map((domain) => (
               <li key={domain.domain}>
                 <strong>{t(`${domain.domain}Analyst`)}</strong>
-                <span>{t(domain.state)}</span>
+                <span>{t(`collection_${domain.state}`)}</span>
                 {domain.diagnostic && <p>{domain.diagnostic.code}</p>}
               </li>
             )) ?? <li>{t("notRecorded")}</li>}
@@ -652,7 +652,7 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
             {node.reassessment?.entries?.map((entry) => (
               <li key={entry.component_id}>
                 <strong>{entry.component_id}</strong>
-                <span>{t(entry.disposition)}</span>
+                <span>{t(`reassessment_${entry.disposition}`)}</span>
                 <p>{entry.reason}</p>
               </li>
             )) ?? <li>{t("notRecorded")}</li>}
@@ -667,7 +667,9 @@ function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
                   maximumFractionDigits: 2,
                 }).format(node.performance.stock.calculation.unrounded_return)}`
               : node.performance?.stock.reason ??
-                node.performance?.stock.status ??
+                (node.performance?.stock.status
+                  ? t(`performance_${node.performance.stock.status}`)
+                  : null) ??
                 t("notRecorded")}
           </p>
         </section>

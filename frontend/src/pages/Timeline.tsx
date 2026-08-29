@@ -1,145 +1,270 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
   api,
   type ResearchNodeComparison,
   type ResearchNodeComparisonSelection,
+  type ResearchNodeView,
   type ResearchTimelinePage,
   type TimelineDetail,
 } from "../api/client";
-import type { components } from "../api/types.generated";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { InstrumentIdentity } from "../components/Instruments";
+import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import { Link, usePathname } from "../router";
 
-const NODE_PAGE_SIZE = 20;
-type PerformanceCalculation = components["schemas"]["PerformanceCalculationRecord"];
-type ResearchNode = components["schemas"]["ResearchNodeView"];
+const CYCLE_PAGE_SIZE = 12;
 
-function AuditContext({ title, value }: { title: string; value: unknown }) {
+function KindBadge({ kind }: { kind: ResearchNodeView["research_kind"] }) {
+  const { t } = useTranslation();
   return (
-    <section className="comparison-context">
-      <h4>{title}</h4>
-      {value === null || value === undefined ? (
-        <p>—</p>
-      ) : (
-        <pre>{JSON.stringify(value, null, 2)}</pre>
-      )}
+    <span className={`research-kind-badge ${kind}`}>
+      {t(kind === "full" ? "fullResearch" : "incrementalResearch")}
+    </span>
+  );
+}
+
+function Confidence({ value }: { value?: number | null }) {
+  const { t } = useTranslation();
+  return (
+    <span className="confidence-value">
+      {value == null
+        ? t("notRecorded")
+        : t("confidencePercent", { value: Math.round(value * 100) })}
+    </span>
+  );
+}
+
+function DecisionSummary({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  if (!node.decision) return <p className="muted-copy">{t("notRecorded")}</p>;
+  return (
+    <section className="decision-summary" aria-label={t("currentDecision")}>
+      <div className="decision-summary-meta">
+        <ResearchRatingBadge rating={node.decision.rating} />
+        <Confidence value={node.decision.confidence} />
+      </div>
+      <p>{node.decision.thesis}</p>
     </section>
   );
 }
 
-function ComparisonValue({
-  state,
-  value,
-}: components["schemas"]["ResearchNodeComparisonValue"]) {
+function IncrementalProducts({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
-  if (state === "not_recorded_under_this_schema") {
-    return <strong>{t("notRecordedUnderThisSchema")}</strong>;
+  return (
+    <div className="incremental-product-grid">
+      <section>
+        <h4>{t("informationAdvancement")}</h4>
+        <p>{node.information_advancement?.reasons?.join(", ") || t("notRecorded")}</p>
+      </section>
+      <section>
+        <h4>{t("researchAvailability")}</h4>
+        <div className="availability-row">
+          {node.research_availability?.domains?.map((domain) => (
+            <span className={`availability-chip ${domain.status}`} key={domain.domain}>
+              {t(`${domain.domain}Analyst`)} · {t(`availability_${domain.status}`)}
+            </span>
+          )) ?? <span>{t("notRecorded")}</span>}
+        </div>
+      </section>
+      {node.reassessment && (
+        <details>
+          <summary>{t("reassessment")}</summary>
+          <ul className="compact-list">
+            {node.reassessment.entries.map((entry) => (
+              <li key={entry.component_id}>
+                <strong>{entry.component_id}</strong>
+                <span>{t(`reassessment_${entry.disposition}`)}</span>
+                <p>{entry.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {node.performance && (
+        <details>
+          <summary>{t("performance")}</summary>
+          <dl className="definition-list compact-definition-list">
+            <div>
+              <dt>{t("stockReturn")}</dt>
+              <dd>
+                {t(`performance_${node.performance.stock.status}`)}
+                {node.performance.stock.calculation
+                  ? ` · ${formatPercent(node.performance.stock.calculation.unrounded_return)}`
+                  : node.performance.stock.reason
+                    ? ` · ${node.performance.stock.reason}`
+                    : ""}
+              </dd>
+            </div>
+            {(node.performance.benchmarks ?? []).map((benchmark) => (
+              <div key={benchmark.name}>
+                <dt>{benchmark.name}</dt>
+                <dd>
+                  {t(`performance_${benchmark.component.status}`)}
+                  {benchmark.component.calculation
+                    ? ` · ${formatPercent(benchmark.component.calculation.unrounded_return)}`
+                    : ""}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+      {(node.full_research_required_reasons?.length ?? 0) > 0 && (
+        <section className="research-warning-block" role="status">
+          <h4>{t("fullResearchRecommended")}</h4>
+          {node.full_research_required_reasons?.map((reason) => (
+            <p key={reason.code}>{reason.message}</p>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function NodeCard({
+  node,
+  selected,
+  comparisonFull,
+  onToggleComparison,
+  onLifecycle,
+  onReload,
+}: {
+  node: ResearchNodeView;
+  selected: boolean;
+  comparisonFull: boolean;
+  onToggleComparison: (node: ResearchNodeView) => void;
+  onLifecycle: (node: ResearchNodeView, mode: "trash" | "purge") => void;
+  onReload: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article className={`research-node-card ${node.research_kind} ${node.is_active ? "" : "trashed"}`}>
+      <header className="research-node-header">
+        <div>
+          <KindBadge kind={node.research_kind} />
+          <h3>{node.analysis_date}</h3>
+        </div>
+        <div className="status-cluster">
+          {node.is_cycle_head && <span className="status-pill">{t("cycleHead")}</span>}
+          {!node.is_active && <span className="status-pill muted">{t("retainedInTrash")}</span>}
+        </div>
+      </header>
+      <DecisionSummary node={node} />
+      {node.research_kind === "incremental" && <IncrementalProducts node={node} />}
+      <details className="audit-disclosure">
+        <summary>{t("auditDetails")}</summary>
+        <dl className="definition-list compact-definition-list">
+          <div><dt>{t("informationCutoff")}</dt><dd>{new Date(node.information_cutoff_at).toLocaleString()}</dd></div>
+          <div><dt>{t("researchSchema")}</dt><dd>{node.research_schema_version}</dd></div>
+          <div><dt>{t("methodProvider")}</dt><dd>{String(node.method_snapshot.llm_provider ?? t("notRecorded"))}</dd></div>
+          <div><dt>{t("runId")}</dt><dd><code>{node.id}</code></dd></div>
+        </dl>
+        <details>
+          <summary>{t("methodSnapshot")}</summary>
+          <pre>{JSON.stringify(node.method_snapshot, null, 2)}</pre>
+        </details>
+      </details>
+      <footer className="node-actions">
+        <button
+          type="button"
+          className={`button compact-button ${selected ? "selected" : ""}`}
+          disabled={comparisonFull && !selected}
+          aria-pressed={selected}
+          onClick={() => onToggleComparison(node)}
+        >
+          {t(selected ? "removeFromComparison" : "selectForComparison")}
+        </button>
+        {node.is_active ? (
+          <button
+            type="button"
+            className="button compact-button danger"
+            onClick={() => onLifecycle(node, "trash")}
+          >
+            {t(node.research_kind === "full" ? "moveCycleToTrash" : "moveNodeToTrash")}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="button compact-button"
+              onClick={() => void api.restoreRuns([node.id]).then(onReload)}
+            >
+              {t("restoreResearchNode")}
+            </button>
+            <button
+              type="button"
+              className="button compact-button danger"
+              onClick={() => onLifecycle(node, "purge")}
+            >
+              {t("purgeResearchNode")}
+            </button>
+          </>
+        )}
+        <Link className="text-link" to={`/runs/${encodeURIComponent(node.id)}`}>
+          {t("openResearchDetail")} →
+        </Link>
+      </footer>
+    </article>
+  );
+}
+
+function ComparisonValue({ value }: { value: unknown }) {
+  const { t } = useTranslation();
+  if (value === null || value === undefined || value === "") {
+    return <span className="muted-copy">{t("notApplicable")}</span>;
   }
-  if (state === "null") return <span>{t("comparisonNull")}</span>;
-  if (state === "empty") return <span>{t("comparisonEmpty")}</span>;
-  return <span>{typeof value === "string" ? value : JSON.stringify(value)}</span>;
+  if (typeof value === "string" || typeof value === "number") return <span>{value}</span>;
+  return <span>{JSON.stringify(value)}</span>;
 }
 
 function NodeComparisonView({ comparison }: { comparison: ResearchNodeComparison }) {
   const { t } = useTranslation();
+  const [left, right] = comparison.sides;
+  const reassessment = (side: (typeof comparison.sides)[number]) =>
+    side.reassessment?.entries
+      .map((entry) => `${entry.component_id}: ${t(`reassessment_${entry.disposition}`)}`)
+      .join(", ");
+  const performance = (side: (typeof comparison.sides)[number]) => {
+    const stock = side.performance?.stock;
+    if (!stock) return null;
+    return stock.calculation
+      ? `${t("stockReturn")}: ${formatPercent(stock.calculation.unrounded_return)}`
+      : `${t("stockReturn")}: ${t(`performance_${stock.status}`)}${stock.reason ? ` · ${stock.reason}` : ""}`;
+  };
+  const method = (side: (typeof comparison.sides)[number]) =>
+    [side.method_snapshot.llm_provider, side.method_snapshot.deep_model]
+      .filter(Boolean)
+      .join(" / ") || null;
+  const rows: [string, unknown, unknown][] = [
+    [t("researchRating"), left.decision?.rating, right.decision?.rating],
+    [t("confidence"), left.decision?.confidence, right.decision?.confidence],
+    [t("thesis"), left.decision?.thesis, right.decision?.thesis],
+    [t("informationAdvancement"), left.information_advancement?.reasons?.join(", "), right.information_advancement?.reasons?.join(", ")],
+    [t("researchAvailability"), left.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", "), right.research_availability?.domains?.map((item) => `${t(`${item.domain}Analyst`)}: ${t(`availability_${item.status}`)}`).join(", ")],
+    [t("reassessment"), reassessment(left), reassessment(right)],
+    [t("performance"), performance(left), performance(right)],
+    [t("method"), method(left), method(right)],
+  ];
   return (
     <section className="panel comparison-panel" aria-label={t("nodeComparison")}>
       <div className="panel-header">
-        <div>
-          <p className="eyebrow">{t("nodeComparison")}</p>
-          <h2>{t("selectedResearchNodes")}</h2>
-        </div>
+        <div><p className="eyebrow">{t("nodeComparison")}</p><h2>{t("selectedResearchNodes")}</h2></div>
         <span>{t(comparison.cross_cycle ? "crossCycleComparison" : "sameCycleComparison")}</span>
       </div>
-      {comparison.warnings?.map((warning) => (
-        <div className="alert" role="status" key={warning.code}>
-          <strong>{t("methodChanged")}</strong> {warning.message}
-        </div>
-      ))}
-      <div className="comparison-grid">
-        {comparison.sides.map((side, index) => {
-          const kind = t(side.research_kind === "full" ? "fullResearchNode" : "incrementalResearchNode");
-          const lifecycle = t(side.lifecycle_state === "active" ? "activeNode" : "trashNode");
-          return (
-            <article
-              className="comparison-side"
-              aria-label={t("comparisonSideLabel", { side: index + 1, kind, lifecycle })}
-              key={side.node_id}
-            >
-              <header>
-                <p className="eyebrow">{kind} · {lifecycle}</p>
-                <h3>{side.analysis_date}</h3>
-                <code>{side.node_id}</code>
-              </header>
-              <dl className="definition-list">
-                <div><dt>{t("researchSchema")}</dt><dd>{side.research_schema_version}</dd></div>
-                <div><dt>{t("cycleId")}</dt><dd>{side.cycle_id}</dd></div>
-              </dl>
-              <AuditContext title={t("methodSnapshot")} value={side.method_snapshot} />
-              <AuditContext title={t("collectionSummary")} value={side.collection_summary} />
-              <AuditContext title={t("researchAvailability")} value={side.research_availability} />
-              <AuditContext title={t("reassessment")} value={side.reassessment} />
-              <AuditContext title={t("decision")} value={side.decision} />
-              <AuditContext title={t("performance")} value={side.performance} />
-              {(side.full_research_required_reasons?.length ?? 0) > 0 && (
-                <section
-                  className="comparison-context"
-                  aria-label={t("comparisonSideWarnings", { side: index + 1 })}
-                >
-                  <h4>{t("warnings")}</h4>
-                  <ul>
-                    {side.full_research_required_reasons?.map((reason) => (
-                      <li className="alert" key={reason.code}>{reason.message}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-            </article>
-          );
-        })}
-      </div>
+      {comparison.method_changed && <div className="notice" role="status">{t("methodChanged")}</div>}
       <div className="table-wrap comparison-decision-table">
         <table>
-          <caption>{t("alignedDecisionSections")}</caption>
-          <thead><tr><th>{t("decisionSection")}</th><th>{t("comparisonSide", { side: 1 })}</th><th>{t("comparisonSide", { side: 2 })}</th></tr></thead>
-          <tbody>
-            {comparison.decision_sections.map((section) => (
-              <tr key={section.key}>
-                <th scope="row">{section.key}</th>
-                {section.values.map((value, index) => (
-                  <td key={`${section.key}-${index}`}><ComparisonValue {...value} /></td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
+          <thead><tr><th>{t("decisionSection")}</th>{[left, right].map((side) => <th key={side.node_id}><KindBadge kind={side.research_kind} /> {side.analysis_date}</th>)}</tr></thead>
+          <tbody>{rows.map(([label, leftValue, rightValue]) => <tr key={label}><th scope="row">{label}</th><td><ComparisonValue value={leftValue} /></td><td><ComparisonValue value={rightValue} /></td></tr>)}</tbody>
         </table>
       </div>
+      <details className="audit-disclosure">
+        <summary>{t("auditDetails")}</summary>
+        <div className="comparison-grid">{comparison.sides.map((side) => <pre key={side.node_id}>{JSON.stringify(side, null, 2)}</pre>)}</div>
+      </details>
     </section>
-  );
-}
-
-function PerformanceCalculationAudit({
-  calculation,
-}: {
-  calculation: PerformanceCalculation;
-}) {
-  return (
-    <dl className="definition-list">
-      <div><dt>Provider</dt><dd>{calculation.provider}</dd></div>
-      <div><dt>Fallback</dt><dd>{calculation.fallback ? "yes" : "no"}</dd></div>
-      <div><dt>Adjustment basis</dt><dd>{calculation.adjustment_basis}</dd></div>
-      <div><dt>Retrieved at</dt><dd>{calculation.retrieved_at}</dd></div>
-      <div>
-        <dt>Information cutoffs</dt>
-        <dd>{calculation.baseline_information_cutoff_at} → {calculation.target_information_cutoff_at}</dd>
-      </div>
-      <div><dt>Endpoint sessions</dt><dd>{calculation.start_session} → {calculation.end_session}</dd></div>
-      <div><dt>Endpoint values</dt><dd>{calculation.start_value} → {calculation.end_value}</dd></div>
-      <div><dt>Formula</dt><dd>{calculation.formula}</dd></div>
-      <div><dt>Unrounded return</dt><dd>{calculation.unrounded_return}</dd></div>
-    </dl>
   );
 }
 
@@ -150,41 +275,69 @@ export default function Timeline() {
   const instrument = decodeURIComponent(pathname.split("/").at(-1) ?? "");
   const [detail, setDetail] = useState<TimelineDetail | null>(null);
   const [timelines, setTimelines] = useState<ResearchTimelinePage | null>(null);
-  const [timelineOffset, setTimelineOffset] = useState(0);
-  const [nodeOffset, setNodeOffset] = useState(0);
+  const [listOffset, setListOffset] = useState(0);
+  const [cycleOffset, setCycleOffset] = useState(0);
+  const [query, setQuery] = useState("");
   const [showRetainedTrash, setShowRetainedTrash] = useState(false);
-  const [pendingNode, setPendingNode] = useState<ResearchNode | null>(null);
+  const [comparisonNodes, setComparisonNodes] = useState<ResearchNodeView[]>([]);
+  const [comparison, setComparison] = useState<ResearchNodeComparison | null>(null);
+  const [comparisonBusy, setComparisonBusy] = useState(false);
+  const [pendingNode, setPendingNode] = useState<ResearchNodeView | null>(null);
   const [lifecycleMode, setLifecycleMode] = useState<"trash" | "purge" | null>(null);
   const [replacementPrimary, setReplacementPrimary] = useState("");
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
-  const [comparisonNodes, setComparisonNodes] = useState<ResearchNode[]>([]);
-  const [comparison, setComparison] = useState<ResearchNodeComparison | null>(null);
-  const [comparisonBusy, setComparisonBusy] = useState(false);
-  const timelineItems = timelines?.items ?? [];
-  const detailNodes = detail?.timeline.nodes ?? [];
-  const activeFullCycles = detail?.timeline.active_full_cycles ?? [];
-  const nodeTotal = detail?.timeline.node_total ?? 0;
-  const nodeLimit = detail?.timeline.node_limit ?? NODE_PAGE_SIZE;
   const [error, setError] = useState("");
 
-  const toggleComparisonNode = (node: ResearchNode) => {
+  const cycles = detail?.timeline.cycles ?? [];
+  const cycleTotal = detail?.timeline.cycle_total ?? 0;
+  const cycleLimit = detail?.timeline.cycle_limit ?? CYCLE_PAGE_SIZE;
+  const activeFullCycles = cycles.filter((cycle) => cycle.baseline.is_active);
+  const filteredTimelines = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return timelines?.items ?? [];
+    return (timelines?.items ?? []).filter((item) =>
+      [item.instrument, item.instrument_name, item.instrument_local_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLocaleLowerCase().includes(normalized)),
+    );
+  }, [query, timelines]);
+
+  useEffect(() => {
+    let active = true;
+    setError("");
+    const fail = (cause: unknown) => {
+      if (active) setError(cause instanceof Error ? cause.message : t("timelineLoadFailed"));
+    };
+    if (isList) {
+      void api.timelines(50, listOffset).then((value) => active && setTimelines(value), fail);
+    } else {
+      void api.timeline(instrument, CYCLE_PAGE_SIZE, cycleOffset, showRetainedTrash ? "all" : "active").then((value) => active && setDetail(value), fail);
+    }
+    return () => { active = false; };
+  }, [cycleOffset, instrument, isList, listOffset, showRetainedTrash, t]);
+
+  useEffect(() => {
+    setCycleOffset(0);
+    setComparisonNodes([]);
+    setComparison(null);
+  }, [instrument]);
+
+  const reloadDetail = async () => {
+    setDetail(await api.timeline(instrument, CYCLE_PAGE_SIZE, cycleOffset, showRetainedTrash ? "all" : "active"));
+  };
+
+  const toggleComparison = (node: ResearchNodeView) => {
     setComparison(null);
     setComparisonNodes((current) => {
-      if (current.some((selected) => selected.id === node.id)) {
-        return current.filter((selected) => selected.id !== node.id);
-      }
+      if (current.some((item) => item.id === node.id)) return current.filter((item) => item.id !== node.id);
       return current.length < 2 ? [...current, node] : current;
     });
   };
 
-  const compareSelectedNodes = async () => {
+  const compareSelected = async () => {
     if (comparisonNodes.length !== 2) return;
-    const selections: ResearchNodeComparisonSelection[] = comparisonNodes.map((node) => ({
-      node_id: node.id,
-      lifecycle_state: node.is_active ? "active" : "trashed",
-    }));
+    const selections: ResearchNodeComparisonSelection[] = comparisonNodes.map((node) => ({ node_id: node.id, lifecycle_state: node.is_active ? "active" : "trashed" }));
     setComparisonBusy(true);
-    setError("");
     try {
       setComparison(await api.compareResearchNodes(instrument, selections));
     } catch (cause) {
@@ -194,70 +347,16 @@ export default function Timeline() {
     }
   };
 
-  useEffect(() => {
-    setDetail(null);
-    setNodeOffset(0);
-    setShowRetainedTrash(false);
-    setComparisonNodes([]);
-    setComparison(null);
-    setError("");
-  }, [instrument]);
-
-  useEffect(() => {
-    let active = true;
-    const onError = (cause: unknown) =>
-      active &&
-      setError(cause instanceof Error ? cause.message : t("timelineLoadFailed"));
-    if (isList) {
-      void api.timelines(50, timelineOffset).then(
-        (value) => active && setTimelines(value),
-        onError,
-      );
-    } else {
-      const request = showRetainedTrash
-        ? api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset, "all")
-        : api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset);
-      void request.then(
-        (value) => active && setDetail(value),
-        onError,
-      );
-    }
-    return () => {
-      active = false;
-    };
-  }, [instrument, isList, nodeOffset, showRetainedTrash, t, timelineOffset]);
-
-  const reloadDetail = async () => {
-    const value = showRetainedTrash
-      ? await api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset, "all")
-      : await api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset);
-    setDetail(value);
-  };
-
   const applyLifecycle = async () => {
     if (!pendingNode || !lifecycleMode) return;
-    const replacements =
-      pendingNode.research_kind === "full" && pendingNode.is_primary && replacementPrimary
-        ? { [pendingNode.id]: replacementPrimary }
-        : {};
-    if (
-      lifecycleMode === "trash" &&
-      pendingNode.research_kind === "full" &&
-      pendingNode.is_primary &&
-      activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) &&
-      !replacementPrimary
-    ) {
+    if (lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && !replacementPrimary) {
       setError(t("selectReplacementCycle"));
       return;
     }
     setLifecycleBusy(true);
-    setError("");
     try {
-      if (lifecycleMode === "trash") {
-        await api.trashRuns([pendingNode.id], replacements);
-      } else {
-        await api.purgeRuns([pendingNode.id]);
-      }
+      if (lifecycleMode === "trash") await api.trashRuns([pendingNode.id], replacementPrimary ? { [pendingNode.id]: replacementPrimary } : {});
+      else await api.purgeRuns([pendingNode.id]);
       setPendingNode(null);
       setLifecycleMode(null);
       setReplacementPrimary("");
@@ -273,62 +372,27 @@ export default function Timeline() {
     return (
       <section>
         <header className="page-header">
-          <div>
-            <p className="eyebrow">{t("researchTimeline")}</p>
-            <h1>{t("researchTimelines")}</h1>
-            <p className="subtitle">{t("researchTimelinesHint")}</p>
-          </div>
-          <Link className="button" to="/runs">
-            {t("executionHistory")}
-          </Link>
+          <div><p className="eyebrow">{t("researchTimeline")}</p><h1>{t("researchTimelines")}</h1><p className="subtitle">{t("researchTimelinesHint")}</p></div>
+          <Link className="button primary" to="/runs/new">+ {t("newRun")}</Link>
         </header>
+        <div className="workbench-toolbar">
+          <label><span>{t("searchResearch")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <Link className="button" to="/runs">{t("executionHistory")}</Link>
+        </div>
         {error && <div className="alert">{error}</div>}
         {!timelines && !error && <div className="loading">{t("loading")}</div>}
-        {timelines && (timelines.items?.length ?? 0) === 0 && (
-          <div className="empty-state">{t("noResearchTimelines")}</div>
-        )}
-        {timelineItems.map((timeline) => (
-          <article className="panel" key={timeline.instrument}>
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">{t("researchTimeline")}</p>
-                <h2>{timeline.instrument}</h2>
-              </div>
-              <strong>{t("researchNodeCount", { count: timeline.node_count })}</strong>
-            </div>
-            <Link className="text-link" to={`/timelines/${encodeURIComponent(timeline.instrument)}`}>
-              {timeline.instrument}
+        <div className="timeline-list-grid">
+          {filteredTimelines.map((item) => (
+            <Link className={`timeline-summary-card ${item.timeline_warning ? "warning" : ""}`} to={`/timelines/${encodeURIComponent(item.instrument)}`} key={item.instrument}>
+              <InstrumentIdentity ticker={item.instrument} instrumentName={item.instrument_name} instrumentLocalName={item.instrument_local_name} />
+              <div className="timeline-summary-decision"><ResearchRatingBadge rating={item.primary_rating} /><Confidence value={item.primary_confidence} /></div>
+              <dl><div><dt>{t("fullResearch")}</dt><dd>{item.full_cycle_count}</dd></div><div><dt>{t("incrementalResearch")}</dt><dd>{item.incremental_node_count ?? 0}</dd></div><div><dt>{t("latestResearch")}</dt><dd>{item.latest_analysis_date}</dd></div></dl>
+              {item.timeline_warning && <span className="warning-copy">{t("fullResearchRecommended")}</span>}
             </Link>
-          </article>
-        ))}
-        {timelines && timelines.total > (timelines.limit ?? 50) && (
-          <div className="pagination">
-            <button
-              type="button"
-              className="button"
-              disabled={timelineOffset === 0}
-              onClick={() =>
-                setTimelineOffset((current) => Math.max(0, current - (timelines.limit ?? 50)))
-              }
-            >
-              ← {t("previous")}
-            </button>
-            <span>
-              {t("runRange", {
-                start: timelineOffset + 1,
-                end: Math.min(timelineOffset + timelineItems.length, timelines.total),
-                total: timelines.total,
-              })}
-            </span>
-            <button
-              type="button"
-              className="button"
-              disabled={timelineOffset + timelineItems.length >= timelines.total}
-              onClick={() => setTimelineOffset((current) => current + (timelines.limit ?? 50))}
-            >
-              {t("next")} →
-            </button>
-          </div>
+          ))}
+        </div>
+        {timelines && timelines.total > timelines.limit && (
+          <div className="pagination"><button className="button" disabled={listOffset === 0} onClick={() => setListOffset((value) => Math.max(0, value - timelines.limit))}>← {t("previous")}</button><span>{t("runRange", { start: listOffset + 1, end: Math.min(listOffset + filteredTimelines.length, timelines.total), total: timelines.total })}</span><button className="button" disabled={listOffset + (timelines.items?.length ?? 0) >= timelines.total} onClick={() => setListOffset((value) => value + timelines.limit)}>{t("next")} →</button></div>
         )}
       </section>
     );
@@ -336,393 +400,51 @@ export default function Timeline() {
 
   return (
     <section>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">{t("researchTimeline")}</p>
-          <h1>{instrument}</h1>
-          <p className="subtitle">
-            {t("researchTimelineHint")}
-          </p>
-        </div>
-        <Link className="button" to="/runs">
-          {t("executionHistory")}
-        </Link>
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            setNodeOffset(0);
-            setShowRetainedTrash((current) => !current);
-          }}
-        >
-          {t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}
-        </button>
+      <header className="page-header research-header">
+        <div><p className="eyebrow">{t("researchTimeline")}</p><InstrumentIdentity ticker={instrument} instrumentName={detail?.timeline.instrument_name} instrumentLocalName={detail?.timeline.instrument_local_name} prominent /></div>
+        <div className="action-row"><Link className="button" to="/timelines">{t("allResearchTimelines")}</Link><button className="button" onClick={() => { setCycleOffset(0); setShowRetainedTrash((value) => !value); }}>{t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}</button></div>
       </header>
       {error && <div className="alert">{error}</div>}
       {!detail && !error && <div className="loading">{t("loading")}</div>}
-      {detail && (detail.timeline.nodes?.length ?? 0) === 0 && (
-        <div className="empty-state">{t("noCommittedFullResearch")}</div>
-      )}
-      {detail?.timeline.timeline_warning && (
-        <div className="alert">{t("fullResearchRecommended")}</div>
-      )}
+      {detail?.timeline.timeline_warning && <div className="alert">{t("fullResearchRecommended")}</div>}
+      {detail && cycles.length === 0 && <div className="empty-state">{t("noCommittedFullResearch")}</div>}
       {detail && (
-        <div className="panel comparison-toolbar" aria-label={t("comparisonSelection")}>
-          <div>
-            <strong>{t("comparisonSelection")}</strong>
-            <p>{t("comparisonSelectionHint")}</p>
-            {comparisonNodes.map((node, index) => (
-              <span className="comparison-selection" key={node.id}>
-                <code>{index + 1}. {node.id} · {t(node.is_active ? "activeNode" : "trashNode")}</code>
-                <button
-                  type="button"
-                  className="button compact-button"
-                  aria-label={t("removeSelectedNode", { nodeId: node.id })}
-                  onClick={() => toggleComparisonNode(node)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="button primary"
-            disabled={comparisonNodes.length !== 2 || comparisonBusy}
-            onClick={() => void compareSelectedNodes()}
-          >
-            {t("compareSelectedNodes")}
-          </button>
-        </div>
+        <aside className="comparison-tray" aria-label={t("comparisonSelection")}>
+          <div><strong>{t("comparisonSelection")}</strong><span>{t("comparisonSelectionHint")}</span></div>
+          <div className="comparison-selections">{comparisonNodes.map((node) => <button type="button" onClick={() => toggleComparison(node)} key={node.id}><KindBadge kind={node.research_kind} /> {node.analysis_date} · {node.decision?.rating ?? t("notRecorded")} ×</button>)}</div>
+          <button className="button primary" disabled={comparisonNodes.length !== 2 || comparisonBusy} onClick={() => void compareSelected()}>{t("compareSelectedNodes")}</button>
+        </aside>
       )}
       {comparison && <NodeComparisonView comparison={comparison} />}
-      {detailNodes.map((node) => (
-        <article className="panel" key={node.id}>
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">{t(node.research_kind === "full" ? "fullResearchNode" : "incrementalResearchNode")}</p>
-              <h2>{node.analysis_date}</h2>
-              {node.research_kind === "full" && <span>{t("fullBaseline")}</span>}
+      <div className="research-cycle-list">
+        {cycles.map((cycle) => (
+          <section className={`research-cycle ${cycle.is_primary ? "primary" : ""}`} key={cycle.id}>
+            <header className="research-cycle-header">
+              <div><p className="eyebrow">{t("researchCycle")}</p><h2>{cycle.baseline.analysis_date}</h2></div>
+              <div className="status-cluster">{cycle.is_primary && <span className="status-pill primary">{t("primaryCycle")}</span>}{cycle.cycle_warning && <span className="status-pill warning">{t("fullResearchRecommended")}</span>}{!cycle.is_primary && cycle.baseline.is_active && <button className="button compact-button" onClick={() => void api.selectPrimaryCycle(instrument, cycle.id).then(setDetail)}>{t("makePrimary")}</button>}</div>
+            </header>
+            <div className="cycle-rail">
+              <NodeCard node={cycle.baseline} selected={comparisonNodes.some((item) => item.id === cycle.baseline.id)} comparisonFull={comparisonNodes.length === 2} onToggleComparison={toggleComparison} onLifecycle={(node, mode) => { setPendingNode(node); setLifecycleMode(mode); setReplacementPrimary(""); }} onReload={reloadDetail} />
+              {(cycle.increments ?? []).map((node) => <NodeCard node={node} selected={comparisonNodes.some((item) => item.id === node.id)} comparisonFull={comparisonNodes.length === 2} onToggleComparison={toggleComparison} onLifecycle={(target, mode) => { setPendingNode(target); setLifecycleMode(mode); setReplacementPrimary(""); }} onReload={reloadDetail} key={node.id} />)}
             </div>
-            <div>
-              {node.is_cycle_head && <strong>{t("cycleHead")}</strong>}
-              {node.is_primary && <strong>{t("primaryCycle")}</strong>}
-              {!node.is_active && <strong>{t("retainedInTrash")}</strong>}
-            </div>
-          </div>
-          <dl className="definition-list">
-            <div>
-              <dt>{t("cycleId")}</dt>
-              <dd>{node.cycle_id}</dd>
-            </div>
-            <div>
-              <dt>{t("researchSchema")}</dt>
-              <dd>{node.research_schema_version}</dd>
-            </div>
-            <div>
-              <dt>{t("informationCutoff")}</dt>
-              <dd>{new Date(node.information_cutoff_at).toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>{t("methodProvider")}</dt>
-              <dd>
-                {String(node.method_snapshot.llm_provider ?? t("notRecorded"))}
-              </dd>
-            </div>
-          </dl>
-          <button
-            type="button"
-            className="button"
-            disabled={
-              comparisonNodes.length === 2 &&
-              !comparisonNodes.some((selected) => selected.id === node.id)
-            }
-            aria-pressed={comparisonNodes.some((selected) => selected.id === node.id)}
-            onClick={() => toggleComparisonNode(node)}
-          >
-            {t(
-              comparisonNodes.some((selected) => selected.id === node.id)
-                ? "removeFromComparison"
-                : "selectForComparison",
-            )}
-          </button>
-          {node.collection_summary && (
-            <details>
-              <summary>Collection Summary</summary>
-              <ul>
-                {node.collection_summary.domains.map((result) => (
-                  <li key={result.domain}>
-                    {result.domain}: {result.state}
-                    {result.diagnostic ? ` [${result.diagnostic.code}]` : ""}
-                    {result.omitted_by_temporal_boundary
-                      ? " [outside_temporal_boundary]"
-                      : ""}
-                    {(result.sources?.length ?? 0) > 0 && (
-                      <ul>
-                        {(result.sources ?? []).map((source) => (
-                          <li key={source.source}>
-                            {source.source}{source.fallback ? " (fallback)" : ""}
-                            {source.diagnostic ? ` [${source.diagnostic.code}]` : ""}
-                            <dl className="definition-list">
-                              <div><dt>Retrieved at</dt><dd>{source.retrieved_at}</dd></div>
-                            </dl>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {result.evidence_refs?.length ? (
-                      <>
-                        {" · "}
-                        {result.evidence_refs.map((ref, index) => (
-                          <span key={ref}>
-                            {index > 0 ? ", " : ""}
-                            <code>{ref}</code>
-                          </span>
-                        ))}
-                      </>
-                    ) : null}
-                    <dl className="definition-list">
-                      {result.observed_from && result.observed_through && (
-                        <div>
-                          <dt>Observed window</dt>
-                          <dd>{result.observed_from} → {result.observed_through}</dd>
-                        </div>
-                      )}
-                      {(result.temporal_bases?.length ?? 0) > 0 && (
-                        <div>
-                          <dt>Temporal basis</dt>
-                          <dd>{result.temporal_bases?.join(", ")}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {node.research_availability && (
-            <details>
-              <summary>Research Availability</summary>
-              <ul>
-                {node.research_availability.domains.map((domain) => (
-                  <li key={domain.domain}>
-                    {domain.domain}: {domain.status}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {node.information_advancement && (
-            <details>
-              <summary>Information Advancement</summary>
-              <ul>
-                {(node.information_advancement.reasons ?? []).map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {node.reassessment && (
-            <details>
-              <summary>Reassessment</summary>
-              <ul>
-                {node.reassessment.entries.map((entry) => (
-                  <li key={entry.component_id}>
-                    {entry.component_id}: {entry.disposition} — {entry.reason}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {node.decision && (
-            <section aria-label="Current Decision">
-              <h3>Current Decision</h3>
-              <p>{node.decision.rating} — {node.decision.thesis}</p>
-            </section>
-          )}
-          {node.performance && (
-            <details>
-              <summary>Performance</summary>
-              <ul>
-                <li>
-                  Stock: {node.performance.stock.status}
-                  {node.performance.stock.reason
-                    ? ` — ${node.performance.stock.reason}`
-                    : node.performance.stock.calculation
-                      ? ` — ${node.performance.stock.calculation.start_session} to ${node.performance.stock.calculation.end_session}: ${node.performance.stock.calculation.unrounded_return}`
-                      : ""}
-                  {node.performance.stock.calculation && (
-                    <PerformanceCalculationAudit calculation={node.performance.stock.calculation} />
-                  )}
-                </li>
-                {(node.performance.benchmarks ?? []).map((benchmark) => (
-                  <li key={benchmark.name}>
-                    {benchmark.name}: {benchmark.component.status}
-                    {benchmark.component.reason
-                      ? ` — ${benchmark.component.reason}`
-                      : benchmark.component.calculation
-                        ? ` — ${benchmark.component.calculation.unrounded_return}`
-                        : ""}
-                    {benchmark.component.calculation && (
-                      <PerformanceCalculationAudit calculation={benchmark.component.calculation} />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {node.cycle_warning && <p className="alert">Cycle warning</p>}
-          {node.full_research_required_reasons?.map((reason) => (
-            <p className="alert" key={reason.code}>{reason.message}</p>
-          ))}
-          {!node.is_primary && node.is_active && node.research_kind === "full" && (
-            <button
-              type="button"
-              className="button"
-              onClick={() => {
-                setError("");
-                void api.selectPrimaryCycle(instrument, node.id).then(
-                  (value) => {
-                    setDetail(value);
-                    setNodeOffset(value.timeline.node_offset ?? 0);
-                  },
-                  (cause: unknown) =>
-                    setError(cause instanceof Error ? cause.message : t("timelineLoadFailed")),
-                );
-              }}
-            >
-              {t("makePrimary")}
-            </button>
-          )}
-          {node.is_active ? (
-            <button
-              type="button"
-              className="button danger"
-              onClick={() => {
-                setPendingNode(node);
-                setLifecycleMode("trash");
-                setReplacementPrimary("");
-              }}
-            >
-              {t(node.research_kind === "full" ? "moveCycleToTrash" : "moveNodeToTrash")}
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="button"
-                onClick={() => {
-                  setError("");
-                  void api.restoreRuns([node.id]).then(reloadDetail, (cause: unknown) =>
-                    setError(cause instanceof Error ? cause.message : t("timelineLoadFailed")),
-                  );
-                }}
-              >
-                {t("restoreResearchNode")}
-              </button>
-              <button
-                type="button"
-                className="button danger"
-                onClick={() => {
-                  setPendingNode(node);
-                  setLifecycleMode("purge");
-                }}
-              >
-                {t("purgeResearchNode")}
-              </button>
-            </>
-          )}
-          <Link className="text-link" to={`/runs/${node.id}`}>
-            {t("openOperationalRun")} →
-          </Link>
-        </article>
-      ))}
-      {detail && nodeTotal > nodeLimit && (
-        <div className="pagination">
-          <button
-            type="button"
-            className="button"
-            disabled={nodeOffset === 0}
-            onClick={() =>
-              setNodeOffset((current) =>
-                Math.max(0, current - nodeLimit),
-              )
-            }
-          >
-            ← {t("previous")}
-          </button>
-          <span>
-            {t("runRange", {
-              start: nodeTotal ? nodeOffset + 1 : 0,
-              end: Math.min(
-                nodeOffset + detailNodes.length,
-                nodeTotal,
-              ),
-              total: nodeTotal,
-            })}
-          </span>
-          <button
-            type="button"
-            className="button"
-            disabled={nodeOffset + detailNodes.length >= nodeTotal}
-            onClick={() => setNodeOffset((current) => current + nodeLimit)}
-          >
-            {t("next")} →
-          </button>
-        </div>
+          </section>
+        ))}
+      </div>
+      {detail && cycleTotal > cycleLimit && (
+        <div className="pagination"><button className="button" disabled={cycleOffset === 0} onClick={() => setCycleOffset((value) => Math.max(0, value - cycleLimit))}>← {t("previous")}</button><span>{t("runRange", { start: cycleOffset + 1, end: Math.min(cycleOffset + cycles.length, cycleTotal), total: cycleTotal })}</span><button className="button" disabled={cycleOffset + cycles.length >= cycleTotal} onClick={() => setCycleOffset((value) => value + cycleLimit)}>{t("next")} →</button></div>
       )}
       {pendingNode && lifecycleMode && (
-        <ConfirmDialog
-          title={t(
-            lifecycleMode === "purge"
-              ? "purgeResearchTitle"
-              : pendingNode.research_kind === "full"
-                ? "cycleTrashTitle"
-                : "nodeTrashTitle",
+        <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={lifecycleBusy} onCancel={() => { setPendingNode(null); setLifecycleMode(null); }} onConfirm={() => void applyLifecycle()}>
+          <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
+          {lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && (
+            <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={(event) => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter((cycle) => cycle.id !== pendingNode.id).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.baseline.analysis_date} · {cycle.baseline.decision?.rating ?? t("notRecorded")} · {cycle.baseline.decision?.confidence == null ? t("notRecorded") : `${Math.round(cycle.baseline.decision.confidence * 100)}%`}</option>)}</select></label>
           )}
-          confirmLabel={t(
-            lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash",
-          )}
-          cancelLabel={t("cancel")}
-          busy={lifecycleBusy}
-          onCancel={() => {
-            setPendingNode(null);
-            setLifecycleMode(null);
-          }}
-          onConfirm={() => void applyLifecycle()}
-        >
-          <p>
-            {t(
-              lifecycleMode === "purge"
-                ? "purgeResearchImpact"
-                : pendingNode.research_kind === "full"
-                  ? "fullOwnsCycle"
-                  : "incrementalTrashImpact",
-            )}
-          </p>
-          {lifecycleMode === "trash" &&
-            pendingNode.research_kind === "full" &&
-            pendingNode.is_primary &&
-            activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && (
-              <label>
-                {t("replacementPrimaryCycle")}
-                <select
-                  value={replacementPrimary}
-                  onChange={(event) => setReplacementPrimary(event.target.value)}
-                >
-                  <option value="">{t("selectReplacementCycle")}</option>
-                  {activeFullCycles
-                    .filter((cycle) => cycle.id !== pendingNode.id)
-                    .map((cycle) => (
-                      <option key={cycle.id} value={cycle.id}>
-                        {cycle.analysis_date} · {cycle.id}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            )}
         </ConfirmDialog>
       )}
     </section>
   );
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 2 }).format(value);
 }
