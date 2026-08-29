@@ -1164,6 +1164,10 @@ label small {
   background: var(--blue);
 }
 
+.activity-stage-track li.degraded > span {
+  background: var(--amber);
+}
+
 .activity-stage-track li.running > span,
 .activity-stage-track li.retrying > span {
   background: #d38b20;
@@ -1207,8 +1211,16 @@ label small {
 }
 
 .activity-state.failed,
-.activity-state.retrying {
+.activity-state.retrying,
+.activity-state.degraded {
   color: var(--red);
+}
+
+.activity-unit-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
 }
 
 .activity-work-units {
@@ -1238,7 +1250,8 @@ label small {
 }
 
 .activity-work-unit.running .activity-work-marker,
-.activity-work-unit.retrying .activity-work-marker {
+.activity-work-unit.retrying .activity-work-marker,
+.activity-work-unit.degraded .activity-work-marker {
   background: #d38b20;
 }
 
@@ -1287,6 +1300,27 @@ label small {
   margin-top: 3px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.collection-coverage-list {
+  display: grid;
+  gap: 8px;
+}
+
+.collection-domain-audit {
+  margin-top: 6px;
+}
+
+.collection-domain-audit code {
+  overflow-wrap: anywhere;
+}
+
+.evidence-metadata-disclosure {
+  margin: 0 18px 14px;
+}
+
+.evidence-metadata-disclosure .evidence-metadata {
+  padding: 14px 0 0;
 }
 
 .timeline-item strong {

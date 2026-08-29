@@ -55,6 +55,7 @@ from .contracts import (
     PerformanceComponentStatus,
     PerformanceObservation,
     ReassessmentDisposition,
+    ReportLanguage,
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchNodeComparison,
@@ -100,6 +101,16 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[RunEvent], None]
 EligibilityResolver = Callable[[str], Any]
 IncrementalSynthesizer = Callable[[IncrementalSynthesisInput], IncrementalSynthesis]
+
+
+def _incremental_brief_fallback_title(language: ReportLanguage | str) -> str:
+    """Return the deterministic heading used when a brief has no Markdown heading."""
+    titles = {
+        ReportLanguage.ENGLISH: "Incremental analysis",
+        ReportLanguage.SIMPLIFIED_CHINESE: "增量分析",
+        ReportLanguage.JAPANESE: "増分分析",
+    }
+    return titles[ReportLanguage(language)]
 
 
 class _IncrementalReassessmentSection(BaseModel):
@@ -1288,7 +1299,9 @@ class AnalysisService:
             report_sections=parse_markdown_sections(
                 semantic_brief,
                 namespace="incremental",
-                fallback_title="Incremental analysis",
+                fallback_title=_incremental_brief_fallback_title(
+                    run_settings.output_language
+                ),
             ),
             evidence_refs=semantic_output.evidence_refs,
             warnings=semantic_output.warnings,

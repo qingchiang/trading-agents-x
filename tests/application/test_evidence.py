@@ -32,6 +32,9 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     EvidenceTemporalScope,
     EvidenceValueLocator,
+    IncrementalAnalysisBrief,
+    IncrementalBaselineContext,
+    IncrementalExportContext,
     MarketReferenceBasis,
     MarketReferenceLevel,
     MeasurementKind,
@@ -45,6 +48,7 @@ from tradingagents.application.contracts import (
     NumericCalculationStatus,
     NumericDisplayStatus,
     NumericRequirementCheck,
+    ReportSection,
     ResearchArtifact,
     ResearchScenarioKind,
     ResearchWarning,
@@ -693,6 +697,87 @@ def test_markdown_export_uses_stable_evidence_markers_without_definitions() -> N
     assert "Model-authored source text" not in markdown
     assert "### E01" in markdown
     assert f"- Refs: `{item.ref}`" in markdown
+
+
+def test_incremental_markdown_export_includes_baseline_evidence_ledger() -> None:
+    baseline_item = EvidenceItem.create(
+        source="baseline.fixture",
+        evidence_type="filing",
+        requested_date=date(2026, 7, 20),
+        content="BASELINE LEDGER CONTENT",
+    )
+    current_item = EvidenceItem.create(
+        source="incremental.fixture",
+        evidence_type="filing update",
+        requested_date=date(2026, 7, 24),
+        content="CURRENT LEDGER CONTENT",
+    )
+    baseline_evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 20),
+        items=(baseline_item,),
+    )
+    current_evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(current_item,),
+    )
+    baseline_decision = research_decision(evidence_refs=(baseline_item.ref,))
+    current_decision = research_decision(evidence_refs=(baseline_item.ref, current_item.ref))
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
+    run_export = RunExport(
+        run=RunView(
+            id="incremental-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="NVDA",
+                analysis_date="2026-07-24",
+                research_kind="incremental",
+                full_baseline_run_id="baseline-run",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="incremental-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="NVDA",
+            reports={},
+            decision=current_decision,
+            evidence=current_evidence,
+        ),
+        evidence=current_evidence,
+        incremental_context=IncrementalExportContext(
+            analysis_brief=IncrementalAnalysisBrief(
+                markdown=f"# Update\n\nBaseline changed.[^{baseline_item.ref}]",
+                report_sections=(
+                    ReportSection(
+                        id="incremental.update",
+                        title="Update",
+                        anchor="update",
+                        source_refs=(baseline_item.ref,),
+                    ),
+                ),
+                evidence_refs=(baseline_item.ref,),
+            ),
+            full_baseline=IncrementalBaselineContext(
+                run_id="baseline-run",
+                analysis_date=date(2026, 7, 20),
+                decision=baseline_decision,
+            ),
+            full_baseline_evidence=baseline_evidence,
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "## Full Baseline Sources" in markdown
+    assert f"- Refs: `{baseline_item.ref}`" in markdown
+    assert "BASELINE LEDGER CONTENT" in markdown
+    assert f"- Refs: `{current_item.ref}`" in markdown
 
 
 def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> None:

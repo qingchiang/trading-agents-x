@@ -20,6 +20,7 @@ from .contracts import (
     DebateAgenda,
     DecisionBrief,
     DecisionNumericAuditAppendix,
+    EvidenceBundle,
     EvidenceTable,
     JudgeDraft,
     RebuttalReview,
@@ -81,6 +82,7 @@ _EN_LABELS = {
     "attempts": "Attempts",
     "no_attempts": "No attempt metrics were recorded.",
     "sources": "Sources",
+    "baseline_sources": "Full Baseline Sources",
     "no_evidence": "No sealed EvidenceBundle was recorded for this run.",
     "raw_tables": "Raw Evidence Tables",
     "evidence_items": "Evidence Items",
@@ -298,6 +300,7 @@ _ZH_LABELS = {
     "attempts": "运行尝试",
     "no_attempts": "未记录尝试级指标。",
     "sources": "来源",
+    "baseline_sources": "完整研究基线来源",
     "no_evidence": "本次运行未记录已封存的 EvidenceBundle。",
     "raw_tables": "原始证据表",
     "evidence_items": "证据条目",
@@ -491,6 +494,7 @@ _JA_LABELS = {
     "attempts": "試行履歴",
     "no_attempts": "試行別の指標は記録されていません。",
     "sources": "情報源",
+    "baseline_sources": "フルリサーチ基準の情報源",
     "no_evidence": "封印済み EvidenceBundle は記録されていません。",
     "raw_tables": "原始証拠テーブル",
     "evidence_items": "証拠項目",
@@ -938,93 +942,107 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"{attempt_metrics.wall_time_seconds:.3f}s |"
             )
 
-    sections.extend(["", f"## {labels['sources']}"])
-    if run_export.evidence is None:
+    _append_evidence_sources(
+        sections,
+        run_export.evidence,
+        evidence_aliases,
+        labels,
+        title=labels["sources"],
+        table_path_prefix="tables",
+    )
+    if baseline_evidence is not None:
+        _append_evidence_sources(
+            sections,
+            baseline_evidence,
+            evidence_aliases,
+            labels,
+            title=labels["baseline_sources"],
+            table_path_prefix="baseline/tables",
+        )
+    return "\n".join(sections)
+
+
+def _append_evidence_sources(
+    sections: list[str],
+    evidence: EvidenceBundle | None,
+    evidence_aliases: Mapping[str, str],
+    labels: ExportLabels,
+    *,
+    title: str,
+    table_path_prefix: str,
+) -> None:
+    sections.extend(["", f"## {title}"])
+    if evidence is None:
         sections.extend(["", f"_{labels['no_evidence']}_"])
-    else:
-        table_refs = {ref for table in run_export.evidence.tables for ref in table.evidence_refs}
+        return
+
+    table_refs = {ref for table in evidence.tables for ref in table.evidence_refs}
+    sections.extend(
+        [
+            "",
+            f"- {labels['bundle_version']}: `{evidence.version}`",
+            f"- {labels['digest']}: `{evidence.digest}`",
+            f"- {labels['analysis_date']}: `{evidence.analysis_date}`",
+        ]
+    )
+    if evidence.tables:
+        sections.extend(["", f"### {labels['raw_tables']}"])
+        for table in evidence.tables:
+            sections.extend(
+                [
+                    "",
+                    f"#### {table.title}",
+                    "",
+                    f"- {labels['table']}: `{table.id}`",
+                    f"- {labels['purpose']}: {table.purpose}",
+                    f"- {labels['rows']}: `{len(table.rows)}`",
+                    f"- {labels['raw_data']}: `{table_path_prefix}/{table.id}.csv`",
+                    f"- {labels['evidence']}: "
+                    + _render_canonical_refs(table.evidence_refs, labels),
+                ]
+            )
+        sections.extend(["", f"### {labels['evidence_items']}"])
+    for group in group_evidence_by_content(evidence.items):
+        item = group.canonical
+        alias = evidence_aliases[item.ref]
+        sources = tuple(
+            dict.fromkeys(
+                origin.source for grouped_item in group.items for origin in grouped_item.origins
+            )
+        ) or tuple(dict.fromkeys(grouped_item.source for grouped_item in group.items))
         sections.extend(
             [
                 "",
-                f"- {labels['bundle_version']}: `{run_export.evidence.version}`",
-                f"- {labels['digest']}: `{run_export.evidence.digest}`",
-                f"- {labels['analysis_date']}: `{run_export.evidence.analysis_date}`",
+                f"### {alias}",
+                "",
+                f"- {labels['refs']}: " + ", ".join(f"`{ref}`" for ref in group.refs),
+                f"- {labels['source_list']}: {', '.join(sources)}",
+                f"- {labels['type']}: {item.evidence_type}",
+                f"- {labels['quality']}: `{item.quality.value}`",
+                f"- {labels['fallback']}: `{str(item.fallback).lower()}`",
             ]
         )
-        if run_export.evidence.tables:
-            sections.extend(["", f"### {labels['raw_tables']}"])
-            for table in run_export.evidence.tables:
-                sections.extend(
+        if group.content and table_refs.isdisjoint(group.refs):
+            sections.extend(["", f"#### {labels['content']}", "", group.content])
+        elif group.content:
+            sections.extend(["", f"_{labels['raw_table_available']}_"])
+        sections.extend(
+            [
+                "",
+                f"#### {labels['audit_records']}",
+                "",
+                "```json",
+                json.dumps(
                     [
-                        "",
-                        f"#### {table.title}",
-                        "",
-                        f"- {labels['table']}: `{table.id}`",
-                        f"- {labels['purpose']}: {table.purpose}",
-                        f"- {labels['rows']}: `{len(table.rows)}`",
-                        f"- {labels['raw_data']}: `tables/{table.id}.csv`",
-                        f"- {labels['evidence']}: "
-                        + _render_canonical_refs(table.evidence_refs, labels),
-                    ]
-                )
-            sections.extend(["", f"### {labels['evidence_items']}"])
-        for group in group_evidence_by_content(run_export.evidence.items):
-            item = group.canonical
-            alias = evidence_aliases[item.ref]
-            sources = tuple(
-                dict.fromkeys(
-                    origin.source for grouped_item in group.items for origin in grouped_item.origins
-                )
-            ) or tuple(dict.fromkeys(grouped_item.source for grouped_item in group.items))
-            sections.extend(
-                [
-                    "",
-                    f"### {alias}",
-                    "",
-                    f"- {labels['refs']}: " + ", ".join(f"`{ref}`" for ref in group.refs),
-                    f"- {labels['source_list']}: {', '.join(sources)}",
-                    f"- {labels['type']}: {item.evidence_type}",
-                    f"- {labels['quality']}: `{item.quality.value}`",
-                    f"- {labels['fallback']}: `{str(item.fallback).lower()}`",
-                ]
-            )
-            if group.content and table_refs.isdisjoint(group.refs):
-                sections.extend(
-                    [
-                        "",
-                        f"#### {labels['content']}",
-                        "",
-                        group.content,
-                    ]
-                )
-            elif group.content:
-                sections.extend(
-                    [
-                        "",
-                        f"_{labels['raw_table_available']}_",
-                    ]
-                )
-            sections.extend(
-                [
-                    "",
-                    f"#### {labels['audit_records']}",
-                    "",
-                    "```json",
-                    json.dumps(
-                        [
-                            grouped_item.model_dump(
-                                mode="json",
-                                exclude={"content"},
-                            )
-                            for grouped_item in group.items
-                        ],
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    "```",
-                ]
-            )
-    return "\n".join(sections)
+                        grouped_item.model_dump(mode="json", exclude={"content"})
+                        for grouped_item in group.items
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                "```",
+            ]
+        )
 
 
 def render_run_export_package(run_export: RunExport) -> bytes:

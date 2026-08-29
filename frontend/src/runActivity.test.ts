@@ -61,4 +61,43 @@ describe("aggregateRunActivity", () => {
     });
     expect(attempts[1].state).toBe("failed");
   });
+
+  test("uses event order for recovery and keeps retry and degradation signals visible", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "node.output_retry", "analyst.news.audit"),
+      event(2, 1, "node.output_recovered", "analyst.news.audit"),
+      event(3, 1, "node.numeric_audit_degraded", "committee.final.serialize.numeric"),
+    ], "full");
+
+    expect(attempts[0].workUnits[0]).toMatchObject({
+      action: "audit",
+      state: "recovered",
+      signals: ["retrying", "recovered"],
+    });
+    expect(attempts[0].workUnits[1]).toMatchObject({
+      action: "serialize",
+      state: "degraded",
+      signals: ["degraded"],
+    });
+  });
+
+  test("maps node-less Incremental lifecycle events to readable stages and actions", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "incremental.collection_completed", null),
+      event(2, 1, "incremental.synthesis_started", null),
+    ], "incremental");
+
+    expect(attempts[0].workUnits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        node: "incremental.collection",
+        stage: "collection",
+        action: "collect",
+      }),
+      expect.objectContaining({
+        node: "incremental.synthesis",
+        stage: "incremental_semantic",
+        action: "synthesize",
+      }),
+    ]));
+  });
 });

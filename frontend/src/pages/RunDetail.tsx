@@ -34,6 +34,8 @@ import {
 import { formatUtcDate, trashDeadline } from "../trash";
 import {
   aggregateRunActivity,
+  type ActivityAction,
+  type ActivitySignal,
   type ActivityStage,
   type ActivityState,
 } from "../runActivity";
@@ -1193,8 +1195,20 @@ function TimelinePanel({
                     <strong>
                       {t(activityStageLabel(unit.stage))}
                       {unit.role ? ` · ${activityRoleLabel(t, unit.role)}` : ""}
-                      {` · ${t(activityStateLabel(unit.state))}`}
+                      {` · ${t(activityActionLabel(unit.action))}`}
                     </strong>
+                    <div className="activity-unit-statuses">
+                      <span className={`activity-state ${unit.state}`}>
+                        {t(activityStateLabel(unit.state))}
+                      </span>
+                      {unit.signals
+                        .filter((signal) => signal !== unit.state)
+                        .map((signal) => (
+                          <span className={`activity-state ${signal}`} key={signal}>
+                            {t(activitySignalLabel(signal))}
+                          </span>
+                        ))}
+                    </div>
                     <code className="activity-node-key">{unit.node}</code>
                     <small>
                       #{unit.firstSequence}–{unit.lastSequence} · {formatTime(unit.events.at(-1)?.created_at ?? "")}
@@ -1331,14 +1345,32 @@ function EvidencePanel({
           </section>
           <section>
             <h3>{t("collectionSummary")}</h3>
-            <div className="availability-row">
+            <div className="collection-coverage-list">
               {(incrementalNode.collection_summary?.domains ?? []).map((domain) => (
-                <span
-                  className={`availability-chip ${domain.state}`}
-                  key={domain.domain}
-                >
-                  {t(`${domain.domain}Analyst`)} · {t(`collection_${domain.state}`)}
-                </span>
+                <div key={domain.domain}>
+                  <span className={`availability-chip ${domain.state}`}>
+                    {t(`${domain.domain}Analyst`)} · {t(`collection_${domain.state}`)}
+                  </span>
+                  {((domain.sources?.length ?? 0) > 0 || domain.diagnostic) && (
+                    <details className="audit-disclosure collection-domain-audit">
+                      <summary>{t("auditDetails")}</summary>
+                      {(domain.sources?.length ?? 0) > 0 && (
+                        <ul className="compact-list">
+                          {domain.sources?.map((source, index) => (
+                            <li key={`${source.source}-${source.retrieved_at}-${index}`}>
+                              <strong>{source.source}</strong>
+                              {source.fallback && <span> · {t("fallback")}</span>}
+                              {source.diagnostic && (
+                                <code> · {source.diagnostic.code}</code>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {domain.diagnostic && <code>{domain.diagnostic.code}</code>}
+                    </details>
+                  )}
+                </div>
               ))}
             </div>
           </section>
@@ -1375,6 +1407,7 @@ function EvidencePanel({
               <EvidenceCard
                 group={group}
                 focused={group.refs.includes(focusedRef)}
+                auditMetadata={incremental}
                 key={group.alias}
               />
             ))}
@@ -1436,9 +1469,11 @@ function EvidenceBundleSummary({
 function EvidenceCard({
   group,
   focused,
+  auditMetadata,
 }: {
   group: EvidenceDisplayGroup;
   focused: boolean;
+  auditMetadata: boolean;
 }) {
   const { t } = useTranslation();
   const item = group.canonical;
@@ -1459,6 +1494,38 @@ function EvidenceCard({
   const auditRecords = group.items.map(
     ({ content: _content, ...entry }) => entry,
   );
+  const metadata = (
+    <dl className="evidence-metadata">
+      <div>
+        <dt>{t("source")}</dt>
+        <dd>{group.sources.join(", ")}</dd>
+      </div>
+      <div>
+        <dt>{t("requestedDate")}</dt>
+        <dd>{requestedDates.join(", ")}</dd>
+      </div>
+      <div>
+        <dt>{t("effectiveDate")}</dt>
+        <dd>{effectiveDates.join(", ") || "—"}</dd>
+      </div>
+      <div>
+        <dt>{t("availableAt")}</dt>
+        <dd>{availableDates.join(", ") || "—"}</dd>
+      </div>
+      <div>
+        <dt>{t("fallback")}</dt>
+        <dd>{group.fallback ? t("yes") : t("no")}</dd>
+      </div>
+      {hasValue && (
+        <div>
+          <dt>{t("value")}</dt>
+          <dd>
+            {String(item.value)} {item.unit ?? ""}
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
   return (
     <section
       className={`evidence-card ${focused ? "focused" : ""}`}
@@ -1475,36 +1542,12 @@ function EvidenceCard({
           {group.quality}
         </span>
       </header>
-      <dl className="evidence-metadata">
-        <div>
-          <dt>{t("source")}</dt>
-          <dd>{group.sources.join(", ")}</dd>
-        </div>
-        <div>
-          <dt>{t("requestedDate")}</dt>
-          <dd>{requestedDates.join(", ")}</dd>
-        </div>
-        <div>
-          <dt>{t("effectiveDate")}</dt>
-          <dd>{effectiveDates.join(", ") || "—"}</dd>
-        </div>
-        <div>
-          <dt>{t("availableAt")}</dt>
-          <dd>{availableDates.join(", ") || "—"}</dd>
-        </div>
-        <div>
-          <dt>{t("fallback")}</dt>
-          <dd>{group.fallback ? t("yes") : t("no")}</dd>
-        </div>
-        {hasValue && (
-          <div>
-            <dt>{t("value")}</dt>
-            <dd>
-              {String(item.value)} {item.unit ?? ""}
-            </dd>
-          </div>
-        )}
-      </dl>
+      {auditMetadata ? (
+        <details className="audit-disclosure evidence-metadata-disclosure">
+          <summary>{t("evidenceMetadata")}</summary>
+          {metadata}
+        </details>
+      ) : metadata}
       {item.content && (
         <div className="evidence-content">
           <Markdown>{item.content}</Markdown>
@@ -2122,6 +2165,14 @@ function activityStageLabel(stage: ActivityStage): string {
 
 function activityStateLabel(state: ActivityState): string {
   return `activityState_${state}`;
+}
+
+function activityActionLabel(action: ActivityAction): string {
+  return `activityAction_${action}`;
+}
+
+function activitySignalLabel(signal: ActivitySignal): string {
+  return `activitySignal_${signal}`;
 }
 
 function activityRoleLabel(t: TFunction, role: string): string {

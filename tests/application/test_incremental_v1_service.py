@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     MarketSeriesPoint,
     MarketSeriesResult,
     NumericAuditStatus,
+    ReportLanguage,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -43,6 +44,7 @@ from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import (
     AnalysisService,
+    _incremental_brief_fallback_title,
     _incremental_decision_core,
     _incremental_decision_from_core,
     default_incremental_synthesizer,
@@ -76,6 +78,21 @@ def _sources(
             retrieved_at=retrieved_at,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    (
+        (ReportLanguage.ENGLISH, "Incremental analysis"),
+        (ReportLanguage.SIMPLIFIED_CHINESE, "增量分析"),
+        (ReportLanguage.JAPANESE, "増分分析"),
+    ),
+)
+def test_incremental_brief_fallback_title_is_localized(
+    language: ReportLanguage,
+    expected: str,
+) -> None:
+    assert _incremental_brief_fallback_title(language) == expected
 
 
 def _incremental_service(

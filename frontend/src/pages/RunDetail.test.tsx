@@ -1011,7 +1011,25 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
     is_cycle_head: true,
     is_baseline_compatible: true,
     cycle_id: "full-baseline",
-    collection_summary: { version: "1", domains: [] },
+    collection_summary: {
+      version: "1",
+      market: "united_states",
+      domains: [
+        {
+          domain: "news",
+          state: "partial",
+          sources: [
+            {
+              source: "fixture.news",
+              fallback: true,
+              retrieved_at: "2026-07-24T19:00:00Z",
+              diagnostic: { code: "coverage.partial" },
+            },
+          ],
+          diagnostic: { code: "collection.partial" },
+        },
+      ],
+    },
     research_availability: { version: "1", domains: [] },
     information_advancement: { advanced: false, reasons: [] },
     performance: null,
@@ -1037,6 +1055,19 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(await screen.findByRole("heading", { name: "Collection Summary" })).toBeVisible();
   expect(api.evidence).not.toHaveBeenCalled();
   expect(screen.getByText("Price snapshot · Composite snapshot")).toBeVisible();
+  expect(screen.getByText("fixture.news")).not.toBeVisible();
+  const collectionSummary = screen
+    .getByRole("heading", { name: "Collection Summary" })
+    .closest("section");
+  fireEvent.click(within(collectionSummary!).getByText("Audit details"));
+  expect(screen.getByText("fixture.news")).toBeVisible();
+  expect(screen.getByText("collection.partial")).toBeVisible();
+
+  const evidenceCard = document.querySelector<HTMLElement>(".evidence-card");
+  expect(evidenceCard).not.toBeNull();
+  expect(within(evidenceCard!).getByText("Requested date")).not.toBeVisible();
+  fireEvent.click(within(evidenceCard!).getByText("Evidence metadata"));
+  expect(within(evidenceCard!).getByText("Requested date")).toBeVisible();
 
   fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
   expect(
@@ -1134,8 +1165,10 @@ test("localizes Incremental activity while keeping raw event data in audit detai
     } as RunEvent),
   );
 
-  expect(await screen.findByText("Collection · Completed")).toBeVisible();
-  expect(screen.getByText("incremental.collect")).toBeVisible();
+  const activityTitle = await screen.findByText("Collection · Collection update");
+  const workUnit = activityTitle.closest("article");
+  expect(within(workUnit!).getByText("Completed")).toBeVisible();
+  expect(within(workUnit!).getByText("incremental.collect")).toBeVisible();
   fireEvent.click(screen.getByText("Audit details"));
   expect(screen.getByText(/incremental\.collection_completed/)).toBeVisible();
   expect(screen.getAllByText(/incremental\.collect/).some((element) => element.matches("code"))).toBe(true);

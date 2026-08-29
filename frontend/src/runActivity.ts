@@ -19,14 +19,30 @@ export type ActivityState =
   | "completed"
   | "retrying"
   | "recovered"
+  | "degraded"
   | "failed";
+
+export type ActivityAction =
+  | "collect"
+  | "synthesize"
+  | "audit"
+  | "serialize"
+  | "prepare"
+  | "debate"
+  | "review"
+  | "commit"
+  | "process";
+
+export type ActivitySignal = "retrying" | "recovered" | "degraded" | "failed";
 
 export interface ActivityWorkUnit {
   key: string;
   node: string;
   stage: ActivityStage;
   role: string | null;
+  action: ActivityAction;
   state: ActivityState;
+  signals: ActivitySignal[];
   events: RunEvent[];
   firstSequence: number;
   lastSequence: number;
@@ -38,15 +54,6 @@ export interface ActivityAttempt {
   workUnits: ActivityWorkUnit[];
   currentStage: ActivityStage;
 }
-
-const statePriority: Record<ActivityState, number> = {
-  pending: 0,
-  running: 1,
-  completed: 2,
-  recovered: 3,
-  retrying: 4,
-  failed: 5,
-};
 
 export function aggregateRunActivity(
   events: RunEvent[],
@@ -73,7 +80,9 @@ export function aggregateRunActivity(
         node,
         stage: activityStage(node, researchKind),
         role: activityRole(node),
+        action: activityAction(node),
         state: unitState(unitEvents),
+        signals: unitSignals(unitEvents),
         events: unitEvents,
         firstSequence: unitEvents[0].sequence,
         lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
@@ -93,6 +102,7 @@ export function aggregateRunActivity(
 function activityNode(event: RunEvent): string {
   if (event.node) return event.node;
   if (event.event_type.startsWith("incremental.collection")) return "incremental.collection";
+  if (event.event_type === "incremental.no_advancement") return "incremental.collection";
   if (event.event_type.startsWith("incremental.synthesis")) return "incremental.synthesis";
   if (event.event_type === "evidence.sealed") return "evidence.seal";
   if (event.event_type.startsWith("run.")) return "run.lifecycle";
@@ -102,27 +112,50 @@ function activityNode(event: RunEvent): string {
 function unitState(events: RunEvent[]): ActivityState {
   let state: ActivityState = "pending";
   for (const event of events) {
-    let candidate: ActivityState | null = null;
-    if (event.event_type.includes("failed") || event.event_type === "run.failed") candidate = "failed";
-    else if (event.event_type.includes("retry")) candidate = "retrying";
-    else if (event.event_type.includes("recovered")) candidate = "recovered";
-    else if (
-      event.event_type.endsWith("completed") ||
-      event.event_type === "artifact.created" ||
-      event.event_type === "evidence.sealed" ||
-      event.event_type === "run.succeeded"
-    ) candidate = "completed";
-    else if (event.event_type.endsWith("started") || event.event_type === "run.resumed") candidate = "running";
-    if (candidate && statePriority[candidate] >= statePriority[state]) state = candidate;
+    const candidate = eventState(event);
+    if (candidate) state = candidate;
   }
   return state;
+}
+
+function unitSignals(events: RunEvent[]): ActivitySignal[] {
+  const signals: ActivitySignal[] = [];
+  for (const event of events) {
+    const candidate = eventState(event);
+    if (
+      candidate &&
+      ["retrying", "recovered", "degraded", "failed"].includes(candidate) &&
+      !signals.includes(candidate as ActivitySignal)
+    ) {
+      signals.push(candidate as ActivitySignal);
+    }
+  }
+  return signals;
+}
+
+function eventState(event: RunEvent): ActivityState | null {
+  if (event.event_type.includes("degraded")) return "degraded";
+  if (event.event_type.includes("failed") || event.event_type === "run.failed") return "failed";
+  if (event.event_type.includes("retry")) return "retrying";
+  if (event.event_type.includes("recovered")) return "recovered";
+  if (
+    event.event_type.endsWith("completed") ||
+    event.event_type === "artifact.created" ||
+    event.event_type === "evidence.sealed" ||
+    event.event_type === "run.succeeded"
+  ) return "completed";
+  if (event.event_type.endsWith("started") || event.event_type === "run.resumed") return "running";
+  return null;
 }
 
 function attemptState(events: RunEvent[], units: ActivityWorkUnit[]): ActivityState {
   const terminal = [...events].reverse().find((event) => event.event_type.startsWith("run."));
   if (terminal?.event_type === "run.failed") return "failed";
   if (terminal?.event_type === "run.succeeded" || terminal?.event_type === "run.cancelled") return "completed";
+  if (units.some((unit) => unit.state === "failed")) return "failed";
+  if (units.some((unit) => unit.state === "degraded")) return "degraded";
   if (units.some((unit) => unit.state === "retrying")) return "retrying";
+  if (units.some((unit) => unit.state === "recovered")) return "recovered";
   return "running";
 }
 
@@ -130,7 +163,9 @@ function activityStage(node: string, kind: "full" | "incremental"): ActivityStag
   const normalized = node.toLowerCase();
   if (kind === "incremental") {
     if (normalized.includes("collection") || normalized.includes("evidence")) return "collection";
-    if (normalized.includes("semantic")) return "incremental_semantic";
+    if (normalized.includes("semantic") || normalized === "incremental.synthesis") {
+      return "incremental_semantic";
+    }
     if (
       normalized.includes("serialize") ||
       normalized.includes("reassessment") ||
@@ -156,4 +191,23 @@ function activityRole(node: string): string | null {
     if (node.toLowerCase().split(/[._-]/).includes(role)) return role;
   }
   return null;
+}
+
+function activityAction(node: string): ActivityAction {
+  const normalized = node.toLowerCase();
+  if (normalized.includes("audit")) return "audit";
+  if (normalized.includes("serialize")) return "serialize";
+  if (normalized.includes("collect") || normalized.includes("evidence")) return "collect";
+  if (normalized.includes("context")) return "prepare";
+  if (normalized.includes("debate") || normalized.includes("rebuttal")) return "debate";
+  if (normalized.includes("risk") || normalized.includes("judge")) return "review";
+  if (
+    normalized.includes("semantic") ||
+    normalized.includes("synthesis") ||
+    normalized.includes("report") ||
+    normalized.includes("write") ||
+    normalized.includes("reason")
+  ) return "synthesize";
+  if (normalized.includes("commit") || normalized === "run.lifecycle") return "commit";
+  return "process";
 }
