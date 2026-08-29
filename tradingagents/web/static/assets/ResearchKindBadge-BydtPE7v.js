@@ -1,1 +1,0 @@
-import{u as r,j as s}from"./index-DE-SAcME.js";function c({kind:n}){const{t:a}=r(),e=n==="incremental"?"incremental":"full";return s.jsx("span",{className:`research-kind-badge ${e}`,children:a(e==="incremental"?"incrementalResearch":"fullResearch")})}export{c as R};
