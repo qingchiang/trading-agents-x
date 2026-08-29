@@ -744,9 +744,10 @@ def write_research_markdown(
     node: str,
     allowed_evidence_refs: tuple[str, ...],
     output_language: str,
+    allow_continuation: bool,
     invoke_config: dict[str, Any] | None = None,
 ) -> ResearchMarkdown:
-    """Generate one readable deliberation document without a JSON contract."""
+    """Generate readable Markdown under an explicit continuation-call policy."""
 
     response = llm.invoke(
         prompt + "\n\nWrite the complete research reasoning as readable Markdown. "
@@ -764,7 +765,7 @@ def write_research_markdown(
             schema="ResearchMarkdown",
             reason_code="empty_output",
         )
-    if _is_truncated(response):
+    if allow_continuation and _is_truncated(response):
         continuation = llm.invoke(
             (
                 "Continue the prior Markdown from its last complete block. "

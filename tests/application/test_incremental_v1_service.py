@@ -640,9 +640,16 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
             return self.response
 
     class _SemanticLLM:
+        def __init__(self):
+            self.calls = 0
+
         def invoke(self, _prompt, config=None):
             del config
-            return AIMessage(content="The bounded update reaffirms the baseline.")
+            self.calls += 1
+            return AIMessage(
+                content="The bounded update reaffirms the baseline.",
+                response_metadata={"finish_reason": "length"},
+            )
 
     class _SerializerLLM:
         preferred_structured_output_method = "function_calling"
@@ -735,13 +742,14 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
                 }
             )
 
+    semantic = _SemanticLLM()
     serializer = _SerializerLLM()
     service = AnalysisService(
         app_settings,
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: RunLLMs(
-            quick=_SemanticLLM(),
-            deep=_SemanticLLM(),
+            quick=semantic,
+            deep=semantic,
             quick_serializer=serializer,
             deep_serializer=serializer,
         ),
@@ -764,6 +772,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
     if section_failure:
         with pytest.raises(StructuredOutputError):
             service.run(request)
+        assert semantic.calls == 1
         assert all(method != "json_mode" for _schema, method in serializer.calls)
         assert [schema for schema, _method in serializer.calls] == [
             "_IncrementalSynthesisPayload",
@@ -788,6 +797,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
     if monolithic_failure == "repair_schema_validation":
         with pytest.raises(StructuredOutputError):
             service.run(request)
+        assert semantic.calls == 1
         assert serializer.calls == [
             ("_IncrementalSynthesisPayload", None),
             ("_IncrementalSynthesisPayload", "json_mode"),
@@ -798,6 +808,7 @@ def test_monolithic_incremental_failure_respects_sectioned_recovery_budget(
 
     result = service.run(request)
 
+    assert semantic.calls == 1
     assert serializer.calls == [
         ("_IncrementalSynthesisPayload", None),
         ("_IncrementalReassessmentSection", None),

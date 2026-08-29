@@ -1291,6 +1291,7 @@ class AnalysisService:
                     )
                 ),
                 output_language=output_language,
+                allow_continuation=False,
                 invoke_config={"metadata": {"research_node": "incremental.synthesis.semantic"}},
             )
         semantic_brief = semantic_output.markdown
