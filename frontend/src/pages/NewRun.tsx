@@ -5,10 +5,12 @@ import {
   type AnalysisRequest,
   type Capabilities,
   type DiscoveredModel,
+  type FullBaselineCandidate,
   type ProviderModelCatalog,
   type RunCreateRequest,
 } from "../api/client";
 import {
+  InstrumentIdentity,
   RecentInstrumentDatalist,
   recentInstrumentListId,
   useRecentInstruments,
@@ -17,16 +19,25 @@ import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
 const customModelValue = "__custom_model_id__";
-const baselinePageSize = 20;
-
 export default function NewRun() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const fromRun = useMemo(
-    () => new URLSearchParams(location.search).get("from_run")?.trim() ?? "",
-    [location.search],
-  );
+  const entry = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return {
+      fromRun: params.get("from_run")?.trim() ?? "",
+      intent: params.get("intent")?.trim() ?? "",
+      baseline: params.get("full_baseline_run_id")?.trim() ?? "",
+    };
+  }, [location.search]);
+  const fromRun = entry.fromRun;
+  const lockedKind =
+    entry.intent === "update"
+      ? "incremental"
+      : entry.intent === "clone_full"
+        ? "full"
+        : null;
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [modelCatalog, setModelCatalog] =
     useState<ProviderModelCatalog | null>(null);
@@ -51,9 +62,7 @@ export default function NewRun() {
   const [researchKind, setResearchKind] = useState<"full" | "incremental">(
     "full",
   );
-  const [fullBaselines, setFullBaselines] = useState<
-    { id: string; analysis_date: string }[]
-  >([]);
+  const [fullBaselines, setFullBaselines] = useState<FullBaselineCandidate[]>([]);
   const [fullBaselineRunId, setFullBaselineRunId] = useState("");
   const [primaryCycleWarned, setPrimaryCycleWarned] = useState(false);
   const [templateWarning, setTemplateWarning] = useState("");
@@ -67,63 +76,30 @@ export default function NewRun() {
   useEffect(() => {
     let active = true;
     const instrument = ticker.trim().toUpperCase();
-    researchKindSelectedByUser.current = false;
-    baselineSelectedByUser.current = false;
     setFullBaselines([]);
-    setFullBaselineRunId("");
     setPrimaryCycleWarned(false);
-    setResearchKind("full");
     if (!instrument) return () => {
       active = false;
     };
-    const publishBaselines = (
-      eligible: Map<string, { id: string; analysis_date: string }>,
-      timelineWarning: boolean,
-    ) => {
-      if (!active) return;
-      const baselines = [...eligible.values()];
-      setFullBaselines(baselines);
-      setPrimaryCycleWarned(timelineWarning);
-      setFullBaselineRunId((current) => {
-        if (baselineSelectedByUser.current) return current;
-        return baselines.some((baseline) => baseline.id === current)
-          ? current
-          : (baselines[0]?.id ?? "");
-      });
-      if (!researchKindSelectedByUser.current) {
-        setResearchKind(
-          baselines.length > 0 && !timelineWarning ? "incremental" : "full",
-        );
-      }
-    };
     const loadBaselines = async () => {
-      const eligible = new Map<string, { id: string; analysis_date: string }>();
-      let timelineWarning = false;
-      let offset = 0;
-      while (active) {
-        const { timeline } = await api.timeline(instrument, baselinePageSize, offset);
-        timelineWarning ||=
-          timeline.timeline_warning === true ||
-          timeline.nodes?.some(
-            (node) => node.is_primary && node.cycle_warning === true,
-          ) === true;
-        for (const node of timeline.nodes ?? []) {
-          if (
-            node.research_kind === "full" &&
-            node.is_active &&
-            node.is_baseline_compatible &&
-            node.analysis_date < analysisDate
-          ) {
-            eligible.set(node.id, { id: node.id, analysis_date: node.analysis_date });
-          }
+      const response = await api.baselineCandidates(instrument, analysisDate);
+      if (!active) return;
+      const baselines = response.items ?? [];
+      const primaryWarning = baselines.find((item) => item.is_primary)?.cycle_warning ?? false;
+      setFullBaselines(baselines);
+      setPrimaryCycleWarned(primaryWarning);
+      setFullBaselineRunId((current) => {
+        const requested = entry.baseline;
+        if (requested && baselines.some((item) => item.id === requested)) return requested;
+        if (baselineSelectedByUser.current && baselines.some((item) => item.id === current)) {
+          return current;
         }
-        publishBaselines(eligible, timelineWarning);
-        const pageSize = timeline.nodes?.length ?? 0;
-        const nextOffset = offset + pageSize;
-        if (pageSize === 0 || nextOffset >= (timeline.node_total ?? 0) || nextOffset <= offset) {
-          break;
-        }
-        offset = nextOffset;
+        return baselines[0]?.id ?? "";
+      });
+      if (lockedKind) {
+        setResearchKind(lockedKind);
+      } else if (!researchKindSelectedByUser.current) {
+        setResearchKind(baselines.length > 0 && !primaryWarning ? "incremental" : "full");
       }
     };
     void loadBaselines()
@@ -136,7 +112,7 @@ export default function NewRun() {
     return () => {
       active = false;
     };
-  }, [analysisDate, ticker]);
+  }, [analysisDate, entry.baseline, lockedKind, ticker]);
 
   useEffect(() => {
     let active = true;
@@ -144,19 +120,15 @@ export default function NewRun() {
     setSourceRunId("");
     const bootstrap = async () => {
       try {
-        const data = await api.capabilities();
-        let source = null;
-        if (fromRun) {
-          try {
-            source = await api.run(fromRun);
-          } catch {
-            if (active) {
-              setTemplateWarning(
-                t("templateLoadFailed", { id: fromRun }),
-              );
-            }
-          }
-        }
+        const [data, source] = await Promise.all([
+          api.capabilities(),
+          fromRun
+            ? api.creationTemplate(fromRun).catch(() => {
+                if (active) setTemplateWarning(t("templateLoadFailed", { id: fromRun }));
+                return null;
+              })
+            : Promise.resolve(null),
+        ]);
         if (!active) return;
         setCapabilities(data);
         const selectableProviders = Object.entries(data.providers).filter(
@@ -165,13 +137,8 @@ export default function NewRun() {
         const defaultProvider = data.providers[data.defaults.llm_provider]?.selectable
           ? data.defaults.llm_provider
           : (selectableProviders[0]?.[0] ?? "");
-        const sourceRequest = source?.run.request;
-        const sourceIsTerminal =
-          source !== null &&
-          ["succeeded", "failed", "cancelled"].includes(source.run.status);
-        if (source !== null && !sourceIsTerminal) {
-          setTemplateWarning(t("templateSourceNotTerminal"));
-        }
+        const sourceRequest = source?.request;
+        const sourceIsTerminal = source !== null;
         const sourceProvider =
           sourceIsTerminal ? (sourceRequest?.llm_provider ?? "") : "";
         const sourceProviderAvailable =
@@ -186,11 +153,7 @@ export default function NewRun() {
             : data.defaults.profile) as "fast" | "standard" | "deep",
         );
         setTicker(sourceIsTerminal ? (sourceRequest?.ticker ?? "") : "");
-        setAnalysisDate(
-          sourceIsTerminal
-            ? (sourceRequest?.analysis_date ?? today())
-            : today(),
-        );
+        setAnalysisDate(today());
         setAnalysts(
           sourceIsTerminal
             ? [...(sourceRequest?.analysts ?? analystKeys)]
@@ -226,7 +189,8 @@ export default function NewRun() {
             ? (sourceRequest?.output_language ?? data.defaults.output_language)
             : data.defaults.output_language,
         );
-        setSourceRunId(sourceIsTerminal ? (source?.run.id ?? "") : "");
+        setSourceRunId(sourceIsTerminal ? (source?.run_id ?? "") : "");
+        if (lockedKind) setResearchKind(lockedKind);
         if (
           sourceIsTerminal &&
           sourceProvider &&
@@ -250,7 +214,7 @@ export default function NewRun() {
     return () => {
       active = false;
     };
-  }, [fromRun, t]);
+  }, [fromRun, lockedKind, t]);
 
   useEffect(() => {
     if (!capabilities || !provider) return;
@@ -376,7 +340,9 @@ export default function NewRun() {
       return;
     }
     if (
-      (quickModel === customModelValue && !quickCustomModel.trim()) ||
+      (researchKind === "full" &&
+        quickModel === customModelValue &&
+        !quickCustomModel.trim()) ||
       (deepModel === customModelValue && !deepCustomModel.trim())
     ) {
       setError(t("customModel"));
@@ -384,8 +350,9 @@ export default function NewRun() {
     }
     setSubmitting(true);
     setError("");
-    const resolvedQuickModel =
-      quickModel === customModelValue ? quickCustomModel.trim() : quickModel;
+    const resolvedQuickModel = quickModel === customModelValue
+      ? quickCustomModel.trim()
+      : quickModel;
     const resolvedDeepModel =
       deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
     const payload: RunCreateRequest = {
@@ -494,7 +461,16 @@ export default function NewRun() {
           <span className="step">02</span>
           <div className="form-section-body">
             <h2>{t("researchKind")}</h2>
-            <div className="check-grid">
+            {lockedKind ? (
+              <div className={`research-kind-lock ${lockedKind}`}>
+                <strong>
+                  {t(lockedKind === "full" ? "fullResearch" : "incrementalResearch")}
+                </strong>
+                <span>
+                  {t(lockedKind === "full" ? "cloneFullIntentHint" : "updateResearchIntentHint")}
+                </span>
+              </div>
+            ) : <div className="check-grid">
               <label className="check-card">
                 <input
                   type="radio"
@@ -526,25 +502,37 @@ export default function NewRun() {
                   <small>{t("incrementalResearchHint")}</small>
                 </span>
               </label>
-            </div>
+            </div>}
             {researchKind === "incremental" && (
-              <label>
-                {t("fullBaseline")}
-                <select
-                  value={fullBaselineRunId}
-                  onChange={(event) => {
-                    baselineSelectedByUser.current = true;
-                    setFullBaselineRunId(event.target.value);
-                  }}
-                  required
-                >
-                  {fullBaselines.map((baseline) => (
-                    <option key={baseline.id} value={baseline.id}>
-                      {baseline.analysis_date} · {baseline.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="baseline-picker">
+                <label>
+                  {t("fullBaseline")}
+                  <select
+                    value={fullBaselineRunId}
+                    onChange={(event) => {
+                      baselineSelectedByUser.current = true;
+                      setFullBaselineRunId(event.target.value);
+                    }}
+                    required
+                  >
+                    {fullBaselines.map((baseline) => (
+                      <option key={baseline.id} value={baseline.id}>
+                        {baseline.is_primary ? `${t("primaryCycle")} · ` : ""}
+                        {baseline.analysis_date} · {baseline.rating ?? t("notRecorded")}
+                        {baseline.confidence == null
+                          ? ""
+                          : ` · ${Math.round(baseline.confidence * 100)}%`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {fullBaselines.find((item) => item.id === fullBaselineRunId) && (
+                  <BaselinePreview
+                    baseline={fullBaselines.find((item) => item.id === fullBaselineRunId)!}
+                    ticker={ticker.trim().toUpperCase()}
+                  />
+                )}
+              </div>
             )}
             {fullBaselines.length > 0 && (
               <p className="model-catalog-note">
@@ -561,27 +549,34 @@ export default function NewRun() {
         <article className="panel form-section">
           <span className="step">03</span>
           <div className="form-section-body">
-            <h2>{t("profile")}</h2>
-            <div className="profile-grid">
-              {(["fast", "standard", "deep"] as const).map((key) => (
-                <button
-                  type="button"
-                  className={`profile-card ${profile === key ? "selected" : ""}`}
-                  onClick={() => setProfile(key)}
-                  key={key}
-                >
-                  <strong>{t(key)}</strong>
-                  <span>
-                    {key === "fast"
-                      ? t("profileFastDesc")
-                      : key === "standard"
-                        ? t("profileStandardDesc")
-                        : t("profileDeepDesc")}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <h3>{t("analysts")}</h3>
+            {researchKind === "full" && (
+              <>
+                <h2>{t("profile")}</h2>
+                <div className="profile-grid">
+                  {(["fast", "standard", "deep"] as const).map((key) => (
+                    <button
+                      type="button"
+                      className={`profile-card ${profile === key ? "selected" : ""}`}
+                      onClick={() => setProfile(key)}
+                      key={key}
+                    >
+                      <strong>{t(key)}</strong>
+                      <span>
+                        {key === "fast"
+                          ? t("profileFastDesc")
+                          : key === "standard"
+                            ? t("profileStandardDesc")
+                            : t("profileDeepDesc")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <h2>{t(researchKind === "incremental" ? "updateScope" : "analysts")}</h2>
+            {researchKind === "incremental" && (
+              <p className="section-hint">{t("updateScopeHint")}</p>
+            )}
             <div className="check-grid">
               {analystKeys.map((key) => (
                 <label className="check-card" key={key}>
@@ -604,7 +599,7 @@ export default function NewRun() {
           <span className="step">04</span>
           <div className="form-section-body">
             <h2>{t("modelsOutput")}</h2>
-            <div className="form-grid three">
+            <div className={`form-grid ${researchKind === "full" ? "three" : "two"}`}>
               <label>
                 {t("provider")}
                 <select
@@ -618,32 +613,34 @@ export default function NewRun() {
                   ))}
                 </select>
               </label>
-              <label>
-                {t("quickModel")}
-                <select
-                  value={quickModel}
-                  onChange={(event) => {
-                    setQuickModel(event.target.value);
-                    setQuickReasoning("provider_default");
-                  }}
-                >
-                  {quickOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.id === customModelValue
-                        ? t("customModel")
-                        : option.label}
-                    </option>
-                  ))}
-                </select>
-                {quickModel === customModelValue && (
-                  <input
-                    required
-                    value={quickCustomModel}
-                    onChange={(event) => setQuickCustomModel(event.target.value)}
-                    placeholder={t("customModel")}
-                  />
-                )}
-              </label>
+              {researchKind === "full" && (
+                <label>
+                  {t("quickModel")}
+                  <select
+                    value={quickModel}
+                    onChange={(event) => {
+                      setQuickModel(event.target.value);
+                      setQuickReasoning("provider_default");
+                    }}
+                  >
+                    {quickOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.id === customModelValue
+                          ? t("customModel")
+                          : option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {quickModel === customModelValue && (
+                    <input
+                      required
+                      value={quickCustomModel}
+                      onChange={(event) => setQuickCustomModel(event.target.value)}
+                      placeholder={t("customModel")}
+                    />
+                  )}
+                </label>
+              )}
               <label>
                 {t("deepModel")}
                 <select
@@ -670,17 +667,19 @@ export default function NewRun() {
                   />
                 )}
               </label>
-              <ReasoningSelect
-                label={t("quickReasoning")}
-                value={quickReasoning}
-                options={reasoningOptions(
-                  modelCatalog,
-                  quickModel,
-                  quickReasoning,
-                )}
-                onChange={setQuickReasoning}
-                providerDefault={t("providerDefault")}
-              />
+              {researchKind === "full" && (
+                <ReasoningSelect
+                  label={t("quickReasoning")}
+                  value={quickReasoning}
+                  options={reasoningOptions(
+                    modelCatalog,
+                    quickModel,
+                    quickReasoning,
+                  )}
+                  onChange={setQuickReasoning}
+                  providerDefault={t("providerDefault")}
+                />
+              )}
               <ReasoningSelect
                 label={t("deepReasoning")}
                 value={deepReasoning}
@@ -754,7 +753,7 @@ export default function NewRun() {
               capabilities === null ||
               modelsLoading ||
               !provider ||
-              !quickModel ||
+              (researchKind === "full" && !quickModel) ||
               !deepModel ||
               (researchKind === "incremental" && !fullBaselineRunId)
             }
@@ -764,6 +763,34 @@ export default function NewRun() {
         </div>
       </form>
     </section>
+  );
+}
+
+function BaselinePreview({
+  baseline,
+  ticker,
+}: {
+  baseline: FullBaselineCandidate;
+  ticker: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article className="baseline-preview">
+      <InstrumentIdentity
+        ticker={ticker}
+        instrumentName={baseline.instrument_name}
+        instrumentLocalName={baseline.instrument_local_name}
+      />
+      <div className="baseline-decision">
+        <strong>{baseline.rating ?? t("notRecorded")}</strong>
+        <span>
+          {baseline.confidence == null
+            ? t("notRecorded")
+            : t("confidencePercent", { value: Math.round(baseline.confidence * 100) })}
+        </span>
+      </div>
+      {baseline.thesis && <p>{baseline.thesis}</p>}
+    </article>
   );
 }
 

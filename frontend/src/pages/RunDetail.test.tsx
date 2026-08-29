@@ -463,7 +463,7 @@ test("restores deliberation and resolves evidence references across run views", 
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
   expect(
     FakeEventSource.instance.listeners.has(
       "decision.numeric_display_scale_normalized",
@@ -477,7 +477,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(screen.getByText("debate.agenda.serialize")).not.toBeVisible();
   fireEvent.click(screen.getByText("Structured recoveries"));
   expect(screen.getByText("debate.agenda.serialize")).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Agent timeline" })).toHaveAttribute(
+  expect(screen.getByRole("tab", { name: "Decision" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -628,7 +628,8 @@ test("restores deliberation and resolves evidence references across run views", 
     created_at: "2026-07-24T00:00:50Z",
   } as RunEvent;
   act(() => FakeEventSource.instance.emit("artifact.created", artifactEvent));
-  await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2));
+  expect(api.artifacts).toHaveBeenCalledTimes(1);
 
   const event = {
     run_id: "run-1",
@@ -655,7 +656,8 @@ test("restores deliberation and resolves evidence references across run views", 
   ).not.toBe(0);
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
   expect(FakeEventSource.instance.closed).toBe(true);
-  await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(3));
+  expect(api.artifacts).toHaveBeenCalledTimes(1);
 });
 
 test("keeps a degraded numeric audit compact and opens run warnings on demand", async () => {
@@ -833,7 +835,7 @@ test("shows requirement comparisons separately from candidate drafts", async () 
   expect(screen.getByText("numeric.requirement.req_forward_pe.result_mismatch")).toBeVisible();
 });
 
-test("opens an editable new-run template instead of rerunning immediately", async () => {
+test("opens a locked Full clone template instead of rerunning immediately", async () => {
   render(
     <Router initialPath="/runs/run-1">
       <RunDetail />
@@ -842,13 +844,60 @@ test("opens an editable new-run template instead of rerunning immediately", asyn
   );
 
   fireEvent.click(
-    await screen.findByRole("link", { name: "New from this run" }),
+    await screen.findByRole("link", { name: "Reuse configuration for Full Research" }),
   );
 
   expect(screen.getByTestId("router-location")).toHaveTextContent(
-    "/runs/new?from_run=run-1",
+    "/runs/new?intent=clone_full&from_run=run-1",
   );
   expect(api.action).not.toHaveBeenCalled();
+});
+
+test("dispatches Incremental research to its own summary and root-baseline update flow", async () => {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.research_kind = "incremental";
+  incremental.run.full_baseline_run_id = "full-baseline";
+  incremental.run.is_research_node = true;
+  incremental.research_node = {
+    id: "run-1",
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_kind: "incremental",
+    full_baseline_run_id: "full-baseline",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T20:00:00Z",
+    method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" },
+    decision: incremental.result!.decision,
+    is_active: true,
+    is_primary: true,
+    is_cycle_head: true,
+    cycle_warning: false,
+    collection_summary: { domains: [] },
+    research_availability: { domains: [] },
+    information_advancement: {
+      advanced: true,
+      reasons: ["A new filing changed the decision."],
+    },
+    performance: null,
+    reassessment: { entries: [] },
+    full_research_required_reasons: [],
+  } as never;
+  vi.mocked(api.run).mockResolvedValue(incremental);
+
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Incremental update summary" })).toBeVisible();
+  expect(screen.getByText("A new filing changed the decision.")).toBeVisible();
+  expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Deliberation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
+    "href",
+    "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
+  );
 });
 
 test("shows trashed retention details and restores without deleting data", async () => {
@@ -920,7 +969,7 @@ test("labels runs that have no recorded artifacts", async () => {
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
   fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
 
   expect(
@@ -945,7 +994,7 @@ test("groups metrics by role and expands phase observations", async () => {
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
   const roleMetricsTitle = screen.getByText("Metrics by role");
   const roleMetrics = roleMetricsTitle.closest("details");
   expect(roleMetrics).not.toHaveAttribute("open");
@@ -1016,8 +1065,7 @@ test("groups metrics by role and expands phase observations", async () => {
   expect(analyst).toHaveTextContent("1/1");
   expect(analyst).toHaveTextContent("Not recorded");
   expect(details).toHaveTextContent("Schema serialization");
-  expect(details).toHaveTextContent("Deep serializer");
-  expect(details).toHaveTextContent("tool_call");
+  expect(details).toHaveTextContent("Not recorded");
   expect(
     details!.compareDocumentPosition(analystDetails!) &
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1136,6 +1184,10 @@ test("loads sealed evidence immediately when the SSE seal event arrives", async 
   } as RunDetailType;
   const runningSealed = {
     ...runningPending,
+    result: {
+      ...runningPending.result,
+      evidence: detail.result!.evidence,
+    },
     evidence_status: detail.evidence_status,
   } as RunDetailType;
   vi.mocked(api.run)
@@ -1173,7 +1225,7 @@ test("loads sealed evidence immediately when the SSE seal event arrives", async 
       name: "Price snapshot · Composite snapshot",
     }),
   ).toBeVisible();
-  expect(api.evidence).toHaveBeenCalledWith("run-1");
+  expect(api.evidence).not.toHaveBeenCalled();
 });
 
 test("shows preserved decision artifacts for an unsuccessful run", async () => {

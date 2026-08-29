@@ -9,6 +9,7 @@ import {
   type EvidenceBundle,
   type ResearchArtifact,
   type ResearchDecision,
+  type ResearchNodeView,
   type RunDetail as RunDetailType,
   type RunEvent,
   type StructuredRecoveryNotice,
@@ -63,8 +64,13 @@ const eventNames = [
   "run.cancelled",
   "run.cancel_requested",
   "run.retry_queued",
+  "incremental.collection_completed",
+  "incremental.no_advancement",
+  "incremental.synthesis_started",
+  "incremental.synthesis_completed",
 ];
 const viewNames = [
+  "incremental",
   "timeline",
   "deliberation",
   "evidence",
@@ -98,35 +104,50 @@ export default function RunDetail() {
     [location.search],
   );
   const requestedView = searchParams.get("view");
-  const activeView: ViewName = isViewName(requestedView)
-    ? requestedView
-    : "timeline";
+  const isIncremental = detail?.run.research_kind === "incremental";
+  const availableViews: ViewName[] = isIncremental
+    ? ["incremental", "evidence", "timeline"]
+    : ["decision", "reports", "deliberation", "evidence", "timeline"];
+  const defaultView: ViewName =
+    detail?.run.status === "succeeded"
+      ? isIncremental
+        ? "incremental"
+        : "decision"
+      : "timeline";
+  const activeView: ViewName =
+    isViewName(requestedView) && availableViews.includes(requestedView)
+      ? requestedView
+      : defaultView;
   const requestedReport = searchParams.get("report") ?? "";
   const focusedEvidence = searchParams.get("ref") ?? "";
 
   const refresh = useCallback(async () => {
     try {
-      const [nextDetail, nextArtifacts] = await Promise.all([
-        api.run(runId),
-        api.artifacts(runId),
-      ]);
-      let nextEvidence = nextDetail.result?.evidence ?? null;
-      let evidenceError = "";
-      if (nextDetail.evidence_status.status === "sealed") {
-        try {
-          nextEvidence = await api.evidence(runId);
-        } catch (cause) {
-          evidenceError = cause instanceof Error ? cause.message : t("error");
-        }
-      }
+      const nextDetail = await api.run(runId);
       setDetail(nextDetail);
-      setArtifacts(nextArtifacts);
-      setEvidence(nextEvidence);
-      setError(evidenceError);
+      setEvidence(nextDetail.result?.evidence ?? null);
+      setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
   }, [runId, t]);
+
+  useEffect(() => {
+    const needsArtifacts =
+      activeView === "deliberation" ||
+      activeView === "reports" ||
+      (activeView === "decision" && detail?.result?.decision == null);
+    if (!needsArtifacts || artifacts.length > 0) return;
+    let active = true;
+    void api.artifacts(runId).then(
+      (items) => active && setArtifacts(items),
+      (cause: unknown) =>
+        active && setError(cause instanceof Error ? cause.message : t("error")),
+    );
+    return () => {
+      active = false;
+    };
+  }, [activeView, artifacts.length, detail?.result?.decision, runId, t]);
 
   useEffect(() => {
     void refresh();
@@ -148,6 +169,7 @@ export default function RunDetail() {
         event.event_type === "node.completed" ||
         event.event_type === "evidence.sealed" ||
         event.event_type === "artifact.created" ||
+        event.event_type.startsWith("incremental.") ||
         event.event_type.startsWith("run.")
       ) {
         void refresh();
@@ -351,6 +373,11 @@ export default function RunDetail() {
     return <div className="loading">{error || t("loading")}</div>;
   }
   const { run, result } = detail;
+  const canUpdateResearch =
+    run.is_research_node &&
+    run.status === "succeeded" &&
+    !run.trashed_at &&
+    run.request.analysis_date < localDateToday();
   const hasPartialResearch =
     run.status !== "succeeded" &&
     (evidence !== null ||
@@ -372,11 +399,15 @@ export default function RunDetail() {
               instrumentLocalName={run.instrument_local_name}
               prominent
             />
+            <span className={"research-kind-badge " + (run.research_kind ?? "full")}>
+              {t(run.research_kind === "incremental" ? "incrementalResearch" : "fullResearch")}
+            </span>
             <StatusBadge status={run.status} />
           </div>
           <p className="subtitle">
-            {run.request.analysis_date} · {run.request.profile} · {t("attempt")}{" "}
-            {run.attempt}
+            {run.request.analysis_date}
+            {run.research_kind !== "incremental" ? " · " + run.request.profile : ""}
+            {" · " + t("attempt") + " " + run.attempt}
           </p>
           {run.source_run_id && (
             <p className="subtitle">
@@ -412,16 +443,32 @@ export default function RunDetail() {
               {t("researchTimeline")}
             </Link>
           )}
+          {canUpdateResearch && (
+            <Link
+              className="button primary"
+              to={`/runs/new?intent=update&from_run=${encodeURIComponent(runId)}&full_baseline_run_id=${encodeURIComponent(run.research_kind === "incremental" ? run.full_baseline_run_id ?? "" : run.id)}`}
+            >
+              {t("updateThisResearch")}
+            </Link>
+          )}
+          {run.is_research_node &&
+            run.status === "succeeded" &&
+            !run.trashed_at &&
+            !canUpdateResearch && (
+              <span className="button disabled" title={t("sameDayUpdateUnavailable")}>
+                {t("updateThisResearch")}
+              </span>
+            )}
           {terminal.has(run.status) && (
             <Link
               className="button"
-              to={`/runs/new?from_run=${encodeURIComponent(runId)}`}
+              to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}
             >
-              {t("newFromRun")}
+              {t("cloneAsFullResearch")}
             </Link>
           )}
           <a
-            className="button primary"
+            className="button"
             href={`/api/v1/runs/${runId}/export?format=package`}
           >
             {t("exportPackage")}
@@ -471,7 +518,7 @@ export default function RunDetail() {
         aria-label={t("researchViews")}
         role="tablist"
       >
-        {viewNames.map((view) => (
+        {availableViews.map((view) => (
           <button
             type="button"
             role="tab"
@@ -485,6 +532,10 @@ export default function RunDetail() {
           </button>
         ))}
       </nav>
+
+      {activeView === "incremental" && detail.research_node && (
+        <IncrementalDetailPanel node={detail.research_node} />
+      )}
 
       {activeView === "timeline" && (
         <TimelinePanel events={events} />
@@ -542,6 +593,98 @@ export default function RunDetail() {
         key={sourceDrawerRef ?? "closed"}
       />
     </section>
+  );
+}
+
+function IncrementalDetailPanel({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  return (
+    <article className="panel incremental-detail-panel" id="run-view-incremental" role="tabpanel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("incrementalResearch")}</p>
+          <h2>{t("incrementalUpdateSummary")}</h2>
+        </div>
+        {node.decision && (
+          <div className="decision-summary-meta">
+            <strong>{node.decision.rating}</strong>
+            <span>{t("confidencePercent", { value: Math.round(node.decision.confidence * 100) })}</span>
+          </div>
+        )}
+      </div>
+      {node.decision && (
+        <section className="incremental-thesis">
+          <h3>{t("thesis")}</h3>
+          <p>{node.decision.thesis}</p>
+        </section>
+      )}
+      <div className="incremental-detail-grid">
+        <section>
+          <h3>{t("informationAdvancement")}</h3>
+          <p>{node.information_advancement?.reasons?.join(", ") || t("notRecorded")}</p>
+        </section>
+        <section>
+          <h3>{t("researchAvailability")}</h3>
+          <ul className="compact-list">
+            {node.research_availability?.domains?.map((domain) => (
+              <li key={domain.domain}>
+                <strong>{t(`${domain.domain}Analyst`)}</strong>
+                <span>{t(domain.status)}</span>
+              </li>
+            )) ?? <li>{t("notRecorded")}</li>}
+          </ul>
+        </section>
+        <section>
+          <h3>{t("collectionSummary")}</h3>
+          <ul className="compact-list">
+            {node.collection_summary?.domains?.map((domain) => (
+              <li key={domain.domain}>
+                <strong>{t(`${domain.domain}Analyst`)}</strong>
+                <span>{t(domain.state)}</span>
+                {domain.diagnostic && <p>{domain.diagnostic.code}</p>}
+              </li>
+            )) ?? <li>{t("notRecorded")}</li>}
+          </ul>
+        </section>
+        <section>
+          <h3>{t("reassessment")}</h3>
+          <ul className="compact-list">
+            {node.reassessment?.entries?.map((entry) => (
+              <li key={entry.component_id}>
+                <strong>{entry.component_id}</strong>
+                <span>{t(entry.disposition)}</span>
+                <p>{entry.reason}</p>
+              </li>
+            )) ?? <li>{t("notRecorded")}</li>}
+          </ul>
+        </section>
+        <section>
+          <h3>{t("performance")}</h3>
+          <p>
+            {node.performance?.stock.calculation
+              ? `${t("stockReturn")}: ${new Intl.NumberFormat(undefined, {
+                  style: "percent",
+                  maximumFractionDigits: 2,
+                }).format(node.performance.stock.calculation.unrounded_return)}`
+              : node.performance?.stock.reason ??
+                node.performance?.stock.status ??
+                t("notRecorded")}
+          </p>
+        </section>
+      </div>
+      {(node.full_research_required_reasons?.length ?? 0) > 0 && (
+        <section className="research-warning-block">
+          <h3>{t("fullResearchRecommended")}</h3>
+          {node.full_research_required_reasons?.map((reason) => (
+            <p key={reason.code}>{reason.message}</p>
+          ))}
+        </section>
+      )}
+      <details className="audit-disclosure">
+        <summary>{t("auditDetails")}</summary>
+        <pre>{JSON.stringify({ performance: node.performance, method_snapshot: node.method_snapshot }, null, 2)}</pre>
+      </details>
+    </article>
   );
 }
 
@@ -610,7 +753,10 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
                 #{event.sequence} · {formatTime(event.created_at)}
               </small>
               {Object.keys(event.payload ?? {}).length > 0 && (
-                <code>{JSON.stringify(event.payload ?? {})}</code>
+                <details className="audit-disclosure event-audit">
+                  <summary>{t("auditDetails")}</summary>
+                  <code>{JSON.stringify(event.payload ?? {})}</code>
+                </details>
               )}
             </div>
           </div>
@@ -1363,6 +1509,7 @@ function reportLabel(t: TFunction, name: string): string {
 
 function returnViewLabel(t: TFunction, view: ReturnViewName): string {
   const labels: Record<ReturnViewName, string> = {
+    incremental: "returnToIncrementalSummary",
     timeline: "returnToTimeline",
     deliberation: "returnToDeliberation",
     reports: "returnToReports",
@@ -1416,4 +1563,10 @@ function formatTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
+}
+
+function localDateToday(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
