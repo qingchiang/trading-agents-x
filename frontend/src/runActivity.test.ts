@@ -244,6 +244,18 @@ describe("aggregateRunActivity", () => {
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
     expect(attempts[0].state).toBe("failed");
   });
+
+  test("keeps the terminal lifecycle unit after unknown workflow units", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "node.started", "vendor.unmapped.step"),
+      event(2, 1, "run.failed", null),
+    ], "incremental", { currentAttempt: 1, runStatus: "failed" });
+
+    expect(attempts[0].workUnits.map((unit) => unit.node)).toEqual([
+      "vendor.unmapped.step",
+      "run.lifecycle",
+    ]);
+  });
 });
 
 function retriedIncrementalHistory(): RunEvent[] {

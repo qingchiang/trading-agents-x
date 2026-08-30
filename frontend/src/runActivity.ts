@@ -290,12 +290,13 @@ function activityUnitOrder(
   unit: Pick<ActivityWorkUnit, "node" | "stage">,
   kind: "full" | "incremental",
 ): number {
+  if (unit.node === "run.lifecycle") return Number.MAX_SAFE_INTEGER;
   const stages: ActivityStage[] = kind === "incremental"
     ? ["collection", "incremental_semantic", "incremental_serialization", "commit", "workflow"]
     : ["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit", "workflow"];
   const stage = stages.indexOf(unit.stage);
   const base = (stage === -1 ? stages.length : stage) * 10;
-  return base + (unit.node === "run.lifecycle" ? 9 : 0);
+  return base;
 }
 
 function activityStage(node: string, kind: "full" | "incremental"): ActivityStage {
