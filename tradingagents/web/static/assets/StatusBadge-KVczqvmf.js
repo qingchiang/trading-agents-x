@@ -1,0 +1,1 @@
+import{u as n,j as e}from"./index-DlLfYajN.js";const t={queued:"statusQueued",running:"statusRunning",succeeded:"statusSucceeded",failed:"statusFailed",cancelled:"statusCancelled"};function c({status:s}){const{t:a}=n();return e.jsxs("span",{className:`status status-${s}`,children:[e.jsx("i",{}),t[s]?a(t[s]):s]})}export{c as S};

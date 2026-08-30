@@ -993,7 +993,7 @@ label small {
 }
 
 .run-title .instrument-identity.prominent {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 .run-title h1 {
