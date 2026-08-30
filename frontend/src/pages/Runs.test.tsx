@@ -235,7 +235,7 @@ test("restores trashed runs and returns from an emptied page", async () => {
   );
 });
 
-test("routes real Research Nodes to the Timeline lifecycle", async () => {
+test("keeps a single Open action for Research Nodes", async () => {
   const node = run("full-node", "NVDA", "succeeded");
   node.research_schema_version = "1";
   node.is_research_node = true;
@@ -248,7 +248,10 @@ test("routes real Research Nodes to the Timeline lifecycle", async () => {
   );
 
   expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
-  expect(
-    screen.getByRole("link", { name: "Research Timeline" }),
-  ).toHaveAttribute("href", "/timelines/NVDA");
+  expect(screen.getByRole("columnheader", { name: "Actions" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Research Timeline" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Open" })).toHaveAttribute(
+    "href",
+    "/runs/full-node",
+  );
 });

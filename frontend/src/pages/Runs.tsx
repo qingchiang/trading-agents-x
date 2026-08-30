@@ -342,7 +342,7 @@ export default function Runs() {
                         : "permanentDeletion",
                     )}
                   </th>
-                  <th />
+                  <th>{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -405,18 +405,9 @@ export default function Runs() {
                           formatDate(run.updated_at)
                         )}
                       </td>
-                      <td className="right">
-                        {run.is_research_node &&
-                          run.status === "succeeded" && (
-                            <Link
-                              className="text-link"
-                              to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
-                            >
-                              {t("researchTimeline")}
-                            </Link>
-                          )}
-                        <Link className="text-link" to={`/runs/${run.id}`}>
-                          {t("open")} →
+                      <td className="run-actions-cell">
+                        <Link className="button compact" to={`/runs/${run.id}`}>
+                          {t("open")}
                         </Link>
                       </td>
                     </tr>

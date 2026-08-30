@@ -716,6 +716,20 @@ test("runs, templates, trash, and restores local research", async ({
   });
   expect(decisionWidth.summary).toBeGreaterThan(decisionWidth.hero * 0.7);
 
+  await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const attemptBody = page.locator(".activity-attempt-body").first();
+  await expect(attemptBody).toHaveAttribute("tabindex", "0");
+  const attemptScroll = await attemptBody.evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(attemptScroll.maxHeight).not.toBe("none");
+  expect(attemptScroll.overflowY).toBe("auto");
+
   await page.goto("/runs/run-daiichi?view=decision");
   const detailIdentity = page.locator(".run-title .instrument-identity");
   await expect(detailIdentity).toContainText("第一三共");
@@ -769,6 +783,17 @@ test("runs, templates, trash, and restores local research", async ({
   expect(timelineWidth.summary).toBeGreaterThan(timelineWidth.card * 0.85);
 
   await page.goto("/runs");
+  await expect(page.getByRole("columnheader", { name: "Actions" })).toBeVisible();
+  const runsTable = page.locator(".runs-table");
+  await expect(
+    runsTable.getByRole("link", { name: "Research Timeline" }),
+  ).toHaveCount(0);
+  const tickerColumnRatio = await runsTable.evaluate((table) => {
+    const tickerHeader = table.querySelectorAll("th")[1];
+    if (!tickerHeader) throw new Error("ticker column not found");
+    return tickerHeader.getBoundingClientRect().width / table.getBoundingClientRect().width;
+  });
+  expect(tickerColumnRatio).toBeLessThan(0.32);
   const runsSearch = page.locator("#runs-search");
   const runsKind = page.locator("#runs-kind");
   const applyFilters = page.getByRole("button", { name: "Apply", exact: true });
@@ -1323,4 +1348,19 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
   await expect(
     page.getByText(/Full research recommended|建议进行完整研究/).first(),
   ).toBeVisible();
+  const warningGeometry = await page
+    .locator(".research-node-card.incremental .research-warning-block")
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        borderRadius: Number.parseFloat(style.borderRadius),
+        borderWidth: Number.parseFloat(style.borderTopWidth),
+        paddingLeft: Number.parseFloat(style.paddingLeft),
+        paddingRight: Number.parseFloat(style.paddingRight),
+      };
+    });
+  expect(warningGeometry.borderRadius).toBeGreaterThanOrEqual(9);
+  expect(warningGeometry.borderWidth).toBeGreaterThanOrEqual(1);
+  expect(warningGeometry.paddingLeft).toBeGreaterThanOrEqual(14);
+  expect(warningGeometry.paddingRight).toBeGreaterThanOrEqual(14);
 });

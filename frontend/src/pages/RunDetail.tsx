@@ -107,6 +107,9 @@ const viewNames = [
   "decision",
 ] as const;
 
+const timelineOrderStorageKey = "tradingagents-timeline-order";
+type TimelineOrder = "newest" | "oldest";
+
 type ViewName = (typeof viewNames)[number];
 type ReturnViewName = Exclude<ViewName, "evidence">;
 type ArtifactContent = ResearchArtifact["content"];
@@ -663,6 +666,7 @@ export default function RunDetail() {
             returnLabel={returnViewLabel(t, returnView)}
             evidenceIndex={currentEvidenceIndex}
             onEvidence={openEvidence}
+            onSourceDetails={openSourceDrawer}
             incremental={isIncremental}
             incrementalNode={isIncremental ? detail.research_node ?? null : null}
           />
@@ -689,12 +693,14 @@ export default function RunDetail() {
         )}
       </Suspense>
 
-      <RunMetricsPanel
-        metrics={run.metrics}
-        attempts={detail.attempts ?? []}
-        events={events}
-        artifacts={artifacts}
-      />
+      {activeView === "timeline" && (
+        <RunMetricsPanel
+          metrics={run.metrics}
+          attempts={detail.attempts ?? []}
+          events={events}
+          artifacts={artifacts}
+        />
+      )}
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         <EvidenceSourceDrawer
           evidenceRef={sourceDrawerRef}
@@ -984,6 +990,19 @@ function ReassessmentPanel({
           })}
         </div>
       )}
+      {entries.length > 0 && (
+        <details className="audit-disclosure reassessment-technical-mapping">
+          <summary>{t("technicalMapping")}</summary>
+          <dl className="definition-list compact-definition-list">
+            {entries.map((entry) => (
+              <div key={entry.component_id}>
+                <dt>{t(`reassessment_${entry.disposition}`)}</dt>
+                <dd><code>{entry.component_id}</code></dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
     </article>
   );
 }
@@ -1020,10 +1039,6 @@ function ReassessmentEntryCard({
         onEvidence={onEvidence}
         compact
       />
-      <details className="audit-disclosure">
-        <summary>{t("auditDetails")}</summary>
-        <code>{entry.component_id}</code>
-      </details>
     </article>
   );
 }
@@ -1032,6 +1047,13 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
   const performance = node.performance;
   if (!performance) return null;
+  const auditRows = [
+    { label: t("currentInstrument"), component: performance.stock },
+    ...(performance.benchmarks ?? []).map((benchmark) => ({
+      label: benchmark.name,
+      component: benchmark.component,
+    })),
+  ].filter((row) => row.component.calculation);
   return (
     <section className="decision-section incremental-performance-section">
       <div className="decision-section-heading">
@@ -1054,6 +1076,43 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
           />
         ))}
       </div>
+      {auditRows.length > 0 && (
+        <details className="audit-disclosure performance-data-audit">
+          <summary>{t("performanceDataAudit")}</summary>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("instrument")}</th>
+                  <th>{t("provider")}</th>
+                  <th>{t("fallback")}</th>
+                  <th>{t("adjustmentBasis")}</th>
+                  <th>{t("informationCutoff")}</th>
+                  <th>{t("retrievedAt")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditRows.map(({ label, component }) => {
+                  const calculation = component.calculation!;
+                  return (
+                    <tr key={label}>
+                      <th>{label}</th>
+                      <td>{calculation.provider}</td>
+                      <td>{calculation.fallback ? t("yes") : t("no")}</td>
+                      <td>{calculation.adjustment_basis}</td>
+                      <td>
+                        {calculation.baseline_information_cutoff_at} →{" "}
+                        {calculation.target_information_cutoff_at}
+                      </td>
+                      <td>{calculation.retrieved_at}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </section>
   );
 }
@@ -1092,36 +1151,6 @@ function PerformanceCard({
           {t("reportedBenchmarkDifference")}:{" "}
           <strong>{formatReturn(reportedDifference)}</strong>
         </p>
-      )}
-      {calculation && (
-        <details className="audit-disclosure">
-          <summary>{t("auditDetails")}</summary>
-          <dl className="definition-list compact-definition-list">
-            <div>
-              <dt>{t("provider")}</dt>
-              <dd>{calculation.provider}</dd>
-            </div>
-            <div>
-              <dt>{t("fallback")}</dt>
-              <dd>{calculation.fallback ? t("yes") : t("no")}</dd>
-            </div>
-            <div>
-              <dt>{t("adjustmentBasis")}</dt>
-              <dd>{calculation.adjustment_basis}</dd>
-            </div>
-            <div>
-              <dt>{t("informationCutoff")}</dt>
-              <dd>
-                {calculation.baseline_information_cutoff_at} →{" "}
-                {calculation.target_information_cutoff_at}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("retrievedAt")}</dt>
-              <dd>{calculation.retrieved_at}</dd>
-            </div>
-          </dl>
-        </details>
       )}
     </article>
   );
@@ -1164,6 +1193,7 @@ function TimelinePanel({
   runStatus: RunDetailType["run"]["status"];
 }) {
   const { t } = useTranslation();
+  const [order, setOrder] = useState<TimelineOrder>(readTimelineOrder);
   const attempts = useMemo(
     () => aggregateRunActivity(events, researchKind, { currentAttempt, runStatus }),
     [currentAttempt, events, researchKind, runStatus],
@@ -1172,6 +1202,10 @@ function TimelinePanel({
   const stages = researchKind === "incremental"
     ? (["collection", "incremental_semantic", "incremental_serialization", "commit"] as ActivityStage[])
     : (["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit"] as ActivityStage[]);
+  const updateOrder = (next: TimelineOrder) => {
+    setOrder(next);
+    localStorage.setItem(timelineOrderStorageKey, next);
+  };
   return (
     <article
       className="panel audit-panel timeline-panel"
@@ -1184,6 +1218,28 @@ function TimelinePanel({
           <h2>{t("activity")}</h2>
         </div>
         <div className="timeline-controls">
+          <div
+            className="timeline-order"
+            role="group"
+            aria-label={t("timelineOrder")}
+          >
+            <button
+              type="button"
+              className={order === "newest" ? "active" : ""}
+              aria-pressed={order === "newest"}
+              onClick={() => updateOrder("newest")}
+            >
+              {t("latestFirst")}
+            </button>
+            <button
+              type="button"
+              className={order === "oldest" ? "active" : ""}
+              aria-pressed={order === "oldest"}
+              onClick={() => updateOrder("oldest")}
+            >
+              {t("earliestFirst")}
+            </button>
+          </div>
           <span className="event-count">{events.length}</span>
         </div>
       </div>
@@ -1214,46 +1270,79 @@ function TimelinePanel({
               <span>{t("researchAttempt", { count: attempt.attempt })}</span>
               <span className={`activity-state ${attempt.state}`}>{t(activityStateLabel(attempt.state))}</span>
             </summary>
-            <div className="activity-work-units">
-              {attempt.workUnits.map((unit) => (
-                <article className={`activity-work-unit ${unit.state}`} key={unit.key}>
-                  <span className="activity-work-marker" aria-hidden="true" />
-                  <div>
-                    <strong>
-                      {t(activityStageLabel(unit.stage))}
-                      {unit.role ? ` · ${activityRoleLabel(t, unit.role)}` : ""}
-                      {` · ${t(activityActionLabel(unit.action))}`}
-                    </strong>
-                    <div className="activity-unit-statuses">
-                      <span className={`activity-state ${unit.state}`}>
-                        {t(activityStateLabel(unit.state))}
-                      </span>
-                      {unit.signals
-                        .filter((signal) => signal !== unit.state)
-                        .map((signal) => (
-                          <span className={`activity-state ${signal}`} key={signal}>
-                            {t(activitySignalLabel(signal))}
-                          </span>
-                        ))}
-                    </div>
-                    <code className="activity-node-key">{unit.node}</code>
-                    <small>
-                      #{unit.firstSequence}–{unit.lastSequence} · {formatTime(unit.events.at(-1)?.created_at ?? "")}
-                    </small>
-                    <details className="audit-disclosure event-audit">
-                      <summary>{t("auditDetails")}</summary>
-                      <ul className="activity-raw-events">
-                        {unit.events.map((event) => (
-                          <li key={event.sequence}>
-                            <strong>{eventLabel(t, event)}</strong>
-                            <code>{JSON.stringify({ sequence: event.sequence, event_type: event.event_type, payload: event.payload ?? {} })}</code>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </div>
-                </article>
-              ))}
+            <div
+              className="activity-attempt-body"
+              tabIndex={0}
+              aria-label={t("attemptActivityLog", { count: attempt.attempt })}
+            >
+              <div className="activity-work-units">
+                {[...attempt.workUnits]
+                  .sort((left, right) =>
+                    order === "newest"
+                      ? right.lastSequence - left.lastSequence
+                      : left.firstSequence - right.firstSequence,
+                  )
+                  .map((unit) => {
+                    const diagnostics = activityDiagnostics(unit.events);
+                    return (
+                      <article className={`activity-work-unit ${unit.state}`} key={unit.key}>
+                        <span className="activity-work-marker" aria-hidden="true" />
+                        <div>
+                          <strong>
+                            {t(activityStageLabel(unit.stage))}
+                            {unit.role ? ` · ${activityRoleLabel(t, unit.role)}` : ""}
+                            {` · ${t(activityActionLabel(unit.action))}`}
+                          </strong>
+                          <div className="activity-unit-statuses">
+                            <span className={`activity-state ${unit.state}`}>
+                              {t(activityStateLabel(unit.state))}
+                            </span>
+                            {unit.signals
+                              .filter((signal) => signal !== unit.state)
+                              .map((signal) => (
+                                <span className={`activity-state ${signal}`} key={signal}>
+                                  {t(activitySignalLabel(signal))}
+                                </span>
+                              ))}
+                          </div>
+                          <code className="activity-node-key">{unit.node}</code>
+                          <small>
+                            #{unit.firstSequence}–{unit.lastSequence} · {formatTime(unit.events.at(-1)?.created_at ?? "")}
+                          </small>
+                          {diagnostics.length > 0 && (
+                            <p className="activity-diagnostic">
+                              <span>{t("activityDiagnostic")}</span>
+                              {diagnostics.map((diagnostic) => (
+                                <code key={diagnostic}>{diagnostic}</code>
+                              ))}
+                            </p>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+              </div>
+              {attempt.events.length > 0 && (
+                <details className="audit-disclosure attempt-technical-events">
+                  <summary>
+                    {t("technicalEvents", { count: attempt.events.length })}
+                  </summary>
+                  <ul className="activity-raw-events">
+                    {[...attempt.events]
+                      .sort((left, right) =>
+                        order === "newest"
+                          ? right.sequence - left.sequence
+                          : left.sequence - right.sequence,
+                      )
+                      .map((event) => (
+                        <li key={event.sequence}>
+                          <strong>{eventLabel(t, event)}</strong>
+                          <code>{JSON.stringify({ sequence: event.sequence, event_type: event.event_type, node: event.node, payload: event.payload ?? {} })}</code>
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              )}
             </div>
           </details>
         ))}
@@ -1263,6 +1352,24 @@ function TimelinePanel({
       </div>
     </article>
   );
+}
+
+function readTimelineOrder(): TimelineOrder {
+  return localStorage.getItem(timelineOrderStorageKey) === "oldest"
+    ? "oldest"
+    : "newest";
+}
+
+function activityDiagnostics(events: RunEvent[]): string[] {
+  const fields = ["reason_code", "error_code", "recovery_method"] as const;
+  return [...new Set(events.flatMap((event) =>
+    fields.flatMap((field) => {
+      const value = event.payload?.[field];
+      return typeof value === "string" || typeof value === "number"
+        ? [String(value)]
+        : [];
+    }),
+  ))];
 }
 
 function DeliberationPanel({
@@ -1309,6 +1416,7 @@ function EvidencePanel({
   returnLabel,
   evidenceIndex,
   onEvidence,
+  onSourceDetails,
   incremental,
   incrementalNode,
 }: {
@@ -1320,10 +1428,14 @@ function EvidencePanel({
   returnLabel: string;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  onSourceDetails: (ref: string) => void;
   incremental: boolean;
   incrementalNode: ResearchNodeView | null;
 }) {
   const { t } = useTranslation();
+  const diagnostics = incrementalNode
+    ? collectionDiagnostics(incrementalNode)
+    : [];
   return (
     <article
       className="panel audit-panel"
@@ -1378,28 +1490,34 @@ function EvidencePanel({
                   <span className={`availability-chip ${domain.state}`}>
                     {t(`${domain.domain}Analyst`)} · {t(`collection_${domain.state}`)}
                   </span>
-                  {((domain.sources?.length ?? 0) > 0 || domain.diagnostic) && (
-                    <details className="audit-disclosure collection-domain-audit">
-                      <summary>{t("auditDetails")}</summary>
-                      {(domain.sources?.length ?? 0) > 0 && (
-                        <ul className="compact-list">
-                          {domain.sources?.map((source, index) => (
-                            <li key={`${source.source}-${source.retrieved_at}-${index}`}>
-                              <strong>{source.source}</strong>
-                              {source.fallback && <span> · {t("fallback")}</span>}
-                              {source.diagnostic && (
-                                <code> · {source.diagnostic.code}</code>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {domain.diagnostic && <code>{domain.diagnostic.code}</code>}
-                    </details>
+                  {(domain.sources?.length ?? 0) > 0 && (
+                    <span className="collection-source-summary">
+                      {domain.sources?.map((source, index) => (
+                        <span key={`${source.source}-${source.retrieved_at}-${index}`}>
+                          <strong>{source.source}</strong>
+                          {source.fallback && <span> · {t("fallback")}</span>}
+                        </span>
+                      ))}
+                    </span>
                   )}
                 </div>
               ))}
             </div>
+            {diagnostics.length > 0 && (
+              <details className="audit-disclosure collection-diagnostics">
+                <summary>{t("collectionDiagnostics")}</summary>
+                <ul className="compact-list">
+                  {diagnostics.map((diagnostic) => (
+                    <li key={diagnostic.key}>
+                      <strong>{t(`${diagnostic.domain}Analyst`)}</strong>
+                      {diagnostic.source && <span> · {diagnostic.source}</span>}
+                      {diagnostic.retrievedAt && <span> · {diagnostic.retrievedAt}</span>}
+                      <code> · {diagnostic.code}</code>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </section>
         </div>
       )}
@@ -1413,16 +1531,24 @@ function EvidencePanel({
       ) : (
         <>
           {incremental ? (
-            <details className="audit-details evidence-bundle-audit">
-              <summary>
-                <strong>{t("evidenceBundleAudit")}</strong>
-                <span>{t("auditDetails")}</span>
-              </summary>
+            <>
               <EvidenceBundleSummary
                 evidence={evidence}
                 evidenceIndex={evidenceIndex}
+                mode="readable"
               />
-            </details>
+              <details className="audit-details evidence-bundle-audit">
+                <summary>
+                  <strong>{t("evidenceBundleAudit")}</strong>
+                  <span>{t("auditDetails")}</span>
+                </summary>
+                <EvidenceBundleSummary
+                  evidence={evidence}
+                  evidenceIndex={evidenceIndex}
+                  mode="technical"
+                />
+              </details>
+            </>
           ) : (
             <EvidenceBundleSummary
               evidence={evidence}
@@ -1434,7 +1560,7 @@ function EvidencePanel({
               <EvidenceCard
                 group={group}
                 focused={group.refs.includes(focusedRef)}
-                auditMetadata={incremental}
+                onSourceDetails={onSourceDetails}
                 key={group.alias}
               />
             ))}
@@ -1458,37 +1584,72 @@ function EvidencePanel({
   );
 }
 
+function collectionDiagnostics(node: ResearchNodeView) {
+  return (node.collection_summary?.domains ?? []).flatMap((domain) => {
+    const diagnostics = domain.diagnostic
+      ? [{
+          key: `${domain.domain}:domain:${domain.diagnostic.code}`,
+          domain: domain.domain,
+          code: domain.diagnostic.code,
+          source: "",
+          retrievedAt: "",
+        }]
+      : [];
+    (domain.sources ?? []).forEach((source, index) => {
+      if (!source.diagnostic) return;
+      diagnostics.push({
+        key: `${domain.domain}:source:${source.source}:${index}:${source.diagnostic.code}`,
+        domain: domain.domain,
+        code: source.diagnostic.code,
+        source: source.source,
+        retrievedAt: source.retrieved_at,
+      });
+    });
+    return diagnostics;
+  });
+}
+
 function EvidenceBundleSummary({
   evidence,
   evidenceIndex,
+  mode = "all",
 }: {
   evidence: EvidenceBundle;
   evidenceIndex: EvidenceReferenceIndex;
+  mode?: "all" | "readable" | "technical";
 }) {
   const { t } = useTranslation();
   return (
     <dl className="bundle-summary">
-      <div>
-        <dt>{t("evidenceDigest")}</dt>
-        <dd>{evidence.digest ?? "—"}</dd>
-      </div>
-      <div>
-        <dt>{t("analysisDate")}</dt>
-        <dd>{evidence.analysis_date}</dd>
-      </div>
-      <div>
-        <dt>{t("version")}</dt>
-        <dd>{evidence.version ?? "1"}</dd>
-      </div>
-      <div>
-        <dt>{t("displayedEvidence")}</dt>
-        <dd>
-          {t("evidenceBodiesSummary", {
-            groups: evidenceIndex.groups.length,
-            items: evidence.items.length,
-          })}
-        </dd>
-      </div>
+      {mode !== "readable" && (
+        <>
+          <div>
+            <dt>{t("evidenceDigest")}</dt>
+            <dd>{evidence.digest ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>{t("version")}</dt>
+            <dd>{evidence.version ?? "1"}</dd>
+          </div>
+        </>
+      )}
+      {mode !== "technical" && (
+        <>
+          <div>
+            <dt>{t("analysisDate")}</dt>
+            <dd>{evidence.analysis_date}</dd>
+          </div>
+          <div>
+            <dt>{t("displayedEvidence")}</dt>
+            <dd>
+              {t("evidenceBodiesSummary", {
+                groups: evidenceIndex.groups.length,
+                items: evidence.items.length,
+              })}
+            </dd>
+          </div>
+        </>
+      )}
     </dl>
   );
 }
@@ -1496,18 +1657,15 @@ function EvidenceBundleSummary({
 function EvidenceCard({
   group,
   focused,
-  auditMetadata,
+  onSourceDetails,
 }: {
   group: EvidenceDisplayGroup;
   focused: boolean;
-  auditMetadata: boolean;
+  onSourceDetails: (ref: string) => void;
 }) {
   const { t } = useTranslation();
   const item = group.canonical;
   const hasValue = item.value !== null && item.value !== undefined;
-  const requestedDates = uniqueStrings(
-    group.items.map((entry) => entry.requested_date),
-  );
   const effectiveDates = uniqueStrings(
     group.items.flatMap((entry) =>
       entry.effective_date ? [entry.effective_date] : [],
@@ -1518,18 +1676,11 @@ function EvidenceCard({
       entry.available_at ? [entry.available_at] : [],
     ),
   );
-  const auditRecords = group.items.map(
-    ({ content: _content, ...entry }) => entry,
-  );
   const metadata = (
     <dl className="evidence-metadata">
       <div>
         <dt>{t("source")}</dt>
         <dd>{group.sources.join(", ")}</dd>
-      </div>
-      <div>
-        <dt>{t("requestedDate")}</dt>
-        <dd>{requestedDates.join(", ")}</dd>
       </div>
       <div>
         <dt>{t("effectiveDate")}</dt>
@@ -1566,40 +1717,22 @@ function EvidenceCard({
           <h3>{group.evidenceTypes.join(" · ")}</h3>
         </div>
         <span className={`quality quality-${group.quality}`}>
-          {group.quality}
+          {t(`quality_${group.quality}`)}
         </span>
       </header>
-      {auditMetadata ? (
-        <details className="audit-disclosure evidence-metadata-disclosure">
-          <summary>{t("evidenceMetadata")}</summary>
-          {metadata}
-        </details>
-      ) : metadata}
+      {metadata}
       {item.content && (
         <div className="evidence-content">
           <Markdown>{item.content}</Markdown>
         </div>
       )}
-      <details className="provenance-details evidence-audit-details">
-        <summary>{t("canonicalEvidenceAndProvenance")}</summary>
-        <div className="canonical-ref-list">
-          {group.refs.map((ref) => (
-            <div key={ref}>
-              <code>{ref}</code>
-              <button
-                type="button"
-                className="copy-ref-button"
-                title={ref}
-                aria-label={t("copyEvidenceId", { ref })}
-                onClick={() => void copyEvidenceRef(ref)}
-              >
-                {t("copy")}
-              </button>
-            </div>
-          ))}
-        </div>
-        <pre>{JSON.stringify(auditRecords, null, 2)}</pre>
-      </details>
+      <button
+        type="button"
+        className="button compact-button evidence-source-button"
+        onClick={() => onSourceDetails(item.ref)}
+      >
+        {t("viewSourceDetails")}
+      </button>
     </section>
   );
 }
@@ -1668,7 +1801,7 @@ function EvidenceSourceDrawer({
               </div>
               <div>
                 <dt>{t("quality")}</dt>
-                <dd>{group.quality}</dd>
+                <dd>{t(`quality_${group.quality}`)}</dd>
               </div>
               <div>
                 <dt>{t("effectiveDate")}</dt>
@@ -1701,6 +1834,8 @@ function EvidenceSourceDrawer({
                     <button
                       type="button"
                       className="copy-ref-button"
+                      title={ref}
+                      aria-label={t("copyEvidenceId", { ref })}
                       onClick={() => void copyEvidenceRef(ref)}
                     >
                       {t("copy")}

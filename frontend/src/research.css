@@ -1503,26 +1503,57 @@ details[open] > summary .details-chevron {
   justify-content: space-between;
 }
 
-.calculation-record-list article > code,
-.calculation-record-list article > small {
-  display: block;
-  margin-top: 8px;
-}
-
-.calculation-record-list dl {
+.calculation-record-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 18px;
   margin: 12px 0 0;
 }
 
-.calculation-record-list dl > div {
+.calculation-record-summary > div {
   display: flex;
   gap: 6px;
 }
 
 .calculation-record-list dd {
   margin: 0;
+}
+
+.numeric-calculation-detail,
+.numeric-raw-candidate {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.numeric-calculation-detail > summary,
+.numeric-raw-candidate > summary {
+  width: fit-content;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.numeric-calculation-detail > dl {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.numeric-calculation-detail > dl > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.25fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.calculation-inputs {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.calculation-inputs > div {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 1120px) {

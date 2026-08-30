@@ -53,6 +53,7 @@ export interface ActivityWorkUnit {
 export interface ActivityAttempt {
   attempt: number;
   state: ActivityState;
+  events: RunEvent[];
   workUnits: ActivityWorkUnit[];
   currentStage: ActivityStage;
   stageStates: Partial<Record<ActivityStage, ActivityState>>;
@@ -117,6 +118,7 @@ export function aggregateRunActivity(
       return {
         attempt,
         state: attemptState(attemptEvents, workUnits, authoritative),
+        events: attemptEvents,
         workUnits,
         currentStage:
           authoritative && ["succeeded", "failed", "cancelled"].includes(authoritative)

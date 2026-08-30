@@ -488,6 +488,9 @@ test("restores deliberation and resolves evidence references across run views", 
     "aria-selected",
     "true",
   );
+  expect(screen.queryByText("Run metrics and diagnostics")).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+  fireEvent.click(await screen.findByText("Run metrics and diagnostics"));
   expect(screen.getAllByText("1,200")[0]).toBeVisible();
   expect(screen.getByText("1/4")).toBeVisible();
   expect(
@@ -526,6 +529,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(
     screen.getByText("1 unique bodies · 2 audit records"),
   ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "View source details" }));
   fireEvent.click(screen.getByText("Canonical IDs and provenance"));
   expect(screen.getByText("fixture-feed", { exact: false })).toBeVisible();
   expect(screen.getByText("ev_fedcba987654")).toBeVisible();
@@ -537,6 +541,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
     "ev_fedcba987654",
   );
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
   fireEvent.click(screen.getByRole("tab", { name: "Reports" }));
   const fundamentalsTab = await screen.findByRole("button", {
@@ -610,8 +615,11 @@ test("restores deliberation and resolves evidence references across run views", 
     auditSummaries[0].closest("summary")?.querySelector(".details-chevron"),
   ).not.toBeNull();
   fireEvent.click(auditSummaries[0]);
-  expect(screen.getByText("calc_market_reference")).toBeVisible();
-  expect(screen.getByText("Thesis: Observed market anchor")).toBeVisible();
+  const marketCalculation = screen.getByText("Observed market anchor").closest("article");
+  expect(within(marketCalculation!).getByText("Thesis", { exact: true })).toBeVisible();
+  expect(within(marketCalculation!).getByText("calc_market_reference")).not.toBeVisible();
+  fireEvent.click(within(marketCalculation!).getByText("Formula and Evidence"));
+  expect(within(marketCalculation!).getByText("calc_market_reference")).toBeVisible();
   const referenceTable = screen.getByRole("table", {
     name: "Market reference levels",
   });
@@ -655,7 +663,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect((await screen.findAllByText("Commit complete"))[0]).toBeVisible();
   expect(screen.getByText("judge.research")).toBeVisible();
   expect(screen.getByText("run.lifecycle")).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Earliest first" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Earliest first" })).toBeVisible();
   expect(FakeEventSource.instance.closed).toBe(true);
   await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2));
   expect(api.artifacts).toHaveBeenCalledTimes(1);
@@ -725,6 +733,8 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   const appendix = appendixSummary.closest("details");
   expect(appendix).not.toHaveAttribute("open");
   fireEvent.click(appendixSummary);
+  expect(screen.getByText(/repair-value/)).not.toBeVisible();
+  fireEvent.click(screen.getByText("Raw candidate"));
   expect(screen.getByText("Valuation assessment")).toBeVisible();
   expect(screen.getByText(/repair-value/)).toBeVisible();
   expect(screen.queryByText(/initial-value/)).not.toBeInTheDocument();
@@ -823,7 +833,7 @@ test("shows requirement comparisons separately from candidate drafts", async () 
   const appendix = summary.closest("details");
   expect(appendix).not.toHaveAttribute("open");
   fireEvent.click(summary);
-  expect(screen.getByText("Calculation verified")).toBeVisible();
+  expect(screen.getAllByText("Calculation verified")[0]).toBeVisible();
   expect(screen.getByText("Display mismatched")).toBeVisible();
   expect(
     screen.getByText(
@@ -834,6 +844,31 @@ test("shows requirement comparisons separately from candidate drafts", async () 
   fireEvent.click(screen.getByText("Formula, inputs, and Evidence"));
   expect(screen.getByText("price / eps")).toBeVisible();
   expect(screen.getByText("numeric.requirement.req_forward_pe.result_mismatch")).toBeVisible();
+});
+
+test("formats verified calculations before exposing formula audit fields", async () => {
+  render(
+    <Router initialPath="/runs/run-1?view=decision">
+      <RunDetail />
+    </Router>,
+  );
+
+  fireEvent.click(await screen.findByText("Decision-critical calculation audit"));
+  const calculation = screen.getByText("Observed market anchor").closest("article");
+  expect(calculation).not.toBeNull();
+  expect(within(calculation!).getByText("Calculation verified")).toBeVisible();
+  expect(within(calculation!).getByText("100 USD")).toBeVisible();
+  expect(within(calculation!).getByText("2026-07-24")).toBeVisible();
+  expect(within(calculation!).getByText("calc_market_reference")).not.toBeVisible();
+  within(calculation!)
+    .getAllByText("close", { exact: true })
+    .forEach((value) => expect(value).not.toBeVisible());
+
+  fireEvent.click(within(calculation!).getByText("Formula and Evidence"));
+  expect(within(calculation!).getByText("calc_market_reference")).toBeVisible();
+  within(calculation!)
+    .getAllByText("close", { exact: true })
+    .forEach((value) => expect(value).toBeVisible());
 });
 
 test("opens a locked Full clone template instead of rerunning immediately", async () => {
@@ -964,10 +999,13 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByText("Balanced research summary.")).toBeVisible();
   expect(screen.getByText(/Newly completed market session/)).toBeVisible();
   expect(screen.getByText("A complete refresh would resolve the scope gap.")).toBeVisible();
-  expect(screen.getByText("Current instrument")).toBeVisible();
-  expect(screen.getByText("S&P 500")).toBeVisible();
-  expect(screen.getByText("NASDAQ 100")).toBeVisible();
+  expect(screen.getAllByText("Current instrument")[0]).toBeVisible();
+  expect(screen.getAllByText("S&P 500")[0]).toBeVisible();
+  expect(screen.getAllByText("NASDAQ 100")[0]).toBeVisible();
   expect(screen.getAllByText(/Reported benchmark difference/)).toHaveLength(2);
+  fireEvent.click(screen.getByText("Decision-critical calculation audit"));
+  expect(screen.getByText("Observed market anchor")).toBeVisible();
+  expect(screen.getByText("calc_market_reference")).not.toBeVisible();
   expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -997,6 +1035,14 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   const reaffirmedSummary = screen.getByText("Show 1 reaffirmed item");
   expect(reaffirmedSummary).toBeInTheDocument();
   expect(reaffirmedSummary.closest("details")).not.toHaveAttribute("open");
+  const reassessmentPanel = screen
+    .getByRole("heading", { name: "Reassessment" })
+    .closest("article");
+  expect(within(reassessmentPanel!).queryByText("Audit details")).toBeNull();
+  expect(within(reassessmentPanel!).getByText("thesis", { exact: true })).not.toBeVisible();
+  fireEvent.click(within(reassessmentPanel!).getByText("Technical mapping"));
+  expect(within(reassessmentPanel!).getByText("thesis", { exact: true })).toBeVisible();
+  expect(within(reassessmentPanel!).getByText("risks.0", { exact: true })).toBeVisible();
 });
 
 test("keeps baseline Evidence out of Evidence updates and supports historical briefs", async () => {
@@ -1061,19 +1107,28 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(await screen.findByRole("heading", { name: "Collection Summary" })).toBeVisible();
   expect(api.evidence).not.toHaveBeenCalled();
   expect(screen.getByText("Price snapshot · Composite snapshot")).toBeVisible();
-  expect(screen.getByText("fixture.news")).not.toBeVisible();
+  expect(screen.getByText("fixture.news")).toBeVisible();
+  expect(screen.getAllByText("Fallback").length).toBeGreaterThan(0);
   const collectionSummary = screen
     .getByRole("heading", { name: "Collection Summary" })
     .closest("section");
-  fireEvent.click(within(collectionSummary!).getByText("Audit details"));
-  expect(screen.getByText("fixture.news")).toBeVisible();
-  expect(screen.getByText("collection.partial")).toBeVisible();
+  expect(within(collectionSummary!).getByText(/collection\.partial/)).not.toBeVisible();
+  fireEvent.click(within(collectionSummary!).getByText("Collection diagnostics"));
+  expect(screen.getByText(/collection\.partial/)).toBeVisible();
 
   const evidenceCard = document.querySelector<HTMLElement>(".evidence-card");
   expect(evidenceCard).not.toBeNull();
-  expect(within(evidenceCard!).getByText("Requested date")).not.toBeVisible();
-  fireEvent.click(within(evidenceCard!).getByText("Evidence metadata"));
-  expect(within(evidenceCard!).getByText("Requested date")).toBeVisible();
+  expect(within(evidenceCard!).getByText("Source")).toBeVisible();
+  expect(within(evidenceCard!).getByText("Effective date")).toBeVisible();
+  expect(within(evidenceCard!).queryByText("Evidence metadata")).toBeNull();
+  expect(within(evidenceCard!).queryByText("Canonical IDs and provenance")).toBeNull();
+  fireEvent.click(
+    within(evidenceCard!).getByRole("button", { name: "View source details" }),
+  );
+  expect(await screen.findByRole("dialog", { name: "Source details" })).toBeVisible();
+  fireEvent.click(screen.getByText("Canonical IDs and provenance"));
+  expect(screen.getByText("ev_fedcba987654")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
   fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
   expect(
@@ -1307,7 +1362,7 @@ test("loads only Run Detail initially and refreshes open deliberation artifacts 
   await waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(2));
 });
 
-test("localizes Incremental activity while keeping raw event data in audit details", async () => {
+test("localizes Incremental activity and keeps one technical event log per attempt", async () => {
   const incremental = structuredClone(detail) as RunDetailType;
   incremental.run.research_kind = "incremental";
   incremental.run.full_baseline_run_id = "full-baseline";
@@ -1349,14 +1404,95 @@ test("localizes Incremental activity while keeping raw event data in audit detai
       created_at: "2026-07-24T00:01:20Z",
     } as RunEvent),
   );
+  act(() =>
+    FakeEventSource.instance.emit("node.output_retry", {
+      run_id: "run-1",
+      sequence: 10,
+      attempt: 1,
+      event_type: "node.output_retry",
+      node: "incremental.synthesis.serialize",
+      payload: { reason_code: "schema_validation" },
+      created_at: "2026-07-24T00:01:21Z",
+    } as RunEvent),
+  );
 
   const activityTitle = await screen.findByText("Collection · Collection update");
   const workUnit = activityTitle.closest("article");
   expect(within(workUnit!).getByText("Completed")).toBeVisible();
   expect(within(workUnit!).getByText("incremental.collect")).toBeVisible();
-  fireEvent.click(screen.getByText("Audit details"));
+  expect(screen.getByText("schema_validation")).toBeVisible();
+  const attempt = screen.getByText("Attempt 1").closest("details");
+  expect(within(attempt!).queryByText("Audit details")).not.toBeInTheDocument();
+  const technicalEvents = within(attempt!).getByText("Technical events (2)");
+  expect(screen.queryByText(/incremental\.collection_completed/)).not.toBeVisible();
+  fireEvent.click(technicalEvents);
   expect(screen.getByText(/incremental\.collection_completed/)).toBeVisible();
   expect(screen.getAllByText(/incremental\.collect/).some((element) => element.matches("code"))).toBe(true);
+});
+
+test("orders work units within each attempt and restores the activity preference", async () => {
+  localStorage.setItem("tradingagents-timeline-order", "oldest");
+  render(
+    <Router initialPath="/runs/run-1?view=timeline">
+      <RunDetail />
+    </Router>,
+  );
+  await screen.findByRole("tab", { name: "Activity" });
+
+  act(() => {
+    FakeEventSource.instance.emit("node.completed", {
+      run_id: "run-1",
+      sequence: 9,
+      attempt: 1,
+      event_type: "node.completed",
+      node: "analyst.news.report",
+      payload: {},
+      created_at: "2026-07-24T00:01:20Z",
+    } as RunEvent);
+    FakeEventSource.instance.emit("node.completed", {
+      run_id: "run-1",
+      sequence: 10,
+      attempt: 1,
+      event_type: "node.completed",
+      node: "risk.review",
+      payload: {},
+      created_at: "2026-07-24T00:01:21Z",
+    } as RunEvent);
+  });
+
+  const attempt = screen.getByText("Attempt 1").closest("details");
+  expect(attempt).not.toBeNull();
+  const nodes = () =>
+    within(attempt!).getAllByText(/^(analyst\.news\.report|risk\.review)$/)
+      .map((element) => element.textContent);
+
+  expect(screen.getByRole("button", { name: "Earliest first" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(nodes()).toEqual(["analyst.news.report", "risk.review"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Latest first" }));
+  expect(nodes()).toEqual(["risk.review", "analyst.news.report"]);
+  expect(localStorage.getItem("tradingagents-timeline-order")).toBe("newest");
+});
+
+test("shows run metrics only in the Activity view", async () => {
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  await screen.findByRole("tab", { name: "Overview" });
+  expect(screen.queryByText("Attempt metrics")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+  const metricsSummary = await screen.findByText("Run metrics and diagnostics");
+  expect(screen.getByText("4 LLM calls · 1,200 input · 400 output · 12.4s")).toBeVisible();
+  expect(screen.getByText("Attempt metrics")).not.toBeVisible();
+  fireEvent.click(metricsSummary);
+  expect(await screen.findByText("Attempt metrics")).toBeVisible();
 });
 
 test("shows trashed retention details and restores without deleting data", async () => {
@@ -1454,6 +1590,8 @@ test("groups metrics by role and expands phase observations", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+  fireEvent.click(await screen.findByText("Run metrics and diagnostics"));
   const roleMetricsTitle = screen.getByText("Metrics by role");
   const roleMetrics = roleMetricsTitle.closest("details");
   expect(roleMetrics).not.toHaveAttribute("open");
@@ -1616,6 +1754,7 @@ test("shows persisted run metrics when a failed run has no result", async () => 
   );
 
   expect(await screen.findByText("Validated output failed.")).toBeVisible();
+  fireEvent.click(screen.getByText("Run metrics and diagnostics"));
   expect(screen.getAllByText("1,200")[0]).toBeVisible();
   fireEvent.click(screen.getByText("Attempt metrics", { exact: false }));
   expect(screen.getByText("StructuredOutputError")).toBeVisible();

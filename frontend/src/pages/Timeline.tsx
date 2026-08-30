@@ -123,8 +123,7 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
                     </div>
                     {((domain.sources?.length ?? 0) > 0 ||
                       domain.diagnostic) && (
-                      <details className="audit-disclosure">
-                        <summary>{t("auditDetails")}</summary>
+                      <div className="timeline-collection-sources">
                         {(domain.sources?.length ?? 0) > 0 && (
                           <ul className="collection-source-list">
                             {domain.sources?.map((source, index) => (
@@ -137,21 +136,11 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
                                     {" "}· {t("fallback")}
                                   </span>
                                 )}
-                                {source.diagnostic && (
-                                  <span className="muted-copy">
-                                    {" "}· {source.diagnostic.code}
-                                  </span>
-                                )}
                               </li>
                             ))}
                           </ul>
                         )}
-                        {domain.diagnostic && (
-                          <p className="muted-copy">
-                            {domain.diagnostic.code}
-                          </p>
-                        )}
-                      </details>
+                      </div>
                     )}
                   </li>
                 ))}
@@ -168,10 +157,6 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
                   <li key={entry.component_id}>
                     <strong>{t(`reassessment_${entry.disposition}`)}</strong>
                     <p>{entry.reason}</p>
-                    <details className="audit-disclosure">
-                      <summary>{t("auditDetails")}</summary>
-                      <code>{entry.component_id}</code>
-                    </details>
                   </li>
                 ))}
               </ul>
@@ -254,6 +239,39 @@ function NodeCard({
           <div><dt>{t("methodProvider")}</dt><dd>{String(node.method_snapshot.llm_provider ?? t("notRecorded"))}</dd></div>
           <div><dt>{t("runId")}</dt><dd><code>{node.id}</code></dd></div>
         </dl>
+        {(node.collection_summary?.domains ?? []).some(
+          (domain) =>
+            domain.diagnostic ||
+            (domain.sources ?? []).some((source) => source.diagnostic),
+        ) && (
+          <section>
+            <h4>{t("collectionDiagnostics")}</h4>
+            <ul className="compact-list">
+              {(node.collection_summary?.domains ?? []).flatMap((domain) => [
+                ...(domain.diagnostic
+                  ? [`${domain.domain}: ${domain.diagnostic.code}`]
+                  : []),
+                ...(domain.sources ?? []).flatMap((source) =>
+                  source.diagnostic
+                    ? [`${domain.domain}/${source.source}: ${source.diagnostic.code}`]
+                    : [],
+                ),
+              ]).map((diagnostic) => <li key={diagnostic}><code>{diagnostic}</code></li>)}
+            </ul>
+          </section>
+        )}
+        {(node.reassessment?.entries?.length ?? 0) > 0 && (
+          <section>
+            <h4>{t("technicalMapping")}</h4>
+            <ul className="compact-list">
+              {node.reassessment?.entries.map((entry) => (
+                <li key={entry.component_id}>
+                  <code>{entry.component_id}</code> · {t(`reassessment_${entry.disposition}`)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <details>
           <summary>{t("methodSnapshot")}</summary>
           <pre>{JSON.stringify(node.method_snapshot, null, 2)}</pre>

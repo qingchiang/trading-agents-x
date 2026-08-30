@@ -211,13 +211,15 @@ test("renders a Full root and a structurally distinct Incremental child", async 
   expect(screen.getByText("Collection Summary")).toBeVisible();
   expect(screen.getByText("News")).toBeVisible();
   expect(screen.getByText("Partial")).toBeVisible();
+  expect(screen.getByText("sec")).toBeVisible();
   const incrementalCard = document.querySelector<HTMLElement>(
     ".research-node-card.incremental",
   );
   expect(incrementalCard).not.toBeNull();
+  expect(within(incrementalCard!).getAllByText("Audit details")).toHaveLength(1);
+  expect(within(incrementalCard!).getByText(/coverage\.partial/)).not.toBeVisible();
   fireEvent.click(within(incrementalCard!).getAllByText("Audit details")[0]);
-  expect(screen.getByText("sec")).toBeVisible();
-  expect(screen.getByText("coverage.partial")).toBeVisible();
+  expect(screen.getByText(/coverage\.partial/)).toBeVisible();
   expect(document.querySelector(".research-node-card.full")).toBeInTheDocument();
   expect(document.querySelector(".research-node-card.incremental")).toBeInTheDocument();
 });

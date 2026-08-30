@@ -1235,6 +1235,18 @@ label small {
   cursor: pointer;
 }
 
+.activity-attempt-body {
+  max-height: clamp(320px, 58dvh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.activity-attempt-body:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
 .activity-state {
   padding: 3px 8px;
   color: var(--muted);
@@ -1332,6 +1344,18 @@ label small {
   font-size: 11px;
 }
 
+.activity-diagnostic {
+  margin: 6px 0 0;
+  color: #8b3f27;
+  font-size: 12px;
+}
+
+.attempt-technical-events {
+  margin: 4px 16px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
 .activity-raw-events {
   display: grid;
   gap: 8px;
@@ -1352,20 +1376,17 @@ label small {
   gap: 8px;
 }
 
-.collection-domain-audit {
-  margin-top: 6px;
+.collection-source-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.collection-domain-audit code {
-  overflow-wrap: anywhere;
-}
-
-.evidence-metadata-disclosure {
-  margin: 0 18px 14px;
-}
-
-.evidence-metadata-disclosure .evidence-metadata {
-  padding: 14px 0 0;
+.collection-diagnostics {
+  margin-top: 10px;
 }
 
 .timeline-item strong {
@@ -1860,6 +1881,10 @@ label small {
   padding: 0 18px 18px;
 }
 
+.evidence-source-button {
+  margin: 0 18px 18px;
+}
+
 .provenance-details {
   margin: 0 18px 18px;
   color: var(--muted);
@@ -1988,6 +2013,24 @@ label small {
 .run-metrics {
   padding: 0;
   overflow: hidden;
+}
+
+.run-metrics-disclosure > summary {
+  display: flex;
+  gap: 12px 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 20px;
+  cursor: pointer;
+}
+
+.run-metrics-disclosure > summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.run-metrics-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .metrics-observation-note,
@@ -2266,7 +2309,7 @@ label small {
 }
 
 .runs-table th:nth-child(2) {
-  width: 36%;
+  width: 28%;
 }
 
 .runs-table th:nth-child(3) {
@@ -2290,7 +2333,17 @@ label small {
 }
 
 .runs-table th:last-child {
-  width: 76px;
+  width: 88px;
+}
+
+.run-actions-cell {
+  text-align: center;
+}
+
+.run-actions-cell .button {
+  display: inline-flex;
+  min-width: 58px;
+  justify-content: center;
 }
 
 .selection-cell {
@@ -3317,9 +3370,27 @@ button.research-kind-badge {
 }
 
 .research-warning-block {
+  padding: 14px 16px;
   color: #704605;
   background: var(--amber-soft) !important;
-  border-color: rgb(188 115 17 / 26%) !important;
+  border: 1px solid rgb(188 115 17 / 26%) !important;
+  border-radius: 10px;
+}
+
+.research-warning-block > :first-child {
+  margin-top: 0;
+}
+
+.research-warning-block > :last-child {
+  margin-bottom: 0;
+}
+
+.performance-data-audit {
+  margin: 16px 22px 22px;
+}
+
+.performance-data-audit table {
+  min-width: 860px;
 }
 
 .audit-disclosure {
@@ -3345,10 +3416,6 @@ button.research-kind-badge {
   border-radius: 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.event-audit {
-  margin-top: 6px;
 }
 
 .node-actions {
@@ -3731,6 +3798,15 @@ button.research-kind-badge {
   .activity-stage-overview,
   .activity-attempts {
     padding-inline: 15px;
+  }
+
+  .activity-attempt-body {
+    max-height: clamp(280px, 56dvh, 520px);
+  }
+
+  .run-metrics-disclosure > summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .trash-state-tabs {
