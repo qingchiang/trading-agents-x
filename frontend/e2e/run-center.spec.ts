@@ -706,6 +706,54 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),
   ).toBeVisible();
+  const decisionWidth = await page.locator(".decision-hero").evaluate((hero) => {
+    const summary = hero.querySelector<HTMLElement>(".decision-summary");
+    if (!summary) throw new Error("decision summary not found");
+    return {
+      hero: hero.getBoundingClientRect().width,
+      summary: summary.getBoundingClientRect().width,
+    };
+  });
+  expect(decisionWidth.summary).toBeGreaterThan(decisionWidth.hero * 0.7);
+
+  await page.goto("/runs/run-daiichi?view=decision");
+  const detailIdentity = page.locator(".run-title .instrument-identity");
+  await expect(detailIdentity).toContainText("第一三共");
+  const detailGeometry = await detailIdentity.evaluate((element) => {
+    const primary = element.querySelector<HTMLElement>(".instrument-primary-name");
+    const alternate = element.querySelector<HTMLElement>(".instrument-alternate-name");
+    if (!primary || !alternate) throw new Error("detail names not found");
+    return {
+      primaryClientWidth: primary.clientWidth,
+      primaryScrollWidth: primary.scrollWidth,
+      alternateClientWidth: alternate.clientWidth,
+      alternateScrollWidth: alternate.scrollWidth,
+      gap:
+        alternate.getBoundingClientRect().left -
+        primary.getBoundingClientRect().right,
+    };
+  });
+  expect(detailGeometry.primaryScrollWidth).toBeLessThanOrEqual(
+    detailGeometry.primaryClientWidth + 1,
+  );
+  expect(detailGeometry.alternateScrollWidth).toBeLessThanOrEqual(
+    detailGeometry.alternateClientWidth + 1,
+  );
+  expect(detailGeometry.gap).toBeGreaterThanOrEqual(6);
+  expect(detailGeometry.gap).toBeLessThanOrEqual(10);
+  const detailKindBadge = page
+    .locator(".run-title")
+    .getByRole("button", { name: "Full research" });
+  const badgeGeometry = await detailKindBadge.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(badgeGeometry.scrollHeight).toBeLessThanOrEqual(
+    badgeGeometry.clientHeight,
+  );
+  await expect(page.locator(".run-heading .subtitle").first()).toHaveText(
+    "2026-07-24 · Attempt 1",
+  );
 
   await page.goto("/timelines/NVDA");
   await expect(page.getByText("Primary Cycle")).toBeVisible();
@@ -713,6 +761,12 @@ test("runs, templates, trash, and restores local research", async ({
     "href",
     "/runs/run-report",
   );
+  const timelineSummary = page.locator(".timeline-decision-summary").first();
+  const timelineWidth = await timelineSummary.evaluate((element) => ({
+    summary: element.getBoundingClientRect().width,
+    card: element.closest(".research-node-card")?.getBoundingClientRect().width ?? 0,
+  }));
+  expect(timelineWidth.summary).toBeGreaterThan(timelineWidth.card * 0.85);
 
   await page.goto("/runs");
   const runsSearch = page.locator("#runs-search");
@@ -743,15 +797,30 @@ test("runs, templates, trash, and restores local research", async ({
     return {
       primaryWidth: primary.getBoundingClientRect().width,
       alternateWidth: alternate.getBoundingClientRect().width,
+      nameGap:
+        alternate.getBoundingClientRect().left -
+        primary.getBoundingClientRect().right,
       primaryClientWidth: primary.clientWidth,
       primaryScrollWidth: primary.scrollWidth,
       alternateClientWidth: alternate.clientWidth,
       alternateScrollWidth: alternate.scrollWidth,
     };
   });
-  expect(nameGeometry.primaryWidth).toBeGreaterThan(nameGeometry.alternateWidth);
-  expect(nameGeometry.primaryScrollWidth).toBeLessThanOrEqual(nameGeometry.primaryClientWidth);
-  expect(nameGeometry.alternateScrollWidth).toBeGreaterThan(nameGeometry.alternateClientWidth);
+  expect(nameGeometry.nameGap).toBeGreaterThanOrEqual(6);
+  expect(nameGeometry.nameGap).toBeLessThanOrEqual(10);
+  expect(nameGeometry.primaryScrollWidth).toBeLessThanOrEqual(nameGeometry.primaryClientWidth + 1);
+  expect(nameGeometry.alternateScrollWidth).toBeLessThanOrEqual(nameGeometry.alternateClientWidth + 1);
+
+  const daiichiKindBadge = page
+    .getByRole("row")
+    .filter({ hasText: "4568.T" })
+    .getByRole("button", { name: "Full research" });
+  await daiichiKindBadge.click();
+  const configuration = page.getByRole("tooltip", { name: "Research configuration" });
+  await expect(configuration).toContainText("gpt-5.4-mini");
+  await expect(configuration).toContainText("gpt-5.5");
+  await page.keyboard.press("Escape");
+  await expect(configuration).toBeHidden();
 
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
@@ -933,6 +1002,10 @@ test("compares active and explicitly shown Trash nodes without creating research
   ] });
   expect(researchCreateCalls).toBe(0);
 
+  await comparisonDialog.getByText(/Extended conclusions|扩展结论|拡張結論/).click();
+  await comparisonDialog.getByText(/Update audit|更新审计|更新監査/).click();
+  await comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/).click();
+
   await page.setViewportSize({ width: 390, height: 844 });
   const dialogBox = await comparisonDialog.boundingBox();
   expect(dialogBox).not.toBeNull();
@@ -940,6 +1013,10 @@ test("compares active and explicitly shown Trash nodes without creating research
   expect(dialogBox?.y).toBe(0);
   expect(dialogBox?.width).toBe(390);
   expect(dialogBox?.height).toBe(844);
+  const comparisonScroll = comparisonDialog.locator(".comparison-modal-scroll");
+  await comparisonScroll.focus();
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
 });
 

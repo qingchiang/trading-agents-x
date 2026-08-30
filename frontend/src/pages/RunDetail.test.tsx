@@ -33,12 +33,16 @@ vi.mock("../api/client", () => ({
 
 class FakeEventSource {
   static instance: FakeEventSource;
+  static instances: FakeEventSource[] = [];
   listeners = new Map<string, EventListener>();
   onerror: ((event: Event) => void) | null = null;
   closed = false;
+  url: string;
 
-  constructor(_url: string) {
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instance = this;
+    FakeEventSource.instances.push(this);
   }
 
   addEventListener(name: string, listener: EventListener) {
@@ -441,6 +445,7 @@ const artifacts = [
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  FakeEventSource.instances = [];
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -465,6 +470,7 @@ test("restores deliberation and resolves evidence references across run views", 
   );
 
   expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
+  await waitFor(() => expect(FakeEventSource.instance).toBeDefined());
   expect(
     FakeEventSource.instance.listeners.has(
       "decision.numeric_display_scale_normalized",
@@ -1074,6 +1080,129 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
     await screen.findByText("This historical run did not record an analysis brief."),
   ).toBeVisible();
   await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
+});
+
+test.each([
+  ["running", "The analysis brief is still being generated."],
+  ["failed", "This run did not produce an analysis brief."],
+  ["cancelled", "This run did not produce an analysis brief."],
+] as const)("describes a missing Incremental brief for a %s run", async (status, message) => {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.research_kind = "incremental";
+  incremental.run.status = status;
+  incremental.result!.status = status;
+  incremental.research_node = {
+    id: "run-1",
+    cycle_id: "full-baseline",
+    instrument: "NVDA",
+    analysis_date: "2026-07-24",
+    research_schema_version: "1",
+    information_cutoff_at: "2026-07-24T20:00:00Z",
+    method_snapshot: {},
+    research_kind: "incremental",
+    full_baseline_run_id: "full-baseline",
+    is_baseline_compatible: true,
+    is_cycle_head: true,
+    is_primary: true,
+    is_active: true,
+  } as ResearchNodeView;
+  incremental.incremental_context = {
+    analysis_brief: null,
+    full_baseline: {
+      run_id: "full-baseline",
+      analysis_date: "2026-07-20",
+      decision: detail.result!.decision!,
+    },
+  };
+  vi.mocked(api.run).mockResolvedValue(incremental);
+
+  render(
+    <Router initialPath="/runs/run-1?view=brief">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText(message)).toBeVisible();
+});
+
+test("streams through historical failed attempts before closing on the current success", async () => {
+  const retried = structuredClone(detail) as RunDetailType;
+  retried.run.attempt = 4;
+  retried.run.status = "succeeded";
+  vi.mocked(api.run).mockResolvedValue(retried);
+
+  render(
+    <Router initialPath="/runs/run-1?view=timeline">
+      <RunDetail />
+    </Router>,
+  );
+  await screen.findByRole("heading", { name: "Activity" });
+  const stream = FakeEventSource.instance;
+
+  await act(async () => {
+    stream.emit("run.failed", {
+      run_id: "run-1",
+      sequence: 11,
+      attempt: 1,
+      event_type: "run.failed",
+      node: null,
+      payload: {},
+      created_at: "2026-08-27T09:59:17Z",
+    });
+  });
+  expect(stream.closed).toBe(false);
+
+  await act(async () => {
+    stream.emit("run.succeeded", {
+      run_id: "run-1",
+      sequence: 47,
+      attempt: 4,
+      event_type: "run.succeeded",
+      node: null,
+      payload: {},
+      created_at: "2026-08-27T15:08:50Z",
+    });
+  });
+  expect(stream.closed).toBe(true);
+});
+
+test("opens a fresh event stream from the last sequence after retry", async () => {
+  const failed = structuredClone(detail) as RunDetailType;
+  failed.run.status = "failed";
+  failed.run.attempt = 1;
+  failed.result!.status = "failed";
+  const queued = structuredClone(failed) as RunDetailType;
+  queued.run.status = "queued";
+  queued.run.attempt = 2;
+  queued.result!.status = "queued";
+  let current = failed;
+  vi.mocked(api.run).mockImplementation(async () => current);
+  vi.mocked(api.action).mockImplementation(async () => {
+    current = queued;
+    return queued.run;
+  });
+
+  render(
+    <Router initialPath="/runs/run-1?view=timeline">
+      <RunDetail />
+    </Router>,
+  );
+  await screen.findByRole("heading", { name: "Activity" });
+  const first = FakeEventSource.instance;
+  act(() => first.emit("run.failed", {
+    run_id: "run-1",
+    sequence: 11,
+    attempt: 1,
+    event_type: "run.failed",
+    node: null,
+    payload: {},
+    created_at: "2026-08-27T09:59:17Z",
+  }));
+  expect(first.closed).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+  expect(FakeEventSource.instance.url).toBe("/api/v1/runs/run-1/events?after=11");
 });
 
 function performanceCalculation(unroundedReturn: number) {

@@ -38,6 +38,17 @@
   box-sizing: border-box;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html {
   min-width: 320px;
   min-height: 100%;
@@ -574,13 +585,14 @@ tbody tr:hover {
 
 .instrument-name-line {
   display: flex;
-  min-width: 0;
   align-items: baseline;
   gap: 8px;
+  min-width: 0;
+  width: 100%;
 }
 
 .instrument-primary-name {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -593,8 +605,7 @@ tbody tr:hover {
 }
 
 .instrument-alternate-name {
-  flex: 0 20 33%;
-  max-width: min(280px, 33%);
+  flex: 0 20 auto;
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, var(--muted) 72%, transparent);
@@ -614,10 +625,16 @@ tbody tr:hover {
 
 .instrument-identity.prominent {
   gap: 1px;
+  width: auto;
+  max-width: 100%;
+}
+
+.instrument-identity.prominent .instrument-name-line {
+  width: auto;
+  max-width: 100%;
 }
 
 .instrument-identity.prominent .instrument-alternate-name {
-  max-width: min(520px, 58vw);
   font-size: 14px;
 }
 
@@ -956,6 +973,11 @@ label small {
   align-items: flex-end;
 }
 
+.run-heading > div:first-child {
+  flex: 1 1 640px;
+  min-width: 0;
+}
+
 .back-link {
   display: inline-block;
   margin-bottom: 12px;
@@ -964,8 +986,14 @@ label small {
 
 .run-title {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   align-items: center;
+  min-width: 0;
+}
+
+.run-title .instrument-identity.prominent {
+  flex: 0 1 auto;
 }
 
 .run-title h1 {
@@ -1175,8 +1203,13 @@ label small {
   box-shadow: 0 0 0 3px rgb(211 139 32 / 12%);
 }
 
-.activity-stage-track li.failed > span {
+.activity-stage-track li.failed > span,
+.activity-stage-track li.cancelled > span {
   background: var(--red);
+}
+
+.activity-stage-track li.interrupted > span {
+  background: var(--muted-2);
 }
 
 .activity-attempts {
@@ -1212,9 +1245,15 @@ label small {
 }
 
 .activity-state.failed,
+.activity-state.cancelled,
 .activity-state.retrying,
 .activity-state.degraded {
   color: var(--red);
+}
+
+.activity-state.interrupted {
+  color: var(--muted);
+  background: var(--surface-soft);
 }
 
 .activity-unit-statuses {
@@ -1256,8 +1295,13 @@ label small {
   background: #d38b20;
 }
 
-.activity-work-unit.failed .activity-work-marker {
+.activity-work-unit.failed .activity-work-marker,
+.activity-work-unit.cancelled .activity-work-marker {
   background: var(--red);
+}
+
+.activity-work-unit.interrupted .activity-work-marker {
+  background: var(--muted-2);
 }
 
 .activity-work-unit strong,
@@ -2183,60 +2227,9 @@ label small {
 }
 
 .run-kind-cell {
-  display: grid;
-  gap: 5px;
-  min-width: 122px;
-  justify-items: start;
-}
-
-.run-kind-cell > small {
-  color: var(--muted);
-}
-
-.run-config-popover {
-  position: relative;
-}
-
-.run-config-trigger {
-  padding: 0;
-  font-size: 12px;
-}
-
-.run-config-card {
-  position: absolute;
-  z-index: 35;
-  top: calc(100% + 7px);
-  left: 0;
-  width: min(360px, 78vw);
-  padding: 14px;
-  color: var(--ink);
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 18px 45px rgb(18 38 63 / 18%);
-}
-
-.run-config-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.run-config-heading button {
-  width: 28px;
-  height: 28px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.run-config-heading button:hover,
-.run-config-heading button:focus-visible {
-  color: var(--ink);
-  background: var(--surface-soft);
+  min-width: max-content;
 }
 
 .trash-state-tabs {
@@ -2265,6 +2258,39 @@ label small {
 
 .run-management-panel {
   margin-top: 18px;
+}
+
+.runs-table {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+.runs-table th:nth-child(2) {
+  width: 36%;
+}
+
+.runs-table th:nth-child(3) {
+  width: 96px;
+}
+
+.runs-table th:nth-child(4) {
+  width: 112px;
+}
+
+.runs-table th:nth-child(5) {
+  width: 110px;
+}
+
+.runs-table th:nth-child(6) {
+  width: 100px;
+}
+
+.runs-table th:nth-child(7) {
+  width: 150px;
+}
+
+.runs-table th:last-child {
+  width: 76px;
 }
 
 .selection-cell {
@@ -2512,6 +2538,59 @@ label small {
   letter-spacing: 0.03em;
   border: 1px solid;
   border-radius: 999px;
+  white-space: nowrap;
+}
+
+button.research-kind-badge {
+  cursor: help;
+}
+
+.research-kind-tooltip-root {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.research-kind-tooltip {
+  position: fixed;
+  z-index: 180;
+  padding: 14px 15px;
+  color: var(--ink);
+  background: rgb(255 255 255 / 98%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgb(18 38 63 / 22%);
+  backdrop-filter: blur(8px);
+}
+
+.research-kind-tooltip > strong {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+}
+
+.research-kind-tooltip dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.research-kind-tooltip dl > div {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.4fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.research-kind-tooltip dt,
+.research-kind-tooltip dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.research-kind-tooltip dt {
+  color: var(--muted);
 }
 
 .research-kind-badge.full {
@@ -2672,7 +2751,7 @@ label small {
   flex: 1;
 }
 
-.comparison-selections button {
+.comparison-selection-chip {
   display: inline-flex;
   gap: 6px;
   align-items: center;
@@ -2681,7 +2760,28 @@ label small {
   background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.comparison-selection-chip > span:not(.research-kind-tooltip-root) {
+  color: var(--ink);
+}
+
+.comparison-selection-chip > button {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
   cursor: pointer;
+}
+
+.comparison-selection-chip > button:hover {
+  color: var(--red);
+  background: var(--red-soft);
 }
 
 .comparison-modal-backdrop {
@@ -2690,16 +2790,16 @@ label small {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 12px;
   background: rgb(5 13 24 / 68%);
   backdrop-filter: blur(5px);
 }
 
 .comparison-modal {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(1320px, 100%);
-  height: min(880px, calc(100vh - 48px));
+  height: min(960px, calc(100dvh - 24px));
   overflow: hidden;
   background: var(--surface);
   border: 1px solid rgb(255 255 255 / 35%);
@@ -2709,19 +2809,27 @@ label small {
 
 .comparison-modal-header {
   display: flex;
-  gap: 24px;
-  align-items: flex-start;
+  gap: 18px;
+  align-items: center;
   justify-content: space-between;
-  padding: 22px 24px 18px;
+  padding: 13px 18px;
   border-bottom: 1px solid var(--line);
 }
 
 .comparison-modal-header h2 {
-  margin: 4px 0;
-  font-size: 25px;
+  margin: 0;
+  font-size: 20px;
 }
 
-.comparison-modal-header > div:first-child > span {
+.comparison-modal-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.comparison-modal-title > span {
   color: var(--muted);
   font-size: 12px;
 }
@@ -2730,24 +2838,29 @@ label small {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.comparison-modal-controls {
-  display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 10px 24px;
-  background: var(--surface-soft);
-  border-bottom: 1px solid var(--line-soft);
 }
 
-.comparison-modal-controls label {
+.comparison-changed-toggle {
   display: inline-flex;
   gap: 8px;
   align-items: center;
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.comparison-changed-toggle > input {
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--blue);
 }
 
 .comparison-modal-scroll {
@@ -2756,8 +2869,10 @@ label small {
   gap: 14px;
   min-height: 0;
   padding: 20px 24px 28px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .comparison-warning-list {
@@ -2804,7 +2919,7 @@ label small {
 }
 
 .comparison-disclosure {
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
@@ -3012,16 +3127,15 @@ label small {
   font-size: 18px;
 }
 
-.decision-summary {
+.timeline-decision-summary {
   padding: 13px 15px;
   background: var(--surface-soft);
   border: 1px solid var(--line-soft);
   border-radius: 10px;
 }
 
-.decision-summary p,
+.timeline-decision-summary p,
 .incremental-thesis {
-  max-width: 82ch;
   margin: 9px 0 0;
   color: #354156;
 }
@@ -3488,17 +3602,12 @@ label small {
 
   .comparison-modal-header {
     display: grid;
-    gap: 12px;
-    padding: 16px;
+    gap: 9px;
+    padding: 12px 14px;
   }
 
   .comparison-modal-actions {
-    justify-content: flex-start;
-  }
-
-  .comparison-modal-controls {
-    justify-content: flex-start;
-    padding-inline: 16px;
+    justify-content: space-between;
   }
 
   .comparison-modal-scroll {

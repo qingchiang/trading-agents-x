@@ -21,19 +21,11 @@ import {
 import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
+import ResearchKindBadge from "../components/ResearchKindBadge";
 import { Link, usePathname } from "../router";
 import { localizePerformanceReason } from "../i18n";
 
 const CYCLE_PAGE_SIZE = 12;
-
-function KindBadge({ kind }: { kind: ResearchNodeView["research_kind"] }) {
-  const { t } = useTranslation();
-  return (
-    <span className={`research-kind-badge ${kind}`}>
-      {t(kind === "full" ? "fullResearch" : "incrementalResearch")}
-    </span>
-  );
-}
 
 function Confidence({ value }: { value?: number | null }) {
   const { t } = useTranslation();
@@ -50,7 +42,7 @@ function DecisionSummary({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
   if (!node.decision) return <p className="muted-copy">{t("notRecorded")}</p>;
   return (
-    <section className="decision-summary" aria-label={t("currentDecision")}>
+    <section className="timeline-decision-summary" aria-label={t("currentDecision")}>
       <div className="decision-summary-meta">
         <ResearchRatingBadge rating={node.decision.rating} />
         <Confidence value={node.decision.confidence} />
@@ -241,7 +233,10 @@ function NodeCard({
     <article className={`research-node-card ${node.research_kind} ${node.is_active ? "" : "trashed"}`}>
       <header className="research-node-header">
         <div>
-          <KindBadge kind={node.research_kind} />
+          <ResearchKindBadge
+            kind={node.research_kind}
+            methodSnapshot={node.method_snapshot}
+          />
           <h3>{node.analysis_date}</h3>
         </div>
         <div className="status-cluster">
@@ -566,8 +561,7 @@ function NodeComparisonModal({
         ref={dialogRef}
       >
         <header className="comparison-modal-header">
-          <div>
-            <p className="eyebrow">{t("selectedResearchNodes")}</p>
+          <div className="comparison-modal-title">
             <h2 id={titleId}>{t("nodeComparison")}</h2>
             <span>
               {t(
@@ -578,9 +572,17 @@ function NodeComparisonModal({
             </span>
           </div>
           <div className="comparison-modal-actions">
+            <label className="comparison-changed-toggle">
+              <input
+                type="checkbox"
+                checked={changedOnly}
+                onChange={(event) => setChangedOnly(event.target.checked)}
+              />
+              {t("showChangedOnly")}
+            </label>
             <button
               type="button"
-              className="button"
+              className="button compact-button"
               onClick={() => setSwapped((value) => !value)}
             >
               {t("swapComparisonSides")}
@@ -588,7 +590,7 @@ function NodeComparisonModal({
             <button
               ref={closeRef}
               type="button"
-              className="button"
+              className="button compact-button"
               onClick={onClose}
             >
               {t("close")}
@@ -596,18 +598,11 @@ function NodeComparisonModal({
           </div>
         </header>
 
-        <div className="comparison-modal-controls">
-          <label>
-            <input
-              type="checkbox"
-              checked={changedOnly}
-              onChange={(event) => setChangedOnly(event.target.checked)}
-            />
-            {t("showChangedOnly")}
-          </label>
-        </div>
-
-        <div className="comparison-modal-scroll">
+        <div
+          className="comparison-modal-scroll"
+          aria-label={t("nodeComparison")}
+          tabIndex={0}
+        >
           {comparison.method_changed && (
             <div className="notice" role="status">
               {t("methodChanged")}
@@ -688,10 +683,15 @@ function ComparisonTable({
       <table>
         <thead>
           <tr>
-            <th>{t("decisionSection")}</th>
+            <th aria-label={t("decisionSection")}>
+              <span className="sr-only">{t("decisionSection")}</span>
+            </th>
             {sides.map((side) => (
               <th key={side.node_id}>
-                <KindBadge kind={side.research_kind} />
+                <ResearchKindBadge
+                  kind={side.research_kind}
+                  methodSnapshot={side.method_snapshot}
+                />
                 <span>{side.analysis_date}</span>
               </th>
             ))}
@@ -1116,7 +1116,24 @@ export default function Timeline() {
       {detail && (
         <aside className="comparison-tray" aria-label={t("comparisonSelection")}>
           <div><strong>{t("comparisonSelection")}</strong><span>{t("comparisonSelectionHint")}</span></div>
-          <div className="comparison-selections">{comparisonNodes.map((node) => <button type="button" onClick={() => toggleComparison(node)} key={node.id}><KindBadge kind={node.research_kind} /> {node.analysis_date} · {node.decision?.rating ?? t("notRecorded")} ×</button>)}</div>
+          <div className="comparison-selections">
+            {comparisonNodes.map((node) => (
+              <span className="comparison-selection-chip" key={node.id}>
+                <ResearchKindBadge
+                  kind={node.research_kind}
+                  methodSnapshot={node.method_snapshot}
+                />
+                <span>{node.analysis_date} · {node.decision?.rating ?? t("notRecorded")}</span>
+                <button
+                  type="button"
+                  aria-label={t("removeFromComparison")}
+                  onClick={() => toggleComparison(node)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
           <button className="button primary" disabled={comparisonNodes.length !== 2 || comparisonBusy} onClick={() => void compareSelected()}>{t("compareSelectedNodes")}</button>
         </aside>
       )}

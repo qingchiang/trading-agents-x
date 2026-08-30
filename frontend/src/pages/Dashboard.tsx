@@ -125,7 +125,13 @@ export default function Dashboard() {
                         )}
                       </div>
                     </td>
-                    <td><ResearchKindBadge kind={run.research_kind} /></td>
+                    <td>
+                      <ResearchKindBadge
+                        kind={run.research_kind}
+                        request={run.request}
+                        methodSnapshot={run.method_snapshot}
+                      />
+                    </td>
                     <td>{run.request.analysis_date}</td>
                     <td>
                       <StatusBadge status={run.status} />

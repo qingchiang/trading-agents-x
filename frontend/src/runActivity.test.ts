@@ -101,14 +101,14 @@ describe("aggregateRunActivity", () => {
     ]));
   });
 
-  test("treats cancellation as a completed lifecycle unit", () => {
+  test("keeps cancellation authoritative while completing its lifecycle unit", () => {
     const attempts = aggregateRunActivity([
       event(1, 1, "run.started", null),
       event(2, 1, "run.cancelled", null),
     ], "full");
 
     expect(attempts[0]).toMatchObject({
-      state: "completed",
+      state: "cancelled",
       currentStage: "commit",
     });
     expect(attempts[0].workUnits[0]).toMatchObject({
@@ -145,4 +145,135 @@ describe("aggregateRunActivity", () => {
       stageStates: { analyst_reports: "running" },
     });
   });
+
+  test("orders work by research stage and interrupts unfinished units after failure", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "run.started", null),
+      event(2, 1, "incremental.synthesis_started", null),
+      event(3, 1, "phase.started", "incremental.synthesis.serialize"),
+      event(4, 1, "node.output_failed", "incremental.synthesis.serialize"),
+      event(5, 1, "phase.completed", "incremental.synthesis.serialize"),
+      event(6, 1, "run.failed", null),
+    ], "incremental", { currentAttempt: 1, runStatus: "failed" });
+
+    expect(attempts[0]).toMatchObject({
+      state: "failed",
+      currentStage: "commit",
+      stageStates: {
+        incremental_semantic: "interrupted",
+        incremental_serialization: "failed",
+        commit: "failed",
+      },
+    });
+    expect(attempts[0].workUnits.map((unit) => unit.node)).toEqual([
+      "incremental.synthesis",
+      "incremental.synthesis.serialize",
+      "run.lifecycle",
+    ]);
+    expect(attempts[0].workUnits[0].state).toBe("interrupted");
+    expect(attempts[0].workUnits[1].state).toBe("failed");
+  });
+
+  test("reconciles the retried GOOG history to the successful fourth attempt", () => {
+    const attempts = aggregateRunActivity(googRetryHistory(), "incremental", {
+      currentAttempt: 4,
+      runStatus: "succeeded",
+    });
+
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([4, 3, 2, 1]);
+    expect(attempts[0]).toMatchObject({
+      state: "completed",
+      currentStage: "commit",
+    });
+    expect(attempts.slice(1).map((attempt) => attempt.state)).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(attempts[0].workUnits.map((unit) => unit.node)).toEqual([
+      "incremental.collection",
+      "incremental.synthesis",
+      "incremental.synthesis.semantic",
+      "incremental.synthesis.serialize",
+      "evidence.seal",
+      "run.lifecycle",
+    ]);
+    expect(
+      attempts[0].workUnits.find(
+        (unit) => unit.node === "incremental.synthesis.serialize",
+      ),
+    ).toMatchObject({
+      state: "completed",
+      signals: ["retrying", "recovered"],
+    });
+  });
+
+  test("uses the persisted current attempt as the authoritative live state", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "run.failed", null),
+    ], "incremental", { currentAttempt: 2, runStatus: "queued" });
+
+    expect(attempts[0]).toMatchObject({
+      attempt: 2,
+      state: "pending",
+      currentStage: "workflow",
+      workUnits: [],
+    });
+    expect(attempts[1].state).toBe("failed");
+  });
 });
+
+function googRetryHistory(): RunEvent[] {
+  const rows: Array<[number, number, string, string | null]> = [
+    [1, 1, "run.queued", null],
+    [2, 1, "run.started", null],
+    [3, 1, "incremental.collection_completed", null],
+    [4, 1, "incremental.synthesis_started", null],
+    [5, 1, "phase.started", "incremental.synthesis.semantic"],
+    [6, 1, "phase.completed", "incremental.synthesis.semantic"],
+    [7, 1, "phase.started", "incremental.synthesis.serialize"],
+    [8, 1, "node.output_retry", "incremental.synthesis.serialize"],
+    [9, 1, "node.output_failed", "incremental.synthesis.serialize"],
+    [10, 1, "phase.completed", "incremental.synthesis.serialize"],
+    [11, 1, "run.failed", null],
+    [12, 2, "run.retry_queued", null],
+    [13, 2, "run.started", null],
+    [14, 2, "incremental.collection_completed", null],
+    [15, 2, "incremental.synthesis_started", null],
+    [16, 2, "phase.started", "incremental.synthesis.semantic"],
+    [17, 2, "phase.completed", "incremental.synthesis.semantic"],
+    [18, 2, "phase.started", "incremental.synthesis.serialize"],
+    [19, 2, "node.output_retry", "incremental.synthesis.serialize"],
+    [20, 2, "node.output_failed", "incremental.synthesis.serialize"],
+    [21, 2, "phase.completed", "incremental.synthesis.serialize"],
+    [22, 2, "run.failed", null],
+    [23, 3, "run.retry_queued", null],
+    [24, 3, "run.started", null],
+    [25, 3, "incremental.collection_completed", null],
+    [26, 3, "incremental.synthesis_started", null],
+    [27, 3, "phase.started", "incremental.synthesis.semantic"],
+    [28, 3, "phase.completed", "incremental.synthesis.semantic"],
+    [29, 3, "phase.started", "incremental.synthesis.serialize"],
+    [30, 3, "node.output_retry", "incremental.synthesis.serialize"],
+    [31, 3, "node.output_failed", "incremental.synthesis.decision"],
+    [32, 3, "node.output_failed", "incremental.synthesis.serialize"],
+    [33, 3, "phase.completed", "incremental.synthesis.serialize"],
+    [34, 3, "run.failed", null],
+    [35, 4, "run.retry_queued", null],
+    [36, 4, "run.started", null],
+    [37, 4, "incremental.collection_completed", null],
+    [38, 4, "incremental.synthesis_started", null],
+    [39, 4, "phase.started", "incremental.synthesis.semantic"],
+    [40, 4, "phase.completed", "incremental.synthesis.semantic"],
+    [41, 4, "phase.started", "incremental.synthesis.serialize"],
+    [42, 4, "node.output_retry", "incremental.synthesis.serialize"],
+    [43, 4, "node.output_recovered", "incremental.synthesis.serialize"],
+    [44, 4, "phase.completed", "incremental.synthesis.serialize"],
+    [45, 4, "incremental.synthesis_completed", null],
+    [46, 4, "evidence.sealed", "evidence.seal"],
+    [47, 4, "run.succeeded", null],
+  ];
+  return rows.map(([sequence, attempt, eventType, node]) =>
+    event(sequence, attempt, eventType, node),
+  );
+}

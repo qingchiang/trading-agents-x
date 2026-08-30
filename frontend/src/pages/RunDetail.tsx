@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,6 +18,7 @@ import {
 import { InstrumentIdentity } from "../components/Instruments";
 import EvidenceLinks from "../components/EvidenceLinks";
 import RunMetricsPanel from "../components/RunMetricsPanel";
+import ResearchKindBadge from "../components/ResearchKindBadge";
 import {
   buildEvidenceReferenceIndex,
   groupEvidenceRefs,
@@ -128,6 +129,7 @@ export default function RunDetail() {
   const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
   const [warningOpenRequest, setWarningOpenRequest] = useState(0);
   const [artifactRefreshRequest, setArtifactRefreshRequest] = useState(0);
+  const latestEventSequence = useRef(0);
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -173,8 +175,18 @@ export default function RunDetail() {
   }, [activeView, artifactRefreshRequest, runId, t]);
 
   useEffect(() => {
+    latestEventSequence.current = 0;
+    setEvents([]);
+    setDetail(null);
     void refresh();
-    const source = new EventSource(`/api/v1/runs/${runId}/events`);
+  }, [refresh, runId]);
+
+  useEffect(() => {
+    if (!detail || detail.run.id !== runId) return;
+    const currentAttempt = detail.run.attempt;
+    const source = new EventSource(
+      `/api/v1/runs/${runId}/events?after=${latestEventSequence.current}`,
+    );
     const receive = (raw: MessageEvent<string>) => {
       let event: RunEvent;
       try {
@@ -182,6 +194,10 @@ export default function RunDetail() {
       } catch {
         return;
       }
+      latestEventSequence.current = Math.max(
+        latestEventSequence.current,
+        event.sequence,
+      );
       setEvents((current) => {
         if (current.some((item) => item.sequence === event.sequence)) {
           return current;
@@ -200,9 +216,10 @@ export default function RunDetail() {
         setArtifactRefreshRequest((current) => current + 1);
       }
       if (
-        event.event_type === "run.succeeded" ||
-        event.event_type === "run.failed" ||
-        event.event_type === "run.cancelled"
+        event.attempt === currentAttempt &&
+        (event.event_type === "run.succeeded" ||
+          event.event_type === "run.failed" ||
+          event.event_type === "run.cancelled")
       ) {
         source.close();
       }
@@ -214,7 +231,7 @@ export default function RunDetail() {
       void refresh();
     };
     return () => source.close();
-  }, [runId, refresh]);
+  }, [detail?.run.attempt, detail?.run.id, refresh, runId]);
 
   useEffect(() => {
     if (!detail?.run.trashed_at) return;
@@ -454,14 +471,15 @@ export default function RunDetail() {
               instrumentLocalName={run.instrument_local_name}
               prominent
             />
-            <span className={"research-kind-badge " + (run.research_kind ?? "full")}>
-              {t(run.research_kind === "incremental" ? "incrementalResearch" : "fullResearch")}
-            </span>
+            <ResearchKindBadge
+              kind={run.research_kind}
+              request={run.request}
+              methodSnapshot={run.method_snapshot}
+            />
             <StatusBadge status={run.status} />
           </div>
           <p className="subtitle">
             {run.request.analysis_date}
-            {run.research_kind !== "incremental" ? " · " + run.request.profile : ""}
             {" · " + t("attempt") + " " + run.attempt}
           </p>
           {run.source_run_id && (
@@ -604,6 +622,7 @@ export default function RunDetail() {
           <IncrementalBriefPanel
             brief={detail.incremental_context?.analysis_brief ?? null}
             runId={run.id}
+            runStatus={run.status}
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
           />
@@ -623,6 +642,8 @@ export default function RunDetail() {
           <TimelinePanel
             events={events}
             researchKind={isIncremental ? "incremental" : "full"}
+            currentAttempt={run.attempt}
+            runStatus={run.status}
           />
         )}
         {activeView === "deliberation" && (
@@ -747,11 +768,13 @@ function IncrementalDecisionPanel({
 function IncrementalBriefPanel({
   brief,
   runId,
+  runStatus,
   evidenceIndex,
   onEvidence,
 }: {
   brief: IncrementalAnalysisBrief | null;
   runId: string;
+  runStatus: RunDetailType["run"]["status"];
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
 }) {
@@ -769,7 +792,9 @@ function IncrementalBriefPanel({
         </div>
       </div>
       {!brief ? (
-        <div className="empty-state">{t("historicalBriefUnavailable")}</div>
+        <div className="empty-state">
+          {t(briefUnavailableLabel(runStatus))}
+        </div>
       ) : (
         <ResearchMarkdownReader
           markdown={brief.markdown}
@@ -1130,14 +1155,18 @@ function reassessmentGroupLabel(group: ReassessmentGroupKey): string {
 function TimelinePanel({
   events,
   researchKind,
+  currentAttempt,
+  runStatus,
 }: {
   events: RunEvent[];
   researchKind: "full" | "incremental";
+  currentAttempt: number;
+  runStatus: RunDetailType["run"]["status"];
 }) {
   const { t } = useTranslation();
   const attempts = useMemo(
-    () => aggregateRunActivity(events, researchKind),
-    [events, researchKind],
+    () => aggregateRunActivity(events, researchKind, { currentAttempt, runStatus }),
+    [currentAttempt, events, researchKind, runStatus],
   );
   const latest = attempts[0];
   const stages = researchKind === "incremental"
@@ -2102,6 +2131,18 @@ function viewLabel(view: ViewName, incremental: boolean): string {
   if (view === "timeline") return "activity";
   if (view === "evidence" && incremental) return "evidenceUpdates";
   return view;
+}
+
+function briefUnavailableLabel(
+  status: RunDetailType["run"]["status"],
+): string {
+  if (status === "queued" || status === "running") {
+    return "analysisBriefPending";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "analysisBriefNotProduced";
+  }
+  return "historicalBriefUnavailable";
 }
 
 const eventLabelKeys: Record<string, string> = {

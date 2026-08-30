@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import type { TFunction } from "i18next";
@@ -13,7 +12,6 @@ import {
   api,
   type Capabilities,
   type RunPage,
-  type RunSummaryView,
 } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
@@ -321,7 +319,7 @@ export default function Runs() {
           </div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="runs-table">
               <thead>
                 <tr>
                   <th className="selection-cell">
@@ -383,9 +381,11 @@ export default function Runs() {
                       </td>
                       <td>
                         <div className="run-kind-cell">
-                          <ResearchKindBadge kind={run.research_kind} />
-                          <small>{methodSummary(run, t)}</small>
-                          <RunConfigurationPopover run={run} />
+                          <ResearchKindBadge
+                            kind={run.research_kind}
+                            request={run.request}
+                            methodSnapshot={run.method_snapshot}
+                          />
                         </div>
                       </td>
                       <td>{run.request.analysis_date}</td>
@@ -478,80 +478,6 @@ export default function Runs() {
 function parseOffset(value: string | null) {
   const parsed = Number.parseInt(value ?? "0", 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function methodSummary(run: RunSummaryView, t: TFunction) {
-  if (run.research_kind === "incremental") {
-    return t("informationDomainCount", {
-      count: run.request.analysts?.length ?? 0,
-    });
-  }
-  return t(run.request.profile ?? "standard");
-}
-
-function RunConfigurationPopover({ run }: { run: RunSummaryView }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
-      if (event instanceof MouseEvent && rootRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
-
-  const incremental = run.research_kind === "incremental";
-  const analysts = run.request.analysts ?? [];
-  return (
-    <div className="run-config-popover" ref={rootRef}>
-      <button
-        type="button"
-        className="text-button run-config-trigger"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {t("configuration")}
-      </button>
-      {open && (
-        <section className="run-config-card" role="dialog" aria-label={t("researchConfiguration")}>
-          <div className="run-config-heading">
-            <strong>{t("researchConfiguration")}</strong>
-            <button type="button" aria-label={t("close")} onClick={() => setOpen(false)}>×</button>
-          </div>
-          <dl className="definition-list compact-definition-list">
-            <div>
-              <dt>{t(incremental ? "updateScope" : "analysts")}</dt>
-              <dd>{analysts.map((analyst) => t(`${analyst}Analyst`)).join(", ") || t("notRecorded")}</dd>
-            </div>
-            <div><dt>{t("provider")}</dt><dd>{run.request.llm_provider ?? t("notRecorded")}</dd></div>
-            {!incremental && (
-              <div><dt>{t("quickModel")}</dt><dd>{run.request.quick_model ?? t("notRecorded")}</dd></div>
-            )}
-            <div><dt>{t("deepModel")}</dt><dd>{run.request.deep_model ?? t("notRecorded")}</dd></div>
-            {!incremental && (
-              <div><dt>{t("quickReasoning")}</dt><dd>{reasoningLabel(run.request.quick_reasoning_effort, t)}</dd></div>
-            )}
-            <div><dt>{t("deepReasoning")}</dt><dd>{reasoningLabel(run.request.deep_reasoning_effort, t)}</dd></div>
-          </dl>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function reasoningLabel(value: string | null | undefined, t: TFunction) {
-  if (!value || value === "provider_default") return t("providerDefault");
-  return value;
 }
 
 function statusLabel(status: (typeof runStatuses)[number]) {

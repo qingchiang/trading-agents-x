@@ -20,7 +20,9 @@ export type ActivityState =
   | "retrying"
   | "recovered"
   | "degraded"
-  | "failed";
+  | "failed"
+  | "interrupted"
+  | "cancelled";
 
 export type ActivityAction =
   | "collect"
@@ -56,15 +58,24 @@ export interface ActivityAttempt {
   stageStates: Partial<Record<ActivityStage, ActivityState>>;
 }
 
+export interface ActivityRunState {
+  currentAttempt: number;
+  runStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+}
+
 export function aggregateRunActivity(
   events: RunEvent[],
   researchKind: "full" | "incremental",
+  runState?: ActivityRunState,
 ): ActivityAttempt[] {
   const attempts = new Map<number, RunEvent[]>();
   for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
     const bucket = attempts.get(event.attempt) ?? [];
     bucket.push(event);
     attempts.set(event.attempt, bucket);
+  }
+  if (runState && !attempts.has(runState.currentAttempt)) {
+    attempts.set(runState.currentAttempt, []);
   }
   return [...attempts.entries()]
     .sort(([left], [right]) => right - left)
@@ -76,24 +87,35 @@ export function aggregateRunActivity(
         bucket.push(event);
         units.set(node, bucket);
       }
-      const workUnits = [...units.entries()].map(([node, unitEvents]) => ({
-        key: `${attempt}:${node}`,
-        node,
-        stage: activityStage(node, researchKind),
-        role: activityRole(node),
-        action: activityAction(node),
-        state: unitState(unitEvents),
-        signals: unitSignals(unitEvents),
-        events: unitEvents,
-        firstSequence: unitEvents[0].sequence,
-        lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
-      }));
+      const terminal = terminalEvent(attemptEvents);
+      const workUnits = [...units.entries()]
+        .map(([node, unitEvents]) => ({
+          key: `${attempt}:${node}`,
+          node,
+          stage: activityStage(node, researchKind),
+          role: activityRole(node),
+          action: activityAction(node),
+          state: terminalUnitState(node, unitState(unitEvents), terminal),
+          signals: unitSignals(unitEvents),
+          events: unitEvents,
+          firstSequence: unitEvents[0].sequence,
+          lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
+        }))
+        .sort((left, right) =>
+          activityUnitOrder(left, researchKind) - activityUnitOrder(right, researchKind) ||
+          left.firstSequence - right.firstSequence,
+        );
+      const authoritative =
+        runState?.currentAttempt === attempt ? runState.runStatus : undefined;
       const currentUnit = currentWorkUnit(attemptEvents, workUnits);
       return {
         attempt,
-        state: attemptState(attemptEvents, workUnits),
+        state: attemptState(attemptEvents, workUnits, authoritative),
         workUnits,
-        currentStage: currentUnit?.stage ?? "workflow",
+        currentStage:
+          authoritative && ["succeeded", "failed", "cancelled"].includes(authoritative)
+            ? "commit"
+            : currentUnit?.stage ?? "workflow",
         stageStates: aggregateStageStates(workUnits),
       };
     });
@@ -134,6 +156,8 @@ function aggregateStageStates(
 function aggregateState(states: ActivityState[]): ActivityState {
   for (const state of [
     "failed",
+    "cancelled",
+    "interrupted",
     "retrying",
     "running",
     "degraded",
@@ -158,11 +182,23 @@ function activityNode(event: RunEvent): string {
 
 function unitState(events: RunEvent[]): ActivityState {
   let state: ActivityState = "pending";
+  let unresolvedFailure = false;
   for (const event of events) {
     const candidate = eventState(event);
-    if (candidate) state = candidate;
+    if (!candidate) continue;
+    if (candidate === "failed") {
+      unresolvedFailure = true;
+      state = candidate;
+      continue;
+    }
+    if (candidate === "recovered") {
+      unresolvedFailure = false;
+      state = candidate;
+      continue;
+    }
+    if (!unresolvedFailure) state = candidate;
   }
-  return state;
+  return unresolvedFailure ? "failed" : state;
 }
 
 function unitSignals(events: RunEvent[]): ActivitySignal[] {
@@ -196,10 +232,16 @@ function eventState(event: RunEvent): ActivityState | null {
   return null;
 }
 
-function attemptState(events: RunEvent[], units: ActivityWorkUnit[]): ActivityState {
+function attemptState(
+  events: RunEvent[],
+  units: ActivityWorkUnit[],
+  authoritative?: ActivityRunState["runStatus"],
+): ActivityState {
+  if (authoritative) return runStatusState(authoritative);
   const terminal = [...events].reverse().find((event) => event.event_type.startsWith("run."));
   if (terminal?.event_type === "run.failed") return "failed";
-  if (terminal?.event_type === "run.succeeded" || terminal?.event_type === "run.cancelled") return "completed";
+  if (terminal?.event_type === "run.cancelled") return "cancelled";
+  if (terminal?.event_type === "run.succeeded") return "completed";
   if (units.some((unit) => unit.state === "failed")) return "failed";
   if (units.some((unit) => unit.state === "retrying")) return "retrying";
   if (units.some((unit) => unit.state === "running")) return "running";
@@ -211,9 +253,44 @@ function attemptState(events: RunEvent[], units: ActivityWorkUnit[]): ActivitySt
   return "running";
 }
 
+function runStatusState(status: ActivityRunState["runStatus"]): ActivityState {
+  if (status === "queued") return "pending";
+  if (status === "succeeded") return "completed";
+  return status;
+}
+
+function terminalEvent(events: RunEvent[]): RunEvent | undefined {
+  return [...events].reverse().find((event) =>
+    ["run.succeeded", "run.failed", "run.cancelled"].includes(event.event_type),
+  );
+}
+
+function terminalUnitState(
+  node: string,
+  state: ActivityState,
+  terminal?: RunEvent,
+): ActivityState {
+  if (!terminal || node === "run.lifecycle") return state;
+  if (!["pending", "running", "retrying"].includes(state)) return state;
+  return "interrupted";
+}
+
+function activityUnitOrder(
+  unit: Pick<ActivityWorkUnit, "node" | "stage">,
+  kind: "full" | "incremental",
+): number {
+  const stages: ActivityStage[] = kind === "incremental"
+    ? ["collection", "incremental_semantic", "incremental_serialization", "commit", "workflow"]
+    : ["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit", "workflow"];
+  const stage = stages.indexOf(unit.stage);
+  const base = (stage === -1 ? stages.length : stage) * 10;
+  return base + (unit.node === "run.lifecycle" ? 9 : 0);
+}
+
 function activityStage(node: string, kind: "full" | "incremental"): ActivityStage {
   const normalized = node.toLowerCase();
   if (kind === "incremental") {
+    if (normalized === "evidence.seal") return "commit";
     if (normalized.includes("collection") || normalized.includes("evidence")) return "collection";
     if (normalized.includes("semantic") || normalized === "incremental.synthesis") {
       return "incremental_semantic";
