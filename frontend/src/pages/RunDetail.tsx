@@ -1329,11 +1329,7 @@ function TimelinePanel({
                   </summary>
                   <ul className="activity-raw-events">
                     {[...attempt.events]
-                      .sort((left, right) =>
-                        order === "newest"
-                          ? right.sequence - left.sequence
-                          : left.sequence - right.sequence,
-                      )
+                      .sort((left, right) => left.sequence - right.sequence)
                       .map((event) => (
                         <li key={event.sequence}>
                           <strong>{eventLabel(t, event)}</strong>

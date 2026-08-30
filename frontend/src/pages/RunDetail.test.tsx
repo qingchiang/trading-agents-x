@@ -1096,6 +1096,7 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
       decision: detail.result!.decision!,
     },
   };
+  incremental.result!.evidence!.items[0].quality = "unavailable";
   vi.mocked(api.run).mockResolvedValue(incremental);
 
   render(
@@ -1120,6 +1121,7 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(evidenceCard).not.toBeNull();
   expect(within(evidenceCard!).getByText("Source")).toBeVisible();
   expect(within(evidenceCard!).getByText("Effective date")).toBeVisible();
+  expect(within(evidenceCard!).getByText("Unavailable")).toBeVisible();
   expect(within(evidenceCard!).queryByText("Evidence metadata")).toBeNull();
   expect(within(evidenceCard!).queryByText("Canonical IDs and provenance")).toBeNull();
   fireEvent.click(
@@ -1472,8 +1474,16 @@ test("orders work units within each attempt and restores the activity preference
   );
   expect(nodes()).toEqual(["analyst.news.report", "risk.review"]);
 
+  fireEvent.click(within(attempt!).getByText("Technical events (2)"));
+  const rawEventSequences = () =>
+    within(attempt!)
+      .getAllByText(/"sequence":(?:9|10)/)
+      .map((element) => element.textContent);
+  expect(rawEventSequences()[0]).toContain('"sequence":9');
+
   fireEvent.click(screen.getByRole("button", { name: "Latest first" }));
   expect(nodes()).toEqual(["risk.review", "analyst.news.report"]);
+  expect(rawEventSequences()[0]).toContain('"sequence":9');
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("newest");
 });
 

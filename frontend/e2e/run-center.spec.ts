@@ -182,7 +182,22 @@ function result(id: string) {
       valuation_assessment: null,
       market_reference_levels: [],
       risk_review_adjustments: [],
-      calculation_records: [],
+      calculation_records: Array.from({ length: 16 }, (_, index) => ({
+        id: `calc_fixture_${index + 1}`,
+        formula: "observed_value",
+        inputs: { observed_value: 100 + index },
+        input_evidence_refs: ["ev_0123456789ab"],
+        result: 100 + index,
+        unit: "USD",
+        as_of_date: "2026-07-24",
+        limitations: [],
+        decision_uses: [
+          {
+            component_path: "thesis",
+            label: `Observed anchor ${index + 1}`,
+          },
+        ],
+      })),
     },
     evidence: {
       version: "5",
@@ -549,18 +564,45 @@ test("runs, templates, trash, and restores local research", async ({
     const eventMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/events$/);
     if (eventMatch) {
       const run = runs.get(eventMatch[1]);
-      const event = {
-        run_id: eventMatch[1],
-        sequence: 1,
-        attempt: 1,
-        event_type: `run.${run?.status ?? "failed"}`,
-        node: null,
-        payload: {},
-        created_at: timestamp,
-      };
+      const events = eventMatch[1] === "run-report"
+        ? [
+            ...Array.from({ length: 24 }, (_, index) => ({
+              run_id: eventMatch[1],
+              sequence: index + 1,
+              attempt: 1,
+              event_type: "node.completed",
+              node: `fixture.stage.${index}`,
+              payload: {},
+              created_at: new Date(
+                Date.parse(timestamp) + index * 1_000,
+              ).toISOString(),
+            })),
+            {
+              run_id: eventMatch[1],
+              sequence: 25,
+              attempt: 1,
+              event_type: "run.succeeded",
+              node: null,
+              payload: {},
+              created_at: new Date(Date.parse(timestamp) + 24_000).toISOString(),
+            },
+          ]
+        : [{
+            run_id: eventMatch[1],
+            sequence: 1,
+            attempt: 1,
+            event_type: `run.${run?.status ?? "failed"}`,
+            node: null,
+            payload: {},
+            created_at: timestamp,
+          }];
       return route.fulfill({
         headers: { "Content-Type": "text/event-stream" },
-        body: `id: 1\nevent: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
+        body: events
+          .map((event) =>
+            `id: ${event.sequence}\nevent: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
+          )
+          .join(""),
       });
     }
     const actionMatch = path.match(
@@ -716,7 +758,14 @@ test("runs, templates, trash, and restores local research", async ({
   });
   expect(decisionWidth.summary).toBeGreaterThan(decisionWidth.hero * 0.7);
 
+  await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
+  await page.getByText("Decision-critical calculation audit").click();
+  await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
+  await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
+
   await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByText("Run metrics and diagnostics")).toBeVisible();
+  await expect(page.getByText("Attempt metrics")).toBeHidden();
   await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -729,6 +778,33 @@ test("runs, templates, trash, and restores local research", async ({
   }));
   expect(attemptScroll.maxHeight).not.toBe("none");
   expect(attemptScroll.overflowY).toBe("auto");
+  const attemptOverflow = await attemptBody.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(attemptOverflow.scrollHeight).toBeGreaterThan(attemptOverflow.clientHeight);
+  await attemptBody.hover();
+  await page.mouse.wheel(0, 500);
+  await expect
+    .poll(() => attemptBody.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  const attemptPanel = page.locator(".activity-attempt").first();
+  await expect(attemptPanel.getByText(/Technical events \(25\)/)).toHaveCount(1);
+  await expect(attemptPanel.getByText("Audit details", { exact: true })).toHaveCount(0);
+  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("run.lifecycle");
+  await page.getByRole("button", { name: "Earliest first" }).click();
+  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("fixture.stage.0");
+  expect(
+    await page.evaluate(() =>
+      localStorage.getItem("tradingagents-timeline-order"),
+    ),
+  ).toBe("oldest");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Earliest first" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "Latest first" }).click();
 
   await page.goto("/runs/run-daiichi?view=decision");
   const detailIdentity = page.locator(".run-title .instrument-identity");
@@ -793,7 +869,18 @@ test("runs, templates, trash, and restores local research", async ({
     if (!tickerHeader) throw new Error("ticker column not found");
     return tickerHeader.getBoundingClientRect().width / table.getBoundingClientRect().width;
   });
-  expect(tickerColumnRatio).toBeLessThan(0.32);
+  expect(tickerColumnRatio).toBeGreaterThan(0.25);
+  expect(tickerColumnRatio).toBeLessThan(0.30);
+  const openAction = page
+    .getByRole("row")
+    .filter({ hasText: "NVDA" })
+    .getByRole("link", { name: "Open" });
+  await expect(openAction).toHaveClass(/compact-button/);
+  expect(
+    await openAction.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBeLessThanOrEqual(34);
   const runsSearch = page.locator("#runs-search");
   const runsKind = page.locator("#runs-kind");
   const applyFilters = page.getByRole("button", { name: "Apply", exact: true });
@@ -937,6 +1024,19 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(shell).not.toHaveClass(/sidebar-open/);
+
+  for (const [locale, label] of [
+    ["zh-CN", "最新优先"],
+    ["en", "Latest first"],
+    ["ja", "新しい順"],
+  ] as const) {
+    await page.evaluate(
+      (value) => localStorage.setItem("tradingagents-locale", value),
+      locale,
+    );
+    await page.goto("/runs/run-report?view=timeline");
+    await expect(page.getByRole("button", { name: label })).toBeVisible();
+  }
 });
 
 test("compares active and explicitly shown Trash nodes without creating research", async ({

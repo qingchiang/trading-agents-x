@@ -250,8 +250,7 @@ test("keeps a single Open action for Research Nodes", async () => {
   expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
   expect(screen.getByRole("columnheader", { name: "Actions" })).toBeVisible();
   expect(screen.queryByRole("link", { name: "Research Timeline" })).toBeNull();
-  expect(screen.getByRole("link", { name: "Open" })).toHaveAttribute(
-    "href",
-    "/runs/full-node",
-  );
+  const open = screen.getByRole("link", { name: "Open" });
+  expect(open).toHaveAttribute("href", "/runs/full-node");
+  expect(open).toHaveClass("compact-button");
 });

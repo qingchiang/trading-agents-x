@@ -406,7 +406,10 @@ export default function Runs() {
                         )}
                       </td>
                       <td className="run-actions-cell">
-                        <Link className="button compact" to={`/runs/${run.id}`}>
+                        <Link
+                          className="button compact-button"
+                          to={`/runs/${run.id}`}
+                        >
                           {t("open")}
                         </Link>
                       </td>
