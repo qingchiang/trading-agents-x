@@ -156,6 +156,16 @@ not publish them remotely unless explicitly requested. See
 This is a single-context repo with `CONTEXT.md` and `docs/adr/` at the root.
 See `docs/agents/domain.md`.
 
+### TDD applicability gate
+
+Use TDD when the change has meaningful observable behavior that can be
+tested through a stable seam, especially for business logic, APIs,
+validation, transformations, and regression fixes.
+
+Do not force a red-green loop for purely mechanical, presentational,
+configuration, or glue-code changes when a focused existing test or
+direct verification is more appropriate.
+
 ## Git commit instructions
 
 When creating or proposing a Git commit message, inspect the staged diff
