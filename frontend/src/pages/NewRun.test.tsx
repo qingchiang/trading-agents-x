@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
   api,
@@ -122,6 +122,8 @@ function NewRunRoutes() {
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-29T12:00:00+09:00"));
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
@@ -132,6 +134,10 @@ beforeEach(async () => {
     before: "2026-07-24",
     items: [],
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 test("lets a user choose an informative Full Baseline for Incremental research", async () => {
