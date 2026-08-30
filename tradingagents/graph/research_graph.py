@@ -742,6 +742,7 @@ class ResearchGraph:
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
                     output_language=state["output_language"],
+                    allow_continuation=True,
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -903,6 +904,7 @@ class ResearchGraph:
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
                     output_language=state["output_language"],
+                    allow_continuation=True,
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -1029,6 +1031,7 @@ class ResearchGraph:
                 node=f"{node}.write",
                 allowed_evidence_refs=_state_evidence_refs(state),
                 output_language=state["output_language"],
+                allow_continuation=True,
                 invoke_config={
                     "callbacks": [self.metrics],
                     "metadata": {"research_node": f"{node}.write"},
@@ -1113,6 +1116,7 @@ class ResearchGraph:
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
                     output_language=state["output_language"],
+                    allow_continuation=True,
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -1241,6 +1245,7 @@ class ResearchGraph:
                     node=f"{node}.reason",
                     allowed_evidence_refs=_state_evidence_refs(state),
                     output_language=state["output_language"],
+                    allow_continuation=True,
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.reason"},

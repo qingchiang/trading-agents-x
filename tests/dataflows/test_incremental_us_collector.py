@@ -448,7 +448,7 @@ def test_default_us_collector_commits_a_full_to_incremental_service_journey(
     )
 
     assert result.status is RunStatus.SUCCEEDED
-    node = next(node for node in repository.get_timeline("NVDA").nodes if node.id == result.run_id)
+    node = next(node for node in repository.get_timeline("NVDA").all_nodes if node.id == result.run_id)
     assert node.performance.stock.status.value == "calculated"
     assert node.information_advancement.reasons == (
         "admissible_observation",

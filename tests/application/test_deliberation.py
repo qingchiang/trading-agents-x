@@ -514,10 +514,42 @@ def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None
         node="case.bull.write",
         allowed_evidence_refs=(ref,),
         output_language="English (en)",
+        allow_continuation=True,
     )
 
     assert result.markdown == f"# Case\n\nSupported.[^{ref}]"
     assert result.warnings == ()
+
+
+def test_research_markdown_can_normalize_truncated_output_without_continuation() -> None:
+    class TruncatedMarkdownLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self, prompt: str, config: Any = None) -> Any:
+            del prompt, config
+            self.calls += 1
+            return type(
+                "Message",
+                (),
+                {
+                    "content": "# Incremental update\n\nThe available evidence is limited.",
+                    "response_metadata": {"finish_reason": "length"},
+                },
+            )()
+
+    llm = TruncatedMarkdownLLM()
+    result = write_research_markdown(
+        llm,
+        prompt="Write the update.",
+        node="incremental.synthesis.semantic",
+        allowed_evidence_refs=(),
+        output_language="English (en)",
+        allow_continuation=False,
+    )
+
+    assert llm.calls == 1
+    assert result.markdown == "# Incremental update\n\nThe available evidence is limited."
 
 
 def test_research_case_preserves_readable_markdown_without_navigation_ids() -> None:

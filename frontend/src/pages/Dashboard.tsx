@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, type Health, type RunSummaryView } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
+import ResearchKindBadge from "../components/ResearchKindBadge";
 import StatusBadge from "../components/StatusBadge";
 import { Link } from "../router";
 
@@ -99,7 +100,7 @@ export default function Dashboard() {
                 <tr>
                   <th>{t("ticker")}</th>
                   <th>{t("researchRating")}</th>
-                  <th>{t("profile")}</th>
+                  <th>{t("researchKind")}</th>
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
                   <th>{t("updated")}</th>
@@ -117,9 +118,20 @@ export default function Dashboard() {
                       />
                     </td>
                     <td>
-                      <ResearchRatingBadge rating={run.research_rating} />
+                      <div className="decision-cell">
+                        <ResearchRatingBadge rating={run.research_rating} />
+                        {run.research_confidence != null && (
+                          <small>{t("confidencePercent", { value: Math.round(run.research_confidence * 100) })}</small>
+                        )}
+                      </div>
                     </td>
-                    <td className="capitalize">{run.request.profile}</td>
+                    <td>
+                      <ResearchKindBadge
+                        kind={run.research_kind}
+                        request={run.request}
+                        methodSnapshot={run.method_snapshot}
+                      />
+                    </td>
                     <td>{run.request.analysis_date}</td>
                     <td>
                       <StatusBadge status={run.status} />

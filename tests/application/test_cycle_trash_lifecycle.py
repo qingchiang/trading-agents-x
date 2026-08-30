@@ -174,7 +174,7 @@ def test_independent_incremental_trash_updates_the_active_cycle(repository, app_
 
     warned = repository.get_timeline("NVDA")
     assert warned.timeline_warning is True
-    assert next(node for node in warned.nodes if node.id == head.id).cycle_warning
+    assert next(node for node in warned.all_nodes if node.id == head.id).cycle_warning
 
     result = repository.trash_runs_detailed((head.id,))
 
@@ -182,16 +182,17 @@ def test_independent_incremental_trash_updates_the_active_cycle(repository, app_
     assert result.impacts[0].cycle_id == full.id
     assert result.impacts[0].affected_run_ids == (head.id,)
     active = repository.get_timeline("NVDA")
-    assert tuple(node.id for node in active.nodes) == (full.id, first.id)
-    new_head = next(node for node in active.nodes if node.id == first.id)
+    assert tuple(node.id for node in active.all_nodes) == (full.id, first.id)
+    new_head = next(node for node in active.all_nodes if node.id == first.id)
     assert new_head.is_cycle_head
     assert new_head.is_primary
     assert active.timeline_warning is False
     retained = repository.get_timeline("NVDA", trash_state="all")
-    assert tuple(node.id for node in retained.nodes) == (full.id, first.id, head.id)
-    assert next(node for node in retained.nodes if node.id == head.id).is_active is False
+    assert tuple(node.id for node in retained.all_nodes) == (full.id, first.id, head.id)
+    assert next(node for node in retained.all_nodes if node.id == head.id).is_active is False
     trashed_only = repository.get_timeline("NVDA", trash_state="trashed")
-    assert tuple(node.id for node in trashed_only.nodes) == (head.id,)
+    assert trashed_only.cycles[0].baseline.id == full.id
+    assert tuple(node.id for node in trashed_only.cycles[0].increments) == (head.id,)
 
 
 def test_full_trash_cascades_only_active_children_and_records_them(
@@ -220,10 +221,10 @@ def test_full_trash_cascades_only_active_children_and_records_them(
     assert result.impacts[0].affected_run_ids == (full.id, cascaded.id)
     assert result.impacts[0].cascade_moved_run_ids == (cascaded.id,)
     retained = repository.get_timeline("NVDA", trash_state="all")
-    by_id = {node.id: node for node in retained.nodes}
+    by_id = {node.id: node for node in retained.all_nodes}
     assert by_id[cascaded.id].trash_cascade_full_run_id == full.id
     assert by_id[independently_trashed.id].trash_cascade_full_run_id is None
-    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_timeline("NVDA").all_nodes == ()
 
 
 def test_primary_full_trash_requires_an_explicit_active_replacement(
@@ -452,7 +453,7 @@ def test_two_connections_linearize_independent_child_and_full_trash(
 
     assert sum(result.changed for result in results) == 2
     retained = repository.get_timeline("NVDA", trash_state="all")
-    retained_child = next(node for node in retained.nodes if node.id == child.id)
+    retained_child = next(node for node in retained.all_nodes if node.id == child.id)
 
     repository.restore_runs_detailed((full.id,))
 

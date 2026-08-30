@@ -1,13 +1,20 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import Layout from "./components/Layout";
-import LoginDialog from "./components/LoginDialog";
-import Dashboard from "./pages/Dashboard";
-import NewRun from "./pages/NewRun";
-import RunDetail from "./pages/RunDetail";
-import Runs from "./pages/Runs";
-import Settings from "./pages/Settings";
-import Timeline from "./pages/Timeline";
 import { usePathname } from "./router";
+
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const NewRun = lazy(() => import("./pages/NewRun"));
+const RunDetail = lazy(() => import("./pages/RunDetail"));
+const Runs = lazy(() => import("./pages/Runs"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Timeline = lazy(() => import("./pages/Timeline"));
+const LoginDialog = lazy(() => import("./components/LoginDialog"));
+
+function LoadingFallback() {
+  const { t } = useTranslation();
+  return <div className="loading" role="status">{t("loading")}</div>;
+}
 
 export default function App() {
   const [authRequired, setAuthRequired] = useState(false);
@@ -38,14 +45,20 @@ export default function App() {
 
   return (
     <>
-      <Layout>{page}</Layout>
+      <Layout>
+        <Suspense fallback={<LoadingFallback />}>
+          {page}
+        </Suspense>
+      </Layout>
       {authRequired && (
-        <LoginDialog
-          onAuthenticated={() => {
-            setAuthRequired(false);
-            window.location.reload();
-          }}
-        />
+        <Suspense fallback={null}>
+          <LoginDialog
+            onAuthenticated={() => {
+              setAuthRequired(false);
+              window.location.reload();
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

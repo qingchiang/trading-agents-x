@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,73 +27,49 @@ export default function AnalystReportView({
   onEvidence: (ref: string) => void;
 }) {
   const { t } = useTranslation();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
-
-  useLayoutEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
-    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
-    };
-  }, [scrollStorageKey]);
-
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      sessionStorage.setItem(
-        scrollStorageKey,
-        String(scrollRef.current.scrollTop),
-      );
-    }
-  };
-
   if (typeof report === "string") {
     return (
-      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
-        <Markdown
-          evidenceAliases={evidenceIndex.aliases}
-          onEvidence={onEvidence}
-        >
-          {report}
-        </Markdown>
-      </div>
+      <LegacyMarkdownReader
+        markdown={report}
+        runId={runId}
+        reportKey={reportKey}
+        evidenceIndex={evidenceIndex}
+        onEvidence={onEvidence}
+      />
     );
   }
   const claims = report.key_claims ?? [];
   const sections = report.report_sections ?? [];
 
   return (
-    <div className="report-reading-layout">
-      <ReportSectionNavigation
-        sections={sections}
-        containerRef={scrollRef}
-      />
-      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
-        <div className="report-audit-summary">
-          {report.confidence !== null && report.confidence !== undefined && (
+    <ResearchMarkdownReader
+      markdown={report.markdown}
+      sections={sections}
+      runId={runId}
+      reportKey={reportKey}
+      evidenceIndex={evidenceIndex}
+      onEvidence={onEvidence}
+      before={
+        <>
+          <div className="report-audit-summary">
+            {report.confidence !== null && report.confidence !== undefined && (
+              <span>
+                {t("confidence")} {Math.round(report.confidence * 100)}%
+              </span>
+            )}
             <span>
-              {t("confidence")} {Math.round(report.confidence * 100)}%
+              {t("keyClaimsCount", { count: claims.length })}
             </span>
-          )}
-          <span>
-            {t("keyClaimsCount", { count: claims.length })}
-          </span>
-        </div>
-        {report.audit_status === "incomplete" && (
-          <div className="audit-incomplete-notice" role="status">
-            {t("auditIncomplete")}
           </div>
-        )}
-        <Markdown
-          evidenceAliases={evidenceIndex.aliases}
-          onEvidence={onEvidence}
-          headingAnchors={sections.map((section) => section.anchor)}
-        >
-          {report.markdown}
-        </Markdown>
-        {claims.length > 0 && (
+          {report.audit_status === "incomplete" && (
+            <div className="audit-incomplete-notice" role="status">
+              {t("auditIncomplete")}
+            </div>
+          )}
+        </>
+      }
+      after={
+        claims.length > 0 ? (
           <details className="claim-audit-details">
             <summary>{t("keyClaimsAudit")}</summary>
             <ol>
@@ -104,8 +81,108 @@ export default function AnalystReportView({
               ))}
             </ol>
           </details>
-        )}
+        ) : null
+      }
+    />
+  );
+}
+
+export function ResearchMarkdownReader({
+  markdown,
+  sections,
+  runId,
+  reportKey,
+  evidenceIndex,
+  onEvidence,
+  before,
+  after,
+}: {
+  markdown: string;
+  sections: AnalystReport["report_sections"];
+  runId: string;
+  reportKey: string;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+  before?: ReactNode;
+  after?: ReactNode;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
+    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
+    return () => {
+      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
+    };
+  }, [scrollStorageKey]);
+  const saveScroll = () => {
+    if (scrollRef.current) {
+      sessionStorage.setItem(
+        scrollStorageKey,
+        String(scrollRef.current.scrollTop),
+      );
+    }
+  };
+  return (
+    <div className="report-reading-layout">
+      <ReportSectionNavigation sections={sections} containerRef={scrollRef} />
+      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+        {before}
+        <Markdown
+          evidenceAliases={evidenceIndex.aliases}
+          onEvidence={onEvidence}
+          headingAnchors={sections.map((section) => section.anchor)}
+        >
+          {markdown}
+        </Markdown>
+        {after}
       </div>
+    </div>
+  );
+}
+
+function LegacyMarkdownReader({
+  markdown,
+  runId,
+  reportKey,
+  evidenceIndex,
+  onEvidence,
+}: {
+  markdown: string;
+  runId: string;
+  reportKey: string;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
+    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
+    return () => {
+      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
+    };
+  }, [scrollStorageKey]);
+  const saveScroll = () => {
+    if (scrollRef.current) {
+      sessionStorage.setItem(
+        scrollStorageKey,
+        String(scrollRef.current.scrollTop),
+      );
+    }
+  };
+  return (
+    <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+      <Markdown
+        evidenceAliases={evidenceIndex.aliases}
+        onEvidence={onEvidence}
+      >
+        {markdown}
+      </Markdown>
     </div>
   );
 }

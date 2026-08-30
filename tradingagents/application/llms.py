@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.llm_clients.reasoning_effort import (
@@ -27,6 +27,7 @@ def create_run_llms(
     settings: RunSettings,
     *,
     callbacks: list[Any] | None = None,
+    purpose: Literal["full", "incremental"] = "full",
 ) -> RunLLMs:
     config = {
         **dict(settings.data_config),
@@ -55,19 +56,6 @@ def create_run_llms(
             kwargs[RESOLVED_MARKER] = True
         return kwargs
 
-    quick = create_llm_client(
-        provider=settings.llm_provider,
-        model=settings.quick_model,
-        base_url=settings.backend_url,
-        **role_kwargs("quick"),
-    ).get_llm()
-    deep = create_llm_client(
-        provider=settings.llm_provider,
-        model=settings.deep_model,
-        base_url=settings.backend_url,
-        **role_kwargs("deep"),
-    ).get_llm()
-
     def serializer(model: str, fallback: Any) -> Any:
         if (
             settings.llm_provider != "deepseek"
@@ -88,6 +76,32 @@ def create_run_llms(
             **kwargs,
         ).get_llm()
 
+    if purpose == "incremental":
+        deep = create_llm_client(
+            provider=settings.llm_provider,
+            model=settings.deep_model,
+            base_url=settings.backend_url,
+            **role_kwargs("deep"),
+        ).get_llm()
+        deep_serializer = serializer(settings.deep_model, deep)
+        return RunLLMs(
+            quick=deep,
+            deep=deep,
+            quick_serializer=deep_serializer,
+            deep_serializer=deep_serializer,
+        )
+    quick = create_llm_client(
+        provider=settings.llm_provider,
+        model=settings.quick_model,
+        base_url=settings.backend_url,
+        **role_kwargs("quick"),
+    ).get_llm()
+    deep = create_llm_client(
+        provider=settings.llm_provider,
+        model=settings.deep_model,
+        base_url=settings.backend_url,
+        **role_kwargs("deep"),
+    ).get_llm()
     return RunLLMs(
         quick=quick,
         deep=deep,

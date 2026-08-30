@@ -153,10 +153,15 @@ function OtherCalculations({
             <header>
               <div>
                 <strong>
-                  {calculationUses.get(calculation.id)?.join(" · ") ??
+                  {calculation.decision_uses
+                    ?.map((use) => use.label)
+                    .filter(
+                      (label, index, labels) => labels.indexOf(label) === index,
+                    )
+                    .join(" · ") ||
                     t("otherVerifiedCalculations")}
                 </strong>
-                <small>{calculation.id}</small>
+                <small>{t("numericCalculationStatus.verified")}</small>
               </div>
               <span title={String(calculation.result)}>
                 {formatDecisionNumber(
@@ -167,24 +172,64 @@ function OtherCalculations({
                 {calculation.unit}
               </span>
             </header>
-            <code>{calculation.formula}</code>
-            <small>{calculation.as_of_date}</small>
-            <dl>
-              {Object.entries(calculation.inputs).map(([name, value]) => (
-                <div key={name}>
-                  <dt>{name}</dt>
-                  <dd title={String(value)}>
-                    {formatDecisionNumber(value, undefined, language)}
+            <dl className="calculation-record-summary">
+              <div>
+                <dt>{t("calculationUseLocation")}</dt>
+                <dd>
+                  {calculationUses.get(calculation.id)?.join(" · ") ?? "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("asOfDate")}</dt>
+                <dd>{calculation.as_of_date}</dd>
+              </div>
+            </dl>
+            <details className="numeric-calculation-detail">
+              <summary>{t("formulaAndEvidence")}</summary>
+              <dl>
+                <div>
+                  <dt>{t("calculationId")}</dt>
+                  <dd><code>{calculation.id}</code></dd>
+                </div>
+                <div>
+                  <dt>{t("formula")}</dt>
+                  <dd><code>{calculation.formula}</code></dd>
+                </div>
+                <div>
+                  <dt>{t("inputs")}</dt>
+                  <dd>
+                    <dl className="calculation-inputs">
+                      {Object.entries(calculation.inputs).map(([name, value]) => (
+                        <div key={name}>
+                          <dt><code>{name}</code></dt>
+                          <dd title={String(value)}>
+                            {formatDecisionNumber(value, undefined, language)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
                   </dd>
                 </div>
-              ))}
-            </dl>
-            <EvidenceLinks
-              refs={calculation.input_evidence_refs}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-              compact
-            />
+                {calculation.temporal_basis && (
+                  <div>
+                    <dt>{t("temporalBasis")}</dt>
+                    <dd><code>{calculation.temporal_basis}</code></dd>
+                  </div>
+                )}
+                {calculation.limitations.length > 0 && (
+                  <div>
+                    <dt>{t("limitations")}</dt>
+                    <dd>{calculation.limitations.join(" · ")}</dd>
+                  </div>
+                )}
+              </dl>
+              <EvidenceLinks
+                refs={calculation.input_evidence_refs}
+                evidenceIndex={evidenceIndex}
+                onEvidence={onEvidence}
+                compact
+              />
+            </details>
           </article>
         ))}
       </div>
@@ -310,13 +355,16 @@ function NumericSnapshotView({ snapshot }: { snapshot: NumericAuditSnapshot }) {
       </div>
       <IssueCodes issues={snapshot.validation_issues ?? []} />
       {snapshot.candidate ? (
-        snapshot.schema_valid ? (
-          <StructuredCandidate candidate={snapshot.candidate} />
-        ) : (
-          <pre className="numeric-candidate-json">
-            {JSON.stringify(snapshot.candidate, null, 2)}
-          </pre>
-        )
+        <details className="numeric-raw-candidate">
+          <summary>{t("rawNumericCandidate")}</summary>
+          {snapshot.schema_valid ? (
+            <StructuredCandidate candidate={snapshot.candidate} />
+          ) : (
+            <pre className="numeric-candidate-json">
+              {JSON.stringify(snapshot.candidate, null, 2)}
+            </pre>
+          )}
+        </details>
       ) : (
         <p className="numeric-candidate-omitted">
           {snapshot.candidate_omitted === "oversize"

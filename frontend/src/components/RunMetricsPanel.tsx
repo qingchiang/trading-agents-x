@@ -34,8 +34,20 @@ export default function RunMetricsPanel({
   const contexts = useMemo(() => contextMetricRows(events), [events]);
 
   return (
-    <article className="panel run-metrics">
-      <p className="metrics-observation-note">{t("observedUsageNote")}</p>
+    <details className="panel run-metrics run-metrics-disclosure">
+      <summary>
+        <strong>{t("runMetricsAndDiagnostics")}</strong>
+        <span>
+          {t("runMetricsCompactSummary", {
+            llm: metrics?.llm_calls ?? 0,
+            input: (metrics?.input_tokens ?? 0).toLocaleString(),
+            output: (metrics?.output_tokens ?? 0).toLocaleString(),
+            seconds: (metrics?.wall_time_seconds ?? 0).toFixed(1),
+          })}
+        </span>
+      </summary>
+      <div className="run-metrics-body">
+        <p className="metrics-observation-note">{t("observedUsageNote")}</p>
       <div className="metrics-strip">
         <Metric label={t("llmCalls")} value={metrics?.llm_calls ?? 0} />
         <Metric label={t("toolCalls")} value={metrics?.tool_calls ?? 0} />
@@ -285,7 +297,8 @@ export default function RunMetricsPanel({
           </div>
         )}
       </details>
-    </article>
+      </div>
+    </details>
   );
 }
 

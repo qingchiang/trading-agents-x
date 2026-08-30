@@ -67,9 +67,10 @@ Markdown is rendered without raw HTML and sanitized before display.
 
 ## Quick start
 
-Python 3.12–3.14 and uv 0.12.1 or newer are supported. Node.js is needed only
-when developing the frontend; release wheels already include the compiled Web
-assets.
+Python 3.12–3.14 and uv 0.12.1 or newer are supported. Node.js 22.12 or newer
+within the Node 22 release line is needed only when developing the frontend;
+release wheels already include the compiled Web assets. The repository
+`.nvmrc` selects the supported major version.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh

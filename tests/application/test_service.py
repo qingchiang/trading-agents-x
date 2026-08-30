@@ -99,7 +99,7 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
     assert run.method_snapshot["thresholds"]["news_article_limit"] == 30
     assert len(run.method_snapshot["configuration_fingerprint"]) == 64
     assert timeline.primary_cycle_id == result.run_id
-    assert [(node.id, node.cycle_id, node.is_primary) for node in timeline.nodes] == [
+    assert [(node.id, node.cycle_id, node.is_primary) for node in timeline.all_nodes] == [
         (result.run_id, result.run_id, True)
     ]
 
@@ -129,9 +129,10 @@ def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selecte
             make_primary=False,
         )
     )
-    assert [node.id for node in repository.get_timeline("NVDA").nodes] == sorted(
-        (first.run_id, later.run_id)
-    )
+    assert [node.id for node in repository.get_timeline("NVDA").all_nodes] == [
+        first.run_id,
+        later.run_id,
+    ]
     assert repository.get_timeline("NVDA").primary_cycle_id == first.run_id
 
     selected = repository.select_primary_cycle("NVDA", later.run_id)
@@ -139,8 +140,8 @@ def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selecte
 
     assert selected.primary_cycle_id == later.run_id
     assert repeated == selected
-    assert [node.is_primary for node in selected.nodes] == [
-        node.id == later.run_id for node in selected.nodes
+    assert [node.is_primary for node in selected.all_nodes] == [
+        node.id == later.run_id for node in selected.all_nodes
     ]
 
 
@@ -582,7 +583,7 @@ def test_atomic_research_commit_rolls_back_every_persisted_boundary(
         assert session.query(DecisionRecord).count() == 0
         assert session.query(ResearchNodeRecord).count() == 0
         assert session.query(PrimaryResearchCycleRecord).count() == 0
-    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_timeline("NVDA").all_nodes == ()
 
 
 @pytest.mark.parametrize(
@@ -724,7 +725,7 @@ def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decis
         service.run(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     failed = repository.list_runs(status=RunStatus.FAILED).items[0]
-    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_timeline("NVDA").all_nodes == ()
     assert repository.get_result(failed.id).decision is None
 
 
@@ -745,7 +746,7 @@ def test_queued_legacy_run_fails_execution_boundary_without_a_node(
         service.execute_claimed(claimed, worker_id="worker")
 
     assert repository.get_run(run.id).status is RunStatus.FAILED
-    assert repository.get_timeline("NVDA").nodes == ()
+    assert repository.get_timeline("NVDA").all_nodes == ()
 
 
 class _MetricFailureGraph:
@@ -1595,7 +1596,7 @@ def test_service_export_reads_the_durable_result(
     assert "Fixture thesis" in body
     if format == "json":
         payload = json.loads(body)
-        assert payload["schema_version"] == "9"
+        assert payload["schema_version"] == "11"
         assert payload["run"]["id"] == result.run_id
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]

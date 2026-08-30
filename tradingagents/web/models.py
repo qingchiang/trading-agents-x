@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -12,10 +12,15 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
+    FullBaselineCandidate,
+    IncrementalRunContext,
     ResearchNodeComparisonSelection,
+    ResearchNodeView,
     ResearchTimeline,
     RunAttemptView,
     RunLifecycleImpact,
+    RunRequestSnapshot,
+    RunStatus,
     RunView,
 )
 
@@ -65,8 +70,26 @@ class LoginRequest(ApiModel):
 class RunDetail(ApiModel):
     run: RunView
     result: AnalysisResult | None = None
+    research_node: ResearchNodeView | None = None
     attempts: tuple[RunAttemptView, ...] = ()
     evidence_status: EvidenceSealView
+    incremental_context: IncrementalRunContext | None = None
+
+
+class RunCreationTemplate(ApiModel):
+    run_id: str
+    status: RunStatus
+    request: RunRequestSnapshot | AnalysisRequest
+    research_kind: Literal["full", "incremental"] | None = None
+    full_baseline_run_id: str | None = None
+    instrument_name: str | None = None
+    instrument_local_name: str | None = None
+
+
+class FullBaselineCandidates(ApiModel):
+    instrument: str
+    before: date
+    items: tuple[FullBaselineCandidate, ...] = ()
 
 
 class TimelineDetail(ApiModel):
@@ -95,9 +118,7 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(
-            self.model_dump(exclude={"source_run_id"})
-        )
+        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}))
 
 
 class RunBatchRequest(ApiModel):

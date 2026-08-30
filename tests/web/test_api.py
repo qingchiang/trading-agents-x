@@ -53,6 +53,12 @@ def _payload(ticker: str = "NVDA") -> dict:
     }
 
 
+def _timeline_nodes(payload: dict) -> list[dict]:
+    return [
+        node for cycle in payload["cycles"] for node in (cycle["baseline"], *cycle["increments"])
+    ]
+
+
 @pytest.mark.anyio
 async def test_default_us_incremental_collector_reads_back_through_asgi_timeline(
     monkeypatch,
@@ -142,7 +148,9 @@ Date,Open,High,Low,Close,Volume
 
     assert result.status is RunStatus.SUCCEEDED
     assert response.status_code == 200
-    node = next(item for item in response.json()["timeline"]["nodes"] if item["id"] == result.run_id)
+    node = next(
+        item for item in _timeline_nodes(response.json()["timeline"]) if item["id"] == result.run_id
+    )
     assert node["performance"]["stock"]["status"] == "calculated"
     assert node["collection_summary"]["domains"][0]["sources"][0]["source"] == "yfinance"
 
@@ -236,9 +244,7 @@ Date,Open,High,Low,Close,Volume
             "get_fundamentals": fundamentals_response,
         }[method]
 
-    monkeypatch.setattr(
-        incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route
-    )
+    monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
     service = AnalysisService(
         web_settings,
         repository=web_repository,
@@ -260,7 +266,9 @@ Date,Open,High,Low,Close,Volume
 
     assert result.status is RunStatus.SUCCEEDED
     assert response.status_code == 200
-    node = next(item for item in response.json()["timeline"]["nodes"] if item["id"] == result.run_id)
+    node = next(
+        item for item in _timeline_nodes(response.json()["timeline"]) if item["id"] == result.run_id
+    )
     assert node["performance"]["stock"]["calculation"]["adjustment_basis"] == (
         "jquants_split_dividend_adjusted_close"
     )
@@ -429,29 +437,19 @@ Date,Open,High,Low,Close,Volume
     assert result.status is RunStatus.SUCCEEDED
     assert response.status_code == 200
     node = next(
-        item
-        for item in response.json()["timeline"]["nodes"]
-        if item["id"] == result.run_id
+        item for item in _timeline_nodes(response.json()["timeline"]) if item["id"] == result.run_id
     )
     assert node["performance"]["stock"]["calculation"]["adjustment_basis"] == (
         "qfq_forward_adjusted"
     )
     assert node["performance"]["benchmarks"] == []
-    domains = {
-        domain["domain"]: domain
-        for domain in node["collection_summary"]["domains"]
-    }
+    domains = {domain["domain"]: domain for domain in node["collection_summary"]["domains"]}
     assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
     assert domains["news"]["state"] == "empty"
-    assert domains["news"]["diagnostic"] == {
-        "code": "bounded_feed_no_observed_records"
-    }
-    assert domains["fundamentals"]["diagnostic"] == {
-        "code": "near_live_snapshot"
-    }
+    assert domains["news"]["diagnostic"] == {"code": "bounded_feed_no_observed_records"}
+    assert domains["fundamentals"]["diagnostic"] == {"code": "near_live_snapshot"}
     assert {
-        domain["domain"]: domain["status"]
-        for domain in node["research_availability"]["domains"]
+        domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     } == {
         "market": "available",
         "news": "missing",
@@ -579,13 +577,31 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     final_ref = result.evidence.items[0].ref
     assert final_ref != candidate.ref
 
+    artifact_reads: list[str] = []
+    original_list_artifacts = web_repository.list_artifacts
+
+    def track_artifact_reads(run_id: str, *args, **kwargs):
+        artifact_reads.append(run_id)
+        return original_list_artifacts(run_id, *args, **kwargs)
+
+    web_repository.list_artifacts = track_artifact_reads
     timeline = await web_client.get(f"/api/v1/timelines/{ticker}")
     detail = await web_client.get(f"/api/v1/runs/{result.run_id}")
     evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
+    exported = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=json")
 
-    assert timeline.status_code == detail.status_code == evidence.status_code == 200
+    assert (
+        timeline.status_code
+        == detail.status_code
+        == evidence.status_code
+        == exported.status_code
+        == 200
+    )
     node = next(
-        item for item in timeline.json()["timeline"]["nodes"] if item["id"] == result.run_id
+        item
+        for cycle in timeline.json()["timeline"]["cycles"]
+        for item in cycle["increments"]
+        if item["id"] == result.run_id
     )
     assert node["full_baseline_run_id"] == baseline.id
     assert "admissible_observation" in node["information_advancement"]["reasons"]
@@ -599,6 +615,22 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         baseline_item.ref,
         final_ref,
     ]
+    assert detail.json()["research_node"]["collection_summary"] == node["collection_summary"]
+    assert detail.json()["research_node"]["reassessment"] == node["reassessment"]
+    assert detail.json()["incremental_context"]["analysis_brief"]["markdown"]
+    assert detail.json()["incremental_context"]["full_baseline"]["run_id"] == baseline.id
+    assert "reports" not in detail.json()["incremental_context"]["full_baseline"]
+    assert baseline.id not in artifact_reads
+    assert (
+        exported.json()["research_node"]["information_advancement"]
+        == node["information_advancement"]
+    )
+    assert exported.json()["schema_version"] == "11"
+    assert (
+        exported.json()["incremental_context"]["analysis_brief"]["generation_method"]
+        == "markdown_audited"
+    )
+    assert exported.json()["incremental_context"]["full_baseline_evidence"]["items"]
     assert evidence.json()["items"][0]["ref"] == final_ref
     assert evidence.json()["items"][0]["available_at"]
 
@@ -901,40 +933,57 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     assert response.status_code == 200
     payload = response.json()["timeline"]
     assert payload["primary_cycle_id"] == run.id
-    assert payload["node_total"] == 1
-    assert payload["node_limit"] == 50
-    assert payload["node_offset"] == 0
-    assert payload["nodes"] == [
+    assert "nodes" not in payload
+    assert payload["cycle_total"] == 1
+    assert payload["cycle_limit"] == 50
+    assert payload["cycle_offset"] == 0
+    assert payload["active_full_cycles"] == [
         {
             "id": run.id,
-            "cycle_id": run.id,
-            "instrument": "NVDA",
             "analysis_date": "2026-07-24",
-            "research_schema_version": "1",
-            "information_cutoff_at": "2026-07-24T23:59:59Z",
-            "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
-            "research_kind": "full",
-            "full_baseline_run_id": None,
-            "is_baseline_compatible": True,
-            "is_cycle_head": True,
             "is_primary": True,
-            "is_active": True,
-            "trashed_at": None,
-            "trash_cascade_full_run_id": None,
-            "collection_summary": None,
-            "research_availability": None,
-            "information_advancement": None,
-            "performance": None,
-            "reassessment": None,
-            "decision": research_decision(evidence_refs=(item.ref,)).model_dump(mode="json"),
-            "full_research_required_reasons": [],
-            "cycle_warning": False,
+            "rating": "Hold",
+            "confidence": 0.6,
         }
+    ]
+    assert payload["cycles"] == [
+        {
+            "id": run.id,
+            "is_primary": True,
+            "cycle_warning": False,
+            "head_run_id": run.id,
+            "baseline": {
+                "id": run.id,
+                "cycle_id": run.id,
+                "instrument": "NVDA",
+                "analysis_date": "2026-07-24",
+                "research_schema_version": "1",
+                "information_cutoff_at": "2026-07-24T23:59:59Z",
+                "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
+                "research_kind": "full",
+                "full_baseline_run_id": None,
+                "is_baseline_compatible": True,
+                "is_cycle_head": True,
+                "is_primary": True,
+                "is_active": True,
+                "trashed_at": None,
+                "trash_cascade_full_run_id": None,
+                "collection_summary": None,
+                "research_availability": None,
+                "information_advancement": None,
+                "performance": None,
+                "reassessment": None,
+                "decision": research_decision(evidence_refs=(item.ref,)).model_dump(mode="json"),
+                "full_research_required_reasons": [],
+                "cycle_warning": False,
+            },
+            "increments": [],
+        },
     ]
 
 
 @pytest.mark.anyio
-async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
+async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
     web_client: httpx.AsyncClient,
     web_repository,
     web_settings,
@@ -988,24 +1037,31 @@ async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
         commit_full(date(2026, 7, 24), make_primary=False),
     ]
 
-    first_page = await web_client.get("/api/v1/timelines/NVDA?node_limit=2")
-    second_page = await web_client.get("/api/v1/timelines/NVDA?node_limit=2&node_offset=2")
+    first_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2")
+    second_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2&cycle_offset=2")
 
     assert first_page.status_code == 200
     assert second_page.status_code == 200
-    assert first_page.json()["timeline"]["node_total"] == 3
-    assert first_page.json()["timeline"]["node_limit"] == 2
-    assert first_page.json()["timeline"]["node_offset"] == 0
-    assert second_page.json()["timeline"]["node_offset"] == 2
-    assert [node["id"] for node in first_page.json()["timeline"]["nodes"]] == [
+    assert first_page.json()["timeline"]["cycle_total"] == 3
+    assert first_page.json()["timeline"]["cycle_limit"] == 2
+    assert first_page.json()["timeline"]["cycle_offset"] == 0
+    assert second_page.json()["timeline"]["cycle_offset"] == 2
+    assert len(first_page.json()["timeline"]["active_full_cycles"]) == 3
+    assert (
+        first_page.json()["timeline"]["active_full_cycles"]
+        == second_page.json()["timeline"]["active_full_cycles"]
+    )
+    assert [cycle["id"] for cycle in first_page.json()["timeline"]["cycles"]] == [
         oldest,
-        *sorted(same_cutoff),
-    ][:2]
-    assert [node["id"] for node in second_page.json()["timeline"]["nodes"]] == [
-        oldest,
-        *sorted(same_cutoff),
-    ][2:]
-    assert [node["is_baseline_compatible"] for node in first_page.json()["timeline"]["nodes"]] == [
+        sorted(same_cutoff)[0],
+    ]
+    assert [cycle["id"] for cycle in second_page.json()["timeline"]["cycles"]] == [
+        sorted(same_cutoff)[1],
+    ]
+    assert [
+        cycle["baseline"]["is_baseline_compatible"]
+        for cycle in first_page.json()["timeline"]["cycles"]
+    ] == [
         False,
         True,
     ]
@@ -1055,10 +1111,126 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
 
     assert response.status_code == 200
     assert response.json() == {
-        "items": [{"instrument": "NVDA", "primary_cycle_id": run.id, "node_count": 1}],
+        "items": [
+            {
+                "instrument": "NVDA",
+                "instrument_name": None,
+                "instrument_local_name": None,
+                "primary_cycle_id": run.id,
+                "full_cycle_count": 1,
+                "incremental_node_count": 0,
+                "latest_analysis_date": "2026-07-24",
+                "primary_rating": "Hold",
+                "primary_confidence": 0.6,
+                "timeline_warning": False,
+            }
+        ],
         "total": 1,
         "limit": 50,
         "offset": 0,
+    }
+
+
+@pytest.mark.anyio
+async def test_baseline_candidates_are_primary_first_and_decision_informative(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    def commit_full(analysis_date: date, *, make_primary: bool | None, confidence: float) -> str:
+        request = AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=analysis_date,
+            make_primary=make_primary,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="1",
+            information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
+            method_snapshot={"schema_version": "1"},
+            research_kind="full",
+        )
+        web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
+        web_repository.set_instrument_local_name(run.id, "英伟达")
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=analysis_date,
+            effective_date=analysis_date,
+            content=run.id,
+        )
+        evidence = EvidenceBundle(instrument="NVDA", analysis_date=analysis_date, items=(item,))
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument="NVDA",
+                reports={},
+                decision=research_decision(
+                    confidence=confidence,
+                    thesis=f"Decision from {analysis_date.isoformat()}.",
+                    evidence_refs=(item.ref,),
+                ),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    primary = commit_full(date(2026, 7, 20), make_primary=None, confidence=0.72)
+    newest = commit_full(date(2026, 7, 22), make_primary=False, confidence=0.81)
+
+    response = await web_client.get("/api/v1/timelines/NVDA/baseline-candidates?before=2026-07-24")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [primary, newest]
+    assert items[0] == {
+        "id": primary,
+        "analysis_date": "2026-07-20",
+        "is_primary": True,
+        "instrument_name": "NVIDIA Corporation",
+        "instrument_local_name": "英伟达",
+        "rating": "Hold",
+        "confidence": 0.72,
+        "thesis": "Decision from 2026-07-20.",
+        "cycle_warning": False,
+    }
+
+
+@pytest.mark.anyio
+async def test_terminal_run_creation_template_is_lightweight_and_uses_today_independently(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    run, _ = web_repository.create_run(
+        request,
+        web_settings.resolve_run(request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(run.id, "fixture", 30)
+    web_repository.fail(run.id, RuntimeError("fixture"))
+
+    response = await web_client.get(f"/api/v1/runs/{run.id}/creation-template")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "run_id": run.id,
+        "status": "failed",
+        "request": run.request.model_dump(mode="json"),
+        "research_kind": "full",
+        "full_baseline_run_id": None,
+        "instrument_name": None,
+        "instrument_local_name": None,
     }
 
 
@@ -1163,9 +1335,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
             request,
             web_settings.resolve_run(request).snapshot(),
             research_schema_version="1",
-            information_cutoff_at=datetime.combine(
-                analysis_date, datetime.max.time(), UTC
-            ),
+            information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
             research_kind="full",
         )
@@ -1177,9 +1347,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
             effective_date=analysis_date,
             content=run.id,
         )
-        evidence = EvidenceBundle(
-            instrument="NVDA", analysis_date=analysis_date, items=(item,)
-        )
+        evidence = EvidenceBundle(instrument="NVDA", analysis_date=analysis_date, items=(item,))
         web_repository.seal_evidence(run.id, evidence)
         web_repository.complete(
             run.id,
@@ -1198,9 +1366,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
     primary = commit_full(date(2026, 7, 24))
     replacement = commit_full(date(2026, 7, 25), make_primary=False)
 
-    rejected = await web_client.post(
-        "/api/v1/runs/trash", json={"run_ids": [primary]}
-    )
+    rejected = await web_client.post("/api/v1/runs/trash", json={"run_ids": [primary]})
     trashed = await web_client.post(
         "/api/v1/runs/trash",
         json={
@@ -1209,19 +1375,15 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
         },
     )
     active = await web_client.get("/api/v1/timelines/NVDA")
-    retained = await web_client.get(
-        "/api/v1/timelines/NVDA?trash_state=all"
-    )
+    retained = await web_client.get("/api/v1/timelines/NVDA?trash_state=all")
 
     assert rejected.status_code == 409
     assert rejected.json()["error"]["code"] == "invalid_run_transition"
     assert trashed.status_code == 200
     assert trashed.json()["impacts"][0]["affected_run_ids"] == [primary]
     assert trashed.json()["impacts"][0]["replacement_primary_cycle_id"] == replacement
-    assert [node["id"] for node in active.json()["timeline"]["nodes"]] == [
-        replacement
-    ]
-    assert {node["id"] for node in retained.json()["timeline"]["nodes"]} == {
+    assert [node["id"] for node in _timeline_nodes(active.json()["timeline"])] == [replacement]
+    assert {node["id"] for node in _timeline_nodes(retained.json()["timeline"])} == {
         primary,
         replacement,
     }

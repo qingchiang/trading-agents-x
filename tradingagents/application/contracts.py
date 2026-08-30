@@ -1741,30 +1741,72 @@ class RunLifecycleResult(FrozenModel):
     impacts: tuple[RunLifecycleImpact, ...] = ()
 
 
+class ResearchCycleView(FrozenModel):
+    """One Full-rooted Research Cycle returned as an indivisible UI unit."""
+
+    id: str
+    is_primary: bool = False
+    cycle_warning: bool = False
+    head_run_id: str
+    baseline: ResearchNodeView
+    increments: tuple[ResearchNodeView, ...] = ()
+
+
 class PrimaryCycleCandidate(FrozenModel):
-    """One active Full Cycle eligible for explicit Primary selection."""
+    """One active Full Cycle eligible for explicit Primary replacement."""
 
     id: str
     analysis_date: date
+    is_primary: bool = False
+    rating: ResearchRating | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ResearchTimeline(FrozenModel):
     instrument: str
+    instrument_name: str | None = None
+    instrument_local_name: str | None = None
     primary_cycle_id: str | None = None
     active_full_cycles: tuple[PrimaryCycleCandidate, ...] = ()
-    nodes: tuple[ResearchNodeView, ...] = ()
-    node_total: int = Field(default=0, ge=0)
-    node_limit: int = Field(default=50, ge=1, le=200)
-    node_offset: int = Field(default=0, ge=0)
+    cycles: tuple[ResearchCycleView, ...] = ()
+    cycle_total: int = Field(default=0, ge=0)
+    cycle_limit: int = Field(default=50, ge=1, le=200)
+    cycle_offset: int = Field(default=0, ge=0)
     timeline_warning: bool = False
+
+    @property
+    def all_nodes(self) -> tuple[ResearchNodeView, ...]:
+        """Flatten the current Cycle page for application-level traversal."""
+        return tuple(node for cycle in self.cycles for node in (cycle.baseline, *cycle.increments))
 
 
 class ResearchTimelineSummary(FrozenModel):
     """Derived Timeline identity and stable, non-duplicated summary metadata."""
 
     instrument: str
+    instrument_name: str | None = None
+    instrument_local_name: str | None = None
     primary_cycle_id: str | None = None
-    node_count: int = Field(ge=1)
+    full_cycle_count: int = Field(ge=1)
+    incremental_node_count: int = Field(default=0, ge=0)
+    latest_analysis_date: date
+    primary_rating: ResearchRating | None = None
+    primary_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    timeline_warning: bool = False
+
+
+class FullBaselineCandidate(FrozenModel):
+    """One active Full Baseline eligible before a requested analysis cutoff."""
+
+    id: str
+    analysis_date: date
+    is_primary: bool = False
+    instrument_name: str | None = None
+    instrument_local_name: str | None = None
+    rating: ResearchRating | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    thesis: str | None = None
+    cycle_warning: bool = False
 
 
 class ResearchTimelinePage(FrozenModel):
@@ -2296,19 +2338,59 @@ class IncrementalSynthesisInput(FrozenModel):
     method_snapshot: dict[str, Any]
 
 
+class IncrementalAnalysisBrief(FrozenModel):
+    """User-readable Incremental analysis produced by the semantic synthesis pass."""
+
+    markdown: str = Field(min_length=1)
+    report_sections: tuple[ReportSection, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    warnings: tuple[ResearchWarning, ...] = ()
+    prompt_version: Literal["incremental-analysis-brief-v1"] = "incremental-analysis-brief-v1"
+    generation_method: Literal[ArtifactGenerationMethod.MARKDOWN_AUDITED] = (
+        ArtifactGenerationMethod.MARKDOWN_AUDITED
+    )
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def coerce_warnings(cls, value: Any) -> tuple[ResearchWarning, ...]:
+        return _coerce_warnings(value)
+
+
 class IncrementalSynthesis(FrozenModel):
+    analysis_brief: IncrementalAnalysisBrief
     reassessment: ResearchReassessment
     decision: ResearchDecision
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
 class IncrementalNodeProducts(FrozenModel):
+    analysis_brief: IncrementalAnalysisBrief | None = None
     collection_summary: CollectionSummary
     research_availability: ResearchAvailability
     information_advancement: InformationAdvancement
     performance: PerformanceObservation
     reassessment: ResearchReassessment
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class IncrementalBaselineContext(FrozenModel):
+    run_id: str = Field(min_length=1, max_length=36)
+    analysis_date: date
+    decision: ResearchDecision
+
+
+class IncrementalRunContext(FrozenModel):
+    analysis_brief: IncrementalAnalysisBrief | None = None
+    full_baseline: IncrementalBaselineContext
+
+
+class IncrementalExportContext(IncrementalRunContext):
+    full_baseline_evidence: EvidenceBundle
 
 
 class RunAttemptView(FrozenModel):
@@ -2325,6 +2407,7 @@ class RunAttemptView(FrozenModel):
 
 class RunSummaryView(RunView):
     research_rating: ResearchRating | None = None
+    research_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class RunPage(FrozenModel):
@@ -2344,9 +2427,11 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["9"] = "9"
+    schema_version: Literal["11"] = "11"
     run: RunView
     result: AnalysisResult
+    research_node: ResearchNodeView | None = None
     evidence: EvidenceBundle | None = None
     artifacts: tuple[ResearchArtifact, ...] = ()
     attempts: tuple[RunAttemptView, ...] = ()
+    incremental_context: IncrementalExportContext | None = None

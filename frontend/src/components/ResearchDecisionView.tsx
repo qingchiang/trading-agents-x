@@ -518,7 +518,7 @@ function buildCalculationUses(
   };
   (decision.calculation_records ?? []).forEach((calculation) =>
     (calculation.decision_uses ?? []).forEach((use) =>
-      add([calculation.id], decisionCalculationUseLabel(use.component_path, use.label, t)),
+      add([calculation.id], decisionCalculationUseLocation(use.component_path, t)),
     ),
   );
   decision.scenarios.forEach((scenario) =>
@@ -550,9 +550,8 @@ function buildCalculationUses(
   return uses;
 }
 
-function decisionCalculationUseLabel(
+function decisionCalculationUseLocation(
   componentPath: string,
-  label: string,
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   let location = t("calculationUseDecisionClaim");
@@ -574,7 +573,7 @@ function decisionCalculationUseLabel(
       });
     }
   }
-  return t("calculationUseDecision", { location, label });
+  return location;
 }
 
 function latestEndpointDate(left: string, right: string): string {

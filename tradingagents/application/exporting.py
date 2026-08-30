@@ -20,6 +20,7 @@ from .contracts import (
     DebateAgenda,
     DecisionBrief,
     DecisionNumericAuditAppendix,
+    EvidenceBundle,
     EvidenceTable,
     JudgeDraft,
     RebuttalReview,
@@ -67,12 +68,21 @@ _EN_LABELS = {
     ),
     "research_decision": "Research Decision",
     "no_decision": "No final decision was recorded.",
+    "incremental_products": "Incremental Research Products",
+    "incremental_brief": "Incremental Analysis Brief",
+    "historical_brief_missing": "This historical run did not record an analysis brief.",
+    "full_baseline_context": "Full Baseline Context",
+    "information_advancement": "Information advancement",
+    "research_availability": "Research availability",
+    "reassessment": "Baseline reassessment",
+    "full_research_required": "Full Research required",
     "warnings": "Warnings",
     "no_warnings": "No structured warnings were recorded.",
     "performance": "Performance",
     "attempts": "Attempts",
     "no_attempts": "No attempt metrics were recorded.",
     "sources": "Sources",
+    "baseline_sources": "Full Baseline Sources",
     "no_evidence": "No sealed EvidenceBundle was recorded for this run.",
     "raw_tables": "Raw Evidence Tables",
     "evidence_items": "Evidence Items",
@@ -276,12 +286,21 @@ _ZH_LABELS = {
     "decision_brief_notice": "非正式结论，尚未通过 Final 决策契约审计。",
     "research_decision": "最终结论",
     "no_decision": "未记录最终研究结论。",
+    "incremental_products": "增量研究产物",
+    "incremental_brief": "增量分析简报",
+    "historical_brief_missing": "此历史运行未记录分析简报。",
+    "full_baseline_context": "完整研究基线上下文",
+    "information_advancement": "信息推进",
+    "research_availability": "研究可用性",
+    "reassessment": "基线再评估",
+    "full_research_required": "需要完整研究",
     "warnings": "警告",
     "no_warnings": "未记录结构化警告。",
     "performance": "性能指标",
     "attempts": "运行尝试",
     "no_attempts": "未记录尝试级指标。",
     "sources": "来源",
+    "baseline_sources": "完整研究基线来源",
     "no_evidence": "本次运行未记录已封存的 EvidenceBundle。",
     "raw_tables": "原始证据表",
     "evidence_items": "证据条目",
@@ -461,12 +480,21 @@ _JA_LABELS = {
     ),
     "research_decision": "最終結論",
     "no_decision": "最終結論は記録されていません。",
+    "incremental_products": "増分リサーチ成果物",
+    "incremental_brief": "増分分析ブリーフ",
+    "historical_brief_missing": "この過去の実行には分析ブリーフが記録されていません。",
+    "full_baseline_context": "フルリサーチ基準コンテキスト",
+    "information_advancement": "情報の前進",
+    "research_availability": "リサーチ可用性",
+    "reassessment": "ベースライン再評価",
+    "full_research_required": "フルリサーチが必要",
     "warnings": "警告",
     "no_warnings": "構造化された警告は記録されていません。",
     "performance": "パフォーマンス指標",
     "attempts": "試行履歴",
     "no_attempts": "試行別の指標は記録されていません。",
     "sources": "情報源",
+    "baseline_sources": "フルリサーチ基準の情報源",
     "no_evidence": "封印済み EvidenceBundle は記録されていません。",
     "raw_tables": "原始証拠テーブル",
     "evidence_items": "証拠項目",
@@ -643,7 +671,12 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
     labels = _export_labels(run_export)
-    evidence_aliases = _evidence_aliases(run_export.evidence)
+    baseline_evidence = (
+        run_export.incremental_context.full_baseline_evidence
+        if run_export.incremental_context is not None
+        else None
+    )
+    evidence_aliases = _evidence_aliases(run_export.evidence, baseline_evidence)
     process_artifacts = tuple(
         artifact
         for artifact in run_export.artifacts
@@ -733,6 +766,56 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 ),
             ]
         )
+
+    node = run_export.research_node
+    if node is not None and node.research_kind == "incremental":
+        sections.extend(["", f"## {labels['incremental_products']}", ""])
+        brief = (
+            run_export.incremental_context.analysis_brief
+            if run_export.incremental_context is not None
+            else None
+        )
+        sections.extend([f"### {labels['incremental_brief']}", ""])
+        if brief is None:
+            sections.append(f"_{labels['historical_brief_missing']}_")
+        else:
+            sections.append(_render_export_markdown(brief.markdown, evidence_aliases))
+        if node.information_advancement is not None:
+            reasons = ", ".join(node.information_advancement.reasons) or "—"
+            sections.append(f"- {labels['information_advancement']}: {reasons}")
+        if node.research_availability is not None:
+            availability = ", ".join(
+                f"{item.domain}: {item.status.value}" for item in node.research_availability.domains
+            )
+            sections.append(f"- {labels['research_availability']}: {availability}")
+        if node.reassessment is not None:
+            sections.extend(["", f"### {labels['reassessment']}", ""])
+            sections.extend(
+                f"- `{entry.component_id}`: {entry.disposition.value} — {entry.reason}"
+                for entry in node.reassessment.entries
+            )
+        if node.full_research_required_reasons:
+            sections.extend(["", f"### {labels['full_research_required']}", ""])
+            sections.extend(
+                f"- `{reason.code}`: {reason.message}"
+                for reason in node.full_research_required_reasons
+            )
+        context = run_export.incremental_context
+        if context is not None:
+            sections.extend(
+                [
+                    "",
+                    f"### {labels['full_baseline_context']}",
+                    "",
+                    f"- {labels['run']}: `{context.full_baseline.run_id}`",
+                    f"- {labels['analysis_date']}: `{context.full_baseline.analysis_date}`",
+                    "",
+                    _render_export_markdown(
+                        _render_research_decision(context.full_baseline.decision, labels),
+                        evidence_aliases,
+                    ),
+                ]
+            )
 
     if result.numeric_audit is not None:
         sections.extend(
@@ -859,93 +942,107 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"{attempt_metrics.wall_time_seconds:.3f}s |"
             )
 
-    sections.extend(["", f"## {labels['sources']}"])
-    if run_export.evidence is None:
+    _append_evidence_sources(
+        sections,
+        run_export.evidence,
+        evidence_aliases,
+        labels,
+        title=labels["sources"],
+        table_path_prefix="tables",
+    )
+    if baseline_evidence is not None:
+        _append_evidence_sources(
+            sections,
+            baseline_evidence,
+            evidence_aliases,
+            labels,
+            title=labels["baseline_sources"],
+            table_path_prefix="baseline/tables",
+        )
+    return "\n".join(sections)
+
+
+def _append_evidence_sources(
+    sections: list[str],
+    evidence: EvidenceBundle | None,
+    evidence_aliases: Mapping[str, str],
+    labels: ExportLabels,
+    *,
+    title: str,
+    table_path_prefix: str,
+) -> None:
+    sections.extend(["", f"## {title}"])
+    if evidence is None:
         sections.extend(["", f"_{labels['no_evidence']}_"])
-    else:
-        table_refs = {ref for table in run_export.evidence.tables for ref in table.evidence_refs}
+        return
+
+    table_refs = {ref for table in evidence.tables for ref in table.evidence_refs}
+    sections.extend(
+        [
+            "",
+            f"- {labels['bundle_version']}: `{evidence.version}`",
+            f"- {labels['digest']}: `{evidence.digest}`",
+            f"- {labels['analysis_date']}: `{evidence.analysis_date}`",
+        ]
+    )
+    if evidence.tables:
+        sections.extend(["", f"### {labels['raw_tables']}"])
+        for table in evidence.tables:
+            sections.extend(
+                [
+                    "",
+                    f"#### {table.title}",
+                    "",
+                    f"- {labels['table']}: `{table.id}`",
+                    f"- {labels['purpose']}: {table.purpose}",
+                    f"- {labels['rows']}: `{len(table.rows)}`",
+                    f"- {labels['raw_data']}: `{table_path_prefix}/{table.id}.csv`",
+                    f"- {labels['evidence']}: "
+                    + _render_canonical_refs(table.evidence_refs, labels),
+                ]
+            )
+        sections.extend(["", f"### {labels['evidence_items']}"])
+    for group in group_evidence_by_content(evidence.items):
+        item = group.canonical
+        alias = evidence_aliases[item.ref]
+        sources = tuple(
+            dict.fromkeys(
+                origin.source for grouped_item in group.items for origin in grouped_item.origins
+            )
+        ) or tuple(dict.fromkeys(grouped_item.source for grouped_item in group.items))
         sections.extend(
             [
                 "",
-                f"- {labels['bundle_version']}: `{run_export.evidence.version}`",
-                f"- {labels['digest']}: `{run_export.evidence.digest}`",
-                f"- {labels['analysis_date']}: `{run_export.evidence.analysis_date}`",
+                f"### {alias}",
+                "",
+                f"- {labels['refs']}: " + ", ".join(f"`{ref}`" for ref in group.refs),
+                f"- {labels['source_list']}: {', '.join(sources)}",
+                f"- {labels['type']}: {item.evidence_type}",
+                f"- {labels['quality']}: `{item.quality.value}`",
+                f"- {labels['fallback']}: `{str(item.fallback).lower()}`",
             ]
         )
-        if run_export.evidence.tables:
-            sections.extend(["", f"### {labels['raw_tables']}"])
-            for table in run_export.evidence.tables:
-                sections.extend(
+        if group.content and table_refs.isdisjoint(group.refs):
+            sections.extend(["", f"#### {labels['content']}", "", group.content])
+        elif group.content:
+            sections.extend(["", f"_{labels['raw_table_available']}_"])
+        sections.extend(
+            [
+                "",
+                f"#### {labels['audit_records']}",
+                "",
+                "```json",
+                json.dumps(
                     [
-                        "",
-                        f"#### {table.title}",
-                        "",
-                        f"- {labels['table']}: `{table.id}`",
-                        f"- {labels['purpose']}: {table.purpose}",
-                        f"- {labels['rows']}: `{len(table.rows)}`",
-                        f"- {labels['raw_data']}: `tables/{table.id}.csv`",
-                        f"- {labels['evidence']}: "
-                        + _render_canonical_refs(table.evidence_refs, labels),
-                    ]
-                )
-            sections.extend(["", f"### {labels['evidence_items']}"])
-        for group in group_evidence_by_content(run_export.evidence.items):
-            item = group.canonical
-            alias = evidence_aliases[item.ref]
-            sources = tuple(
-                dict.fromkeys(
-                    origin.source for grouped_item in group.items for origin in grouped_item.origins
-                )
-            ) or tuple(dict.fromkeys(grouped_item.source for grouped_item in group.items))
-            sections.extend(
-                [
-                    "",
-                    f"### {alias}",
-                    "",
-                    f"- {labels['refs']}: " + ", ".join(f"`{ref}`" for ref in group.refs),
-                    f"- {labels['source_list']}: {', '.join(sources)}",
-                    f"- {labels['type']}: {item.evidence_type}",
-                    f"- {labels['quality']}: `{item.quality.value}`",
-                    f"- {labels['fallback']}: `{str(item.fallback).lower()}`",
-                ]
-            )
-            if group.content and table_refs.isdisjoint(group.refs):
-                sections.extend(
-                    [
-                        "",
-                        f"#### {labels['content']}",
-                        "",
-                        group.content,
-                    ]
-                )
-            elif group.content:
-                sections.extend(
-                    [
-                        "",
-                        f"_{labels['raw_table_available']}_",
-                    ]
-                )
-            sections.extend(
-                [
-                    "",
-                    f"#### {labels['audit_records']}",
-                    "",
-                    "```json",
-                    json.dumps(
-                        [
-                            grouped_item.model_dump(
-                                mode="json",
-                                exclude={"content"},
-                            )
-                            for grouped_item in group.items
-                        ],
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    "```",
-                ]
-            )
-    return "\n".join(sections)
+                        grouped_item.model_dump(mode="json", exclude={"content"})
+                        for grouped_item in group.items
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                "```",
+            ]
+        )
 
 
 def render_run_export_package(run_export: RunExport) -> bytes:
@@ -958,7 +1055,17 @@ def render_run_export_package(run_export: RunExport) -> bytes:
                 "schema_version": run_export.schema_version,
                 "run": run_export.run.model_dump(mode="json"),
                 "result": run_export.result.model_dump(mode="json"),
+                "research_node": (
+                    run_export.research_node.model_dump(mode="json")
+                    if run_export.research_node is not None
+                    else None
+                ),
                 "attempts": [attempt.model_dump(mode="json") for attempt in run_export.attempts],
+                "incremental_context": (
+                    run_export.incremental_context.model_dump(mode="json")
+                    if run_export.incremental_context is not None
+                    else None
+                ),
             }
         ),
         "artifacts.json": _json_bytes(
@@ -971,6 +1078,11 @@ def render_run_export_package(run_export: RunExport) -> bytes:
     if run_export.evidence is not None:
         for table in run_export.evidence.tables:
             payloads[f"tables/{table.id}.csv"] = _evidence_table_csv(table)
+    if run_export.incremental_context is not None:
+        baseline_evidence = run_export.incremental_context.full_baseline_evidence
+        payloads["baseline/evidence.json"] = _json_bytes(baseline_evidence.model_dump(mode="json"))
+        for table in baseline_evidence.tables:
+            payloads[f"baseline/tables/{table.id}.csv"] = _evidence_table_csv(table)
 
     manifest = {
         "schema_version": "1",
@@ -1071,11 +1183,12 @@ def _render_analyst_report(
     return "\n".join(lines)
 
 
-def _evidence_aliases(evidence: Any) -> dict[str, str]:
-    if evidence is None:
-        return {}
+def _evidence_aliases(*evidence_bundles: Any) -> dict[str, str]:
+    items = tuple(
+        item for evidence in evidence_bundles if evidence is not None for item in evidence.items
+    )
     aliases: dict[str, str] = {}
-    for index, group in enumerate(group_evidence_by_content(evidence.items), 1):
+    for index, group in enumerate(group_evidence_by_content(items), 1):
         alias = f"E{index:02d}"
         for ref in group.refs:
             aliases[ref] = alias
@@ -1261,9 +1374,9 @@ def _render_research_decision(
                 f"- {labels['method']}: {assessment.method}",
                 (
                     f"- {labels['range']}: "
-                f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
-                f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
-                f"{assessment.unit}"
+                    f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
+                    f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
+                    f"{assessment.unit}"
                 ),
                 f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
                 (
@@ -1393,9 +1506,7 @@ def _calculation_uses(
                     )
                     if item is not None
                 ),
-                labels["calculation_use.scenario"].format(
-                    scenario=labels[scenario.kind.value]
-                ),
+                labels["calculation_use.scenario"].format(scenario=labels[scenario.kind.value]),
             )
     if content.valuation_assessment is not None:
         add(
@@ -1423,9 +1534,7 @@ def _decision_component_label(component_path: str, labels: ExportLabels) -> str:
         return labels["risk_response"]
     match = re.fullmatch(r"scenarios\.(base|bull|bear)\..+", component_path)
     if match:
-        return labels["calculation_use.scenario"].format(
-            scenario=labels[match.group(1)]
-        )
+        return labels["calculation_use.scenario"].format(scenario=labels[match.group(1)])
     return labels["calculation_use.decision_claim"]
 
 
@@ -1518,8 +1627,7 @@ def _render_numeric_audit_appendix(
         for item in appendix.omitted_components:
             lines.append(
                 f"- **{_numeric_omission_label(item, labels)}** "
-                f"(`{item.component_path}`): "
-                + ", ".join(f"`{code}`" for code in item.issue_codes)
+                f"(`{item.component_path}`): " + ", ".join(f"`{code}`" for code in item.issue_codes)
             )
     for snapshot in appendix.snapshots:
         phase_label = labels.enum_name("numeric_phase", snapshot.phase.value)

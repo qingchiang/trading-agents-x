@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 from email.parser import BytesParser
 from pathlib import Path
@@ -41,6 +42,35 @@ _FORBIDDEN_REQUIREMENTS = {
 }
 
 _REQUIRES_PYTHON = frozenset({">=3.12", "<3.15"})
+_STATIC_ROOT = "tradingagents/web/static/"
+_ASSET_SUFFIXES = (".js", ".css")
+
+
+def _reachable_web_assets(archive: ZipFile, index: str) -> set[str]:
+    reachable = {
+        f"{_STATIC_ROOT}{path.removeprefix('/')}"
+        for path in re.findall(
+            r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"',
+            index,
+        )
+    }
+    pending = [name for name in reachable if name.endswith(".js")]
+    visited: set[str] = set()
+    while pending:
+        asset = pending.pop()
+        if asset in visited or asset not in archive.namelist():
+            continue
+        visited.add(asset)
+        source = archive.read(asset).decode("utf-8")
+        for relative in re.findall(r'["\'](\./[^"\']+\.(?:js|css))["\']', source):
+            referenced = posixpath.normpath(
+                posixpath.join(posixpath.dirname(asset), relative)
+            )
+            if referenced not in reachable:
+                reachable.add(referenced)
+                if referenced.endswith(".js"):
+                    pending.append(referenced)
+    return reachable
 
 
 def verify(wheel: Path) -> None:
@@ -58,18 +88,12 @@ def verify(wheel: Path) -> None:
                 f"wheel contains removed runtime files: {', '.join(forbidden)}"
             )
         index = archive.read("tradingagents/web/static/index.html").decode("utf-8")
-        referenced_assets = {
-            f"tradingagents/web/static{path}"
-            for path in re.findall(
-                r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"',
-                index,
-            )
-        }
+        referenced_assets = _reachable_web_assets(archive, index)
         packaged_assets = {
             name
             for name in names
-            if name.startswith("tradingagents/web/static/assets/")
-            and name.endswith((".js", ".css"))
+            if name.startswith(f"{_STATIC_ROOT}assets/")
+            and name.endswith(_ASSET_SUFFIXES)
         }
         if not any(name.endswith(".js") for name in referenced_assets):
             raise ValueError("wheel is missing the compiled Web JavaScript asset")

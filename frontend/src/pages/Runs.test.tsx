@@ -106,9 +106,12 @@ beforeEach(async () => {
 });
 
 test("filters and atomically trashes eligible runs with instrument names", async () => {
+  const incremental = run("run-1", "NVDA", "succeeded");
+  incremental.research_kind = "incremental";
+  incremental.research_confidence = 0.82;
   vi.mocked(api.runs).mockResolvedValue(
     page([
-      run("run-1", "NVDA", "succeeded"),
+      incremental,
       run("run-2", "AAPL", "running"),
     ]),
   );
@@ -122,6 +125,20 @@ test("filters and atomically trashes eligible runs with instrument names", async
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("英伟达")).toBeVisible();
   expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
+  expect(screen.getByText("82% confidence")).toBeVisible();
+  const kindBadge = screen.getByRole("button", { name: "Incremental research" });
+  expect(kindBadge).toHaveClass("research-kind-badge");
+  fireEvent.click(kindBadge);
+  const configuration = screen.getByRole("tooltip", {
+    name: "Research configuration",
+  });
+  expect(configuration).toHaveTextContent("1 information domain");
+  expect(configuration).toHaveTextContent("Market");
+  expect(configuration).toHaveTextContent("openai");
+  expect(configuration).toHaveTextContent("deep");
+  expect(configuration).toHaveTextContent("Provider default");
+  expect(configuration).not.toHaveTextContent("Quick model");
+  expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
   expect(screen.getByText("—")).toHaveClass("research-rating-badge");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
@@ -156,11 +173,14 @@ test("filters and atomically trashes eligible runs with instrument names", async
   fireEvent.change(screen.getByLabelText("Status"), {
     target: { value: "succeeded" },
   });
+  fireEvent.change(screen.getByLabelText("Research kind"), {
+    target: { value: "incremental" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
   await waitFor(() =>
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/runs?q=nvidia&status=succeeded",
+      "/runs?q=nvidia&status=succeeded&research_kind=incremental",
     ),
   );
   await waitFor(() => {
@@ -170,6 +190,7 @@ test("filters and atomically trashes eligible runs with instrument names", async
       trash_state: "active",
       q: "nvidia",
       status: "succeeded",
+      research_kind: "incremental",
       limit: "20",
       offset: "0",
     });
@@ -214,7 +235,7 @@ test("restores trashed runs and returns from an emptied page", async () => {
   );
 });
 
-test("routes real Research Nodes to the Timeline lifecycle", async () => {
+test("keeps a single Open action for Research Nodes", async () => {
   const node = run("full-node", "NVDA", "succeeded");
   node.research_schema_version = "1";
   node.is_research_node = true;
@@ -227,7 +248,9 @@ test("routes real Research Nodes to the Timeline lifecycle", async () => {
   );
 
   expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
-  expect(
-    screen.getByRole("link", { name: "Research Timeline" }),
-  ).toHaveAttribute("href", "/timelines/NVDA");
+  expect(screen.getByRole("columnheader", { name: "Actions" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Research Timeline" })).toBeNull();
+  const open = screen.getByRole("link", { name: "Open" });
+  expect(open).toHaveAttribute("href", "/runs/full-node");
+  expect(open).toHaveClass("compact-button");
 });

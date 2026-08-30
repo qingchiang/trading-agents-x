@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 from importlib import resources
 from pathlib import Path
 from typing import Annotated, Literal
@@ -63,6 +64,7 @@ from tradingagents.version import __version__
 from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
 from .models import (
     CapabilitiesResponse,
+    FullBaselineCandidates,
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
@@ -73,6 +75,7 @@ from .models import (
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
+    RunCreationTemplate,
     RunDetail,
     TimelineDetail,
 )
@@ -248,9 +251,7 @@ def create_app(
             return await call_next(request)
         if not auth.validate(request.cookies.get(COOKIE_NAME)):
             return _error(401, "authentication_required", "LAN session required")
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(
-            request
-        ):
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(request):
             return _error(403, "origin_mismatch", "Request origin is not allowed")
         return await call_next(request)
 
@@ -311,7 +312,7 @@ def create_app(
                                         }
                                     ],
                                 },
-                            }
+                            },
                         }
                     }
                 },
@@ -349,6 +350,7 @@ def create_app(
     def list_runs(
         trash_state: RunTrashState = RunTrashState.ACTIVE,
         status: RunStatus | None = None,
+        research_kind: Literal["full", "incremental"] | None = None,
         q: Annotated[str | None, Query(max_length=200)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
@@ -356,6 +358,7 @@ def create_app(
         return repository.list_runs(
             trash_state=trash_state,
             status=status,
+            research_kind=research_kind,
             q=q,
             limit=limit,
             offset=offset,
@@ -383,17 +386,34 @@ def create_app(
     )
     def get_timeline(
         instrument: str,
-        node_limit: Annotated[int, Query(ge=1, le=200)] = 50,
-        node_offset: Annotated[int, Query(ge=0)] = 0,
+        cycle_limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cycle_offset: Annotated[int, Query(ge=0)] = 0,
         trash_state: RunTrashState = RunTrashState.ACTIVE,
     ):
         return TimelineDetail(
             timeline=repository.get_timeline(
                 instrument,
-                node_limit=node_limit,
-                node_offset=node_offset,
+                cycle_limit=cycle_limit,
+                cycle_offset=cycle_offset,
                 trash_state=trash_state,
             )
+        )
+
+    @app.get(
+        f"{API_PREFIX}/timelines/{{instrument}}/baseline-candidates",
+        response_model=FullBaselineCandidates,
+    )
+    def baseline_candidates(
+        instrument: str,
+        before: Annotated[date, Query()],
+    ):
+        return FullBaselineCandidates(
+            instrument=instrument,
+            before=before,
+            items=repository.list_full_baseline_candidates(
+                instrument,
+                before=before,
+            ),
         )
 
     @app.put(
@@ -445,14 +465,36 @@ def create_app(
         result = repository.purge_runs_detailed(payload.run_ids)
         return RunBatchResult(**result.model_dump())
 
+    @app.get(
+        f"{API_PREFIX}/runs/{{run_id}}/creation-template",
+        response_model=RunCreationTemplate,
+    )
+    def get_run_creation_template(run_id: str):
+        run = repository.get_run(run_id)
+        if run.status not in _TERMINAL:
+            raise InvalidRunTransitionError(
+                "Only a terminal run can be used as a creation template"
+            )
+        return RunCreationTemplate(
+            run_id=run.id,
+            status=run.status,
+            request=run.request,
+            research_kind=run.research_kind,
+            full_baseline_run_id=run.full_baseline_run_id,
+            instrument_name=run.instrument_name,
+            instrument_local_name=run.instrument_local_name,
+        )
+
     @app.get(f"{API_PREFIX}/runs/{{run_id}}", response_model=RunDetail)
     def get_run(run_id: str):
         view = repository.get_run(run_id)
         return RunDetail(
             run=view,
             result=repository.get_result(run_id),
+            research_node=repository.get_research_node(run_id),
             attempts=repository.list_attempts(run_id),
             evidence_status=repository.evidence_status(run_id),
+            incremental_context=repository.get_incremental_context(run_id),
         )
 
     @app.get(
@@ -513,11 +555,7 @@ def create_app(
                     for event in events:
                         cursor = event.sequence
                         data = event.model_dump_json()
-                        yield (
-                            f"id: {event.sequence}\n"
-                            f"event: {event.event_type}\n"
-                            f"data: {data}\n\n"
-                        )
+                        yield (f"id: {event.sequence}\nevent: {event.event_type}\ndata: {data}\n\n")
                 else:
                     idle_ticks += 1
                     view = repository.get_run(run_id)
@@ -595,9 +633,7 @@ def create_app(
                 "deep_model": defaults.deep_model,
                 "quick_reasoning_effort": defaults.quick_reasoning_effort,
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
-                "output_language": report_language_value(
-                    defaults.output_language
-                ),
+                "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
                 "trash_retention_days": settings.trash_retention_days,
             },

@@ -12,11 +12,11 @@ import {
   api,
   type Capabilities,
   type RunPage,
-  type RunView,
 } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
+import ResearchKindBadge from "../components/ResearchKindBadge";
 import StatusBadge from "../components/StatusBadge";
 import { Link, useLocation, useNavigate } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
@@ -50,11 +50,16 @@ export default function Runs() {
     ? requestedStatus
     : "";
   const query = params.get("q") ?? "";
+  const requestedKind = params.get("research_kind") ?? "";
+  const researchKind = requestedKind === "full" || requestedKind === "incremental"
+    ? requestedKind
+    : "";
   const offset = parseOffset(params.get("offset"));
   const [page, setPage] = useState<RunPage | null>(null);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [qInput, setQInput] = useState(query);
   const [statusInput, setStatusInput] = useState(status);
+  const [kindInput, setKindInput] = useState(researchKind);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
@@ -64,7 +69,8 @@ export default function Runs() {
   useEffect(() => {
     setQInput(query);
     setStatusInput(status);
-  }, [query, status]);
+    setKindInput(researchKind);
+  }, [query, status, researchKind]);
 
   const load = useCallback(async () => {
     const requestParams = new URLSearchParams({
@@ -74,6 +80,7 @@ export default function Runs() {
     });
     if (query) requestParams.set("q", query);
     if (status) requestParams.set("status", status);
+    if (researchKind) requestParams.set("research_kind", researchKind);
     try {
       const next = await api.runs(`?${requestParams}`);
       setPage(next);
@@ -82,7 +89,7 @@ export default function Runs() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
-  }, [trashState, offset, query, status, t]);
+  }, [trashState, offset, query, status, researchKind, t]);
 
   useEffect(() => {
     void load();
@@ -118,6 +125,7 @@ export default function Runs() {
     updateSearch({
       q: qInput.trim() || null,
       status: statusInput || null,
+      research_kind: kindInput || null,
       offset: null,
     });
   };
@@ -253,6 +261,19 @@ export default function Runs() {
             ))}
           </select>
         </label>
+        <label htmlFor="runs-kind">
+          {t("researchKind")}
+          <select
+            id="runs-kind"
+            name="research_kind"
+            value={kindInput}
+            onChange={(event) => setKindInput(event.target.value)}
+          >
+            <option value="">{t("all")}</option>
+            <option value="full">{t("fullResearch")}</option>
+            <option value="incremental">{t("incrementalResearch")}</option>
+          </select>
+        </label>
         <button className="button primary">{t("apply")}</button>
       </form>
 
@@ -298,7 +319,7 @@ export default function Runs() {
           </div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="runs-table">
               <thead>
                 <tr>
                   <th className="selection-cell">
@@ -311,7 +332,7 @@ export default function Runs() {
                   </th>
                   <th>{t("ticker")}</th>
                   <th>{t("researchRating")}</th>
-                  <th>{t("profile")}</th>
+                  <th>{t("researchKind")}</th>
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
                   <th>
@@ -321,7 +342,7 @@ export default function Runs() {
                         : "permanentDeletion",
                     )}
                   </th>
-                  <th />
+                  <th>{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -351,9 +372,22 @@ export default function Runs() {
                         />
                       </td>
                       <td>
-                        <ResearchRatingBadge rating={run.research_rating} />
+                        <div className="decision-cell">
+                          <ResearchRatingBadge rating={run.research_rating} />
+                          {run.research_confidence != null && (
+                            <small>{t("confidencePercent", { value: Math.round(run.research_confidence * 100) })}</small>
+                          )}
+                        </div>
                       </td>
-                      <td className="capitalize">{run.request.profile}</td>
+                      <td>
+                        <div className="run-kind-cell">
+                          <ResearchKindBadge
+                            kind={run.research_kind}
+                            request={run.request}
+                            methodSnapshot={run.method_snapshot}
+                          />
+                        </div>
+                      </td>
                       <td>{run.request.analysis_date}</td>
                       <td>
                         <StatusBadge status={run.status} />
@@ -371,18 +405,12 @@ export default function Runs() {
                           formatDate(run.updated_at)
                         )}
                       </td>
-                      <td className="right">
-                        {run.is_research_node &&
-                          run.status === "succeeded" && (
-                            <Link
-                              className="text-link"
-                              to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
-                            >
-                              {t("researchTimeline")}
-                            </Link>
-                          )}
-                        <Link className="text-link" to={`/runs/${run.id}`}>
-                          {t("open")} →
+                      <td className="run-actions-cell">
+                        <Link
+                          className="button compact-button"
+                          to={`/runs/${run.id}`}
+                        >
+                          {t("open")}
                         </Link>
                       </td>
                     </tr>

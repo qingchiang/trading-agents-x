@@ -32,6 +32,9 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     EvidenceTemporalScope,
     EvidenceValueLocator,
+    IncrementalAnalysisBrief,
+    IncrementalBaselineContext,
+    IncrementalExportContext,
     MarketReferenceBasis,
     MarketReferenceLevel,
     MeasurementKind,
@@ -45,6 +48,7 @@ from tradingagents.application.contracts import (
     NumericCalculationStatus,
     NumericDisplayStatus,
     NumericRequirementCheck,
+    ReportSection,
     ResearchArtifact,
     ResearchScenarioKind,
     ResearchWarning,
@@ -484,11 +488,7 @@ def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
     assert len(csv_table.rows) == 28
     assert csv_table.columns[0].data_type is TableDataType.DATE
     assert csv_table.columns[1].data_type is TableDataType.NUMBER
-    assert all(
-        not cell.source_refs
-        for row in csv_table.rows
-        for cell in row.cells.values()
-    )
+    assert all(not cell.source_refs for row in csv_table.rows for cell in row.cells.values())
     assert csv_table.evidence_refs == (first.ref, second.ref)
 
 
@@ -629,7 +629,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
 
     markdown = render_run_export_markdown(run_export)
 
-    assert run_export.schema_version == "9"
+    assert run_export.schema_version == "11"
     assert "Decision Synthesis Brief" in markdown
     assert "Non-final reasoning draft" in markdown
     assert "Non-final synthesis.[E01]" in markdown
@@ -697,6 +697,87 @@ def test_markdown_export_uses_stable_evidence_markers_without_definitions() -> N
     assert "Model-authored source text" not in markdown
     assert "### E01" in markdown
     assert f"- Refs: `{item.ref}`" in markdown
+
+
+def test_incremental_markdown_export_includes_baseline_evidence_ledger() -> None:
+    baseline_item = EvidenceItem.create(
+        source="baseline.fixture",
+        evidence_type="filing",
+        requested_date=date(2026, 7, 20),
+        content="BASELINE LEDGER CONTENT",
+    )
+    current_item = EvidenceItem.create(
+        source="incremental.fixture",
+        evidence_type="filing update",
+        requested_date=date(2026, 7, 24),
+        content="CURRENT LEDGER CONTENT",
+    )
+    baseline_evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 20),
+        items=(baseline_item,),
+    )
+    current_evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(current_item,),
+    )
+    baseline_decision = research_decision(evidence_refs=(baseline_item.ref,))
+    current_decision = research_decision(evidence_refs=(baseline_item.ref, current_item.ref))
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
+    run_export = RunExport(
+        run=RunView(
+            id="incremental-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="NVDA",
+                analysis_date="2026-07-24",
+                research_kind="incremental",
+                full_baseline_run_id="baseline-run",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="incremental-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="NVDA",
+            reports={},
+            decision=current_decision,
+            evidence=current_evidence,
+        ),
+        evidence=current_evidence,
+        incremental_context=IncrementalExportContext(
+            analysis_brief=IncrementalAnalysisBrief(
+                markdown=f"# Update\n\nBaseline changed.[^{baseline_item.ref}]",
+                report_sections=(
+                    ReportSection(
+                        id="incremental.update",
+                        title="Update",
+                        anchor="update",
+                        source_refs=(baseline_item.ref,),
+                    ),
+                ),
+                evidence_refs=(baseline_item.ref,),
+            ),
+            full_baseline=IncrementalBaselineContext(
+                run_id="baseline-run",
+                analysis_date=date(2026, 7, 20),
+                decision=baseline_decision,
+            ),
+            full_baseline_evidence=baseline_evidence,
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "## Full Baseline Sources" in markdown
+    assert f"- Refs: `{baseline_item.ref}`" in markdown
+    assert "BASELINE LEDGER CONTENT" in markdown
+    assert f"- Refs: `{current_item.ref}`" in markdown
 
 
 def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> None:
@@ -889,9 +970,7 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
                         rounded_canonical_result=82.1,
                         calculation_status=NumericCalculationStatus.VERIFIED,
                         display_status=NumericDisplayStatus.MISMATCHED,
-                        issue_codes=(
-                            "numeric.requirement.req_forward_pe.result_mismatch",
-                        ),
+                        issue_codes=("numeric.requirement.req_forward_pe.result_mismatch",),
                     ),
                 ),
                 snapshots=(),
@@ -900,9 +979,7 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
                         component_path="risks.0",
                         component_type=NumericAuditComponentType.DECISION_CLAIM,
                         reference_label="Remaining EPS",
-                        issue_codes=(
-                            "numeric.requirement.req_eps_remaining.missing_calculation",
-                        ),
+                        issue_codes=("numeric.requirement.req_eps_remaining.missing_calculation",),
                     ),
                 ),
             ),
@@ -974,14 +1051,8 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
 
     assert "## Performance" in markdown
     assert "- Input tokens: `1200`" in markdown
-    assert (
-        "| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | "
-        "4.000s |"
-    ) in markdown
-    assert (
-        "| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | "
-        "2.500s |"
-    ) in markdown
+    assert ("| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | 4.000s |") in markdown
+    assert ("| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | 2.500s |") in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
 
 
@@ -1037,9 +1108,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     interpretation="Observation only, not an entry order.",
                     evidence_refs=("ev_0123456789ab",),
                     date_evidence_refs=("ev_0123456789ab",),
-                    source_locator=EvidenceValueLocator(
-                        evidence_ref="ev_0123456789ab"
-                    ),
+                    source_locator=EvidenceValueLocator(evidence_ref="ev_0123456789ab"),
                 ),
                 MarketReferenceLevel(
                     label="Unclassified signal",
@@ -1140,9 +1209,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                         component_path="numeric.calculation.calc_valuation",
                         component_type=NumericAuditComponentType.CALCULATION,
                         reference_label="calc_valuation",
-                        issue_codes=(
-                            "numeric.calculation.calc_valuation.formula.invalid_syntax",
-                        ),
+                        issue_codes=("numeric.calculation.calc_valuation.formula.invalid_syntax",),
                     ),
                 ),
             ),
