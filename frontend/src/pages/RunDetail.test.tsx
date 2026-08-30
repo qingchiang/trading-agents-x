@@ -1544,6 +1544,9 @@ test("shows trashed retention details and restores without deleting data", async
 
 test("always enters report audit details collapsed", async () => {
   localStorage.setItem("tradingagents-audit-details-open", "true");
+  const unavailableEvidence = structuredClone(detail);
+  unavailableEvidence.result!.evidence!.items[0].quality = "unavailable";
+  vi.mocked(api.run).mockResolvedValue(unavailableEvidence);
   const view = render(
     <Router initialPath="/runs/run-1?view=reports&report=market">
       <RunDetail />
@@ -1560,6 +1563,9 @@ test("always enters report audit details collapsed", async () => {
   expect(view.container.querySelector(".audit-source-name")).toHaveTextContent(
     "fixture, alternate-fixture",
   );
+  expect(
+    view.container.querySelector(".audit-evidence-grid .quality"),
+  ).toHaveTextContent("Unavailable");
   fireEvent.click(screen.getByRole("button", { name: "News" }));
   fireEvent.click(screen.getByRole("button", { name: "Market" }));
   expect(screen.getByText("Historical source was partial.")).not.toBeVisible();

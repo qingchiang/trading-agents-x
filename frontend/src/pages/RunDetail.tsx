@@ -2023,7 +2023,7 @@ function ReportMetadata({
                     {group.sources.join(", ")}
                   </span>
                   <span className={`quality quality-${group.quality}`}>
-                    {group.quality}
+                    {t(`quality_${group.quality}`)}
                   </span>
                   {group.fallback && (
                     <span className="audit-fallback-chip">{t("fallback")}</span>

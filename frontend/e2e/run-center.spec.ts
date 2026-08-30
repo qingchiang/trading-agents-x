@@ -762,6 +762,13 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByText("Decision-critical calculation audit").click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
+  await expect(
+    page
+      .locator(".numeric-calculation-detail")
+      .first()
+      .getByText("observed_value", { exact: true })
+      .first(),
+  ).toBeHidden();
 
   await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByText("Run metrics and diagnostics")).toBeVisible();
@@ -1025,17 +1032,32 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page).toHaveURL(/\/settings$/);
   await expect(shell).not.toHaveClass(/sidebar-open/);
 
-  for (const [locale, label] of [
-    ["zh-CN", "最新优先"],
-    ["en", "Latest first"],
-    ["ja", "新しい順"],
+  for (const [locale, latestLabel, earliestLabel] of [
+    ["zh-CN", "最新优先", "最早优先"],
+    ["en", "Latest first", "Earliest first"],
+    ["ja", "新しい順", "古い順"],
   ] as const) {
     await page.evaluate(
       (value) => localStorage.setItem("tradingagents-locale", value),
       locale,
     );
     await page.goto("/runs/run-report?view=timeline");
-    await expect(page.getByRole("button", { name: label })).toBeVisible();
+    const latest = page.getByRole("button", { name: latestLabel });
+    const earliest = page.getByRole("button", { name: earliestLabel });
+    await expect(latest).toBeVisible();
+    await expect(earliest).toBeVisible();
+    for (const control of [latest, earliest]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+      expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(844);
+    }
+    await earliest.click();
+    await expect(earliest).toHaveAttribute("aria-pressed", "true");
+    await latest.click();
+    await expect(latest).toHaveAttribute("aria-pressed", "true");
   }
 });
 
