@@ -971,6 +971,7 @@ label small {
 
 .run-heading {
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 
 .run-heading > div:first-child {
