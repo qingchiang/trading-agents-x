@@ -1013,6 +1013,16 @@ test("compares active and explicitly shown Trash nodes without creating research
   expect(dialogBox?.y).toBe(0);
   expect(dialogBox?.width).toBe(390);
   expect(dialogBox?.height).toBe(844);
+  const comparisonValues = comparisonDialog.locator(
+    ".comparison-decision-table tbody tr",
+  ).first().locator("td");
+  const leftValueBox = await comparisonValues.nth(0).boundingBox();
+  const rightValueBox = await comparisonValues.nth(1).boundingBox();
+  expect(leftValueBox).not.toBeNull();
+  expect(rightValueBox).not.toBeNull();
+  expect(rightValueBox!.y).toBeGreaterThanOrEqual(
+    leftValueBox!.y + leftValueBox!.height,
+  );
   const comparisonScroll = comparisonDialog.locator(".comparison-modal-scroll");
   await comparisonScroll.focus();
   await page.keyboard.press("PageDown");
