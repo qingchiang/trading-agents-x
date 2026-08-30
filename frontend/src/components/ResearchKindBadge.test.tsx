@@ -42,6 +42,17 @@ test("pins a Full research configuration and closes it accessibly", () => {
   expect(trigger).toHaveAttribute("aria-expanded", "false");
 });
 
+test("closes a focus-opened configuration with Escape", () => {
+  render(<ResearchKindBadge kind="full" />);
+
+  const trigger = screen.getByRole("button", { name: "Full research" });
+  fireEvent.focus(trigger);
+  expect(screen.getByRole("tooltip")).toBeVisible();
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+});
+
 test("shows only the deep model path for Incremental research", () => {
   render(
     <ResearchKindBadge

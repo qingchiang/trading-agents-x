@@ -2799,7 +2799,7 @@ button.research-kind-badge {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: min(1320px, 100%);
-  height: min(960px, calc(100dvh - 24px));
+  height: calc(100dvh - 24px);
   overflow: hidden;
   background: var(--surface);
   border: 1px solid rgb(255 255 255 / 35%);

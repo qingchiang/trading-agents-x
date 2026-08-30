@@ -108,7 +108,7 @@ export default function ResearchKindBadge({
   }, [open, placeTooltip]);
 
   useEffect(() => {
-    if (!pinned) return;
+    if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
       if (event instanceof KeyboardEvent) {
         if (event.key !== "Escape") return;
@@ -131,7 +131,7 @@ export default function ResearchKindBadge({
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", close);
     };
-  }, [pinned]);
+  }, [open]);
 
   return (
     <span

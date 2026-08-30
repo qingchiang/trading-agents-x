@@ -131,6 +131,19 @@ describe("aggregateRunActivity", () => {
     });
   });
 
+  test("completes an unfinished unit when the attempt succeeds", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "node.started", "analyst.news.report"),
+      event(2, 1, "run.succeeded", null),
+    ], "full", { currentAttempt: 1, runStatus: "succeeded" });
+
+    expect(attempts[0].state).toBe("completed");
+    expect(attempts[0].workUnits[0]).toMatchObject({
+      node: "analyst.news.report",
+      state: "completed",
+    });
+  });
+
   test("keeps a recovered attempt and shared stage running while parallel work remains", () => {
     const attempts = aggregateRunActivity([
       event(1, 1, "node.output_retry", "analyst.news.audit"),
@@ -174,8 +187,8 @@ describe("aggregateRunActivity", () => {
     expect(attempts[0].workUnits[1].state).toBe("failed");
   });
 
-  test("reconciles the retried GOOG history to the successful fourth attempt", () => {
-    const attempts = aggregateRunActivity(googRetryHistory(), "incremental", {
+  test("reconciles an anonymized four-attempt history to the final success", () => {
+    const attempts = aggregateRunActivity(retriedIncrementalHistory(), "incremental", {
       currentAttempt: 4,
       runStatus: "succeeded",
     });
@@ -221,9 +234,19 @@ describe("aggregateRunActivity", () => {
     });
     expect(attempts[1].state).toBe("failed");
   });
+
+  test("keeps the persisted current attempt first while a future attempt refresh is pending", () => {
+    const attempts = aggregateRunActivity([
+      event(1, 1, "run.failed", null),
+      event(2, 2, "run.retry_queued", null),
+    ], "incremental", { currentAttempt: 1, runStatus: "failed" });
+
+    expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
+    expect(attempts[0].state).toBe("failed");
+  });
 });
 
-function googRetryHistory(): RunEvent[] {
+function retriedIncrementalHistory(): RunEvent[] {
   const rows: Array<[number, number, string, string | null]> = [
     [1, 1, "run.queued", null],
     [2, 1, "run.started", null],

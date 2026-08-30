@@ -1017,6 +1017,12 @@ test("compares active and explicitly shown Trash nodes without creating research
   await comparisonScroll.focus();
   await page.keyboard.press("PageDown");
   await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await comparisonScroll.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await comparisonScroll.hover();
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
 });
 

@@ -78,7 +78,13 @@ export function aggregateRunActivity(
     attempts.set(runState.currentAttempt, []);
   }
   return [...attempts.entries()]
-    .sort(([left], [right]) => right - left)
+    .sort(([left], [right]) => {
+      if (runState) {
+        if (left === runState.currentAttempt) return -1;
+        if (right === runState.currentAttempt) return 1;
+      }
+      return right - left;
+    })
     .map(([attempt, attemptEvents]) => {
       const units = new Map<string, RunEvent[]>();
       for (const event of attemptEvents) {
@@ -272,7 +278,12 @@ function terminalUnitState(
 ): ActivityState {
   if (!terminal || node === "run.lifecycle") return state;
   if (!["pending", "running", "retrying"].includes(state)) return state;
-  return "interrupted";
+  if (terminal.event_type === "run.succeeded") return "completed";
+  if (
+    terminal.event_type === "run.failed" ||
+    terminal.event_type === "run.cancelled"
+  ) return "interrupted";
+  return state;
 }
 
 function activityUnitOrder(
