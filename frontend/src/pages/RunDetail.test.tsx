@@ -954,6 +954,8 @@ test("dispatches Incremental research to its own summary and root-baseline updat
         },
       ],
     },
+    decision_outcome: "updated",
+    decision_outcome_reason: "The filing requires a new Decision thesis.",
     full_research_required_reasons: [
       { code: "scope_gap", message: "A complete refresh would resolve the scope gap." },
     ],
@@ -990,23 +992,24 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   });
 
   render(
-    <Router initialPath="/runs/run-1?view=incremental">
+    <Router initialPath="/runs/run-1">
       <RunDetail />
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
-  expect(screen.getByText("Balanced research summary.")).toBeVisible();
-  expect(screen.getByText(/Newly completed market session/)).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Analysis brief" })).toBeVisible();
+  expect(screen.getByText("The full Decision was regenerated.")).toBeVisible();
+  expect(screen.getByText("The filing requires a new Decision thesis.")).toBeVisible();
   expect(screen.getByText("A complete refresh would resolve the scope gap.")).toBeVisible();
   expect(screen.getAllByText("Current instrument")[0]).toBeVisible();
   expect(screen.getAllByText("S&P 500")[0]).toBeVisible();
   expect(screen.getAllByText("NASDAQ 100")[0]).toBeVisible();
   expect(screen.getAllByText(/Reported benchmark difference/)).toHaveLength(2);
-  fireEvent.click(screen.getByText("Decision-critical calculation audit"));
-  expect(screen.getByText("Observed market anchor")).toBeVisible();
-  expect(screen.getByText("calc_market_reference")).not.toBeVisible();
-  expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+  expect(
+    screen.getAllByText("2026-07-20 · 100.1235 → 2026-07-24 · 112.9877"),
+  ).toHaveLength(3);
+  expect(screen.getAllByText(/split-adjusted close/)).toHaveLength(3);
+  expect(screen.getByRole("tab", { name: "Analysis brief" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -1016,18 +1019,34 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
+  expect(
+    screen.getAllByRole("tab").map((tab) => tab.textContent),
+  ).toEqual([
+    "Analysis brief",
+    "Reassessment",
+    "Overview",
+    "Evidence updates",
+    "Activity",
+  ]);
   expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
     "href",
     "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
   );
 
   await waitFor(() => expect(api.evidence).toHaveBeenCalledTimes(1));
-  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
   const briefHeading = await screen.findByRole("heading", { name: "Key update" });
   expect(briefHeading).toBeVisible();
   expect(briefHeading.closest("article")).toHaveTextContent(
     "The filing changes the outlook.",
   );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
+  expect(screen.getByText("Balanced research summary.")).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Decision-critical calculation audit"));
+  expect(screen.getByText("Observed market anchor")).toBeVisible();
+  expect(screen.getByText("calc_market_reference")).not.toBeVisible();
 
   fireEvent.click(screen.getByRole("tab", { name: "Reassessment" }));
   expect(await screen.findByText("The new filing adds uncertainty.")).toBeVisible();
@@ -1136,6 +1155,7 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(
     await screen.findByText("This historical run did not record an analysis brief."),
   ).toBeVisible();
+  expect(screen.getByText("This version did not record a Decision outcome.")).toBeVisible();
   await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
 });
 
@@ -1272,8 +1292,8 @@ function performanceCalculation(unroundedReturn: number) {
     target_information_cutoff_at: "2026-07-24T20:00:00Z",
     start_session: "2026-07-20",
     end_session: "2026-07-24",
-    start_value: 100,
-    end_value: 112,
+    start_value: 100.123456,
+    end_value: 112.987654,
     formula: "(end / start) - 1",
     unrounded_return: unroundedReturn,
   };
@@ -1306,10 +1326,29 @@ function incrementalDetailWithPerformanceReason(reason: string): RunDetailType {
       benchmarks: [],
     },
     reassessment: { entries: [] },
+    decision_outcome: "unchanged",
+    decision_outcome_reason: "The baseline Decision remains valid as written.",
     full_research_required_reasons: [],
   } as never;
   return incremental;
 }
+
+test("explains when an Incremental Decision is inherited unchanged", async () => {
+  vi.mocked(api.run).mockResolvedValue(
+    incrementalDetailWithPerformanceReason("benchmark_unavailable"),
+  );
+
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByText("The full Decision is inherited from the Full baseline."),
+  ).toBeVisible();
+  expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
+});
 
 test.each([
   ["en", "Performance reason is unavailable."],

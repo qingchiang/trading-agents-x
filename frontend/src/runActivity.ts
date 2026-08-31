@@ -311,6 +311,7 @@ function activityStage(node: string, kind: "full" | "incremental"): ActivityStag
     }
     if (
       normalized.includes("serialize") ||
+      normalized.includes("assessment") ||
       normalized.includes("reassessment") ||
       normalized.includes("synthesis.decision")
     ) return "incremental_serialization";

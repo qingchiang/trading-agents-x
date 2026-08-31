@@ -592,12 +592,16 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     detail = await web_client.get(f"/api/v1/runs/{result.run_id}")
     evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
     exported = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=json")
+    exported_markdown = await web_client.get(
+        f"/api/v1/runs/{result.run_id}/export?format=markdown"
+    )
 
     assert (
         timeline.status_code
         == detail.status_code
         == evidence.status_code
         == exported.status_code
+        == exported_markdown.status_code
         == 200
     )
     node = next(
@@ -610,6 +614,8 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     assert "admissible_observation" in node["information_advancement"]["reasons"]
     assert node["research_availability"]["domains"]
     assert node["reassessment"]["entries"]
+    assert node["decision_outcome"] == "updated"
+    assert node["decision_outcome_reason"]
     assert node["decision"]["evidence_refs"] == [baseline_item.ref, final_ref]
     assert {
         ref for entry in node["collection_summary"]["domains"] for ref in entry["evidence_refs"]
@@ -634,6 +640,8 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         == "markdown_audited"
     )
     assert exported.json()["incremental_context"]["full_baseline_evidence"]["items"]
+    assert "### Decision outcome" in exported_markdown.text
+    assert "Full Decision regenerated" in exported_markdown.text
     assert evidence.json()["items"][0]["ref"] == final_ref
     assert evidence.json()["items"][0]["available_at"]
 

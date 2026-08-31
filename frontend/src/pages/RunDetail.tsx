@@ -140,12 +140,16 @@ export default function RunDetail() {
   const requestedView = searchParams.get("view");
   const isIncremental = detail?.run.research_kind === "incremental";
   const availableViews: ViewName[] = isIncremental
-    ? ["decision", "brief", "reassessment", "evidence", "timeline"]
+    ? ["brief", "reassessment", "decision", "evidence", "timeline"]
     : ["decision", "reports", "deliberation", "evidence", "timeline"];
   const defaultView: ViewName =
-    detail?.run.status === "succeeded" ? "decision" : "timeline";
+    detail?.run.status === "succeeded"
+      ? isIncremental
+        ? "brief"
+        : "decision"
+      : "timeline";
   const normalizedRequestedView =
-    requestedView === "incremental" ? "decision" : requestedView;
+    requestedView === "incremental" ? "brief" : requestedView;
   const activeView: ViewName =
     isViewName(normalizedRequestedView) && availableViews.includes(normalizedRequestedView)
       ? normalizedRequestedView
@@ -612,7 +616,6 @@ export default function RunDetail() {
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         {activeView === "decision" && isIncremental && detail.research_node && (
           <IncrementalDecisionPanel
-            node={detail.research_node}
             decision={decision}
             numericAudit={detail.result?.numeric_audit}
             evidenceIndex={evidenceIndex}
@@ -624,6 +627,7 @@ export default function RunDetail() {
         {activeView === "brief" && isIncremental && (
           <IncrementalBriefPanel
             brief={detail.incremental_context?.analysis_brief ?? null}
+            node={detail.research_node ?? null}
             runId={run.id}
             runStatus={run.status}
             evidenceIndex={evidenceIndex}
@@ -714,14 +718,12 @@ export default function RunDetail() {
 }
 
 function IncrementalDecisionPanel({
-  node,
   decision,
   numericAudit,
   evidenceIndex,
   onEvidence,
   onOpenWarnings,
 }: {
-  node: ResearchNodeView;
   decision: ResearchDecision | null;
   numericAudit: AnalysisResult["numeric_audit"];
   evidenceIndex: EvidenceReferenceIndex;
@@ -742,23 +744,6 @@ function IncrementalDecisionPanel({
       id="run-view-decision"
       role="tabpanel"
     >
-      <div className="incremental-decision-context">
-        <span className="advancement-status">
-          {t("informationAdvancement")}: {" "}
-          {advancementLabel(
-            t,
-            node.information_advancement?.reasons ?? [],
-          )}
-        </span>
-        {(node.full_research_required_reasons?.length ?? 0) > 0 && (
-          <section className="research-warning-block" role="status">
-            <h2>{t("fullResearchRecommended")}</h2>
-            {node.full_research_required_reasons?.map((reason) => (
-              <p key={reason.code}>{reason.message}</p>
-            ))}
-          </section>
-        )}
-      </div>
       <ResearchDecisionContentView
         decision={decision}
         numericAudit={numericAudit}
@@ -766,19 +751,20 @@ function IncrementalDecisionPanel({
         onEvidence={onEvidence}
         onOpenWarnings={onOpenWarnings}
       />
-      <PerformanceSection node={node} />
     </article>
   );
 }
 
 function IncrementalBriefPanel({
   brief,
+  node,
   runId,
   runStatus,
   evidenceIndex,
   onEvidence,
 }: {
   brief: IncrementalAnalysisBrief | null;
+  node: ResearchNodeView | null;
   runId: string;
   runStatus: RunDetailType["run"]["status"];
   evidenceIndex: EvidenceReferenceIndex;
@@ -797,6 +783,8 @@ function IncrementalBriefPanel({
           <h2>{t("analysisBrief")}</h2>
         </div>
       </div>
+      {node && <IncrementalOutcomeSummary node={node} />}
+      {node && <PerformanceSection node={node} />}
       {!brief ? (
         <div className="empty-state">
           {t(briefUnavailableLabel(runStatus))}
@@ -819,6 +807,31 @@ function IncrementalBriefPanel({
         />
       )}
     </article>
+  );
+}
+
+function IncrementalOutcomeSummary({ node }: { node: ResearchNodeView }) {
+  const { t } = useTranslation();
+  return (
+    <section className="incremental-outcome-summary" aria-label={t("decisionOutcome")}>
+      <div>
+        <p className="eyebrow">{t("decisionOutcome")}</p>
+        <strong>
+          {node.decision_outcome
+            ? t(`decisionOutcome_${node.decision_outcome}`)
+            : t("decisionOutcomeNotRecorded")}
+        </strong>
+        {node.decision_outcome_reason && <p>{node.decision_outcome_reason}</p>}
+      </div>
+      {(node.full_research_required_reasons?.length ?? 0) > 0 && (
+        <section className="research-warning-block" role="status">
+          <h2>{t("fullResearchRecommended")}</h2>
+          {node.full_research_required_reasons?.map((reason) => (
+            <p key={reason.code}>{reason.message}</p>
+          ))}
+        </section>
+      )}
+    </section>
   );
 }
 
@@ -1086,7 +1099,6 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
                   <th>{t("instrument")}</th>
                   <th>{t("provider")}</th>
                   <th>{t("fallback")}</th>
-                  <th>{t("adjustmentBasis")}</th>
                   <th>{t("informationCutoff")}</th>
                   <th>{t("retrievedAt")}</th>
                 </tr>
@@ -1099,7 +1111,6 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
                       <th>{label}</th>
                       <td>{calculation.provider}</td>
                       <td>{calculation.fallback ? t("yes") : t("no")}</td>
-                      <td>{calculation.adjustment_basis}</td>
                       <td>
                         {calculation.baseline_information_cutoff_at} →{" "}
                         {calculation.target_information_cutoff_at}
@@ -1140,8 +1151,12 @@ function PerformanceCard({
             {formatReturn(calculation.unrounded_return)}
           </strong>
           <small>
-            {calculation.start_session} → {calculation.end_session}
+            {calculation.start_session} · {formatEndpointValue(calculation.start_value)} →{" "}
+            {calculation.end_session} · {formatEndpointValue(calculation.end_value)}
           </small>
+          <span className="performance-adjustment-basis">
+            {t("adjustmentBasis")}: {calculation.adjustment_basis}
+          </span>
         </>
       ) : (
         <p>{localizePerformanceReason(t, component.reason)}</p>
@@ -1161,6 +1176,12 @@ function formatReturn(value: number): string {
     style: "percent",
     maximumFractionDigits: 2,
     signDisplay: "exceptZero",
+  }).format(value);
+}
+
+function formatEndpointValue(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 4,
   }).format(value);
 }
 

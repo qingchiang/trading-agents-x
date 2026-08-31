@@ -124,6 +124,9 @@ function node(
             ],
           }
         : null,
+    decision_outcome: kind === "incremental" ? "updated" : null,
+    decision_outcome_reason:
+      kind === "incremental" ? "The Decision thesis changed." : null,
     full_research_required_reasons: [],
   } as unknown as ResearchNodeView;
 }
@@ -204,6 +207,7 @@ test("renders a Full root and a structurally distinct Incremental child", async 
   expect(screen.getByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("Full baseline thesis")).toBeVisible();
   expect(screen.getByText("Incremental thesis changed")).toBeVisible();
+  expect(screen.getByText("The full Decision was regenerated.")).toBeVisible();
   expect(screen.getByText("New admissible observation")).toBeVisible();
   expect(screen.getByText("Stock return: 5%")).toBeVisible();
   expect(screen.getByText("1 non-reaffirmed item")).toBeVisible();
@@ -301,6 +305,8 @@ test("selects human-readable nodes and renders a structured comparison", async (
           thesis: "Incremental thesis changed",
         },
         information_advancement: { advanced: true, reasons: ["admissible_observation"] },
+        decision_outcome: "updated",
+        decision_outcome_reason: "The Decision thesis changed.",
         reassessment: {
           entries: [
             {

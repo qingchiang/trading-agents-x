@@ -64,6 +64,14 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
     <div className="incremental-products">
       <div className="incremental-summary-strip">
         <section>
+          <h4>{t("decisionOutcome")}</h4>
+          <p>
+            {node.decision_outcome
+              ? t(`decisionOutcome_${node.decision_outcome}`)
+              : t("decisionOutcomeNotRecorded")}
+          </p>
+        </section>
+        <section>
           <h4>{t("advancementType")}</h4>
           <p>
             {advancementSummary(
@@ -485,6 +493,15 @@ function NodeComparisonModal({
   );
   const primaryProducts = filterProductRows(
     [
+      productRow(
+        "decision-outcome",
+        t("decisionOutcome"),
+        comparison.sides,
+        (side) =>
+          side.decision_outcome
+            ? t(`decisionOutcome_${side.decision_outcome}`)
+            : t("decisionOutcomeNotRecorded"),
+      ),
       productRow(
         "performance",
         t("performance"),

@@ -71,6 +71,12 @@ _EN_LABELS = {
     "incremental_products": "Incremental Research Products",
     "incremental_brief": "Incremental Analysis Brief",
     "historical_brief_missing": "This historical run did not record an analysis brief.",
+    "decision_outcome": "Decision outcome",
+    "decision_outcome.unchanged": "Full Decision inherited unchanged from the Full Baseline",
+    "decision_outcome.updated": "Full Decision regenerated",
+    "decision_outcome.not_recorded": "This version did not record a Decision outcome",
+    "current_instrument": "Current instrument",
+    "adjustment_basis": "Adjustment basis",
     "full_baseline_context": "Full Baseline Context",
     "information_advancement": "Information advancement",
     "research_availability": "Research availability",
@@ -292,6 +298,12 @@ _ZH_LABELS = {
     "incremental_products": "增量研究产物",
     "incremental_brief": "增量分析简报",
     "historical_brief_missing": "此历史运行未记录分析简报。",
+    "decision_outcome": "Decision 结果",
+    "decision_outcome.unchanged": "完整 Decision 原样继承自完整研究基线",
+    "decision_outcome.updated": "已重新生成完整 Decision",
+    "decision_outcome.not_recorded": "该版本未记录 Decision 结果",
+    "current_instrument": "当前股票",
+    "adjustment_basis": "复权依据",
     "full_baseline_context": "完整研究基线上下文",
     "information_advancement": "信息推进",
     "research_availability": "研究可用性",
@@ -489,6 +501,12 @@ _JA_LABELS = {
     "incremental_products": "増分リサーチ成果物",
     "incremental_brief": "増分分析ブリーフ",
     "historical_brief_missing": "この過去の実行には分析ブリーフが記録されていません。",
+    "decision_outcome": "Decision の結果",
+    "decision_outcome.unchanged": "完全な Decision はフルリサーチ基準からそのまま継承",
+    "decision_outcome.updated": "完全な Decision を再生成済み",
+    "decision_outcome.not_recorded": "このバージョンには Decision の結果が記録されていません",
+    "current_instrument": "対象銘柄",
+    "adjustment_basis": "調整基準",
     "full_baseline_context": "フルリサーチ基準コンテキスト",
     "information_advancement": "情報の前進",
     "research_availability": "リサーチ可用性",
@@ -676,6 +694,24 @@ def _export_labels(run_export: RunExport) -> ExportLabels:
     return ExportLabels(_EN_LABELS, language="en")
 
 
+def _format_observation_value(value: float) -> str:
+    return f"{value:,.4f}".rstrip("0").rstrip(".")
+
+
+def _performance_export_line(label: str, component: Any, labels: ExportLabels) -> str:
+    calculation = component.calculation
+    if calculation is None:
+        reason = component.reason or labels["not_recorded"]
+        return f"- **{label}:** {component.status.value} — {reason}"
+    return (
+        f"- **{label}:** {calculation.unrounded_return:+.2%}; "
+        f"`{calculation.start_session}` · `{_format_observation_value(calculation.start_value)}` "
+        f"→ `{calculation.end_session}` · "
+        f"`{_format_observation_value(calculation.end_value)}`; "
+        f"{labels['adjustment_basis']}: `{calculation.adjustment_basis}`"
+    )
+
+
 def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
@@ -789,6 +825,39 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             sections.append(f"_{labels['historical_brief_missing']}_")
         else:
             sections.append(_render_export_markdown(brief.markdown, evidence_aliases))
+        outcome = node.decision_outcome
+        outcome_key = (
+            f"decision_outcome.{outcome.value}"
+            if outcome is not None
+            else "decision_outcome.not_recorded"
+        )
+        sections.extend(
+            [
+                "",
+                f"### {labels['decision_outcome']}",
+                "",
+                f"- {labels[outcome_key]}",
+            ]
+        )
+        if node.decision_outcome_reason:
+            sections.append(f"- {node.decision_outcome_reason}")
+        if node.performance is not None:
+            sections.extend(
+                [
+                    "",
+                    f"### {labels['performance']}",
+                    "",
+                    _performance_export_line(
+                        labels["current_instrument"],
+                        node.performance.stock,
+                        labels,
+                    ),
+                ]
+            )
+            sections.extend(
+                _performance_export_line(benchmark.name, benchmark.component, labels)
+                for benchmark in node.performance.benchmarks
+            )
         if node.information_advancement is not None:
             reasons = ", ".join(node.information_advancement.reasons) or "—"
             sections.append(f"- {labels['information_advancement']}: {reasons}")
