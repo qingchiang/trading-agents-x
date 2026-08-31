@@ -80,6 +80,11 @@ risk_review_adjustments
 numeric_audit_status
 ```
 
+Final Decision confidence is a rubric-based `low`, `medium`, or `high` research
+support level rather than a numeric probability. Numeric confidence retained by
+analyst, judge, and sentiment-stage contracts describes their bounded process
+outputs and is not projected onto the final Decision contract.
+
 Failed optional numeric candidates never enter `ResearchDecision`. A separate
 `DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
 snapshots (initial and repair), their safe validation issue codes, and the
@@ -558,17 +563,28 @@ the current core Decision contract.
 Incremental Research is a bounded update to one explicitly selected Full
 Baseline, not a strict historical backtest or a chained revision. It receives
 no sibling Incremental conclusion, seals only its own newly admitted Evidence,
-performs one required synthesis into the complete current `ResearchDecision`,
-and commits its Evidence, Reassessment, Decision, Node role, and fixed products
-atomically. Its direct Full Baseline bundle is referenceable but is never
-copied into the current Node.
+and commits its Evidence, Reassessment, complete current `ResearchDecision`,
+Node role, and fixed products atomically. Its direct Full Baseline bundle is
+referenceable but is never copied into the current Node.
 
 The semantic synthesis call produces both the readable Incremental analysis
-brief and the source text used by the strict Decision/Reassessment serializer.
+brief and the source text used by strict structured serializers.
 Markdown Evidence references are normalized against the baseline and current
-bundles before the brief is committed. This adds no normal-path LLM call;
-bounded continuation remains available only when the Markdown response is
-truncated.
+bundles before the brief is committed. A bounded assessment serializer then
+produces the required Research Reassessment, whole-Decision outcome, outcome
+reason, and Full Research Required reasons. An `unchanged` outcome skips full
+Decision generation and materializes the baseline Decision exactly; an
+`updated` outcome invokes the full Decision serializer and must produce a real
+Decision-field change. An overturned component cannot be paired with
+`unchanged`. Strengthened or weakened components may be paired with unchanged
+when the complete baseline Decision remains valid verbatim.
+
+The outcome is not a field patch and does not expand Research Reassessment into
+a second Decision schema. Full Research Required remains an independent warning
+and may accompany either outcome. The assessment and optional Decision stages
+share one bounded structured-output repair budget, so splitting the serializers
+does not multiply retries. Atomic commit and Evidence Reference Closure apply
+to the assembled Decision in both branches.
 
 The Incremental collector reuses the Run's configured routers and existing
 market assemblers. A provider may receive an exact interval or a broader range

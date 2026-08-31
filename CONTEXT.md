@@ -57,10 +57,17 @@ product metadata.
 _Avoid_: Revision, copied snapshot
 
 **Research Decision**:
-The complete current research judgment produced by a Research Node. Full and
-Incremental Research Nodes use the same decision schema so that Primary
-Research and Node Comparison do not require separate conclusion models.
+The complete current research judgment materialized by a Research Node. Full
+and Incremental Research Nodes use the same decision schema so that Primary
+Research and Node Comparison do not require separate conclusion models; an
+Incremental Node may inherit the Full Baseline judgment unchanged.
 _Avoid_: Incremental summary, rating only
+
+**Research Confidence Level**:
+The low, medium, or high evidence-support classification attached to a Research
+Decision. It is a rubric-based research judgment, not a probability, numeric
+score, Research Availability measure, or deterministic calculation.
+_Avoid_: Confidence score, probability, coverage grade
 
 **Decision Component**:
 A reviewable part of a Research Decision with a stable identifier scoped to its
@@ -163,6 +170,12 @@ reaffirmed, strengthened, weakened, overturned, or unresolved, with a concise
 reason grounded in admitted information and disclosed limitations. An
 overturned core thesis is one Full Research Required trigger.
 _Avoid_: Outcome review, reflection
+
+**Incremental Decision Outcome**:
+The declaration that an Incremental Research Node's complete Research Decision
+is unchanged from its Full Baseline or updated. It concerns the whole Decision,
+is independent of Full Research Required, and is not a field-level patch.
+_Avoid_: Reassessment disposition, Decision diff, patch set
 
 **Incremental Evidence**:
 New Evidence admitted for one Incremental Research Node. It is either strict
