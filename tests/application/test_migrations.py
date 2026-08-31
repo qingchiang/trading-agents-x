@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import sqlite3
@@ -30,6 +31,16 @@ from tradingagents.persistence import (
     IncompatibleDatabaseError,
     upgrade_database,
 )
+
+
+def _canonical_content_hash(payload: dict[str, object]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _alembic_config(app_settings) -> Config:
@@ -148,6 +159,7 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
     repository.engine.dispose()
     decision_json = research_decision().model_dump(mode="json")
     decision_json["confidence"] = numeric_confidence
+    legacy_artifact_hash = _canonical_content_hash(decision_json)
     with sqlite3.connect(app_settings.database_path) as connection:
         connection.execute(
             """
@@ -176,9 +188,9 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
                 content_hash, created_at
             ) VALUES ('artifact-decision', ?, 1, 'decision', 'committee', 0,
                       '1', 'fixture', 'structured', 'research_decision', ?,
-                      'fixture-hash', '2026-07-24 01:00:00')
+                      ?, '2026-07-24 01:00:00')
             """,
-            (run.id, json.dumps(decision_json)),
+            (run.id, json.dumps(decision_json), legacy_artifact_hash),
         )
 
     upgrade_database(app_settings)
@@ -188,9 +200,10 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
             "SELECT confidence, decision_json FROM decisions WHERE run_id = ?",
             (run.id,),
         ).fetchone()
-        artifact_json = connection.execute(
-            "SELECT content_json FROM run_artifacts WHERE id = 'artifact-decision'"
-        ).fetchone()[0]
+        artifact_json, artifact_hash = connection.execute(
+            "SELECT content_json, content_hash FROM run_artifacts "
+            "WHERE id = 'artifact-decision'"
+        ).fetchone()
         schema_version, method_snapshot = connection.execute(
             "SELECT research_schema_version, method_snapshot_json FROM runs WHERE id = ?",
             (run.id,),
@@ -198,7 +211,10 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
 
     assert confidence == expected_level
     assert json.loads(migrated_json)["confidence"] == expected_level
-    assert json.loads(artifact_json)["confidence"] == expected_level
+    migrated_artifact = json.loads(artifact_json)
+    assert migrated_artifact["confidence"] == expected_level
+    assert artifact_hash == _canonical_content_hash(migrated_artifact)
+    assert artifact_hash != legacy_artifact_hash
     assert schema_version == "2"
     assert json.loads(method_snapshot)["research_schema_version"] == "1"
 
@@ -210,13 +226,17 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
             "SELECT confidence, decision_json FROM decisions WHERE run_id = ?",
             (run.id,),
         ).fetchone()
-        downgraded_artifact = connection.execute(
-            "SELECT content_json FROM run_artifacts WHERE id = 'artifact-decision'"
-        ).fetchone()[0]
+        downgraded_artifact_json, downgraded_artifact_hash = connection.execute(
+            "SELECT content_json, content_hash FROM run_artifacts "
+            "WHERE id = 'artifact-decision'"
+        ).fetchone()
 
     assert downgraded_confidence == pytest.approx(expected_score)
     assert json.loads(downgraded_json)["confidence"] == pytest.approx(expected_score)
-    assert json.loads(downgraded_artifact)["confidence"] == pytest.approx(expected_score)
+    downgraded_artifact = json.loads(downgraded_artifact_json)
+    assert downgraded_artifact["confidence"] == pytest.approx(expected_score)
+    assert downgraded_artifact_hash == _canonical_content_hash(downgraded_artifact)
+    assert downgraded_artifact_hash != artifact_hash
 
 
 def test_cycle_trash_migration_converges_pre_ticket_12_state(app_settings) -> None:

@@ -7,6 +7,7 @@ Create Date: 2026-08-31
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -33,12 +34,23 @@ def _score(value: Any) -> float:
     return {"low": 0.25, "medium": 0.65, "high": 0.90}[str(value)]
 
 
+def _content_hash(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _rewrite_json_confidence(
     table_name: str,
     id_column: str,
     json_column: str,
     converter: Any,
     *,
+    hash_column: str | None = None,
     where: str | None = None,
 ) -> None:
     connection = op.get_bind()
@@ -52,12 +64,16 @@ def _rewrite_json_confidence(
             continue
         rewritten = dict(payload)
         rewritten["confidence"] = converter(payload["confidence"])
+        assignments = f"{json_column} = :payload"
+        parameters = {"payload": rewritten, "row_id": row_id}
+        if hash_column is not None:
+            assignments += f", {hash_column} = :content_hash"
+            parameters["content_hash"] = _content_hash(rewritten)
         connection.execute(
             sa.text(
-                f"UPDATE {table_name} SET {json_column} = :payload "
-                f"WHERE {id_column} = :row_id"
+                f"UPDATE {table_name} SET {assignments} WHERE {id_column} = :row_id"
             ).bindparams(sa.bindparam("payload", type_=sa.JSON())),
-            {"payload": rewritten, "row_id": row_id},
+            parameters,
         )
 
 
@@ -83,6 +99,7 @@ def upgrade() -> None:
         "id",
         "content_json",
         _level,
+        hash_column="content_hash",
         where="content_type = 'research_decision'",
     )
     connection.execute(
@@ -107,6 +124,7 @@ def downgrade() -> None:
         "id",
         "content_json",
         _score,
+        hash_column="content_hash",
         where="content_type = 'research_decision'",
     )
     rows = connection.execute(sa.text("SELECT id, confidence FROM decisions")).fetchall()
