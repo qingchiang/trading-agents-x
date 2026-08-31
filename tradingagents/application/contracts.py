@@ -1725,6 +1725,8 @@ class ResearchNodeView(FrozenModel):
     information_advancement: InformationAdvancement | None = None
     performance: PerformanceObservation | None = None
     reassessment: ResearchReassessment | None = None
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = None
     decision: ResearchDecision | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
     cycle_warning: bool = False
@@ -1881,6 +1883,8 @@ class ResearchNodeComparisonSide(FrozenModel):
     research_availability: ResearchAvailability | None = None
     information_advancement: InformationAdvancement | None = None
     reassessment: ResearchReassessment | None = None
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = None
     decision: dict[str, Any]
     performance: PerformanceObservation | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
@@ -2138,6 +2142,13 @@ class ReassessmentDisposition(_StableStrEnum):
     UNRESOLVED = "unresolved"
 
 
+class IncrementalDecisionOutcome(_StableStrEnum):
+    """Whether an Incremental Node reuses or regenerates its Full Decision."""
+
+    UNCHANGED = "unchanged"
+    UPDATED = "updated"
+
+
 class ResearchReassessmentEntry(FrozenModel):
     component_id: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
     disposition: ReassessmentDisposition
@@ -2370,6 +2381,8 @@ class IncrementalAnalysisBrief(FrozenModel):
 class IncrementalSynthesis(FrozenModel):
     analysis_brief: IncrementalAnalysisBrief
     reassessment: ResearchReassessment
+    decision_outcome: IncrementalDecisionOutcome
+    decision_outcome_reason: str = Field(min_length=1)
     decision: ResearchDecision
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
@@ -2381,7 +2394,17 @@ class IncrementalNodeProducts(FrozenModel):
     information_advancement: InformationAdvancement
     performance: PerformanceObservation
     reassessment: ResearchReassessment
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = Field(default=None, min_length=1)
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_decision_outcome_pair(self) -> IncrementalNodeProducts:
+        if (self.decision_outcome is None) != (self.decision_outcome_reason is None):
+            raise ValueError(
+                "decision outcome and reason must either both be recorded or both be absent"
+            )
+        return self
 
 
 class IncrementalBaselineContext(FrozenModel):

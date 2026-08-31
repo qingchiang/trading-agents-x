@@ -1970,6 +1970,8 @@ class RunRepository:
                 raise ValueError("Incremental commit requires an Incremental Run")
             if result.decision is None:
                 raise ValueError("Incremental Node requires a complete Research Decision")
+            if products.decision_outcome is None:
+                raise ValueError("New Incremental Nodes must record a Decision outcome")
             if session.get(RunEvidenceRecord, run_id) is not None:
                 raise EvidenceConflictError("Incremental evidence was already sealed")
             digest = evidence.digest
@@ -2288,6 +2290,8 @@ class RunRepository:
                 information_advancement=products.information_advancement if products else None,
                 performance=products.performance if products else None,
                 reassessment=products.reassessment if products else None,
+                decision_outcome=products.decision_outcome if products else None,
+                decision_outcome_reason=(products.decision_outcome_reason if products else None),
                 decision=decisions_by_id.get(run.id),
                 full_research_required_reasons=(
                     products.full_research_required_reasons if products else ()
@@ -2462,6 +2466,10 @@ class RunRepository:
                     research_availability=products.research_availability if products else None,
                     information_advancement=products.information_advancement if products else None,
                     reassessment=products.reassessment if products else None,
+                    decision_outcome=products.decision_outcome if products else None,
+                    decision_outcome_reason=(
+                        products.decision_outcome_reason if products else None
+                    ),
                     decision=decision,
                     performance=products.performance if products else None,
                     full_research_required_reasons=(
@@ -2593,6 +2601,8 @@ class RunRepository:
             information_advancement=products.information_advancement if products else None,
             performance=products.performance if products else None,
             reassessment=products.reassessment if products else None,
+            decision_outcome=products.decision_outcome if products else None,
+            decision_outcome_reason=(products.decision_outcome_reason if products else None),
             decision=(
                 ResearchDecision.model_validate(decision_record.decision_json)
                 if decision_record

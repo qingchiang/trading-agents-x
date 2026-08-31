@@ -25,6 +25,7 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     IncrementalCollectionRequest,
     IncrementalCollectionResult,
+    IncrementalDecisionOutcome,
     IncrementalEvidenceCandidate,
     ResearchArtifactDraft,
     RunStatus,
@@ -555,6 +556,8 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         incremental_collector=collect,
         incremental_synthesizer=lambda input_: default_incremental_synthesizer(input_).model_copy(
             update={
+                "decision_outcome": IncrementalDecisionOutcome.UPDATED,
+                "decision_outcome_reason": "The Decision now references current Evidence.",
                 "decision": input_.full_baseline_decision.model_copy(
                     update={
                         "evidence_refs": (
@@ -562,7 +565,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
                             input_.incremental_evidence.items[0].ref,
                         )
                     }
-                )
+                ),
             }
         ),
     )
@@ -973,6 +976,8 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
                 "information_advancement": None,
                 "performance": None,
                 "reassessment": None,
+                "decision_outcome": None,
+                "decision_outcome_reason": None,
                 "decision": research_decision(evidence_refs=(item.ref,)).model_dump(mode="json"),
                 "full_research_required_reasons": [],
                 "cycle_warning": False,

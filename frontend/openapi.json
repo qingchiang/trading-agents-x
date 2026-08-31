@@ -2029,6 +2029,15 @@
         "title": "IncrementalBaselineContext",
         "type": "object"
       },
+      "IncrementalDecisionOutcome": {
+        "description": "Whether an Incremental Node reuses or regenerates its Full Decision.",
+        "enum": [
+          "unchanged",
+          "updated"
+        ],
+        "title": "IncrementalDecisionOutcome",
+        "type": "string"
+      },
       "IncrementalRunContext": {
         "additionalProperties": false,
         "properties": {
@@ -3938,6 +3947,27 @@
             "title": "Decision",
             "type": "object"
           },
+          "decision_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalDecisionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Outcome Reason"
+          },
           "full_research_required_reasons": {
             "default": [],
             "items": {
@@ -4133,6 +4163,27 @@
                 "type": "null"
               }
             ]
+          },
+          "decision_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalDecisionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Outcome Reason"
           },
           "full_baseline_run_id": {
             "anyOf": [

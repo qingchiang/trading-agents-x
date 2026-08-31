@@ -285,6 +285,7 @@ export interface components {
       decision: components["schemas"]["ResearchDecision"];
       run_id: string;
     };
+    IncrementalDecisionOutcome: "unchanged" | "updated";
     IncrementalRunContext: {
       analysis_brief?: components["schemas"]["IncrementalAnalysisBrief"] | null;
       full_baseline: components["schemas"]["IncrementalBaselineContext"];
@@ -568,6 +569,8 @@ export interface components {
       collection_summary?: components["schemas"]["CollectionSummary"] | null;
       cycle_id: string;
       decision: Record<string, unknown>;
+      decision_outcome?: components["schemas"]["IncrementalDecisionOutcome"] | null;
+      decision_outcome_reason?: string | null;
       full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       information_advancement?: components["schemas"]["InformationAdvancement"] | null;
       lifecycle_state: components["schemas"]["ResearchNodeLifecycleState"];
@@ -598,6 +601,8 @@ export interface components {
       cycle_id: string;
       cycle_warning?: boolean;
       decision?: components["schemas"]["ResearchDecision"] | null;
+      decision_outcome?: components["schemas"]["IncrementalDecisionOutcome"] | null;
+      decision_outcome_reason?: string | null;
       full_baseline_run_id?: string | null;
       full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       id: string;

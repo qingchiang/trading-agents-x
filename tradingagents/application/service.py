@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -32,6 +32,7 @@ from tradingagents.graph.deliberation import (
     ResearchScenarioCoreDraft,
     write_research_markdown,
 )
+from tradingagents.graph.output_validation import OutputValidationError
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
 from tradingagents.graph.structured_output import (
     StructuredOutputResult,
@@ -49,6 +50,7 @@ from .contracts import (
     FullResearchRequiredReason,
     IncrementalAnalysisBrief,
     IncrementalCollectionPreflight,
+    IncrementalDecisionOutcome,
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
@@ -113,12 +115,14 @@ def _incremental_brief_fallback_title(language: ReportLanguage | str) -> str:
     return titles[ReportLanguage(language)]
 
 
-class _IncrementalReassessmentSection(BaseModel):
-    """Bounded truncation-recovery section for baseline component review."""
+class _IncrementalAssessmentPayload(BaseModel):
+    """Small Incremental assessment that decides whether a Decision is regenerated."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     reassessment: ResearchReassessment
+    decision_outcome: IncrementalDecisionOutcome
+    decision_outcome_reason: str = Field(min_length=1)
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
@@ -130,14 +134,12 @@ class _IncrementalDecisionSection(BaseModel):
     decision: ResearchDecisionCoreDraft
 
 
-class _IncrementalSynthesisPayload(BaseModel):
-    """Strict serializer payload; the readable brief stays outside this schema."""
+class _IncrementalDecisionPayload(BaseModel):
+    """Complete Decision payload generated only for an updated outcome."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    reassessment: ResearchReassessment
     decision: ResearchDecision
-    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
 def _incremental_decision_core(decision: ResearchDecision) -> ResearchDecisionCoreDraft:
@@ -249,6 +251,10 @@ def default_incremental_synthesizer(
                 )
                 for component_id in _baseline_component_ids(synthesis_input.full_baseline_decision)
             )
+        ),
+        decision_outcome=IncrementalDecisionOutcome.UNCHANGED,
+        decision_outcome_reason=(
+            "The bounded update does not require any Full Decision field to change."
         ),
         decision=synthesis_input.full_baseline_decision,
     )
@@ -725,6 +731,25 @@ class AnalysisService:
                         raise ValueError(
                             "Incremental synthesis must reassess every Full Baseline Decision Component"
                         )
+                    baseline_decision_json = baseline_result.decision.model_dump(mode="json")
+                    incremental_decision_json = synthesis.decision.model_dump(mode="json")
+                    if (
+                        synthesis.decision_outcome is IncrementalDecisionOutcome.UNCHANGED
+                        and incremental_decision_json != baseline_decision_json
+                    ):
+                        raise ValueError(
+                            "unchanged outcome requires the baseline Decision without changes"
+                        )
+                    if (
+                        synthesis.decision_outcome is IncrementalDecisionOutcome.UPDATED
+                        and incremental_decision_json == baseline_decision_json
+                    ):
+                        raise ValueError("updated outcome requires a changed Decision")
+                    if synthesis.decision_outcome is IncrementalDecisionOutcome.UNCHANGED and any(
+                        entry.disposition is ReassessmentDisposition.OVERTURNED
+                        for entry in synthesis.reassessment.entries
+                    ):
+                        raise ValueError("overturned reassessment requires updated outcome")
                     allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
                     allowed_evidence_refs.update(item.ref for item in incremental_evidence.items)
                     if not set(synthesis.decision.evidence_refs).issubset(allowed_evidence_refs):
@@ -739,6 +764,8 @@ class AnalysisService:
                         information_advancement=collection.information_advancement,
                         performance=performance,
                         reassessment=synthesis.reassessment,
+                        decision_outcome=synthesis.decision_outcome,
+                        decision_outcome_reason=synthesis.decision_outcome_reason,
                         full_research_required_reasons=(synthesis.full_research_required_reasons),
                     )
                     self._validate_full_research_required_reason_closure(
@@ -1300,26 +1327,61 @@ class AnalysisService:
             report_sections=parse_markdown_sections(
                 semantic_brief,
                 namespace="incremental",
-                fallback_title=_incremental_brief_fallback_title(
-                    run_settings.output_language
-                ),
+                fallback_title=_incremental_brief_fallback_title(run_settings.output_language),
             ),
             evidence_refs=semantic_output.evidence_refs,
             warnings=semantic_output.warnings,
         )
-        serializer_prompt = (
-            "Serialize a complete IncrementalSynthesis from this semantic brief and the "
-            "typed bounded input. Every reassessment entry requires a concise reason; "
-            "include Evidence references only when the permitted bundles support them. "
-            "Limited or missing optional Research Availability alone must not create a Full "
-            "Research Required reason, and required_coverage codes are forbidden. "
-            "Use only the typed v1 reason codes for material thesis reversal, identity "
-            "uncertainty, unreliable attribution, or material Evidence conflict. Write all "
-            f"human-readable prose in {output_language}.\n\n"
+        allowed_evidence_refs = tuple(
+            dict.fromkeys(
+                (
+                    *synthesis_input.permitted_baseline_evidence_refs,
+                    *(item.ref for item in synthesis_input.incremental_evidence.items),
+                )
+            )
+        )
+        expected_components = set(_baseline_component_ids(synthesis_input.full_baseline_decision))
+
+        def validate_assessment(
+            value: _IncrementalAssessmentPayload,
+        ) -> _IncrementalAssessmentPayload:
+            if {entry.component_id for entry in value.reassessment.entries} != expected_components:
+                raise OutputValidationError("incremental.reassessment.component_closure")
+            if value.decision_outcome is IncrementalDecisionOutcome.UNCHANGED and any(
+                entry.disposition is ReassessmentDisposition.OVERTURNED
+                for entry in value.reassessment.entries
+            ):
+                raise OutputValidationError("incremental.outcome.overturned_unchanged")
+            allowed = set(allowed_evidence_refs)
+            if any(
+                not set(entry.evidence_refs).issubset(allowed)
+                for entry in value.reassessment.entries
+            ) or any(
+                not set(reason.evidence_refs).issubset(allowed)
+                for reason in value.full_research_required_reasons
+            ):
+                raise OutputValidationError("incremental.assessment.refs_invalid")
+            return value
+
+        assessment_prompt = (
+            "Serialize only the small Incremental assessment from the semantic brief and "
+            "typed bounded input. Reassess every Full Baseline Decision Component. Set "
+            "decision_outcome to unchanged when the complete baseline Decision remains valid "
+            "without changing any field, even if evidence strengthened or weakened a component. "
+            "Set it to updated only when at least one complete Decision field must actually be "
+            "rewritten. An overturned component always requires updated. Do not serialize a "
+            "Research Decision. Full Research Required is independent of decision_outcome, so "
+            "either outcome may include a reason. Every reassessment entry and the outcome need "
+            "a concise reason. Include Evidence references only when the permitted bundles "
+            "support them. Limited or missing optional Research Availability alone must not "
+            "create a Full Research Required reason, and required_coverage codes are forbidden. "
+            "Use only the typed reason codes for material thesis reversal, identity uncertainty, "
+            "unreliable attribution, or material Evidence conflict. Write all human-readable "
+            f"prose in {output_language}.\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
         )
-        example = {
+        assessment_example = {
             "reassessment": {
                 "entries": [
                     {
@@ -1329,133 +1391,146 @@ class AnalysisService:
                     }
                 ]
             },
-            "decision": {"rating": "hold", "thesis": "Complete current decision."},
+            "decision_outcome": "unchanged",
+            "decision_outcome_reason": "No complete Decision field needs to change.",
             "full_research_required_reasons": [],
         }
-        allowed_evidence_refs = tuple(
-            dict.fromkeys(
-                (
-                    *synthesis_input.permitted_baseline_evidence_refs,
-                    *(item.ref for item in synthesis_input.incremental_evidence.items),
-                )
-            )
-        )
-
-        def sectioned_recovery() -> StructuredOutputResult[_IncrementalSynthesisPayload]:
-            bounded_input = synthesis_input.model_dump_json(indent=2)
-            baseline_decision = synthesis_input.full_baseline_decision
-            reassessment = (
-                StructuredOutputRunner(
-                    llm=serializer_llm,
-                    schema=_IncrementalReassessmentSection,
-                    validator=lambda value: value,
-                    node="incremental.synthesis.reassessment",
-                    event_writer=event_writer,
-                    repair_enabled=False,
-                    invoke_config={
-                        "metadata": {
-                            "research_node": "incremental.synthesis.reassessment",
-                        }
-                    },
-                    repair_instructions=(
-                        "Preserve every baseline component ID, typed reason code, "
-                        "and Evidence reference exactly."
-                    ),
-                )
-                .invoke(
-                    (
-                        "Recover only the complete Research Reassessment and any "
-                        "Full Research Required reasons from the semantic brief and "
-                        "bounded input. Reassess every Full Baseline Decision Component "
-                        "with a concise reason. Do not serialize the current Decision. "
-                        f"Write all human-readable prose in {output_language}.\n\n"
-                        f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-                        f"BOUNDED INPUT:\n{bounded_input}"
-                    ),
-                    example={
-                        "reassessment": example["reassessment"],
-                        "full_research_required_reasons": [],
-                    },
-                    allowed_evidence_refs=allowed_evidence_refs,
-                )
-                .value
-            )
-            decision_core = (
-                StructuredOutputRunner(
-                    llm=serializer_llm,
-                    schema=_IncrementalDecisionSection,
-                    validator=lambda value: value,
-                    node="incremental.synthesis.decision",
-                    event_writer=event_writer,
-                    repair_enabled=False,
-                    invoke_config={
-                        "metadata": {
-                            "research_node": "incremental.synthesis.decision",
-                        }
-                    },
-                    repair_instructions=(
-                        "Return one complete current qualitative Decision core using only "
-                        "permitted Evidence references."
-                    ),
-                )
-                .invoke(
-                    (
-                        "Recover only the complete current qualitative Research Decision "
-                        "core from the semantic brief and bounded input. Include exactly "
-                        "base, bull, and bear scenarios. Do not serialize the Research "
-                        "Reassessment, Full Research Required reasons, or any optional "
-                        "numeric appendix; the application preserves the audited numeric "
-                        "appendix from the direct Full Baseline. "
-                        f"Write all human-readable prose in {output_language}.\n\n"
-                        f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-                        f"BOUNDED INPUT:\n{bounded_input}"
-                    ),
-                    example={
-                        "decision": _incremental_decision_core(baseline_decision).model_dump(
-                            mode="json"
-                        )
-                    },
-                    allowed_evidence_refs=allowed_evidence_refs,
-                )
-                .value
-            )
-            decision = _incremental_decision_from_core(
-                decision_core.decision,
-                baseline_decision,
-            )
-            return StructuredOutputResult(
-                value=_IncrementalSynthesisPayload(
-                    reassessment=reassessment.reassessment,
-                    decision=decision,
-                    full_research_required_reasons=(reassessment.full_research_required_reasons),
-                ),
-                generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
-            )
-
-        with metrics.phase("incremental.synthesis.serialize", event_writer=event_writer):
-            output = StructuredOutputRunner(
+        with metrics.phase("incremental.synthesis.assessment", event_writer=event_writer):
+            assessment_output = StructuredOutputRunner(
                 llm=serializer_llm,
-                schema=_IncrementalSynthesisPayload,
-                validator=lambda value: value,
-                node="incremental.synthesis.serialize",
+                schema=_IncrementalAssessmentPayload,
+                validator=validate_assessment,
+                node="incremental.synthesis.assessment",
                 event_writer=event_writer,
-                invoke_config={"metadata": {"research_node": "incremental.synthesis.serialize"}},
+                invoke_config={"metadata": {"research_node": "incremental.synthesis.assessment"}},
                 repair_instructions=(
                     "Write all human-readable prose in "
-                    f"{output_language}. Preserve IDs, enums, Evidence refs, and "
-                    "typed collection limitations exactly."
+                    f"{output_language}. Preserve every baseline component ID, enums, "
+                    "permitted Evidence refs, and typed Full Research Required codes exactly."
                 ),
-                truncation_recovery=sectioned_recovery,
-                sectioned_recovery_reasons=("output_truncated", "schema_validation"),
-                sectioned_recovery_after_repair=False,
             ).invoke(
-                serializer_prompt,
-                example=example,
+                assessment_prompt,
+                example=assessment_example,
                 allowed_evidence_refs=allowed_evidence_refs,
             )
+
+        assessment = assessment_output.value
+        baseline_decision = synthesis_input.full_baseline_decision
+        if assessment.decision_outcome is IncrementalDecisionOutcome.UNCHANGED:
+            decision = baseline_decision
+        else:
+            repair_available = not assessment_output.failed_attempts
+            decision_prompt = (
+                "Serialize one complete updated Research Decision from the semantic brief, "
+                "small assessment, and typed bounded input. The Decision must differ from the "
+                "Full Baseline in at least one real field. Do not emit a field patch or changed-"
+                "fields list. Primary generation may update valuation, scenarios, market "
+                "references, and calculations when supported by permitted Evidence. Classify "
+                "confidence by rubric, not as a probability: low means the core judgment remains "
+                "tentative because important gaps, conflicts, or unresolved assumptions remain; "
+                "medium means the main direction is supported but important uncertainty could "
+                "materially change it; high means reliable evidence sufficiently supports the "
+                "core judgment with no unresolved major conflict. Include exactly base, bull, "
+                "and bear scenarios and use only permitted Evidence references. Write all human-"
+                f"readable prose in {output_language}.\n\n"
+                f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
+                f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
+                f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+            )
+            decision_example = {"decision": baseline_decision.model_dump(mode="json")}
+
+            def validate_decision(
+                value: _IncrementalDecisionPayload,
+            ) -> _IncrementalDecisionPayload:
+                if value.decision.model_dump(mode="json") == baseline_decision.model_dump(
+                    mode="json"
+                ):
+                    raise OutputValidationError("incremental.decision.updated_identical")
+                if not set(value.decision.evidence_refs).issubset(set(allowed_evidence_refs)):
+                    raise OutputValidationError("incremental.decision.refs_invalid")
+                return value
+
+            def decision_core_recovery() -> StructuredOutputResult[_IncrementalDecisionPayload]:
+                decision_core = (
+                    StructuredOutputRunner(
+                        llm=serializer_llm,
+                        schema=_IncrementalDecisionSection,
+                        validator=lambda value: value,
+                        node="incremental.synthesis.decision",
+                        event_writer=event_writer,
+                        repair_enabled=False,
+                        invoke_config={
+                            "metadata": {
+                                "research_node": "incremental.synthesis.decision",
+                            }
+                        },
+                        repair_instructions=(
+                            "Return one complete current qualitative Decision core using only "
+                            "permitted Evidence references."
+                        ),
+                    )
+                    .invoke(
+                        (
+                            "Recover only the complete updated qualitative Research Decision "
+                            "core from the semantic brief and bounded input. Include exactly "
+                            "base, bull, and bear scenarios. Do not serialize the Research "
+                            "Reassessment, Full Research Required reasons, or any optional "
+                            "numeric appendix; the application preserves the audited numeric "
+                            "appendix from the direct Full Baseline. "
+                            f"Write all human-readable prose in {output_language}.\n\n"
+                            f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
+                            f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
+                            f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+                        ),
+                        example={
+                            "decision": _incremental_decision_core(baseline_decision).model_dump(
+                                mode="json"
+                            )
+                        },
+                        allowed_evidence_refs=allowed_evidence_refs,
+                    )
+                    .value
+                )
+                return StructuredOutputResult(
+                    value=_IncrementalDecisionPayload(
+                        decision=_incremental_decision_from_core(
+                            decision_core.decision,
+                            baseline_decision,
+                        )
+                    ),
+                    generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                )
+
+            with metrics.phase("incremental.synthesis.decision", event_writer=event_writer):
+                decision_output = StructuredOutputRunner(
+                    llm=serializer_llm,
+                    schema=_IncrementalDecisionPayload,
+                    validator=validate_decision,
+                    node="incremental.synthesis.decision",
+                    event_writer=event_writer,
+                    repair_enabled=repair_available,
+                    invoke_config={"metadata": {"research_node": "incremental.synthesis.decision"}},
+                    repair_instructions=(
+                        "Return a complete Decision that really differs from the baseline, "
+                        "uses only permitted Evidence refs, and follows the confidence rubric."
+                    ),
+                    truncation_recovery=(decision_core_recovery if repair_available else None),
+                    sectioned_recovery_reasons=("output_truncated", "schema_validation"),
+                    sectioned_recovery_after_repair=False,
+                ).invoke(
+                    decision_prompt,
+                    example=decision_example,
+                    allowed_evidence_refs=allowed_evidence_refs,
+                )
+            decision = decision_output.value.decision
+
         return IncrementalSynthesis(
             analysis_brief=analysis_brief,
-            **output.value.model_dump(mode="python"),
+            reassessment=assessment.reassessment,
+            decision_outcome=assessment.decision_outcome,
+            decision_outcome_reason=assessment.decision_outcome_reason,
+            decision=decision,
+            full_research_required_reasons=assessment.full_research_required_reasons,
         )
 
     @staticmethod
