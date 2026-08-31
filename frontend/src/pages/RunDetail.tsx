@@ -617,6 +617,7 @@ export default function RunDetail() {
         {activeView === "decision" && isIncremental && detail.research_node && (
           <IncrementalDecisionPanel
             decision={decision}
+            node={detail.research_node}
             numericAudit={detail.result?.numeric_audit}
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
@@ -719,12 +720,14 @@ export default function RunDetail() {
 
 function IncrementalDecisionPanel({
   decision,
+  node,
   numericAudit,
   evidenceIndex,
   onEvidence,
   onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
+  node: ResearchNodeView;
   numericAudit: AnalysisResult["numeric_audit"];
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
@@ -744,6 +747,7 @@ function IncrementalDecisionPanel({
       id="run-view-decision"
       role="tabpanel"
     >
+      <IncrementalOutcomeSummary node={node} />
       <ResearchDecisionContentView
         decision={decision}
         numericAudit={numericAudit}

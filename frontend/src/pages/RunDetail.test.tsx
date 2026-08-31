@@ -1028,11 +1028,20 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "Evidence updates",
     "Activity",
   ]);
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  await waitFor(() =>
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "run-view-decision"),
+  );
+  expect(
+    within(screen.getByRole("tabpanel")).getByText("The full Decision was regenerated."),
+  ).toBeVisible();
+  expect(screen.queryByText("Current instrument")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
     "href",
     "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
   );
 
+  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
   await waitFor(() => expect(api.evidence).toHaveBeenCalledTimes(1));
   const briefHeading = await screen.findByRole("heading", { name: "Key update" });
   expect(briefHeading).toBeVisible();
@@ -1155,6 +1164,8 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(
     await screen.findByText("This historical run did not record an analysis brief."),
   ).toBeVisible();
+  expect(screen.getByText("This version did not record a Decision outcome.")).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
   expect(screen.getByText("This version did not record a Decision outcome.")).toBeVisible();
   await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
 });
@@ -1346,6 +1357,11 @@ test("explains when an Incremental Decision is inherited unchanged", async () =>
 
   expect(
     await screen.findByText("The full Decision is inherited from the Full baseline."),
+  ).toBeVisible();
+  expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  expect(
+    screen.getByText("The full Decision is inherited from the Full baseline."),
   ).toBeVisible();
   expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
 });

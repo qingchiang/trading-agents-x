@@ -163,6 +163,28 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
     assert captured["on_event"] is None
 
 
+def test_run_prints_confidence_level_in_non_json_success_summary(monkeypatch) -> None:
+    class FakeApplication:
+        def run(self, request, *, on_event):
+            return AnalysisResult(
+                run_id="run-readable-summary",
+                status=RunStatus.SUCCEEDED,
+                instrument=request.ticker,
+                reports={},
+                decision=research_decision(confidence="medium"),
+            )
+
+    monkeypatch.setattr(cli, "_application", FakeApplication)
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "AAPL", "--date", "2026-07-24", "--quiet"],
+    )
+
+    assert result.exit_code == 0
+    assert "confidence medium" in result.output
+
+
 @pytest.mark.parametrize(
     ("error", "exit_code"),
     [
