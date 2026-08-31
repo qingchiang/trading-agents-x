@@ -221,7 +221,7 @@ const detail = {
     },
     decision: {
       rating: "Hold",
-      confidence: 0.65,
+      confidence: "medium",
       executive_summary: "Balanced research summary.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],

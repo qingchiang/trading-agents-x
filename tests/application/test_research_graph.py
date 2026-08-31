@@ -130,7 +130,7 @@ class _StructuredInvoker:
                 else ()
             )
             decision = research_decision(
-                confidence=0.65,
+                confidence="medium",
                 thesis="The available evidence supports a balanced conclusion.",
                 evidence_refs=refs[-1:],
                 catalysts=("Evidence improves",),

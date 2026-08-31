@@ -2,6 +2,15 @@ import i18n from "i18next";
 import type { TFunction } from "i18next";
 import { initReactI18next } from "react-i18next";
 
+export type ResearchConfidenceLevel = "low" | "medium" | "high";
+
+export function researchConfidenceLabel(
+  t: TFunction,
+  value: ResearchConfidenceLevel,
+): string {
+  return t(`confidenceLevel_${value}`);
+}
+
 export function localizePerformanceReason(
   t: TFunction,
   reason: string | null | undefined,
@@ -279,6 +288,9 @@ const en = {
     exportJson: "Export JSON",
     confidence: "Confidence",
     confidencePercent: "{{value}}% confidence",
+    confidenceLevel_low: "Low confidence",
+    confidenceLevel_medium: "Medium confidence",
+    confidenceLevel_high: "High confidence",
     currentDecision: "Current decision",
     thesis: "Thesis",
     stockReturn: "Stock return",
@@ -1064,6 +1076,9 @@ const zhCN = {
     exportJson: "导出 JSON",
     confidence: "置信度",
     confidencePercent: "{{value}}% 置信度",
+    confidenceLevel_low: "低置信度",
+    confidenceLevel_medium: "中等置信度",
+    confidenceLevel_high: "高置信度",
     currentDecision: "当前结论",
     thesis: "核心论点",
     stockReturn: "股票回报",
@@ -1825,6 +1840,9 @@ const ja = {
     exportJson: "JSON 出力",
     confidence: "確信度",
     confidencePercent: "確信度 {{value}}%",
+    confidenceLevel_low: "確信度：低",
+    confidenceLevel_medium: "確信度：中",
+    confidenceLevel_high: "確信度：高",
     currentDecision: "現在の判断",
     thesis: "投資仮説",
     stockReturn: "株価リターン",

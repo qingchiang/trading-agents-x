@@ -74,7 +74,7 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -168,7 +168,7 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 14, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -323,7 +323,7 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -471,7 +471,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -699,7 +699,7 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
     baseline, _ = web_repository.create_run(
         request,
         web_settings.resolve_run(request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -774,7 +774,7 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -837,7 +837,7 @@ async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
     baseline, _ = web_repository.create_run(
         baseline_request,
         web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -898,7 +898,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     run, _ = web_repository.create_run(
         request,
         web_settings.resolve_run(request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
         research_kind="full",
@@ -943,7 +943,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "analysis_date": "2026-07-24",
             "is_primary": True,
             "rating": "Hold",
-            "confidence": 0.6,
+            "confidence": "medium",
         }
     ]
     assert payload["cycles"] == [
@@ -957,7 +957,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
                 "cycle_id": run.id,
                 "instrument": "NVDA",
                 "analysis_date": "2026-07-24",
-                "research_schema_version": "1",
+                "research_schema_version": "2",
                 "information_cutoff_at": "2026-07-24T23:59:59Z",
                 "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
                 "research_kind": "full",
@@ -992,7 +992,7 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         analysis_date: date,
         *,
         make_primary: bool | None = None,
-        research_schema_version: str = "1",
+        research_schema_version: str = "2",
     ) -> str:
         request = AnalysisRequest(
             ticker="NVDA",
@@ -1077,7 +1077,7 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
     run, _ = web_repository.create_run(
         request,
         web_settings.resolve_run(request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
         research_kind="full",
@@ -1121,7 +1121,7 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
                 "incremental_node_count": 0,
                 "latest_analysis_date": "2026-07-24",
                 "primary_rating": "Hold",
-                "primary_confidence": 0.6,
+                "primary_confidence": "medium",
                 "timeline_warning": False,
             }
         ],
@@ -1137,7 +1137,7 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
     web_repository,
     web_settings,
 ) -> None:
-    def commit_full(analysis_date: date, *, make_primary: bool | None, confidence: float) -> str:
+    def commit_full(analysis_date: date, *, make_primary: bool | None, confidence: str) -> str:
         request = AnalysisRequest(
             ticker="NVDA",
             analysis_date=analysis_date,
@@ -1146,7 +1146,7 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
         run, _ = web_repository.create_run(
             request,
             web_settings.resolve_run(request).snapshot(),
-            research_schema_version="1",
+            research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
             research_kind="full",
@@ -1181,8 +1181,8 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
         )
         return run.id
 
-    primary = commit_full(date(2026, 7, 20), make_primary=None, confidence=0.72)
-    newest = commit_full(date(2026, 7, 22), make_primary=False, confidence=0.81)
+    primary = commit_full(date(2026, 7, 20), make_primary=None, confidence="medium")
+    newest = commit_full(date(2026, 7, 22), make_primary=False, confidence="high")
 
     response = await web_client.get("/api/v1/timelines/NVDA/baseline-candidates?before=2026-07-24")
 
@@ -1196,7 +1196,7 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
         "instrument_name": "NVIDIA Corporation",
         "instrument_local_name": "英伟达",
         "rating": "Hold",
-        "confidence": 0.72,
+        "confidence": "medium",
         "thesis": "Decision from 2026-07-20.",
         "cycle_warning": False,
     }
@@ -1212,7 +1212,7 @@ async def test_terminal_run_creation_template_is_lightweight_and_uses_today_inde
     run, _ = web_repository.create_run(
         request,
         web_settings.resolve_run(request).snapshot(),
-        research_schema_version="1",
+        research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
         research_kind="full",
@@ -1249,7 +1249,7 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
         run, _ = web_repository.create_run(
             request,
             web_settings.resolve_run(request).snapshot(),
-            research_schema_version="1",
+            research_schema_version="2",
             information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
             method_snapshot={"schema_version": "1"},
             research_kind="full",
@@ -1334,7 +1334,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
         run, _ = web_repository.create_run(
             request,
             web_settings.resolve_run(request).snapshot(),
-            research_schema_version="1",
+            research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
             research_kind="full",
@@ -1803,7 +1803,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         ),
     )
     decision = research_decision(
-        confidence=0.6,
+        confidence="medium",
         thesis="Fixture thesis.",
         evidence_refs=(evidence_item.ref,),
     )

@@ -178,6 +178,9 @@ _EN_LABELS = {
     "analyst": "Analyst",
     "audit": "Audit",
     "confidence": "Confidence",
+    "confidence_level.low": "Low",
+    "confidence_level.medium": "Medium",
+    "confidence_level.high": "High",
     "implication": "Implication",
     "rating": "Rating",
     "time_horizon": "Time horizon",
@@ -390,6 +393,9 @@ _ZH_LABELS = {
     "analyst": "分析师",
     "audit": "审计状态",
     "confidence": "置信度",
+    "confidence_level.low": "低",
+    "confidence_level.medium": "中",
+    "confidence_level.high": "高",
     "implication": "含义",
     "rating": "研究评级",
     "time_horizon": "研究周期",
@@ -584,6 +590,9 @@ _JA_LABELS = {
     "analyst": "アナリスト",
     "audit": "監査状態",
     "confidence": "確信度",
+    "confidence_level.low": "低",
+    "confidence_level.medium": "中",
+    "confidence_level.high": "高",
     "implication": "示唆",
     "rating": "評価",
     "time_horizon": "期間",
@@ -1283,7 +1292,10 @@ def _render_research_decision(
         f"> {labels['opinion_notice']}",
         "",
         f"- {labels['rating']}: **{content.rating.value}**",
-        f"- {labels['confidence']}: `{content.confidence:.0%}`",
+        (
+            f"- {labels['confidence']}: `"
+            f"{labels.enum_name('confidence_level', content.confidence.value)}`"
+        ),
         f"- {labels['time_horizon']}: {content.time_horizon}",
         (
             f"- {labels['numeric_audit']}: `"

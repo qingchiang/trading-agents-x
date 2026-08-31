@@ -12,6 +12,7 @@ from tradingagents.application.contracts import (
     ReportAuditStatus,
     ReportSection,
     ResearchCase,
+    ResearchConfidenceLevel,
     ResearchDecision,
     ResearchRating,
     ResearchScenario,
@@ -75,7 +76,7 @@ def analyst_report(
 def research_decision(
     *,
     rating: ResearchRating = ResearchRating.HOLD,
-    confidence: float = 0.6,
+    confidence: ResearchConfidenceLevel | str = ResearchConfidenceLevel.MEDIUM,
     executive_summary: str = "Fixture decision summary.",
     thesis: str = "Fixture evidence supports a conditional conclusion.",
     evidence_refs: tuple[str, ...] = (_DEFAULT_REF,),

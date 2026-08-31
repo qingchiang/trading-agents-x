@@ -41,6 +41,7 @@ from .contracts import (
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchCase,
+    ResearchConfidenceLevel,
     ResearchCycleView,
     ResearchDecision,
     ResearchNodeComparison,
@@ -1901,7 +1902,7 @@ class RunRepository:
                     asset_type=request.asset_type,
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
-                    confidence=result.decision.confidence,
+                    confidence=result.decision.confidence.value,
                     decision_json=result.decision.model_dump(mode="json"),
                     numeric_audit_json=(
                         result.numeric_audit.model_dump(mode="json")
@@ -2053,7 +2054,7 @@ class RunRepository:
                     asset_type=request.asset_type,
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
-                    confidence=result.decision.confidence,
+                    confidence=result.decision.confidence.value,
                     decision_json=result.decision.model_dump(mode="json"),
                     numeric_audit_json=None,
                     created_at=now,
@@ -3199,7 +3200,7 @@ class RunRepository:
         cls,
         record: RunRecord,
         rating: str | None,
-        confidence: float | None,
+        confidence: str | None,
         is_research_node: bool,
         *,
         instrument_name: str | None = None,
@@ -3218,5 +3219,5 @@ class RunRepository:
             )
             .model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
-            research_confidence=confidence,
+            research_confidence=(ResearchConfidenceLevel(confidence) if confidence else None),
         )

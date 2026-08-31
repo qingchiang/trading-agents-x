@@ -111,7 +111,7 @@ def _complete_trashed_run(repository, app_settings):
     )
     repository.seal_evidence(run.id, evidence)
     decision = research_decision(
-        confidence=0.6,
+        confidence="medium",
         thesis="Fixture thesis.",
         evidence_refs=(evidence_item.ref,),
         risks=("Fixture risk.",),

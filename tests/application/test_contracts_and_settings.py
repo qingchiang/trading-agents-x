@@ -13,6 +13,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     ReportLanguage,
+    ResearchConfidenceLevel,
     ResearchDecision,
     ResearchWarning,
     RunProfile,
@@ -63,6 +64,21 @@ def test_public_enum_contract_remains_stable() -> None:
         "standard",
         "deep",
     ]
+
+
+def test_research_decision_confidence_uses_fixed_research_levels() -> None:
+    decision = research_decision(confidence=ResearchConfidenceLevel.MEDIUM)
+
+    assert decision.confidence is ResearchConfidenceLevel.MEDIUM
+    assert decision.model_dump(mode="json")["confidence"] == "medium"
+    assert ResearchDecision.model_json_schema()["$defs"]["ResearchConfidenceLevel"][
+        "enum"
+    ] == ["low", "medium", "high"]
+
+    payload = decision.model_dump(mode="json")
+    payload["confidence"] = 0.65
+    with pytest.raises(ValidationError, match="confidence"):
+        ResearchDecision.model_validate(payload)
 
 
 def test_research_decision_rejects_account_level_fields() -> None:

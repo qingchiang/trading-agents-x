@@ -11,7 +11,6 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -198,7 +197,7 @@ class DecisionRecord(Base):
     asset_type: Mapped[str] = mapped_column(String(20), nullable=False)
     analysis_date: Mapped[date] = mapped_column(Date, nullable=False)
     rating: Mapped[str] = mapped_column(String(20), nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(10), nullable=False)
     decision_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     numeric_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,

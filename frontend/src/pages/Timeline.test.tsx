@@ -41,14 +41,14 @@ function node(
     analysis_date: date,
     research_kind: kind,
     full_baseline_run_id: kind === "incremental" ? "full-primary" : null,
-    research_schema_version: "1",
+    research_schema_version: "2",
     information_cutoff_at: `${date}T21:00:00Z`,
     method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.5" },
     decision: {
       ticker: "NVDA",
       analysis_date: date,
       rating,
-      confidence: rating === "Overweight" ? 0.84 : 0.63,
+      confidence: rating === "Overweight" ? "high" : "medium",
       thesis: kind === "full" ? "Full baseline thesis" : "Incremental thesis changed",
       catalysts: [],
       risks: [],
@@ -181,7 +181,7 @@ test("renders name-first timeline cards with research counts and decision contex
       incremental_node_count: 4,
       latest_analysis_date: "2026-07-25",
       primary_rating: "Overweight",
-      primary_confidence: 0.81,
+      primary_confidence: "high",
       timeline_warning: true,
     }],
     total: 1,
@@ -193,7 +193,7 @@ test("renders name-first timeline cards with research counts and decision contex
   expect(await screen.findByText("トヨタ自動車")).toBeVisible();
   expect(screen.getByText("Toyota Motor Corporation")).toBeVisible();
   expect(screen.getByText("7203.T")).toBeVisible();
-  expect(screen.getByText("81% confidence")).toBeVisible();
+  expect(screen.getByText("High confidence")).toBeVisible();
   expect(screen.getByRole("link", { name: /トヨタ自動車/ })).toHaveAttribute("href", "/timelines/7203.T");
 });
 
@@ -279,11 +279,11 @@ test("selects human-readable nodes and renders a structured comparison", async (
         cycle_id: "full-primary",
         lifecycle_state: "active",
         research_kind: "full",
-        research_schema_version: "1",
+        research_schema_version: "2",
         analysis_date: "2026-07-20",
         decision: {
           rating: "Overweight",
-          confidence: 0.84,
+          confidence: "high",
           thesis: "Full baseline thesis",
         },
         method_snapshot: { llm_provider: "openai", deep_model: "gpt-5.4" },
@@ -293,11 +293,11 @@ test("selects human-readable nodes and renders a structured comparison", async (
         cycle_id: "full-primary",
         lifecycle_state: "active",
         research_kind: "incremental",
-        research_schema_version: "1",
+        research_schema_version: "2",
         analysis_date: "2026-07-25",
         decision: {
           rating: "Hold",
-          confidence: 0.63,
+          confidence: "medium",
           thesis: "Incremental thesis changed",
         },
         information_advancement: { advanced: true, reasons: ["admissible_observation"] },
@@ -358,8 +358,8 @@ test("selects human-readable nodes and renders a structured comparison", async (
       {
         key: "confidence",
         values: [
-          { state: "recorded", value: 0.84 },
-          { state: "recorded", value: 0.84 },
+          { state: "recorded", value: "high" },
+          { state: "recorded", value: "high" },
         ],
       },
       {
@@ -410,7 +410,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
   const dialog = await screen.findByRole("dialog", { name: "Node Comparison" });
   expect(document.body.style.overflow).toBe("hidden");
   expect(within(dialog).getByText("Incremental thesis changed")).toBeVisible();
-  expect(within(dialog).queryByText("84% confidence")).not.toBeInTheDocument();
+  expect(within(dialog).queryByText("High confidence")).not.toBeInTheDocument();
 
   fireEvent.click(within(dialog).getByText("Extended conclusions"));
   expect(within(dialog).getByText("Not Recorded Under This Schema")).toBeVisible();
@@ -431,7 +431,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
       name: "Show changed sections only",
     }),
   );
-  expect(within(dialog).getAllByText("84% confidence")).toHaveLength(2);
+  expect(within(dialog).getAllByText("High confidence")).toHaveLength(2);
 
   let headers = within(dialog).getAllByRole("columnheader");
   expect(headers[1]).toHaveTextContent("Full research");
@@ -492,7 +492,7 @@ test("offers Primary replacement cycles outside the current Timeline page", asyn
       analysis_date: "2026-06-30",
       is_primary: false,
       rating: "Hold",
-      confidence: 0.58,
+      confidence: "medium",
     },
   ];
   vi.mocked(api.timeline).mockResolvedValue(current);
@@ -500,7 +500,7 @@ test("offers Primary replacement cycles outside the current Timeline page", asyn
 
   fireEvent.click(await screen.findByRole("button", { name: "Move Cycle to Trash" }));
   expect(
-    screen.getByRole("option", { name: "2026-06-30 · Hold · 58%" }),
+    screen.getByRole("option", { name: "2026-06-30 · Hold · Medium confidence" }),
   ).toBeVisible();
 });
 

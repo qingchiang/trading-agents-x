@@ -688,7 +688,7 @@ def test_recovery_events_surface_as_audit_notices_not_top_level_warnings(
             role="final_committee",
             generation_method=ArtifactGenerationMethod.RAW_JSON_RECOVERED,
             content=research_decision(
-                confidence=0.5,
+                confidence="medium",
                 thesis="Fixture recovered thesis.",
                 evidence_refs=(),
                 risks=("Fixture risk.",),
@@ -800,7 +800,7 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
     )
     decision = research_decision(
         rating=ResearchRating.OVERWEIGHT,
-        confidence=0.7,
+        confidence="medium",
         thesis="Constructive evidence outweighs valuation risk.",
         evidence_refs=(evidence_item.ref,),
         catalysts=("Earnings execution",),

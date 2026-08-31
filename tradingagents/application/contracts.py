@@ -165,6 +165,12 @@ class ResearchRating(_StableStrEnum):
     SELL = "Sell"
 
 
+class ResearchConfidenceLevel(_StableStrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class DebateImportance(_StableStrEnum):
     CRITICAL = "critical"
     MATERIAL = "material"
@@ -1242,7 +1248,7 @@ class ResearchDecision(FrozenModel):
     """Research-only conclusion; deliberately excludes account-level advice."""
 
     rating: ResearchRating
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
@@ -1693,7 +1699,7 @@ class RunView(FrozenModel):
         return value
 
 
-CURRENT_RESEARCH_SCHEMA_VERSION = "1"
+CURRENT_RESEARCH_SCHEMA_VERSION = "2"
 
 
 class ResearchNodeView(FrozenModel):
@@ -1759,7 +1765,7 @@ class PrimaryCycleCandidate(FrozenModel):
     analysis_date: date
     is_primary: bool = False
     rating: ResearchRating | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel | None = None
 
 
 class ResearchTimeline(FrozenModel):
@@ -1791,7 +1797,7 @@ class ResearchTimelineSummary(FrozenModel):
     incremental_node_count: int = Field(default=0, ge=0)
     latest_analysis_date: date
     primary_rating: ResearchRating | None = None
-    primary_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    primary_confidence: ResearchConfidenceLevel | None = None
     timeline_warning: bool = False
 
 
@@ -1804,7 +1810,7 @@ class FullBaselineCandidate(FrozenModel):
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     rating: ResearchRating | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel | None = None
     thesis: str | None = None
     cycle_warning: bool = False
 
@@ -2407,7 +2413,7 @@ class RunAttemptView(FrozenModel):
 
 class RunSummaryView(RunView):
     research_rating: ResearchRating | None = None
-    research_confidence: float | None = Field(default=None, ge=0, le=1)
+    research_confidence: ResearchConfidenceLevel | None = None
 
 
 class RunPage(FrozenModel):
