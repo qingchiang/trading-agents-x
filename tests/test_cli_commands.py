@@ -108,7 +108,7 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
         instrument="7203.T",
         reports={},
         decision=research_decision(
-            confidence=0.7,
+            confidence="medium",
             thesis="Balanced evidence.",
         ),
     )
@@ -674,7 +674,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0009_cycle_aware_trash",
+                "0010_decision_confidence_levels",
             )
             assert (
                 upgraded.execute(

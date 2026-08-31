@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from tests.factories import research_decision
 from tradingagents.application.contracts import (
+    CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisRequest,
     AnalysisResult,
     EvidenceBundle,
@@ -50,11 +51,14 @@ def _commit_node(
     run, _ = repository.create_run(
         request,
         app_settings.resolve_run(request).snapshot(),
-        research_schema_version="1",
+        research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
         information_cutoff_at=datetime.combine(
             analysis_date, datetime.max.time(), UTC
         ),
-        method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
+        method_snapshot={
+            "schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
+            "llm_provider": "fixture",
+        },
         research_kind=research_kind,
         full_baseline_run_id=baseline_id,
         incremental_input_fingerprint=(

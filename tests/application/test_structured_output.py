@@ -506,7 +506,7 @@ def test_sectioned_recovery_can_be_disabled_after_generic_repair() -> None:
 def _decision_payload(evidence_ref: str) -> dict[str, Any]:
     return {
         "rating": "Hold",
-        "confidence": 0.5,
+        "confidence": "medium",
         "executive_summary": "The evidence supports a balanced conclusion.",
         "thesis": "The current evidence supports a balanced conclusion.",
         "evidence_refs": [evidence_ref],
