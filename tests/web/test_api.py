@@ -1744,6 +1744,36 @@ async def test_future_analysis_cutoff_returns_context_without_creating_a_run(
 
 
 @pytest.mark.anyio
+async def test_future_analysis_cutoff_precedes_vendor_admission_failure(
+    web_settings,
+    web_repository,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+            RuntimeError("vendor unavailable")
+        ),
+        now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
+    )
+    transport = httpx.ASGITransport(
+        app=create_app(web_settings, service=service),
+        raise_app_exceptions=False,
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        rejected = await client.post(
+            "/api/v1/runs",
+            json={**_payload(), "analysis_date": "2026-09-02"},
+        )
+        runs = await client.get("/api/v1/runs")
+
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "future_analysis_cutoff"
+    assert runs.status_code == 200
+    assert runs.json()["total"] == 0
+
+
+@pytest.mark.anyio
 async def test_openapi_contains_versioned_run_center_contract(
     web_client: httpx.AsyncClient,
 ) -> None:

@@ -29,6 +29,7 @@ from tradingagents.dataflows.interface import (
 from tradingagents.dataflows.symbol_utils import (
     is_supported_equity_symbol,
     market_timezone,
+    market_today,
     normalize_symbol,
 )
 from tradingagents.graph.deliberation import (
@@ -327,7 +328,7 @@ class AnalysisService:
                 "unsupported product symbol",
             )
         zone = market_timezone(instrument)
-        market_date = observed_at.astimezone(zone).date()
+        market_date = market_today(instrument, observed_at)
         valid_until = datetime.combine(
             market_date + timedelta(days=1),
             time.min,
@@ -363,6 +364,7 @@ class AnalysisService:
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
         request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False))
+        information_cutoff_at = self._information_cutoff_at(request)
         run_settings = self.settings.resolve_run(request)
         request_dataflow_config = run_settings.dataflow_config(self.settings)
         self._validate_instrument_eligibility(
@@ -380,7 +382,6 @@ class AnalysisService:
             request,
             run_settings=run_settings,
         )
-        information_cutoff_at = self._information_cutoff_at(request)
         method_snapshot = self._method_snapshot(run_settings, request)
         if request.research_kind == "incremental":
             assert request.full_baseline_run_id is not None
