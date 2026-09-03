@@ -816,6 +816,9 @@ function IncrementalBriefPanel({
 
 function IncrementalOutcomeSummary({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
+  const currentNodeReasons = node.full_research_required_reasons ?? [];
+  const currentNodeTriggeredWarning = currentNodeReasons.length > 0;
+  const showCycleWarning = currentNodeTriggeredWarning || node.cycle_warning;
   return (
     <section className="incremental-outcome-summary" aria-label={t("decisionOutcome")}>
       <div>
@@ -827,10 +830,17 @@ function IncrementalOutcomeSummary({ node }: { node: ResearchNodeView }) {
         </strong>
         {node.decision_outcome_reason && <p>{node.decision_outcome_reason}</p>}
       </div>
-      {(node.full_research_required_reasons?.length ?? 0) > 0 && (
+      {showCycleWarning && (
         <section className="research-warning-block" role="status">
           <h2>{t("fullResearchRecommended")}</h2>
-          {node.full_research_required_reasons?.map((reason) => (
+          <p>
+            {t(
+              currentNodeTriggeredWarning
+                ? "fullResearchTriggeredByCurrentNode"
+                : "fullResearchTriggeredByEarlierNode",
+            )}
+          </p>
+          {currentNodeReasons.map((reason) => (
             <p key={reason.code}>{reason.message}</p>
           ))}
         </section>

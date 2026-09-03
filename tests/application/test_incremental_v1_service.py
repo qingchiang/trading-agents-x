@@ -960,11 +960,13 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     component_ids = _baseline_component_ids(baseline_decision)
 
     class _Invoker:
-        def __init__(self, parsed):
+        def __init__(self, parsed, prompts):
             self.parsed = parsed
+            self.prompts = prompts
 
-        def invoke(self, _prompt, config=None):
+        def invoke(self, prompt, config=None):
             del config
+            self.prompts.append(prompt)
             return {
                 "raw": AIMessage(content=""),
                 "parsed": self.parsed,
@@ -972,8 +974,12 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
             }
 
     class _SemanticLLM:
-        def invoke(self, _prompt, config=None):
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        def invoke(self, prompt, config=None):
             del config
+            self.prompts.append(prompt)
             return AIMessage(content="The bounded update was assessed.")
 
     class _SerializerLLM:
@@ -982,6 +988,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
 
         def __init__(self):
             self.calls: list[tuple[str, str | None]] = []
+            self.prompts: list[str] = []
 
         def with_structured_output(
             self,
@@ -1026,13 +1033,17 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
                             if full_research_required
                             else []
                         ),
-                    }
+                    },
+                    self.prompts,
                 )
             if schema.__name__ == "_IncrementalDecisionPayload":
                 updated = baseline_decision.model_copy(
                     update={"thesis": "The new filing materially updates the thesis."}
                 )
-                return _Invoker({"decision": updated.model_dump(mode="json")})
+                return _Invoker(
+                    {"decision": updated.model_dump(mode="json")},
+                    self.prompts,
+                )
             raise AssertionError(f"unexpected schema: {schema.__name__}")
 
     serializer = _SerializerLLM()
@@ -1068,6 +1079,16 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     if outcome == "updated":
         expected_calls.append(("_IncrementalDecisionPayload", None))
     assert serializer.calls == expected_calls
+    confidence_instruction = (
+        "Never express final Decision confidence as a number, decimal, percentage, "
+        "or probability"
+    )
+    assert semantic.prompts
+    assert serializer.prompts
+    assert all(
+        confidence_instruction in prompt
+        for prompt in (*semantic.prompts, *serializer.prompts)
+    )
     assert result.decision is not None
     assert (
         result.decision.model_dump(mode="json") == baseline_decision.model_dump(mode="json")

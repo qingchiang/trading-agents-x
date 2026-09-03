@@ -80,6 +80,10 @@ const en = {
     fullResearchNode: "Full Research Node",
     incrementalResearchNode: "Incremental Research Node",
     fullResearchRecommended: "Full research recommended",
+    fullResearchTriggeredByCurrentNode:
+      "This Incremental node triggered the full-research warning.",
+    fullResearchTriggeredByEarlierNode:
+      "An earlier active Incremental node in this Research Cycle triggered the warning; this node did not add a new reason.",
     cycleHead: "Cycle Head",
     primaryCycle: "Primary Cycle",
     primaryResearch: "Primary Research",
@@ -873,6 +877,9 @@ const zhCN = {
     fullResearchNode: "完整研究节点",
     incrementalResearchNode: "增量研究节点",
     fullResearchRecommended: "建议进行完整研究",
+    fullResearchTriggeredByCurrentNode: "本增量节点触发了完整研究警告。",
+    fullResearchTriggeredByEarlierNode:
+      "该研究周期中较早的活跃增量节点触发了警告；本节点没有新增触发理由。",
     fullBaseline: "完整研究基线",
     cycleHead: "周期头节点",
     primaryCycle: "主研究周期",
@@ -1641,6 +1648,10 @@ const ja = {
     fullResearchNode: "フルリサーチノード",
     incrementalResearchNode: "インクリメンタル・リサーチノード",
     fullResearchRecommended: "フルリサーチを推奨",
+    fullResearchTriggeredByCurrentNode:
+      "この増分ノードがフルリサーチ警告を発生させました。",
+    fullResearchTriggeredByEarlierNode:
+      "このリサーチサイクル内の以前のアクティブな増分ノードが警告を発生させており、このノードは新しい理由を追加していません。",
     cycleHead: "サイクルヘッド",
     primaryCycle: "プライマリサイクル",
     primaryResearch: "プライマリリサーチ",

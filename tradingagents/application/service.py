@@ -126,6 +126,14 @@ class _IncrementalAssessmentPayload(BaseModel):
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
+_FINAL_CONFIDENCE_PROSE_INSTRUCTION = (
+    "Treat the structured Full Baseline Decision confidence level as authoritative. "
+    "When discussing final Decision confidence, use only the localized equivalent of low, "
+    "medium, or high. Never express final Decision confidence as a number, decimal, "
+    "percentage, or probability, even when legacy baseline prose contains one."
+)
+
+
 class _IncrementalDecisionSection(BaseModel):
     """Bounded recovery section for the current qualitative Decision core."""
 
@@ -1301,6 +1309,7 @@ class AnalysisService:
             "reintroduce required-coverage certification. Cover the key new information, "
             "its effect on the current Decision, stock and benchmark Performance context, "
             "and unresolved questions. Keep audit metadata out of the narrative. "
+            f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
             f"Write all human-readable prose in {output_language}.\n\n"
             + synthesis_input.model_dump_json(indent=2)
         )
@@ -1377,7 +1386,7 @@ class AnalysisService:
             "create a Full Research Required reason, and required_coverage codes are forbidden. "
             "Use only the typed reason codes for material thesis reversal, identity uncertainty, "
             "unreliable attribution, or material Evidence conflict. Write all human-readable "
-            f"prose in {output_language}.\n\n"
+            f"prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
         )
@@ -1406,7 +1415,8 @@ class AnalysisService:
                 repair_instructions=(
                     "Write all human-readable prose in "
                     f"{output_language}. Preserve every baseline component ID, enums, "
-                    "permitted Evidence refs, and typed Full Research Required codes exactly."
+                    "permitted Evidence refs, and typed Full Research Required codes exactly. "
+                    f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION}"
                 ),
             ).invoke(
                 assessment_prompt,
@@ -1432,7 +1442,7 @@ class AnalysisService:
                 "materially change it; high means reliable evidence sufficiently supports the "
                 "core judgment with no unresolved major conflict. Include exactly base, bull, "
                 "and bear scenarios and use only permitted Evidence references. Write all human-"
-                f"readable prose in {output_language}.\n\n"
+                f"readable prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
                 f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
                 f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
                 f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
@@ -1477,6 +1487,7 @@ class AnalysisService:
                             "Reassessment, Full Research Required reasons, or any optional "
                             "numeric appendix; the application preserves the audited numeric "
                             "appendix from the direct Full Baseline. "
+                            f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
                             f"Write all human-readable prose in {output_language}.\n\n"
                             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
                             f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
@@ -1513,6 +1524,7 @@ class AnalysisService:
                     repair_instructions=(
                         "Return a complete Decision that really differs from the baseline, "
                         "uses only permitted Evidence refs, and follows the confidence rubric."
+                        f" {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}"
                     ),
                     truncation_recovery=(decision_core_recovery if repair_available else None),
                     sectioned_recovery_reasons=("output_truncated", "schema_validation"),

@@ -1000,6 +1000,9 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(await screen.findByRole("heading", { name: "Analysis brief" })).toBeVisible();
   expect(screen.getByText("The full Decision was regenerated.")).toBeVisible();
   expect(screen.getByText("The filing requires a new Decision thesis.")).toBeVisible();
+  expect(
+    screen.getByText("This Incremental node triggered the full-research warning."),
+  ).toBeVisible();
   expect(screen.getByText("A complete refresh would resolve the scope gap.")).toBeVisible();
   expect(screen.getAllByText("Current instrument")[0]).toBeVisible();
   expect(screen.getAllByText("S&P 500")[0]).toBeVisible();
@@ -1364,6 +1367,28 @@ test("explains when an Incremental Decision is inherited unchanged", async () =>
     screen.getByText("The full Decision is inherited from the Full baseline."),
   ).toBeVisible();
   expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
+});
+
+test("shows when an earlier Incremental node keeps the Cycle Warning active", async () => {
+  const incremental = incrementalDetailWithPerformanceReason("benchmark_unavailable");
+  incremental.research_node!.cycle_warning = true;
+  vi.mocked(api.run).mockResolvedValue(incremental);
+
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText("Full research recommended")).toBeVisible();
+  expect(
+    screen.getByText(
+      "An earlier active Incremental node in this Research Cycle triggered the warning; this node did not add a new reason.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("This Incremental node triggered the full-research warning."),
+  ).not.toBeInTheDocument();
 });
 
 test.each([
