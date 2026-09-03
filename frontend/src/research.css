@@ -498,7 +498,7 @@
   overflow: hidden;
 }
 
-.incremental-decision-context {
+.incremental-outcome-summary {
   display: grid;
   gap: 12px;
   padding: 18px 24px;
@@ -506,22 +506,16 @@
   border-bottom: 1px solid var(--line-soft);
 }
 
-.advancement-status {
-  width: fit-content;
-  padding: 5px 9px;
-  color: var(--blue-dark);
-  font-size: 12px;
-  font-weight: 750;
-  background: var(--blue-soft);
-  border-radius: 999px;
+.incremental-outcome-summary p {
+  margin: 5px 0 0;
 }
 
-.incremental-decision-context .research-warning-block {
+.incremental-outcome-summary .research-warning-block {
   margin: 0;
 }
 
 .incremental-performance-section {
-  border-top: 1px solid var(--line-soft);
+  background: #fbfcff;
 }
 
 .performance-card-grid {
@@ -559,6 +553,11 @@
 
 .performance-card > small {
   color: var(--muted);
+}
+
+.performance-adjustment-basis {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .reported-difference {
@@ -1608,7 +1607,7 @@ details[open] > summary .details-chevron {
     padding: 22px 20px;
   }
 
-  .incremental-decision-context,
+  .incremental-outcome-summary,
   .reassessment-groups {
     padding-inline: 16px;
   }

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { researchConfidenceLabel } from "../i18n";
 import {
   api,
   type AnalysisRequest,
@@ -541,7 +542,7 @@ export default function NewRun() {
                         {baseline.analysis_date} · {baseline.rating ?? t("notRecorded")}
                         {baseline.confidence == null
                           ? ""
-                          : ` · ${Math.round(baseline.confidence * 100)}%`}
+                          : ` · ${researchConfidenceLabel(t, baseline.confidence)}`}
                       </option>
                     ))}
                   </select>
@@ -811,7 +812,7 @@ function BaselinePreview({
         <span>
           {baseline.confidence == null
             ? t("notRecorded")
-            : t("confidencePercent", { value: Math.round(baseline.confidence * 100) })}
+            : researchConfidenceLabel(t, baseline.confidence)}
         </span>
       </div>
       {baseline.thesis && <p>{baseline.thesis}</p>}

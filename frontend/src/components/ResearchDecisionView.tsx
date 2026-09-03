@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { researchConfidenceLabel } from "../i18n";
 
 import type {
   DecisionNumericAuditAppendix,
@@ -83,9 +84,7 @@ export function ResearchDecisionContent({
         <div className="decision-rating-v2">
           <span>{t("researchRating")}</span>
           <strong>{decision.rating}</strong>
-          <small>
-            {t("confidence")} {Math.round(decision.confidence * 100)}%
-          </small>
+          <small>{researchConfidenceLabel(t, decision.confidence)}</small>
         </div>
         <div className="decision-summary">
           <span className="research-opinion-notice">

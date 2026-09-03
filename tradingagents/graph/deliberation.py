@@ -58,6 +58,7 @@ from tradingagents.application.contracts import (
     RebuttalReview,
     ReportLanguage,
     ResearchCase,
+    ResearchConfidenceLevel,
     ResearchDecision,
     ResearchRating,
     ResearchScenario,
@@ -235,7 +236,7 @@ class ResearchDecisionCoreDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     rating: ResearchRating
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
@@ -1510,7 +1511,7 @@ def invoke_research_decision(
 
     core_example = ResearchDecisionCoreEnvelope(
         rating=ResearchRating.HOLD,
-        confidence=0.5,
+        confidence=ResearchConfidenceLevel.MEDIUM,
         executive_summary=example_text["executive_summary"],
         thesis=example_text["requirement_thesis"],
         evidence_refs=(first_ref,),
@@ -1586,6 +1587,12 @@ def invoke_research_decision(
             invoke_config={"metadata": {"research_node": core_node}},
             repair_instructions=(
                 "Keep valid research content. Use only allowed evidence refs. "
+                "Classify final Decision confidence as low, medium, or high: low "
+                "means the core judgment remains tentative because of material "
+                "evidence gaps, conflicts, or unresolved assumptions; medium means "
+                "the direction is supported with material uncertainty; high means "
+                "reliable evidence strongly supports the core judgment with no "
+                "unresolved material conflict. This is not a probability. "
                 "Do not include valuation ranges, market-reference levels, "
                 "or optional numeric components in this core object. Register every "
                 "decision-critical derived exact number in "
@@ -1612,8 +1619,10 @@ def invoke_research_decision(
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
             ),
         ).invoke(
-            prompt + "\n\nSerialize only the strict qualitative decision core. Numeric "
-            "valuation, scenario ranges, market reference levels, and canonical "
+            prompt + "\n\nSerialize only the strict qualitative decision core. "
+            "Classify confidence as the rubric-based low, medium, or high research "
+            "support level, never as a number or probability. Numeric valuation, "
+            "scenario ranges, market reference levels, and canonical "
             "calculations are handled by a separate audit step. Preserve the brief's "
             "decision-critical calculation checklist as soft "
             "numeric_requirement_candidates. These annotations do not replace "

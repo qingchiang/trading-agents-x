@@ -30,7 +30,7 @@ beforeEach(async () => {
         instrument_name: "Toyota Motor Corporation",
         instrument_local_name: "トヨタ自動車",
         research_rating: "Hold",
-        research_confidence: 0.78,
+        research_confidence: "medium",
         research_kind: "incremental",
         trashed_at: null,
         status: "succeeded",
@@ -79,7 +79,7 @@ test("shows local identity and final rating with a run-management entry point", 
   expect(screen.getByText("トヨタ自動車")).toBeVisible();
   expect(screen.getByText("7203.T")).toBeVisible();
   expect(screen.getByText("Hold")).toHaveClass("research-rating-badge");
-  expect(screen.getByText("78% confidence")).toBeVisible();
+  expect(screen.getByText("Medium confidence")).toBeVisible();
   expect(screen.getByText("Incremental research")).toHaveClass(
     "research-kind-badge",
   );

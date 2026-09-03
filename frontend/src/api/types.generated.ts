@@ -243,7 +243,7 @@ export interface components {
     };
     FullBaselineCandidate: {
       analysis_date: string;
-      confidence?: number | null;
+      confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       cycle_warning?: boolean;
       id: string;
       instrument_local_name?: string | null;
@@ -285,6 +285,7 @@ export interface components {
       decision: components["schemas"]["ResearchDecision"];
       run_id: string;
     };
+    IncrementalDecisionOutcome: "unchanged" | "updated";
     IncrementalRunContext: {
       analysis_brief?: components["schemas"]["IncrementalAnalysisBrief"] | null;
       full_baseline: components["schemas"]["IncrementalBaselineContext"];
@@ -429,7 +430,7 @@ export interface components {
     };
     PrimaryCycleCandidate: {
       analysis_date: string;
-      confidence?: number | null;
+      confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       id: string;
       is_primary?: boolean;
       rating?: components["schemas"]["ResearchRating"] | null;
@@ -521,6 +522,7 @@ export interface components {
       markdown: string;
       role: "bull" | "bear";
     };
+    ResearchConfidenceLevel: "low" | "medium" | "high";
     ResearchCycleView: {
       baseline: components["schemas"]["ResearchNodeView"];
       cycle_warning?: boolean;
@@ -532,7 +534,7 @@ export interface components {
     ResearchDecision: {
       calculation_records?: components["schemas"]["CalculationRecord"][];
       catalysts?: string[];
-      confidence: number;
+      confidence: components["schemas"]["ResearchConfidenceLevel"];
       evidence_refs?: string[];
       executive_summary: string;
       invalidation_conditions: string[];
@@ -567,6 +569,8 @@ export interface components {
       collection_summary?: components["schemas"]["CollectionSummary"] | null;
       cycle_id: string;
       decision: Record<string, unknown>;
+      decision_outcome?: components["schemas"]["IncrementalDecisionOutcome"] | null;
+      decision_outcome_reason?: string | null;
       full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       information_advancement?: components["schemas"]["InformationAdvancement"] | null;
       lifecycle_state: components["schemas"]["ResearchNodeLifecycleState"];
@@ -597,6 +601,8 @@ export interface components {
       cycle_id: string;
       cycle_warning?: boolean;
       decision?: components["schemas"]["ResearchDecision"] | null;
+      decision_outcome?: components["schemas"]["IncrementalDecisionOutcome"] | null;
+      decision_outcome_reason?: string | null;
       full_baseline_run_id?: string | null;
       full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       id: string;
@@ -659,7 +665,7 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       latest_analysis_date: string;
-      primary_confidence?: number | null;
+      primary_confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       primary_cycle_id?: string | null;
       primary_rating?: components["schemas"]["ResearchRating"] | null;
       timeline_warning?: boolean;
@@ -806,7 +812,7 @@ export interface components {
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
-      research_confidence?: number | null;
+      research_confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       research_kind?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
       research_schema_version?: string | null;

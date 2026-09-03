@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import sqlite3
 import zipfile
+from datetime import UTC, datetime
 from importlib import resources
 
 import pytest
@@ -29,6 +31,16 @@ from tradingagents.persistence import (
     IncompatibleDatabaseError,
     upgrade_database,
 )
+
+
+def _canonical_content_hash(payload: dict[str, object]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _alembic_config(app_settings) -> Config:
@@ -69,7 +81,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0009_cycle_aware_trash"
+    assert revision == "0010_decision_confidence_levels"
     assert {
         "id",
         "run_id",
@@ -123,6 +135,108 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "numeric_audit_json" in decision_columns
     node_columns = {column["name"] for column in inspector.get_columns("research_nodes")}
     assert "incremental_products_json" in node_columns
+
+
+@pytest.mark.parametrize(
+    ("numeric_confidence", "expected_level"),
+    ((0.49, "low"), (0.50, "medium"), (0.79, "medium"), (0.80, "high")),
+)
+def test_decision_confidence_migration_updates_all_canonical_copies(
+    app_settings,
+    numeric_confidence: float,
+    expected_level: str,
+) -> None:
+    upgrade_database(app_settings, "0009_cycle_aware_trash")
+    repository = RunRepository(app_settings)
+    run, _ = repository.create_run(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"),
+        {},
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 24, 23, 59, tzinfo=UTC),
+        method_snapshot={"research_schema_version": "1"},
+        research_kind="full",
+    )
+    repository.engine.dispose()
+    decision_json = research_decision().model_dump(mode="json")
+    decision_json["confidence"] = numeric_confidence
+    legacy_artifact_hash = _canonical_content_hash(decision_json)
+    with sqlite3.connect(app_settings.database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO decisions (
+                run_id, ticker, market, asset_type, analysis_date, rating,
+                confidence, decision_json, numeric_audit_json, created_at
+            ) VALUES (?, 'NVDA', 'United States', 'stock', '2026-07-24',
+                      'Hold', ?, ?, NULL, '2026-07-24 01:00:00')
+            """,
+            (run.id, numeric_confidence, json.dumps(decision_json)),
+        )
+        connection.execute(
+            """
+            INSERT INTO research_nodes (
+                run_id, research_kind, full_baseline_run_id, created_at,
+                incremental_products_json
+            ) VALUES (?, 'full', NULL, '2026-07-24 01:00:00', NULL)
+            """,
+            (run.id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO run_artifacts (
+                id, run_id, attempt, stage, role, round, schema_version,
+                prompt_version, generation_method, content_type, content_json,
+                content_hash, created_at
+            ) VALUES ('artifact-decision', ?, 1, 'decision', 'committee', 0,
+                      '1', 'fixture', 'structured', 'research_decision', ?,
+                      ?, '2026-07-24 01:00:00')
+            """,
+            (run.id, json.dumps(decision_json), legacy_artifact_hash),
+        )
+
+    upgrade_database(app_settings)
+
+    with sqlite3.connect(app_settings.database_path) as connection:
+        confidence, migrated_json = connection.execute(
+            "SELECT confidence, decision_json FROM decisions WHERE run_id = ?",
+            (run.id,),
+        ).fetchone()
+        artifact_json, artifact_hash = connection.execute(
+            "SELECT content_json, content_hash FROM run_artifacts "
+            "WHERE id = 'artifact-decision'"
+        ).fetchone()
+        schema_version, method_snapshot = connection.execute(
+            "SELECT research_schema_version, method_snapshot_json FROM runs WHERE id = ?",
+            (run.id,),
+        ).fetchone()
+
+    assert confidence == expected_level
+    assert json.loads(migrated_json)["confidence"] == expected_level
+    migrated_artifact = json.loads(artifact_json)
+    assert migrated_artifact["confidence"] == expected_level
+    assert artifact_hash == _canonical_content_hash(migrated_artifact)
+    assert artifact_hash != legacy_artifact_hash
+    assert schema_version == "2"
+    assert json.loads(method_snapshot)["research_schema_version"] == "1"
+
+    config = _alembic_config(app_settings)
+    command.downgrade(config, "0009_cycle_aware_trash")
+    expected_score = {"low": 0.25, "medium": 0.65, "high": 0.90}[expected_level]
+    with sqlite3.connect(app_settings.database_path) as connection:
+        downgraded_confidence, downgraded_json = connection.execute(
+            "SELECT confidence, decision_json FROM decisions WHERE run_id = ?",
+            (run.id,),
+        ).fetchone()
+        downgraded_artifact_json, downgraded_artifact_hash = connection.execute(
+            "SELECT content_json, content_hash FROM run_artifacts "
+            "WHERE id = 'artifact-decision'"
+        ).fetchone()
+
+    assert downgraded_confidence == pytest.approx(expected_score)
+    assert json.loads(downgraded_json)["confidence"] == pytest.approx(expected_score)
+    downgraded_artifact = json.loads(downgraded_artifact_json)
+    assert downgraded_artifact["confidence"] == pytest.approx(expected_score)
+    assert downgraded_artifact_hash == _canonical_content_hash(downgraded_artifact)
+    assert downgraded_artifact_hash != artifact_hash
 
 
 def test_cycle_trash_migration_converges_pre_ticket_12_state(app_settings) -> None:
@@ -464,6 +578,7 @@ def test_artifact_observation_migration_preserves_existing_rows(app_settings) ->
         engine.dispose()
 
     command.upgrade(config, "0003_artifact_generation_observations")
+    command.upgrade(config, "head")
     repository = RunRepository(app_settings)
     try:
         restored = repository.list_artifacts(run.id)

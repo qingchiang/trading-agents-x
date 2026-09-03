@@ -2,6 +2,15 @@ import i18n from "i18next";
 import type { TFunction } from "i18next";
 import { initReactI18next } from "react-i18next";
 
+export type ResearchConfidenceLevel = "low" | "medium" | "high";
+
+export function researchConfidenceLabel(
+  t: TFunction,
+  value: ResearchConfidenceLevel,
+): string {
+  return t(`confidenceLevel_${value}`);
+}
+
 export function localizePerformanceReason(
   t: TFunction,
   reason: string | null | undefined,
@@ -71,6 +80,10 @@ const en = {
     fullResearchNode: "Full Research Node",
     incrementalResearchNode: "Incremental Research Node",
     fullResearchRecommended: "Full research recommended",
+    fullResearchTriggeredByCurrentNode:
+      "This Incremental node triggered the full-research warning.",
+    fullResearchTriggeredByEarlierNode:
+      "An earlier active Incremental node in this Research Cycle triggered the warning; this node did not add a new reason.",
     cycleHead: "Cycle Head",
     primaryCycle: "Primary Cycle",
     primaryResearch: "Primary Research",
@@ -141,6 +154,11 @@ const en = {
     historicalBriefUnavailable: "This historical run did not record an analysis brief.",
     analysisBriefPending: "The analysis brief is still being generated.",
     analysisBriefNotProduced: "This run did not produce an analysis brief.",
+    decisionOutcome: "Decision outcome",
+    decisionOutcome_unchanged:
+      "The full Decision is inherited from the Full baseline.",
+    decisionOutcome_updated: "The full Decision was regenerated.",
+    decisionOutcomeNotRecorded: "This version did not record a Decision outcome.",
     returnToAnalysisBrief: "Return to analysis brief",
     advancementAdmissibleObservation: "New admissible observation",
     advancementCompletedMarketSession: "Newly completed market session",
@@ -190,7 +208,7 @@ const en = {
     activityStage_risk_review: "Risk review",
     activityStage_final_decision: "Final conclusion",
     activityStage_incremental_semantic: "Analysis synthesis",
-    activityStage_incremental_serialization: "Decision serialization",
+    activityStage_incremental_serialization: "Assessment and Decision serialization",
     activityStage_commit: "Commit complete",
     activityStage_workflow: "Workflow step",
     activityState_pending: "Pending",
@@ -279,6 +297,9 @@ const en = {
     exportJson: "Export JSON",
     confidence: "Confidence",
     confidencePercent: "{{value}}% confidence",
+    confidenceLevel_low: "Low confidence",
+    confidenceLevel_medium: "Medium confidence",
+    confidenceLevel_high: "High confidence",
     currentDecision: "Current decision",
     thesis: "Thesis",
     stockReturn: "Stock return",
@@ -856,6 +877,9 @@ const zhCN = {
     fullResearchNode: "完整研究节点",
     incrementalResearchNode: "增量研究节点",
     fullResearchRecommended: "建议进行完整研究",
+    fullResearchTriggeredByCurrentNode: "本增量节点触发了完整研究警告。",
+    fullResearchTriggeredByEarlierNode:
+      "该研究周期中较早的活跃增量节点触发了警告；本节点没有新增触发理由。",
     fullBaseline: "完整研究基线",
     cycleHead: "周期头节点",
     primaryCycle: "主研究周期",
@@ -927,6 +951,10 @@ const zhCN = {
     historicalBriefUnavailable: "此历史运行未记录分析简报。",
     analysisBriefPending: "分析简报仍在生成中。",
     analysisBriefNotProduced: "本次运行未生成分析简报。",
+    decisionOutcome: "Decision 结果",
+    decisionOutcome_unchanged: "完整 Decision 原样继承自完整研究基线。",
+    decisionOutcome_updated: "已重新生成完整 Decision。",
+    decisionOutcomeNotRecorded: "该版本未记录 Decision 结果。",
     returnToAnalysisBrief: "返回分析简报",
     advancementAdmissibleObservation: "新增可采纳信息",
     advancementCompletedMarketSession: "新增已完成交易日",
@@ -976,7 +1004,7 @@ const zhCN = {
     activityStage_risk_review: "风险审查",
     activityStage_final_decision: "最终结论",
     activityStage_incremental_semantic: "自然语言综合",
-    activityStage_incremental_serialization: "Decision 序列化",
+    activityStage_incremental_serialization: "评估与 Decision 序列化",
     activityStage_commit: "提交完成",
     activityStage_workflow: "工作流步骤",
     activityState_pending: "待处理",
@@ -1064,6 +1092,9 @@ const zhCN = {
     exportJson: "导出 JSON",
     confidence: "置信度",
     confidencePercent: "{{value}}% 置信度",
+    confidenceLevel_low: "低置信度",
+    confidenceLevel_medium: "中等置信度",
+    confidenceLevel_high: "高置信度",
     currentDecision: "当前结论",
     thesis: "核心论点",
     stockReturn: "股票回报",
@@ -1617,6 +1648,10 @@ const ja = {
     fullResearchNode: "フルリサーチノード",
     incrementalResearchNode: "インクリメンタル・リサーチノード",
     fullResearchRecommended: "フルリサーチを推奨",
+    fullResearchTriggeredByCurrentNode:
+      "この増分ノードがフルリサーチ警告を発生させました。",
+    fullResearchTriggeredByEarlierNode:
+      "このリサーチサイクル内の以前のアクティブな増分ノードが警告を発生させており、このノードは新しい理由を追加していません。",
     cycleHead: "サイクルヘッド",
     primaryCycle: "プライマリサイクル",
     primaryResearch: "プライマリリサーチ",
@@ -1687,6 +1722,11 @@ const ja = {
     historicalBriefUnavailable: "この過去の実行には分析ブリーフが記録されていません。",
     analysisBriefPending: "分析ブリーフを生成中です。",
     analysisBriefNotProduced: "この実行では分析ブリーフが生成されませんでした。",
+    decisionOutcome: "Decision の結果",
+    decisionOutcome_unchanged:
+      "完全な Decision はフルリサーチ基準からそのまま継承されます。",
+    decisionOutcome_updated: "完全な Decision を再生成しました。",
+    decisionOutcomeNotRecorded: "このバージョンには Decision の結果が記録されていません。",
     returnToAnalysisBrief: "分析ブリーフへ戻る",
     advancementAdmissibleObservation: "新しい採用可能な観測",
     advancementCompletedMarketSession: "新たに完了した市場セッション",
@@ -1736,7 +1776,7 @@ const ja = {
     activityStage_risk_review: "リスクレビュー",
     activityStage_final_decision: "最終結論",
     activityStage_incremental_semantic: "自然言語統合",
-    activityStage_incremental_serialization: "Decision シリアライズ",
+    activityStage_incremental_serialization: "評価と Decision のシリアライズ",
     activityStage_commit: "コミット完了",
     activityStage_workflow: "ワークフローステップ",
     activityState_pending: "保留",
@@ -1825,6 +1865,9 @@ const ja = {
     exportJson: "JSON 出力",
     confidence: "確信度",
     confidencePercent: "確信度 {{value}}%",
+    confidenceLevel_low: "確信度：低",
+    confidenceLevel_medium: "確信度：中",
+    confidenceLevel_high: "確信度：高",
     currentDecision: "現在の判断",
     thesis: "投資仮説",
     stockReturn: "株価リターン",

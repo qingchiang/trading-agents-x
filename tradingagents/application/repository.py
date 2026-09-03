@@ -41,6 +41,7 @@ from .contracts import (
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchCase,
+    ResearchConfidenceLevel,
     ResearchCycleView,
     ResearchDecision,
     ResearchNodeComparison,
@@ -1901,7 +1902,7 @@ class RunRepository:
                     asset_type=request.asset_type,
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
-                    confidence=result.decision.confidence,
+                    confidence=result.decision.confidence.value,
                     decision_json=result.decision.model_dump(mode="json"),
                     numeric_audit_json=(
                         result.numeric_audit.model_dump(mode="json")
@@ -1969,6 +1970,8 @@ class RunRepository:
                 raise ValueError("Incremental commit requires an Incremental Run")
             if result.decision is None:
                 raise ValueError("Incremental Node requires a complete Research Decision")
+            if products.decision_outcome is None:
+                raise ValueError("New Incremental Nodes must record a Decision outcome")
             if session.get(RunEvidenceRecord, run_id) is not None:
                 raise EvidenceConflictError("Incremental evidence was already sealed")
             digest = evidence.digest
@@ -2053,7 +2056,7 @@ class RunRepository:
                     asset_type=request.asset_type,
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
-                    confidence=result.decision.confidence,
+                    confidence=result.decision.confidence.value,
                     decision_json=result.decision.model_dump(mode="json"),
                     numeric_audit_json=None,
                     created_at=now,
@@ -2287,6 +2290,8 @@ class RunRepository:
                 information_advancement=products.information_advancement if products else None,
                 performance=products.performance if products else None,
                 reassessment=products.reassessment if products else None,
+                decision_outcome=products.decision_outcome if products else None,
+                decision_outcome_reason=(products.decision_outcome_reason if products else None),
                 decision=decisions_by_id.get(run.id),
                 full_research_required_reasons=(
                     products.full_research_required_reasons if products else ()
@@ -2461,6 +2466,10 @@ class RunRepository:
                     research_availability=products.research_availability if products else None,
                     information_advancement=products.information_advancement if products else None,
                     reassessment=products.reassessment if products else None,
+                    decision_outcome=products.decision_outcome if products else None,
+                    decision_outcome_reason=(
+                        products.decision_outcome_reason if products else None
+                    ),
                     decision=decision,
                     performance=products.performance if products else None,
                     full_research_required_reasons=(
@@ -2592,6 +2601,8 @@ class RunRepository:
             information_advancement=products.information_advancement if products else None,
             performance=products.performance if products else None,
             reassessment=products.reassessment if products else None,
+            decision_outcome=products.decision_outcome if products else None,
+            decision_outcome_reason=(products.decision_outcome_reason if products else None),
             decision=(
                 ResearchDecision.model_validate(decision_record.decision_json)
                 if decision_record
@@ -3199,7 +3210,7 @@ class RunRepository:
         cls,
         record: RunRecord,
         rating: str | None,
-        confidence: float | None,
+        confidence: str | None,
         is_research_node: bool,
         *,
         instrument_name: str | None = None,
@@ -3218,5 +3229,5 @@ class RunRepository:
             )
             .model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
-            research_confidence=confidence,
+            research_confidence=(ResearchConfidenceLevel(confidence) if confidence else None),
         )

@@ -46,7 +46,8 @@ describe("aggregateRunActivity", () => {
       event(1, 1, "node.output_retry", "incremental.synthesis.serialize"),
       event(2, 1, "run.failed", null),
       event(3, 2, "node.output_recovered", "incremental.synthesis.serialize"),
-      event(4, 2, "node.started", "vendor.unmapped.step"),
+      event(4, 2, "node.started", "incremental.synthesis.assessment"),
+      event(5, 2, "node.started", "vendor.unmapped.step"),
     ], "incremental");
 
     expect(attempts.map((attempt) => attempt.attempt)).toEqual([2, 1]);
@@ -55,6 +56,11 @@ describe("aggregateRunActivity", () => {
       state: "recovered",
     });
     expect(attempts[0].workUnits[1]).toMatchObject({
+      node: "incremental.synthesis.assessment",
+      stage: "incremental_serialization",
+      state: "running",
+    });
+    expect(attempts[0].workUnits[2]).toMatchObject({
       node: "vendor.unmapped.step",
       stage: "workflow",
       state: "running",

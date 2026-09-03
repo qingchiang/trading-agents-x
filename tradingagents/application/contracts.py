@@ -165,6 +165,12 @@ class ResearchRating(_StableStrEnum):
     SELL = "Sell"
 
 
+class ResearchConfidenceLevel(_StableStrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class DebateImportance(_StableStrEnum):
     CRITICAL = "critical"
     MATERIAL = "material"
@@ -1242,7 +1248,7 @@ class ResearchDecision(FrozenModel):
     """Research-only conclusion; deliberately excludes account-level advice."""
 
     rating: ResearchRating
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
@@ -1693,7 +1699,7 @@ class RunView(FrozenModel):
         return value
 
 
-CURRENT_RESEARCH_SCHEMA_VERSION = "1"
+CURRENT_RESEARCH_SCHEMA_VERSION = "2"
 
 
 class ResearchNodeView(FrozenModel):
@@ -1719,6 +1725,8 @@ class ResearchNodeView(FrozenModel):
     information_advancement: InformationAdvancement | None = None
     performance: PerformanceObservation | None = None
     reassessment: ResearchReassessment | None = None
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = None
     decision: ResearchDecision | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
     cycle_warning: bool = False
@@ -1759,7 +1767,7 @@ class PrimaryCycleCandidate(FrozenModel):
     analysis_date: date
     is_primary: bool = False
     rating: ResearchRating | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel | None = None
 
 
 class ResearchTimeline(FrozenModel):
@@ -1791,7 +1799,7 @@ class ResearchTimelineSummary(FrozenModel):
     incremental_node_count: int = Field(default=0, ge=0)
     latest_analysis_date: date
     primary_rating: ResearchRating | None = None
-    primary_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    primary_confidence: ResearchConfidenceLevel | None = None
     timeline_warning: bool = False
 
 
@@ -1804,7 +1812,7 @@ class FullBaselineCandidate(FrozenModel):
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     rating: ResearchRating | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: ResearchConfidenceLevel | None = None
     thesis: str | None = None
     cycle_warning: bool = False
 
@@ -1875,6 +1883,8 @@ class ResearchNodeComparisonSide(FrozenModel):
     research_availability: ResearchAvailability | None = None
     information_advancement: InformationAdvancement | None = None
     reassessment: ResearchReassessment | None = None
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = None
     decision: dict[str, Any]
     performance: PerformanceObservation | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
@@ -2132,6 +2142,13 @@ class ReassessmentDisposition(_StableStrEnum):
     UNRESOLVED = "unresolved"
 
 
+class IncrementalDecisionOutcome(_StableStrEnum):
+    """Whether an Incremental Node reuses or regenerates its Full Decision."""
+
+    UNCHANGED = "unchanged"
+    UPDATED = "updated"
+
+
 class ResearchReassessmentEntry(FrozenModel):
     component_id: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
     disposition: ReassessmentDisposition
@@ -2364,6 +2381,8 @@ class IncrementalAnalysisBrief(FrozenModel):
 class IncrementalSynthesis(FrozenModel):
     analysis_brief: IncrementalAnalysisBrief
     reassessment: ResearchReassessment
+    decision_outcome: IncrementalDecisionOutcome
+    decision_outcome_reason: str = Field(min_length=1)
     decision: ResearchDecision
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
@@ -2375,7 +2394,17 @@ class IncrementalNodeProducts(FrozenModel):
     information_advancement: InformationAdvancement
     performance: PerformanceObservation
     reassessment: ResearchReassessment
+    decision_outcome: IncrementalDecisionOutcome | None = None
+    decision_outcome_reason: str | None = Field(default=None, min_length=1)
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_decision_outcome_pair(self) -> IncrementalNodeProducts:
+        if (self.decision_outcome is None) != (self.decision_outcome_reason is None):
+            raise ValueError(
+                "decision outcome and reason must either both be recorded or both be absent"
+            )
+        return self
 
 
 class IncrementalBaselineContext(FrozenModel):
@@ -2407,7 +2436,7 @@ class RunAttemptView(FrozenModel):
 
 class RunSummaryView(RunView):
     research_rating: ResearchRating | None = None
-    research_confidence: float | None = Field(default=None, ge=0, le=1)
+    research_confidence: ResearchConfidenceLevel | None = None
 
 
 class RunPage(FrozenModel):

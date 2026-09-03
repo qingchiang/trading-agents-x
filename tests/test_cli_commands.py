@@ -108,7 +108,7 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
         instrument="7203.T",
         reports={},
         decision=research_decision(
-            confidence=0.7,
+            confidence="medium",
             thesis="Balanced evidence.",
         ),
     )
@@ -161,6 +161,28 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
     assert request.quick_reasoning_effort == "low"
     assert request.deep_reasoning_effort == "high"
     assert captured["on_event"] is None
+
+
+def test_run_prints_confidence_level_in_non_json_success_summary(monkeypatch) -> None:
+    class FakeApplication:
+        def run(self, request, *, on_event):
+            return AnalysisResult(
+                run_id="run-readable-summary",
+                status=RunStatus.SUCCEEDED,
+                instrument=request.ticker,
+                reports={},
+                decision=research_decision(confidence="medium"),
+            )
+
+    monkeypatch.setattr(cli, "_application", FakeApplication)
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "AAPL", "--date", "2026-07-24", "--quiet"],
+    )
+
+    assert result.exit_code == 0
+    assert "confidence medium" in result.output
 
 
 @pytest.mark.parametrize(
@@ -674,7 +696,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0009_cycle_aware_trash",
+                "0010_decision_confidence_levels",
             )
             assert (
                 upgraded.execute(

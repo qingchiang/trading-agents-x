@@ -23,17 +23,17 @@ import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import ResearchKindBadge from "../components/ResearchKindBadge";
 import { Link, usePathname } from "../router";
-import { localizePerformanceReason } from "../i18n";
+import { localizePerformanceReason, researchConfidenceLabel } from "../i18n";
 
 const CYCLE_PAGE_SIZE = 12;
 
-function Confidence({ value }: { value?: number | null }) {
+function Confidence({ value }: { value?: "low" | "medium" | "high" | null }) {
   const { t } = useTranslation();
   return (
     <span className="confidence-value">
       {value == null
         ? t("notRecorded")
-        : t("confidencePercent", { value: Math.round(value * 100) })}
+        : researchConfidenceLabel(t, value)}
     </span>
   );
 }
@@ -63,6 +63,14 @@ function IncrementalProducts({ node }: { node: ResearchNodeView }) {
   return (
     <div className="incremental-products">
       <div className="incremental-summary-strip">
+        <section>
+          <h4>{t("decisionOutcome")}</h4>
+          <p>
+            {node.decision_outcome
+              ? t(`decisionOutcome_${node.decision_outcome}`)
+              : t("decisionOutcomeNotRecorded")}
+          </p>
+        </section>
         <section>
           <h4>{t("advancementType")}</h4>
           <p>
@@ -413,7 +421,9 @@ function DecisionComparisonValue({
   }
   if (
     sectionKey === "confidence" &&
-    typeof comparisonValue.value === "number"
+    (comparisonValue.value === "low" ||
+      comparisonValue.value === "medium" ||
+      comparisonValue.value === "high")
   ) {
     return <Confidence value={comparisonValue.value} />;
   }
@@ -483,6 +493,15 @@ function NodeComparisonModal({
   );
   const primaryProducts = filterProductRows(
     [
+      productRow(
+        "decision-outcome",
+        t("decisionOutcome"),
+        comparison.sides,
+        (side) =>
+          side.decision_outcome
+            ? t(`decisionOutcome_${side.decision_outcome}`)
+            : t("decisionOutcomeNotRecorded"),
+      ),
       productRow(
         "performance",
         t("performance"),
@@ -1182,7 +1201,7 @@ export default function Timeline() {
         <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={lifecycleBusy} onCancel={() => { setPendingNode(null); setLifecycleMode(null); }} onConfirm={() => void applyLifecycle()}>
           <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
           {lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some((cycle) => cycle.id !== pendingNode.id) && (
-            <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={(event) => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter((cycle) => cycle.id !== pendingNode.id).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.analysis_date} · {cycle.rating ?? t("notRecorded")} · {cycle.confidence == null ? t("notRecorded") : `${Math.round(cycle.confidence * 100)}%`}</option>)}</select></label>
+            <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={(event) => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter((cycle) => cycle.id !== pendingNode.id).map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.analysis_date} · {cycle.rating ?? t("notRecorded")} · {cycle.confidence == null ? t("notRecorded") : researchConfidenceLabel(t, cycle.confidence)}</option>)}</select></label>
           )}
         </ConfirmDialog>
       )}

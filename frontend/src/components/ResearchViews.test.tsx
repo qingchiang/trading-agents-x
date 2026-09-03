@@ -195,7 +195,7 @@ test("shows raw evidence tables outside the reading report", () => {
 test("uses generic valuation units and omits unknown unit placeholders", () => {
   const decision: ResearchDecision = {
     rating: "Hold",
-    confidence: 0.6,
+    confidence: "medium",
     executive_summary: "Balanced evidence.",
     thesis: "Valuation depends on execution.",
     evidence_refs: [evidenceRef],
@@ -385,7 +385,7 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
       round: 0,
       content: {
         rating: "Hold",
-        confidence: 0.6,
+        confidence: "medium",
         executive_summary: "Evidence remains balanced.",
         thesis: "Demand durability determines the outcome.",
         evidence_refs: [evidenceRef],

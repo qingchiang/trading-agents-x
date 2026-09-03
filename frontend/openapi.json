@@ -1758,15 +1758,12 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
+                "$ref": "#/components/schemas/ResearchConfidenceLevel"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Confidence"
+            ]
           },
           "cycle_warning": {
             "default": false,
@@ -2031,6 +2028,15 @@
         ],
         "title": "IncrementalBaselineContext",
         "type": "object"
+      },
+      "IncrementalDecisionOutcome": {
+        "description": "Whether an Incremental Node reuses or regenerates its Full Decision.",
+        "enum": [
+          "unchanged",
+          "updated"
+        ],
+        "title": "IncrementalDecisionOutcome",
+        "type": "string"
       },
       "IncrementalRunContext": {
         "additionalProperties": false,
@@ -3036,15 +3042,12 @@
           "confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
+                "$ref": "#/components/schemas/ResearchConfidenceLevel"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Confidence"
+            ]
           },
           "id": {
             "title": "Id",
@@ -3642,6 +3645,15 @@
         "title": "ResearchCase",
         "type": "object"
       },
+      "ResearchConfidenceLevel": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "ResearchConfidenceLevel",
+        "type": "string"
+      },
       "ResearchCycleView": {
         "additionalProperties": false,
         "description": "One Full-rooted Research Cycle returned as an indivisible UI unit.",
@@ -3705,10 +3717,7 @@
             "type": "array"
           },
           "confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
+            "$ref": "#/components/schemas/ResearchConfidenceLevel"
           },
           "evidence_refs": {
             "default": [],
@@ -3938,6 +3947,27 @@
             "title": "Decision",
             "type": "object"
           },
+          "decision_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalDecisionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Outcome Reason"
+          },
           "full_research_required_reasons": {
             "default": [],
             "items": {
@@ -4133,6 +4163,27 @@
                 "type": "null"
               }
             ]
+          },
+          "decision_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncrementalDecisionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Outcome Reason"
           },
           "full_baseline_run_id": {
             "anyOf": [
@@ -4567,15 +4618,12 @@
           "primary_confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
+                "$ref": "#/components/schemas/ResearchConfidenceLevel"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Primary Confidence"
+            ]
           },
           "primary_cycle_id": {
             "anyOf": [
@@ -5719,15 +5767,12 @@
           "research_confidence": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
-                "type": "number"
+                "$ref": "#/components/schemas/ResearchConfidenceLevel"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Research Confidence"
+            ]
           },
           "research_kind": {
             "anyOf": [

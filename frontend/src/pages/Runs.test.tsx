@@ -108,7 +108,7 @@ beforeEach(async () => {
 test("filters and atomically trashes eligible runs with instrument names", async () => {
   const incremental = run("run-1", "NVDA", "succeeded");
   incremental.research_kind = "incremental";
-  incremental.research_confidence = 0.82;
+  incremental.research_confidence = "high";
   vi.mocked(api.runs).mockResolvedValue(
     page([
       incremental,
@@ -125,7 +125,7 @@ test("filters and atomically trashes eligible runs with instrument names", async
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("英伟达")).toBeVisible();
   expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
-  expect(screen.getByText("82% confidence")).toBeVisible();
+  expect(screen.getByText("High confidence")).toBeVisible();
   const kindBadge = screen.getByRole("button", { name: "Incremental research" });
   expect(kindBadge).toHaveClass("research-kind-badge");
   fireEvent.click(kindBadge);

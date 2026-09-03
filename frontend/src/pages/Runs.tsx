@@ -18,6 +18,7 @@ import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import ResearchKindBadge from "../components/ResearchKindBadge";
 import StatusBadge from "../components/StatusBadge";
+import { researchConfidenceLabel } from "../i18n";
 import { Link, useLocation, useNavigate } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
 
@@ -375,7 +376,7 @@ export default function Runs() {
                         <div className="decision-cell">
                           <ResearchRatingBadge rating={run.research_rating} />
                           {run.research_confidence != null && (
-                            <small>{t("confidencePercent", { value: Math.round(run.research_confidence * 100) })}</small>
+                            <small>{researchConfidenceLabel(t, run.research_confidence)}</small>
                           )}
                         </div>
                       </td>

@@ -1070,7 +1070,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
         narrative=narrative,
     )
     base_decision = research_decision(
-        confidence=0.6,
+        confidence="medium",
         thesis="FINAL THESIS",
         risks=("Demand weakens.",),
         invalidation_conditions=("A new filing changes the evidence.",),

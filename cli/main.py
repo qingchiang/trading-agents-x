@@ -181,7 +181,7 @@ def run_command(
     if result.decision:
         console.print(
             f"Rating: [bold]{result.decision.rating.value}[/bold] · "
-            f"confidence {result.decision.confidence:.0%}"
+            f"confidence {result.decision.confidence.value}"
         )
 
 

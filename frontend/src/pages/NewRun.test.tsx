@@ -108,7 +108,7 @@ function baseline(id: string, cycleWarning = false): FullBaselineCandidate {
     analysis_date: "2026-07-20",
     is_primary: true,
     rating: "Overweight",
-    confidence: 0.82,
+    confidence: "high",
     instrument_name: "NVIDIA Corporation",
     instrument_local_name: "英伟达",
     thesis: "Durable demand supports the current view.",
@@ -199,7 +199,7 @@ test("recommends Incremental research and selects the primary baseline", async (
   await waitFor(() => expect(incremental).toBeChecked());
   expect(
     screen.getByRole("option", {
-      name: /Primary Cycle · 2026-07-20 · Overweight · 82%/,
+      name: /Primary Cycle · 2026-07-20 · Overweight · High confidence/,
     }),
   ).toBeInTheDocument();
   expect(
@@ -493,7 +493,7 @@ test("locks the update intent to Incremental fields and keeps the root Full base
   expect(screen.getByText("Update scope")).toBeVisible();
   expect(
     await screen.findByRole("option", {
-      name: /Primary Cycle · 2026-07-20 · Overweight · 82%/,
+      name: /Primary Cycle · 2026-07-20 · Overweight · High confidence/,
     }),
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Full Baseline")).toBeDisabled();
