@@ -1,6 +1,7 @@
 """Application-layer contracts and services for TradingAgentsX."""
 
 from .contracts import (
+    AnalysisCutoffContext,
     AnalysisRequest,
     AnalysisResult,
     AnalystClaimType,
@@ -71,6 +72,7 @@ from .contracts import (
 )
 from .errors import (
     EligibilityUnavailableError,
+    FutureAnalysisCutoffError,
     InstrumentEligibilityError,
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
@@ -78,6 +80,7 @@ from .errors import (
 from .settings import AppSettings, RunSettings
 
 __all__ = [
+    "AnalysisCutoffContext",
     "AnalysisRequest",
     "AnalysisResult",
     "AnalystClaimType",
@@ -143,6 +146,7 @@ __all__ = [
     "TableDataType",
     "ValuationAssessment",
     "EligibilityUnavailableError",
+    "FutureAnalysisCutoffError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
     "UnsupportedInstrumentError",

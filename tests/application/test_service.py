@@ -33,6 +33,7 @@ from tradingagents.application.database import (
     RunRecord,
 )
 from tradingagents.application.errors import (
+    FutureAnalysisCutoffError,
     IncrementalRequestConflictError,
     InvalidIncrementalBaselineError,
     UnsupportedInstrumentError,
@@ -518,9 +519,129 @@ def test_current_market_day_freezes_current_instant_and_future_rejects_without_r
     run = service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=now.date()))
     assert run.information_cutoff_at == now.astimezone(UTC)
 
-    with pytest.raises(ValueError, match="future analysis cutoff"):
+    with pytest.raises(FutureAnalysisCutoffError):
         service.enqueue(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 25)))
     assert repository.list_runs().total == 1
+
+
+@pytest.mark.parametrize(
+    ("ticker", "instrument", "timezone_name", "market_date", "valid_until"),
+    [
+        (
+            "NVDA",
+            "NVDA",
+            "America/New_York",
+            date(2026, 9, 1),
+            datetime(2026, 9, 2, 4, tzinfo=UTC),
+        ),
+        (
+            "7203.t",
+            "7203.T",
+            "Asia/Tokyo",
+            date(2026, 9, 2),
+            datetime(2026, 9, 2, 15, tzinfo=UTC),
+        ),
+        (
+            "600519",
+            "600519.SS",
+            "Asia/Shanghai",
+            date(2026, 9, 1),
+            datetime(2026, 9, 1, 16, tzinfo=UTC),
+        ),
+    ],
+)
+def test_analysis_cutoff_context_uses_the_listed_instrument_market_date(
+    app_settings,
+    repository,
+    ticker,
+    instrument,
+    timezone_name,
+    market_date,
+    valid_until,
+) -> None:
+    observed_at = datetime(2026, 9, 1, 15, 30, tzinfo=UTC)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: observed_at,
+    )
+
+    context = service.analysis_cutoff_context(ticker)
+
+    assert context.instrument == instrument
+    assert context.market_timezone == timezone_name
+    assert context.market_date == market_date
+    assert context.max_analysis_date == market_date
+    assert context.observed_at == observed_at
+    assert context.valid_until == valid_until
+
+
+def test_future_analysis_cutoff_reports_the_current_instrument_market_context(
+    app_settings,
+    repository,
+) -> None:
+    observed_at = datetime(2026, 9, 1, 15, 30, tzinfo=UTC)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: observed_at,
+    )
+
+    with pytest.raises(FutureAnalysisCutoffError) as raised:
+        service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 9, 2)))
+
+    assert raised.value.instrument == "NVDA"
+    assert raised.value.requested_analysis_date == date(2026, 9, 2)
+    assert raised.value.context.market_timezone == "America/New_York"
+    assert raised.value.context.market_date == date(2026, 9, 1)
+    assert repository.list_runs().total == 0
+
+
+@pytest.mark.parametrize(
+    ("observed_at", "market_date", "valid_until"),
+    [
+        (
+            datetime(2026, 7, 1, 3, 59, tzinfo=UTC),
+            date(2026, 6, 30),
+            datetime(2026, 7, 1, 4, tzinfo=UTC),
+        ),
+        (
+            datetime(2026, 7, 1, 4, tzinfo=UTC),
+            date(2026, 7, 1),
+            datetime(2026, 7, 2, 4, tzinfo=UTC),
+        ),
+        (
+            datetime(2026, 1, 1, 4, 59, tzinfo=UTC),
+            date(2025, 12, 31),
+            datetime(2026, 1, 1, 5, tzinfo=UTC),
+        ),
+        (
+            datetime(2026, 1, 1, 5, tzinfo=UTC),
+            date(2026, 1, 1),
+            datetime(2026, 1, 2, 5, tzinfo=UTC),
+        ),
+    ],
+)
+def test_analysis_cutoff_context_tracks_new_york_midnight_across_dst(
+    app_settings,
+    repository,
+    observed_at,
+    market_date,
+    valid_until,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+        now=lambda: observed_at.astimezone(ZoneInfo("Asia/Tokyo")),
+    )
+
+    context = service.analysis_cutoff_context("NVDA")
+
+    assert context.market_date == market_date
+    assert context.valid_until == valid_until
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,98 @@
 {
   "components": {
     "schemas": {
+      "AnalysisCutoffContext": {
+        "additionalProperties": false,
+        "description": "Server-observed market-local date boundary for a Listed Instrument.",
+        "properties": {
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "market_date": {
+            "format": "date",
+            "title": "Market Date",
+            "type": "string"
+          },
+          "market_timezone": {
+            "title": "Market Timezone",
+            "type": "string"
+          },
+          "max_analysis_date": {
+            "format": "date",
+            "title": "Max Analysis Date",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "valid_until": {
+            "format": "date-time",
+            "title": "Valid Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument",
+          "market_timezone",
+          "market_date",
+          "max_analysis_date",
+          "observed_at",
+          "valid_until"
+        ],
+        "title": "AnalysisCutoffContext",
+        "type": "object"
+      },
+      "AnalysisCutoffError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/AnalysisCutoffErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AnalysisCutoffError",
+        "type": "object"
+      },
+      "AnalysisCutoffErrorCode": {
+        "enum": [
+          "future_analysis_cutoff"
+        ],
+        "title": "AnalysisCutoffErrorCode",
+        "type": "string"
+      },
+      "AnalysisCutoffErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/AnalysisCutoffContext"
+          },
+          "error": {
+            "$ref": "#/components/schemas/AnalysisCutoffError"
+          },
+          "requested_analysis_date": {
+            "format": "date",
+            "title": "Requested Analysis Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "requested_analysis_date",
+          "context"
+        ],
+        "title": "AnalysisCutoffErrorResponse",
+        "type": "object"
+      },
       "AnalysisRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6474,6 +6566,47 @@
         "summary": "Recent Instruments"
       }
     },
+    "/api/v1/instruments/{instrument}/analysis-cutoff-context": {
+      "get": {
+        "operationId": "analysis_cutoff_context_api_v1_instruments__instrument__analysis_cutoff_context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instrument",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Instrument",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisCutoffContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analysis Cutoff Context"
+      }
+    },
     "/api/v1/providers/{provider}/models": {
       "get": {
         "operationId": "provider_models_api_v1_providers__provider__models_get",
@@ -6683,6 +6816,24 @@
             "content": {
               "application/json": {
                 "examples": {
+                  "future_analysis_cutoff": {
+                    "summary": "Analysis cutoff is after the market date",
+                    "value": {
+                      "context": {
+                        "instrument": "NVDA",
+                        "market_date": "2026-09-01",
+                        "market_timezone": "America/New_York",
+                        "max_analysis_date": "2026-09-01",
+                        "observed_at": "2026-09-01T15:30:00Z",
+                        "valid_until": "2026-09-02T04:00:00Z"
+                      },
+                      "error": {
+                        "code": "future_analysis_cutoff",
+                        "message": "The requested Analysis Cutoff is after the current market date."
+                      },
+                      "requested_analysis_date": "2026-09-02"
+                    }
+                  },
                   "unsupported_instrument": {
                     "summary": "Confirmed non-equity",
                     "value": {
@@ -6714,6 +6865,9 @@
                 },
                 "schema": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AnalysisCutoffErrorResponse"
+                    },
                     {
                       "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
                     },

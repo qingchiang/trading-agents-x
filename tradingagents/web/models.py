@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
+    AnalysisCutoffContext,
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
@@ -61,6 +62,21 @@ class RequestValidationDetail(ApiModel):
 class RequestValidationErrorResponse(ApiModel):
     error: RequestValidationError
     details: list[RequestValidationDetail]
+
+
+class AnalysisCutoffErrorCode(StrEnum):
+    FUTURE_ANALYSIS_CUTOFF = "future_analysis_cutoff"
+
+
+class AnalysisCutoffError(ApiModel):
+    code: AnalysisCutoffErrorCode
+    message: str
+
+
+class AnalysisCutoffErrorResponse(ApiModel):
+    error: AnalysisCutoffError
+    requested_analysis_date: date
+    context: AnalysisCutoffContext
 
 
 class LoginRequest(ApiModel):

@@ -8,7 +8,7 @@ import math
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,11 @@ from tradingagents.dataflows.interface import (
     resolve_instrument_eligibility,
     validate_market_routing,
 )
-from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.dataflows.symbol_utils import (
+    is_supported_equity_symbol,
+    market_timezone,
+    normalize_symbol,
+)
 from tradingagents.graph.deliberation import (
     ResearchDecisionCoreDraft,
     ResearchScenarioCoreDraft,
@@ -43,6 +47,7 @@ from tradingagents.version import __version__
 
 from .contracts import (
     CURRENT_RESEARCH_SCHEMA_VERSION,
+    AnalysisCutoffContext,
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
@@ -71,6 +76,7 @@ from .contracts import (
 )
 from .eligibility import validate_instrument_eligibility
 from .errors import (
+    FutureAnalysisCutoffError,
     InstrumentEligibilityUnavailableError,
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
@@ -302,6 +308,40 @@ class AnalysisService:
         self.incremental_synthesizer = incremental_synthesizer
         self.now = now
 
+    def analysis_cutoff_context(self, ticker: str) -> AnalysisCutoffContext:
+        """Return the authoritative current Analysis Cutoff boundary."""
+        observed_at = self.now()
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
+        observed_at = observed_at.astimezone(UTC)
+        try:
+            instrument = normalize_symbol(ticker)
+        except ValueError as exc:
+            raise UnsupportedInstrumentError(
+                str(ticker),
+                "unsupported product symbol",
+            ) from exc
+        if not is_supported_equity_symbol(instrument):
+            raise UnsupportedInstrumentError(
+                instrument,
+                "unsupported product symbol",
+            )
+        zone = market_timezone(instrument)
+        market_date = observed_at.astimezone(zone).date()
+        valid_until = datetime.combine(
+            market_date + timedelta(days=1),
+            time.min,
+            tzinfo=zone,
+        ).astimezone(UTC)
+        return AnalysisCutoffContext(
+            instrument=instrument,
+            market_timezone=str(zone),
+            market_date=market_date,
+            max_analysis_date=market_date,
+            observed_at=observed_at,
+            valid_until=valid_until,
+        )
+
     def compare_research_nodes(
         self,
         instrument: str,
@@ -403,15 +443,16 @@ class AnalysisService:
 
     def _information_cutoff_at(self, request: AnalysisRequest) -> datetime:
         """Freeze the one PIT boundary before the Run becomes durable."""
-        now = self.now()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
-        zone = market_timezone(request.ticker)
-        market_now = now.astimezone(zone)
-        if request.analysis_date > market_now.date():
-            raise ValueError("future analysis cutoff is not allowed")
-        if request.analysis_date == market_now.date():
-            return now.astimezone(UTC)
+        context = self.analysis_cutoff_context(request.ticker)
+        if request.analysis_date > context.max_analysis_date:
+            raise FutureAnalysisCutoffError(
+                request.ticker,
+                request.analysis_date,
+                context,
+            )
+        if request.analysis_date == context.market_date:
+            return context.observed_at
+        zone = market_timezone(context.instrument)
         return datetime.combine(
             request.analysis_date,
             time.max,

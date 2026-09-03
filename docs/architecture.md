@@ -655,6 +655,13 @@ The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
 
+The Web client obtains the current market-local boundary from the server's
+instrument Analysis Cutoff context. That context is a deterministic calendar
+lookup, not an instrument-eligibility decision: strict vendor-backed equity
+admission still occurs when the Run is created. Run creation re-evaluates the
+same boundary and returns a typed validation error when a requested Analysis
+Cutoff is in the instrument market's future.
+
 Sources truncate strict PIT observations to the cutoff. A disclosure/update
 source uses the conservative visibility boundary. Retrieval-time snapshots may
 be admitted only as explicitly non-PIT Near-live Advisory Evidence when the
