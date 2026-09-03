@@ -423,6 +423,20 @@ test("runs, templates, trash, and restores local research", async ({
         })),
       });
     }
+    const cutoffContextMatch = path.match(
+      /^\/api\/v1\/instruments\/([^/]+)\/analysis-cutoff-context$/,
+    );
+    if (cutoffContextMatch) {
+      const instrument = decodeURIComponent(cutoffContextMatch[1]).toUpperCase();
+      return route.fulfill({ json: {
+        instrument,
+        market_timezone: instrument.endsWith(".T") ? "Asia/Tokyo" : "America/New_York",
+        market_date: "2026-07-24",
+        max_analysis_date: "2026-07-24",
+        observed_at: timestamp,
+        valid_until: "2999-01-01T00:00:00Z",
+      } });
+    }
     const timelineMatch = path.match(/^\/api\/v1\/timelines\/([^/]+)$/);
     if (timelineMatch) {
       const instrument = decodeURIComponent(timelineMatch[1]);
@@ -1355,6 +1369,13 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
       ], source: "fixture", fetched_at: timestamp, stale: false, warning: null } });
     }
     if (path === "/api/v1/instruments/recent") return route.fulfill({ json: [] });
+    if (/^\/api\/v1\/instruments\/[^/]+\/analysis-cutoff-context$/.test(path)) {
+      return route.fulfill({ json: {
+        instrument: "NVDA", market_timezone: "America/New_York",
+        market_date: "2026-07-24", max_analysis_date: "2026-07-24",
+        observed_at: timestamp, valid_until: "2999-01-01T00:00:00Z",
+      } });
+    }
     if (path === "/api/v1/timelines/NVDA/baseline-candidates") {
       return route.fulfill({ json: {
         instrument: "NVDA",

@@ -1,0 +1,1 @@
+import{j as r}from"./index-t-tM8-Rz.js";function n({rating:a}){const e=a?.toLowerCase()??"unavailable";return r.jsx("span",{className:`research-rating-badge rating-${e}`,children:a??"—"})}export{n as R};
