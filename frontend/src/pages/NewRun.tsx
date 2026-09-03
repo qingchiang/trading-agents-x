@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
 import {
@@ -22,6 +22,30 @@ import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
 const customModelValue = "__custom_model_id__";
+
+type AnalysisDateMode = "auto" | "manual";
+
+function reconcileAnalysisDate(
+  context: AnalysisCutoffContext,
+  mode: AnalysisDateMode,
+  manualDate: string,
+) {
+  if (mode === "manual" && manualDate <= context.max_analysis_date) {
+    return {
+      analysisDate: manualDate,
+      mode,
+      manualDate,
+      adjusted: false,
+    } as const;
+  }
+  return {
+    analysisDate: context.market_date,
+    mode: "auto",
+    manualDate: "",
+    adjusted: mode === "manual",
+  } as const;
+}
+
 export default function NewRun() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -82,8 +106,23 @@ export default function NewRun() {
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const researchKindSelectedByUser = useRef(false);
   const baselineSelectedByUser = useRef(false);
-  const analysisDateMode = useRef<"auto" | "manual">("auto");
+  const analysisDateMode = useRef<AnalysisDateMode>("auto");
   const manualAnalysisDate = useRef("");
+  const applyAnalysisContext = useCallback((
+    context: AnalysisCutoffContext,
+    selection?: { mode: AnalysisDateMode; manualDate: string },
+  ) => {
+    const reconciliation = reconcileAnalysisDate(
+      context,
+      selection?.mode ?? analysisDateMode.current,
+      selection?.manualDate ?? manualAnalysisDate.current,
+    );
+    setAnalysisContext(context);
+    analysisDateMode.current = reconciliation.mode;
+    manualAnalysisDate.current = reconciliation.manualDate;
+    setAnalysisDate(reconciliation.analysisDate);
+    return reconciliation;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -102,18 +141,13 @@ export default function NewRun() {
     void api.analysisCutoffContext(instrument)
       .then((context) => {
         if (!active) return;
-        setAnalysisContext(context);
-        if (analysisDateMode.current === "auto") {
-          setAnalysisDate(context.market_date);
-        } else if (manualAnalysisDate.current > context.max_analysis_date) {
-          analysisDateMode.current = "auto";
-          manualAnalysisDate.current = "";
-          setAnalysisDate(context.market_date);
+        const reconciliation = applyAnalysisContext(context);
+        if (reconciliation.adjusted) {
           setAnalysisDateNotice(t("analysisDateAdjusted", {
             date: context.market_date,
             timezone: context.market_timezone,
           }));
-        } else setAnalysisDate(manualAnalysisDate.current);
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -126,15 +160,16 @@ export default function NewRun() {
     return () => {
       active = false;
     };
-  }, [analysisContextRefresh, t, ticker]);
+  }, [analysisContextRefresh, applyAnalysisContext, t, ticker]);
 
   useEffect(() => {
     if (!analysisContext) return;
+    const observedAt = Date.parse(analysisContext.observed_at);
     const validUntil = Date.parse(analysisContext.valid_until);
-    if (!Number.isFinite(validUntil)) return;
+    if (!Number.isFinite(observedAt) || !Number.isFinite(validUntil)) return;
     const timer = window.setTimeout(
       () => setAnalysisContextRefresh((value) => value + 1),
-      Math.min(2_147_483_647, Math.max(10, validUntil - Date.now())),
+      Math.min(2_147_483_647, Math.max(10, validUntil - observedAt)),
     );
     return () => window.clearTimeout(timer);
   }, [analysisContext]);
@@ -448,17 +483,19 @@ export default function NewRun() {
       : quickModel;
     const resolvedDeepModel =
       deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
+    let latestContext: AnalysisCutoffContext;
     try {
-      const latestContext = await api.analysisCutoffContext(ticker.trim());
-      setAnalysisContext(latestContext);
-      let effectiveAnalysisDate = analysisDate;
-      if (analysisDateMode.current === "auto") {
-        effectiveAnalysisDate = latestContext.market_date;
-        setAnalysisDate(effectiveAnalysisDate);
-      } else if (analysisDate > latestContext.max_analysis_date) {
-        analysisDateMode.current = "auto";
-        manualAnalysisDate.current = "";
-        setAnalysisDate(latestContext.market_date);
+      latestContext = await api.analysisCutoffContext(ticker.trim());
+    } catch {
+      setAnalysisContext(null);
+      setAnalysisContextError(t("marketDateUnavailable"));
+      setAnalysisDate("");
+      setSubmitting(false);
+      return;
+    }
+    try {
+      const reconciliation = applyAnalysisContext(latestContext);
+      if (reconciliation.adjusted) {
         setAnalysisDateNotice(t("analysisDateAdjusted", {
           date: latestContext.market_date,
           timezone: latestContext.market_timezone,
@@ -468,7 +505,7 @@ export default function NewRun() {
       }
       const payload: RunCreateRequest = {
         ticker: latestContext.instrument,
-        analysis_date: effectiveAnalysisDate,
+        analysis_date: reconciliation.analysisDate,
         asset_type: "stock",
         profile,
         analysts: analysts as AnalysisRequest["analysts"],
@@ -499,10 +536,10 @@ export default function NewRun() {
           ? (cause as { code?: unknown }).code
           : undefined;
       if (apiCode === "future_analysis_cutoff" && cause instanceof ApiError && cause.context) {
-        analysisDateMode.current = "auto";
-        manualAnalysisDate.current = "";
-        setAnalysisContext(cause.context);
-        setAnalysisDate(cause.context.market_date);
+        applyAnalysisContext(cause.context, {
+          mode: "manual",
+          manualDate: cause.requestedAnalysisDate ?? analysisDate,
+        });
         setAnalysisDateNotice(t("futureAnalysisDate", {
           date: cause.requestedAnalysisDate ?? analysisDate,
           marketDate: cause.context.market_date,
@@ -553,6 +590,7 @@ export default function NewRun() {
                   autoComplete="on"
                   list={recentInstrumentListId}
                   spellCheck={false}
+                  disabled={submitting}
                   value={ticker}
                   onChange={(event) => {
                     setTicker(event.target.value);
@@ -574,7 +612,7 @@ export default function NewRun() {
                   required
                   type="date"
                   autoComplete="off"
-                  disabled={!analysisContext || analysisContextLoading}
+                  disabled={submitting || !analysisContext || analysisContextLoading}
                   max={analysisContext?.max_analysis_date}
                   value={analysisDate}
                   onChange={(event) => {

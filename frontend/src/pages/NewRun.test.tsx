@@ -305,6 +305,34 @@ test("refreshes the cutoff when the page becomes visible and at valid_until", as
   await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(3));
 });
 
+test("refreshes from the server validity window when the browser clock is wrong", async () => {
+  vi.setSystemTime(new Date("2027-08-29T03:00:00Z"));
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({
+    ...analysisCutoffContext,
+    observed_at: "2026-08-29T03:00:00Z",
+    valid_until: "2026-08-29T03:00:00.100Z",
+  });
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+  });
+  expect(api.analysisCutoffContext).toHaveBeenCalledTimes(1);
+  await waitFor(
+    () => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(2),
+    { timeout: 500 },
+  );
+});
+
 test("rechecks the server cutoff immediately before submitting an automatic date", async () => {
   vi.mocked(api.analysisCutoffContext)
     .mockResolvedValueOnce({
@@ -331,6 +359,58 @@ test("rechecks the server cutoff immediately before submitting an automatic date
     ticker: "NVDA",
     analysis_date: "2026-08-29",
   });
+});
+
+test("keeps submission unavailable when the submit-time cutoff refresh fails", async () => {
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce(analysisCutoffContext)
+    .mockRejectedValueOnce(new Error("offline"));
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  const date = screen.getByLabelText(/^Analysis date/);
+  const submit = screen.getByRole("button", { name: /Queue research/ });
+  await waitFor(() => expect(date).toBeEnabled());
+  fireEvent.click(submit);
+
+  expect(await screen.findByText(/market date could not be loaded/i)).toBeVisible();
+  expect(date).toBeDisabled();
+  expect(submit).toBeDisabled();
+  expect(api.createRun).not.toHaveBeenCalled();
+});
+
+test("locks the instrument cutoff while the submit-time context is pending", async () => {
+  let resolveSubmitContext!: (value: typeof analysisCutoffContext) => void;
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce(analysisCutoffContext)
+    .mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSubmitContext = resolve;
+    }));
+  vi.mocked(api.createRun).mockResolvedValue({ id: "locked-cutoff-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  const ticker = screen.getByLabelText(/^Ticker/);
+  const date = screen.getByLabelText(/^Analysis date/);
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(date).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(2));
+  expect(ticker).toBeDisabled();
+  expect(date).toBeDisabled();
+
+  await act(async () => resolveSubmitContext(analysisCutoffContext));
+  await waitFor(() => expect(api.createRun).toHaveBeenCalledTimes(1));
 });
 
 test("requires confirmation instead of submitting when a refreshed cutoff invalidates a manual date", async () => {
