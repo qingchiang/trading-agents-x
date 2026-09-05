@@ -73,15 +73,16 @@ def augment_domain(request, domain, observations):
                 }
             )
         combined_sources[source.source] = source
+    preserve_data = domain.state == "data" and all(c.evidence.available_at for c in candidates)
     return CollectionDomainResult(
         domain=domain.domain,
-        state="partial",
+        state="data" if preserve_data else "partial",
         sources=tuple(combined_sources.values()),
         temporal_bases=tuple(dict.fromkeys(bases)),
         evidence_refs=domain.evidence_refs + tuple(c.evidence.ref for c in candidates),
         observed_from=domain.observed_from,
         observed_through=domain.observed_through,
-        diagnostic=CollectionDiagnostic(code="bounded_source_observations"),
+        diagnostic=domain.diagnostic if preserve_data else CollectionDiagnostic(code="bounded_source_observations"),
     ), candidates
 
 
@@ -160,3 +161,51 @@ def append_market_context(request, domain, series, routed):
         else:
             observations.extend(captured)
     return augment_domain(request, domain, observations)
+
+
+def dedupe_news_domains(domains, candidates):
+    """Keep one source article across CN news and professional-signal domains."""
+    from .news_quality import canonical_headline
+
+    items = {c.evidence.ref: c for c in candidates}
+    seen = set()
+    output = {}
+    for domain in sorted(domains, key=lambda d: d.domain != "news"):
+        refs = []
+        for ref in domain.evidence_refs:
+            item = items[ref].evidence
+            observation = item.provenance.get("observation", {})
+            values = observation.get("values", {})
+            key = None
+            if observation.get("kind") == "news_article":
+                record = values.get("link") or values.get("url")
+                key = (observation.get("source"), record or (
+                    canonical_headline(values.get("title", "")), observation.get("effective_date")
+                ))
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            refs.append(ref)
+        updates = {"evidence_refs": tuple(dict.fromkeys(refs))}
+        if domain.evidence_refs and not refs:
+            updates.update(state="empty", temporal_bases=(), observed_from=None, observed_through=None,
+                           diagnostic=CollectionDiagnostic(code="articles_already_in_news"))
+        elif len(refs) < len(domain.evidence_refs):
+            sources = {}
+            for ref in refs:
+                for origin in items[ref].evidence.origins:
+                    previous = sources.get(origin.source)
+                    stamp = datetime.fromisoformat(origin.retrieved_at)
+                    sources[origin.source] = CollectionSourceProvenance(
+                        source=origin.source,
+                        fallback=origin.fallback or bool(previous and previous.fallback),
+                        retrieved_at=max(stamp, previous.retrieved_at) if previous else stamp,
+                    )
+            updates["sources"] = tuple(sources.values())
+            updates["temporal_bases"] = tuple(dict.fromkeys(
+                "pit" if items[ref].evidence.available_at else "near_live_advisory" for ref in refs
+            ))
+        output[domain.domain] = CollectionDomainResult.model_validate({**domain.model_dump(), **updates})
+    retained = {ref for domain in output.values() for ref in domain.evidence_refs}
+    return [output[d.domain] for d in domains], [c for ref, c in items.items() if ref in retained]

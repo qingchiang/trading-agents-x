@@ -21,7 +21,7 @@ def _article(title: str, summary: str = "", date: str = "2025-05-05") -> dict:
         "title": title,
         "summary": summary,
         "publisher": "Example",
-        "link": "https://example.test/article",
+        "link": "https://example.test/" + title.replace(" ", "-"),
         "providerPublishTime": _epoch(date),
     }
 

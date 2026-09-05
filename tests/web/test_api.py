@@ -246,6 +246,8 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: "")
     service = AnalysisService(
         web_settings,
         repository=web_repository,
@@ -408,6 +410,7 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
     synthesis_inputs = []
 
     def synthesize(input_):

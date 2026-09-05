@@ -112,6 +112,11 @@ _BASE_CONFIG = {
     "yahoo_news_candidate_limit": 200,
     "cn_news_candidate_limit": 100,
     "news_selection_version": "2-temporal",
+    "news_cache_enabled": True,
+    "news_cache_refresh_seconds": 900,
+    "news_cache_retention_days": 90,
+    "news_cache_scope_limit": 2000,
+    "news_cache_total_limit": 50000,
     "sentiment_filing_limit": 20,         # max low-frequency filing signals
     # Offset from the injected analysis date; endpoints are inclusive, so 14
     # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.

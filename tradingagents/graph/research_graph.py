@@ -659,10 +659,24 @@ class ResearchGraph:
         self._start_node(runtime, node)
         check_cancelled(runtime.context)
         deduped: dict[str, EvidenceItem] = {}
-        for analyst_items in state.get("analyst_evidence_items", {}).values():
+        article_refs: dict[tuple[str, str], str] = {}
+        analyst_items_by_role = {}
+        for role, analyst_items in sorted(state.get("analyst_evidence_items", {}).items(), key=lambda pair: pair[0] != "news"):
+            role_items = {}
             for raw in analyst_items:
                 item = EvidenceItem.model_validate(raw)
+                observation = item.provenance.get("observation", {})
+                values = observation.get("values", {})
+                record = values.get("link") or values.get("url")
+                if observation.get("kind") == "news_article" and record:
+                    key = (observation["source"], record)
+                    if key in article_refs:
+                        item = deduped[article_refs[key]]
+                    else:
+                        article_refs[key] = item.ref
                 deduped[item.ref] = item
+                role_items[item.ref] = item.model_dump(mode="json")
+            analyst_items_by_role[role] = list(role_items.values())
         bundle = EvidenceBundle(
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
@@ -681,6 +695,7 @@ class ResearchGraph:
         )
         return {
             "evidence_bundle": bundle.model_dump(mode="json"),
+            "analyst_evidence_items": analyst_items_by_role,
         }
 
     def _reports_ready(
@@ -1569,6 +1584,17 @@ def _collect_evidence(
 
     tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
     for message in tool_messages:
+        if isinstance(message.content, str) and "<!-- news-observation:" in message.content:
+            from tradingagents.dataflows.news_selection import emit_news
+            from tradingagents.dataflows.source_observations import capture_observations
+
+            with capture_observations() as news_observations:
+                emit_news(message.content, "news", "", global_news=getattr(message, "name", "") == "get_global_news")
+            for observation in news_observations:
+                item = observation.evidence(requested_date)
+                items[item.ref] = item
+            # Producer metadata owns item timing, including cached revisions.
+            continue
         artifact = getattr(message, "artifact", None)
         if is_evidence_tool_artifact(artifact):
             records = artifact_records(artifact)

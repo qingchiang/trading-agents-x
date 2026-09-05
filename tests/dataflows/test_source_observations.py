@@ -146,3 +146,64 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
     assert (
         admitted[0].provenance["observation_identity"] == full[0].provenance["observation_identity"]
     )
+
+
+def test_financial_release_keeps_older_comparative_periods_as_context():
+    from tradingagents.dataflows.financial_inputs import collect_financial_inputs
+    from tradingagents.dataflows.source_observations import publish_observation
+
+    def route(method, *_args, **_kwargs):
+        if method == "get_income_statement":
+            for period, visible, value in (("2026-06-30", "2026-08-25", 20), ("2026-03-31", "2026-04-25", 10)):
+                publish_observation("Sina", "financial_income", period,
+                                    {"Revenue": value, "period_basis": "YTD"},
+                                    effective_date=period, available_on=visible)
+        return "source response"
+
+    result = collect_financial_inputs("600309.SS", "2026-09-05", route=route, include_overview=False)
+    assert len(result["observations"]) == 1
+    observation = result["observations"][0]
+    assert observation["available_on"] == "2026-08-25"
+    assert [period["values"]["Revenue"] for period in observation["values"]["periods"]] == [20, 10]
+
+
+def test_financial_rate_limit_preserves_an_earlier_success():
+    from tradingagents.dataflows.errors import VendorRateLimitError
+    from tradingagents.dataflows.financial_inputs import collect_financial_inputs
+    from tradingagents.dataflows.source_observations import publish_observation
+
+    calls = []
+    def route(method, *_args, **_kwargs):
+        calls.append(method)
+        if method == "get_balance_sheet":
+            raise VendorRateLimitError("limited")
+        publish_observation("Yahoo", "financial_income", "GOOG:2026-06-30", {"Revenue": 42})
+        return "success"
+
+    result = collect_financial_inputs("GOOG", "2026-09-05", route=route,
+                                      include_overview=False, stop_on_rate_limit=True)
+    assert len(result["observations"]) == 1
+    assert calls == ["get_income_statement", "get_balance_sheet"]
+
+
+def test_cn_news_signal_deduplication_preserves_valid_domain_contracts():
+    from tests.dataflows.test_incremental_cn_collector import _request
+    from tradingagents.application.contracts import CollectionDiagnostic, CollectionDomainResult
+    from tradingagents.dataflows.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.dataflows.source_observations import SourceObservation
+
+    request = _request(enabled_domains=("news", "social"))
+    observed = SourceObservation("CNINFO", "news_article", "record-1",
+                                 {"title": "event", "url": "https://example.test/1"},
+                                 datetime(2026, 7, 24, tzinfo=UTC), available_on=date(2026, 7, 21))
+    domains, candidates = [], []
+    for role in ("news", "social"):
+        empty = CollectionDomainResult(domain=role, state="unavailable", diagnostic=CollectionDiagnostic(code="test"))
+        domain, values = augment_domain(request, empty, [observed])
+        domains.append(domain)
+        candidates.extend(values)
+    domains, candidates = dedupe_news_domains(domains, candidates)
+    assert len(candidates) == 1
+    assert not domains[1].evidence_refs
+    for domain in domains:
+        CollectionDomainResult.model_validate(domain.model_dump())

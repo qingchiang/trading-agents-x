@@ -134,9 +134,10 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     except (TypeError, ValueError):
         return f"No Google News found for {ticker} between {start_date} and {end_date}"
 
+    fetched = _fetch_items(query, timeout)
     candidates = [
         it
-        for it in _fetch_items(query, timeout)
+        for it in fetched
         if it["title"]
         and _in_window(it["pub_date"], start_dt, end_dt)
     ]
@@ -175,7 +176,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         for it, tier in kept
     )
     stats = (
-        f"Quality filter: candidates={len(candidates)}; relevant={len(relevant)}; "
+        f"Quality filter: upstream_returned={len(fetched)}; date_filtered={len(fetched) - len(candidates)}; candidates={len(candidates)}; relevant={len(relevant)}; "
         f"kept={len(kept)} (direct={direct_count}, candidate={candidate_count}, "
         f"context={context_count}); "
         f"dropped={dropped_count}; omitted_by_limit={omitted_count}."

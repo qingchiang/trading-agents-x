@@ -16,8 +16,9 @@ from tradingagents.provenance import (
 
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
+from ..news_cache import fetch_news_feed
 from ..news_quality import canonical_headline
-from ..news_selection import candidate_scope, merge_news_blocks
+from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .google_news import get_news as _google_news
 from .news_sources import (
@@ -60,7 +61,7 @@ def _dedupe_blocks(
 def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
     try:
         with candidate_scope():
-            return fetch(ticker, start_date, end_date)
+            return fetch_news_feed(source, ticker, start_date, end_date, lambda: fetch(ticker, start_date, end_date), budget=get_config().get("cn_news_candidate_limit", 100), config=get_config())
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
@@ -144,6 +145,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         if output.startswith("<"):
             notes.append((output, record))
         elif output.startswith("## ") and counts.kept:
+            emit_news(blocks[merged_index], source, ticker)
             bound_blocks.append(
                 attach_evidence_span(
                     attach_provenance(blocks[merged_index], record),

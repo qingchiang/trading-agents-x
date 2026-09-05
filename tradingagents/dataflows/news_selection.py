@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
 
 from .config import get_config
 from .news_quality import canonical_headline
@@ -110,9 +111,15 @@ class NewsCandidate:
     record_id: str = ""
     retrieved_at: str | None = None
     revision: bool = False
+    market_day: str | None = None
 
     @classmethod
     def from_item(cls, source: str, item: str) -> NewsCandidate:
+        metadata = re.search(r"<!-- news-observation: (.*?) -->", item)
+        if metadata:
+            fields = json.loads(metadata[1])
+            item = re.sub(r"\nObservation: retrieved[^\n]*", "", item[:metadata.start()]).rstrip()
+            return cls(content=item, **fields)
         title = item.splitlines()[0].removeprefix("### ").strip()
         title = re.sub(r"^\[(?:direct|candidate|context)\]\s*", "", title)
         title = re.sub(r"\s+\((?:source|filer|institution):.*\)\s*$", "", title)
@@ -132,7 +139,7 @@ class NewsCandidate:
 
     @property
     def day(self) -> date | None:
-        return publication_day(self.published)
+        return publication_day(self.market_day or self.published)
 
 
 @dataclass(frozen=True)
@@ -195,5 +202,59 @@ def merge_news_blocks(blocks, limit, start_date=None, end_date=None, quotas=None
         )
         counts.append(MergeCounts(returned[i], duplicates[i], len(kept), len(rows) - len(kept)))
         if kept:
-            merged.append(header + "\n\n" + "\n\n".join(row.content for row in kept))
+            merged.append(header + "\n\n" + "\n\n".join(render_candidate(row) for row in kept))
     return merged, counts
+
+
+def render_candidate(row: NewsCandidate) -> str:
+    if not row.retrieved_at:
+        return row.content
+    metadata = asdict(row)
+    metadata.pop("content")
+    timing = "; near-live revision; revision publication unknown" if row.revision else ""
+    return row.content + f"\nObservation: retrieved {row.retrieved_at}{timing}" + "\n<!-- news-observation: " + json.dumps(metadata, ensure_ascii=False) + " -->"
+
+
+def emit_news(block: str, source: str, ticker: str, *, global_news=False) -> None:
+    from .source_observations import publish_observation
+    from .symbol_utils import market_timezone
+
+    for row in split_candidates(block, source)[1]:
+        stamp = None
+        try:
+            if len(row.published) <= 10:
+                raise ValueError("date-only publication")
+            stamp = datetime.fromisoformat(row.published.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=market_timezone(ticker))
+        except (ValueError, TypeError, AttributeError):
+            pass
+        publish_observation(
+            row.source or source, "global_news_article" if global_news else "news_article",
+            row.record_id or row.link or row.title,
+            {"title": row.title, "content": row.content, "link": row.link,
+             "original_publication": row.published, "revision": row.revision},
+            effective_date=row.day,
+            available_at=None if row.revision else stamp,
+            available_on=None if row.revision or stamp else row.day,
+            retrieved_at=datetime.fromisoformat(row.retrieved_at) if row.retrieved_at else datetime.now(UTC),
+            timing=("near-live revision; revision publication unknown" if row.revision else
+                    "publication dated; bounded news selection" if row.day else
+                    "near-live undated news; publication time unknown"),
+        )
+
+
+def finalize_news(block, source, ticker, start, end, limit, *, global_news=False):
+    header, rows = split_candidates(block, source)
+    if not rows:
+        return block
+    merged, counts = merge_news_blocks([block], limit, start, end)
+    result = merged[0] if merged else header
+    count = counts[0]
+    tiers = {tier: len(re.findall(r"(?m)^### \[" + tier + r"\]", result)) for tier in ("direct", "candidate", "context")}
+    result = re.sub(r"kept=\d+ \(direct=\d+, candidate=\d+, context=\d+\)",
+                    f"kept={count.kept} (direct={tiers['direct']}, candidate={tiers['candidate']}, context={tiers['context']})", result)
+    result = re.sub(r"omitted_by_limit=\d+", f"omitted_by_limit={count.cap_omitted}", result)
+    emit_news(result, source, ticker, global_news=global_news)
+    result += f"\nSelection: duplicates={count.duplicates}; final={count.kept}; truncated={count.cap_omitted}."
+    return result

@@ -39,8 +39,9 @@ from tradingagents.provenance import (
 
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
+from ..news_cache import fetch_news_feed
 from ..news_quality import canonical_headline
-from ..news_selection import candidate_scope, merge_news_blocks
+from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .edinet_common import effective_window as _edinet_effective_window
 from .edinet_news import get_news as _edinet_news
@@ -121,6 +122,8 @@ def _safe_feed(
     end_date: str,
     *,
     stop_on_rate_limit: bool = False,
+    cache_start: str | None = None,
+    cache_end: str | None = None,
 ) -> str:
     """Run one sub-feed, degrading any failure to an availability note.
 
@@ -130,7 +133,7 @@ def _safe_feed(
     """
     try:
         with candidate_scope():
-            return fetch(ticker, start_date, end_date)
+            return fetch_news_feed(source, ticker, cache_start or start_date, cache_end or end_date, lambda: fetch(ticker, start_date, end_date), config=get_config())
     except VendorRateLimitError:
         if stop_on_rate_limit:
             raise
@@ -198,6 +201,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                 effective_start,
                 effective_end,
                 stop_on_rate_limit=True,
+                cache_start=start_date, cache_end=end_date,
             )
             for source, fetch, effective_start, effective_end, _effective, _limited in feed_requests
         ]
@@ -207,7 +211,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
             rendered = list(
                 pool.map(
-                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, pair[1][2], pair[1][3]),
+                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, pair[1][2], pair[1][3], cache_start=start_date, cache_end=end_date),
                     [(copy_context(), request) for request in feed_requests],
                 )
             )
@@ -250,6 +254,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         if block.startswith(_NOTE_PREFIX):
             notes.append((block, record))
         elif block.startswith(_DATA_PREFIX) and counts.kept:
+            emit_news(blocks[merged_index], source, ticker)
             bound_blocks.append(
                 attach_evidence_span(
                     attach_provenance(blocks[merged_index], record),

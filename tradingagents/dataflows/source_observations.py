@@ -65,7 +65,7 @@ class SourceObservation:
     @property
     def content(self) -> str:
         return f"{self.kind}: {self.key}\n" + json.dumps(
-            self.values,
+            {k: v for k, v in self.values.items() if self.kind != "macro_indicator" or k != "display"},
             ensure_ascii=False,
             sort_keys=True,
             allow_nan=False,
@@ -209,6 +209,8 @@ def publish_yahoo_statement(frame, ticker: str, kind: str, freq: str, *, source=
             continue
         values.update(
             currency=instrument_currency(ticker),
+            currency_basis="instrument market convention; statement currency unverified",
+            unit="currency units; EPS per share",
             frequency=freq,
             period_basis="provider fiscal period; not a filing timestamp",
         )

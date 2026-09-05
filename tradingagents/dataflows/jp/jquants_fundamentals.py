@@ -170,7 +170,7 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
     lines = [f"# {title} for {canonical} (J-Quants summary, latest {len(rows)} periods)"]
     for r in rows:
         parts = []
-        values = {"currency": "JPY", "period_basis": "YTD", "reporting_basis": _reporting_basis(r)}
+        values = {"currency": "JPY", "unit": "JPY; EPS/BPS in JPY per share", "period_basis": "YTD", "reporting_basis": _reporting_basis(r)}
         for label, spec in field_specs:
             value = _fmt(spec(r)) if callable(spec) else _fmt_field(r, spec)
             parts.append(f"{label}={value}")

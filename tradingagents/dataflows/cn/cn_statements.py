@@ -367,6 +367,7 @@ def _statement(
             column = _find_column(visible.columns, aliases)
             values[label] = scalar(row[column]) if column else None
         values.update(currency=scalar(row.get("Currency")),
+                      unit="source currency units",
                       period_basis="instant" if kind == "balance" else "YTD",
                       entity_type=entity_type)
         has_visibility = pd.notna(row.get("PublishDate")) or pd.notna(row.get("UpdateDate"))

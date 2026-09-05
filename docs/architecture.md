@@ -674,6 +674,26 @@ When a live-only response is cached, its producer-owned retrieval timestamp is
 cached with the payload and reused by consumers; cache hits are never restamped
 at assembly time.
 
+### Shared observations and bounded news continuity
+
+`source_observations` transports producer-owned records beside existing tool
+strings. Full fundamental prefetch and Incremental collectors consume the same
+financial summaries; professional signals and macro observations retain their
+actual dates, units and retrieval provenance. Stable semantic observation IDs
+support baseline comparison without treating a refreshed timestamp as new
+information. Financial comparison periods travel with the latest visible release
+as context. Existing Node ownership and atomic sealing remain authoritative.
+
+`news_selection` applies common candidate deduplication and temporal allocation.
+`news_cache` persists relevant candidates in a separate, bounded SQLite source
+cache under `data_cache_dir`, before final output truncation. Exact refresh reuse
+is request-triggered; source configuration, window and budget constrain reuse.
+Cached retrieval times are preserved, unknown-time revisions remain near-live,
+and cache failures degrade to ordinary collection. This cache neither stores
+research conclusions nor certifies historical completeness. See
+[Full and Incremental data inputs](data-inputs.md) for source limits, defaults,
+selection behavior and admission details.
+
 ### Vendor chains and assemblers
 
 Configuration resolution remains:
