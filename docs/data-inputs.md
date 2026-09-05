@@ -12,13 +12,16 @@ best-effort inputs for live research, not completeness certificates.
 | Fundamentals | Overview and compact quarterly income, balance, and cash-flow summaries; US/JP four periods, CN up to eight | JP/CN disclosure/update dates admit releases; older comparison periods remain context. Yahoo statements are near-live, never dated by fiscal period end as if it were publication. |
 | Sentiment | US StockTwits; JP ownership/TOB, four-week margin, short disclosures and consensus; CN margin, ownership changes, institutional research and important announcements | Actual publication dates where known; otherwise explicitly near-live. JP margin uses an inferred T+2 exchange-session visibility date. Empty feeds do not establish neutral sentiment or absence. |
 | News | Company news, global news, the existing global macro panel and applicable JP aggregate investor flows | Macro observation dates are not release timestamps. JP flows describe the whole market. |
-| Market | Configured verified OHLCV/indicator snapshot | Also computes close change, close range and maximum drawdown over actual completed interval rows from one price source and adjustment basis. Snapshot failure does not erase the underlying return series. |
+| Market | Configured verified OHLCV/indicator snapshot | Also computes close change, close range and maximum drawdown from the latest completed baseline endpoint through the cutoff, using one price source and adjustment basis. If the baseline endpoint is missing, the summary explicitly describes the observed subinterval. Snapshot failure does not erase the underlying return series. |
 
 Full fetches the four fundamental methods once on first entering the role. Its
 subsequent quarterly tool calls reuse the Run's responses. The producer-owned
 structured observations enter model inputs and sealed Evidence; public tool
-signatures stay unchanged. A source failure preserves earlier successes, and a
-bounded financial collection stops further statement requests after a rate limit.
+signatures stay unchanged. A source failure preserves earlier successes. Full
+prefetch continues its remaining financial methods after a method fails, including
+a rate limit. Incremental's bounded statement collection stops further statement
+requests after a rate limit and retains earlier successes; this does not require
+unrelated background sources to stop.
 
 Financial observations retain report periods, disclosure/update dates, units,
 currency and cumulative YTD versus instant balances. Missing mapped fields stay
@@ -29,8 +32,9 @@ stronger metadata; it must not be treated as verified issuer reporting currency.
 Indicator histories shorter than the configured indicator's minimum warm-up
 produce unavailable values rather than plausible-looking partial calculations.
 
-The macro panel retains its 60-minute `SeriesCache`. Producer retrieval time is
-stored with each refreshed series and survives cache hits. Near-live admission
+The macro panel retains `SeriesCache`: recent windows use 60-minute reuse, while
+older settled windows retain the existing 30-day reuse policy. Producer retrieval
+time is stored with each refreshed series and survives cache hits. Near-live admission
 uses the existing zero-to-five market-local-day rule, not the age of the economic
 observation. Information identity excludes retrieval time and presentation order;
 macro display-window changes alone do not advance the information frontier.
@@ -42,6 +46,14 @@ Yahoo statements use this same near-live boundary in Full prefetch and statement
 tools; older dated requests do not fetch current Yahoo statement frames. Configured
 JP/CN point-in-time statement providers retain their disclosure-date behavior.
 
+The existing rendered Full macro panel also remains available for historical
+observation-date windows. That path is distinct from the new near-live structured
+observations: an observation date does not establish when a value or its revision
+was published. Non-vintage limitations remain relevant; withholding a new
+out-of-window structured observation does not remove the legacy historical panel
+or certify it as publication-time/vintage history. This change adds no historical
+macro release reconstruction or stricter backtest gate.
+
 ## News budgets and selection
 
 The default final budgets remain 30 company articles and 10 global articles.
@@ -49,9 +61,12 @@ Yahoo's company candidate budget is 200 (configurable down to 100 or less).
 CNINFO and Eastmoney each use one page, at most 100 candidates. EDINET's 90-day
 scan, TDnet's service archive and Google's existing request boundaries remain.
 Global queries request 10 candidates each and execute at most the existing five
-queries. The candidate target and query budget are independent of the final
-output budget. Date filtering and deduplication happen before deciding whether
-the candidate target has been reached.
+queries. Per-query candidate count, maximum query count and final output count
+are separately configured. After each query, date filtering and deduplication
+determine whether the final output target has been reached; otherwise the next
+configured query runs within the query budget. Raising the output target can
+therefore require more of those queries, but does not raise the per-query request
+size or the maximum query count.
 
 After candidate filtering and cache merge, deduplication uses source record IDs,
 URLs and normalized titles. JP retains official-source priority. CN starts with
@@ -64,8 +79,10 @@ CN announcement observations duplicated between news and sentiment share one
 source article in sealed inputs, with references kept closed.
 
 Yahoo, CNINFO, Eastmoney, Google, EDINET and TDnet outputs report upstream rows,
-date and relevance losses, invalid records, duplicates and source truncation separately; assemblers report final duplicates,
-kept and truncated counts. CN source memory caches retain the original upstream
+date and relevance losses, invalid records, duplicates and source truncation
+separately; assemblers report final duplicates, kept and truncated counts.
+Source/query availability notes remain collection diagnostics, outside article
+content and revision identity. CN source memory caches retain the original upstream
 counts before applying a later request's window. Cache merge reports saved
 candidates and cache additions. These describe observed candidates, not articles
 that the upstream service omitted before responding.
@@ -89,9 +106,37 @@ time. It never reads or writes Run conclusions or the application database.
 | `global_news_candidate_limit` / `global_news_query_limit` | `10` / `5` |
 | `news_selection_version` | `2-temporal` |
 
+These are data-configuration keys in `RunSettings.data_config`, not additional
+Run request fields, Web controls or environment variables. The cache directory
+can be set with `TRADINGAGENTS_CACHE_DIR`. A custom Python entry point can lower
+the Yahoo candidate budget and disable the news cache before creating Runs:
+
+```python
+from tradingagents.application.settings import AppSettings, RunSettings
+
+settings = AppSettings.from_env()
+base = settings.default_run_settings
+run_settings = RunSettings.model_validate({
+    **dict(base),
+    "data_config": {
+        **base.data_config,
+        "yahoo_news_candidate_limit": 100,
+        "news_cache_enabled": False,
+    },
+})
+settings = settings.model_copy(update={"default_run_settings": run_settings})
+# Pass settings to TradingAgents(settings) at the application entry point.
+```
+
+The shipped CLI/Web/worker entry points use the defaults from
+`tradingagents/default_config.py`; changing deployment defaults requires the same
+configuration in each process. New Runs snapshot those settings. Do not mutate
+configuration for an already active Run.
+
 A successful exact refresh can be reused for 15 minutes. Its signature includes
 the requested window, candidate budget and relevant routing/selection settings;
-a narrow or smaller fetch cannot certify a wider request. Only currently invoked,
+a global feed also includes the output target because it affects query stopping.
+A narrow or smaller fetch cannot certify a wider request. Only currently invoked,
 configured sources can read their cache scope. Cached candidates are reselected
 for each Full or Incremental request's window and output cap.
 Company feeds use the instrument's market calendar; ticker-less global feeds use
@@ -101,10 +146,17 @@ Content revisions with recognizable source identity are separate versions. When
 a revision has no reliable public timestamp, it is a near-live observation at
 first retrieval; the old publication date is context, not proof that the new
 text existed then. Historical selection can retain the earlier stored version.
+The capacity limits count stored versions, so revisions also consume slots.
+Undated candidates can be used in the current response as near-live observations,
+but are not persisted as dated history; their refresh is not reused as a complete
+cached response that would silently drop them.
 Refresh failure may use eligible saved material while reporting the failure and
 original retrieval times. Cache read/write errors fall back to ordinary fetching.
 Writes prune expired and oldest excess material transactionally; concurrent
 writers use SQLite's local locking. Deleting the cache cannot change sealed Runs.
+Application database backups do not include this separate cache. Copying it is
+optional if previously observed source history should survive a move or restore;
+without it, new analyses accumulate source history again from subsequent requests.
 
 There is no background polling or historical backfill. The cache accumulates
 only material actually seen after activation and cannot prove complete interval

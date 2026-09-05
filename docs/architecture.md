@@ -684,13 +684,26 @@ support baseline comparison without treating a refreshed timestamp as new
 information. Financial comparison periods travel with the latest visible release
 as context. Existing Node ownership and atomic sealing remain authoritative.
 
+`incremental_inputs.collect_news_observations` shares the structured ticker-news
+collection, fallback binding and limitation retention across the three markets.
+Market adapters retain their text-only response handling. Full uses one admission
+guard for captured, prefetched and cached structured observations, applying the
+near-live boundary to original retrieval times and retaining unavailable-source
+diagnostics when values are withheld. Its pre-existing rendered macro panel still
+describes observation-date windows, including historical/non-vintage limitations;
+the new guard does not turn that panel into a publication-time archive.
+
 `news_selection` applies common candidate deduplication and temporal allocation.
 `news_cache` persists relevant candidates in a separate, bounded SQLite source
 cache under `data_cache_dir`, before final output truncation. Exact refresh reuse
 is request-triggered; source configuration, window and budget constrain reuse.
 Cached retrieval times are preserved, unknown-time revisions remain near-live,
-and cache failures degrade to ordinary collection. This cache neither stores
-research conclusions nor certifies historical completeness. See
+and cache failures degrade to ordinary collection. Source/query availability
+notes are diagnostics, not articles or content revisions. Global feeds use UTC
+dates; their refresh signature includes the output target as well as the
+per-query candidate budget, since the target controls early query stopping.
+This cache neither stores research conclusions nor certifies historical
+completeness. See
 [Full and Incremental data inputs](data-inputs.md) for source limits, defaults,
 selection behavior and admission details.
 

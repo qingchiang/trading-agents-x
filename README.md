@@ -307,10 +307,13 @@ Internally, instruments use canonical Yahoo-compatible symbols. Examples:
 | US/default | `NVDA`, `SPY` | yfinance-based default route |
 | Japan | `7203.T` | J-Quants, EDINET, TDnet, Japanese news and macro sources |
 | China A-shares | `600519.SS`, `000651.SZ` | Tencent/AkShare, CNINFO, Sina, Eastmoney and China macro sources |
+| Product boundary | US/default, Tokyo `.T`, mainland `.SS`/`.SZ` equities | positive candidate validation before routing |
 
 See [Full and Incremental data inputs](docs/data-inputs.md) for source limits,
-news cache configuration and publication-time behavior.
-| Product boundary | US/default, Tokyo `.T`, mainland `.SS`/`.SZ` equities | positive candidate validation before routing |
+news cache configuration and publication-time behavior. Enabled research roles
+share financial, professional-signal and macro inputs across Full and Incremental.
+Company/global news retain default output caps of 30/10; a bounded, request-triggered
+source cache can preserve previously seen articles without certifying coverage.
 
 Bare mainland codes and supported `.SH` aliases are normalized before routing.
 Benchmark/index codes, unsupported security families, and ambiguous symbols
