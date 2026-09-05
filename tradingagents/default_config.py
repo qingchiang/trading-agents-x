@@ -109,12 +109,22 @@ _BASE_CONFIG = {
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
     "news_article_limit": 30,             # max articles per ticker (ticker-news)
+    "yahoo_news_candidate_limit": 200,
+    "cn_news_candidate_limit": 100,
+    "news_selection_version": "2-temporal",
+    "news_cache_enabled": True,
+    "news_cache_refresh_seconds": 900,
+    "news_cache_retention_days": 90,
+    "news_cache_scope_limit": 2000,
+    "news_cache_total_limit": 50000,
     "sentiment_filing_limit": 20,         # max low-frequency filing signals
     # Offset from the injected analysis date; endpoints are inclusive, so 14
     # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.
     "ticker_news_lookback_days": 14,
     "social_lookback_days": 7,            # recent StockTwits/Reddit sentiment window
     "global_news_article_limit": 10,      # max articles for global/macro news
+    "global_news_candidate_limit": 10,
+    "global_news_query_limit": 5,
     "global_news_lookback_days": 7,       # macro news lookback window
     # Search queries used by get_global_news for macro headlines. Extend or
     # replace to broaden geographic / sector coverage.

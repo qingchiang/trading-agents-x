@@ -254,6 +254,12 @@ Web login は token を署名済み `HttpOnly`、`SameSite=Strict` cookie に交
 | China A-share | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
 | 製品境界 | 米国/default、東京 `.T`、中国本土 `.SS`/`.SZ` の株式 | ルーティング前に候補を正判定 |
 
+Full と Incremental は、有効な研究ロールに応じて財務・専門シグナル・
+マクロ入力を共有します。個別銘柄／グローバルニュースの出力上限は既定で
+30／10 件です。分析リクエストで更新する容量制限付きソースキャッシュは
+取得済みの記事を保持しますが、期間全体の網羅性を保証しません。
+取得範囲・設定方法・時点の扱いは [データ入力の説明](../data-inputs.md) を参照してください。
+
 historical analysis の cutoff は instrument market のローカル日付です。
 Evidence は requested/effective date、timezone 付き availability、実際の
 source、quality、fallback、provenance を保持し、seal 時に未来可視データを

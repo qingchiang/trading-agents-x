@@ -19,7 +19,7 @@ import re
 import tempfile
 import time
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 from .config import get_config
@@ -166,6 +166,11 @@ class SeriesCache:
     def put(self, key, value) -> None:
         self._remember(key, value)
         self._disk_put(key, value)
+
+    def put_observation(self, key, value: dict) -> None:
+        """Keep a macro producer's retrieval receipt with its series payload."""
+        value.setdefault("retrieved_at", datetime.fromtimestamp(time.time(), UTC).isoformat())
+        self.put(key, value)
 
     def clear(self) -> None:
         # In-memory only: the persisted disk layer is deliberately NOT purged here

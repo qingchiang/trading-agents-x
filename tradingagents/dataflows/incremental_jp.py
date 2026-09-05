@@ -32,8 +32,16 @@ from tradingagents.application.contracts import (
     MarketSeriesResult,
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
+from tradingagents.dataflows.incremental_inputs import (
+    append_financials,
+    append_market_context,
+    append_news_context,
+    collect_news_observations,
+    collect_professional_signals,
+)
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.jp.calendar import completed_market_date, is_tse_open
+from tradingagents.dataflows.market_signals import fetch_sentiment_signals
 from tradingagents.provenance import (
     EvidenceSpan,
     extract_evidence_spans,
@@ -82,22 +90,27 @@ def collect_japan_incremental(
     for domain in request.enabled_domains:
         if domain == "market":
             result, candidate, stock_series = _collect_market(request, routed, now)
+            result, extra = append_market_context(request, result, stock_series, routed)
             domains.append(result)
             if candidate is not None:
                 evidence.append(candidate)
                 stock_series_evidence_ref = candidate.evidence.ref
+            evidence.extend(extra)
         elif domain == "news":
             result, candidates = _collect_news(request, routed, now)
+            result, extra = append_news_context(request, result, routed)
             domains.append(result)
+            evidence.extend(extra)
             evidence.extend(candidates)
         elif domain == "fundamentals":
             result, candidates = _collect_fundamentals(request, routed, now)
+            result, extra = append_financials(request, result, routed)
+            domains.append(result)
+            evidence.extend((*candidates, *extra))
+        elif domain == "social":
+            result, candidates = collect_professional_signals(request, fetch_sentiment_signals)
             domains.append(result)
             evidence.extend(candidates)
-        elif domain == "social":
-            # The existing JP sentiment tools are analyst-only aggregates, not a
-            # configured collection route with auditable observation timestamps.
-            domains.append(_unavailable("social", "japan_social_route_unavailable"))
         else:
             raise ValueError(f"unsupported Japanese collection domain: {domain}")
 
@@ -193,15 +206,11 @@ def _collect_market(request, routed, now):
 def _collect_news(request, routed, now):
     sources = ()
     try:
-        response = routed(
-            "get_news",
-            request.instrument,
-            request.baseline_analysis_cutoff.isoformat(),
-            request.analysis_cutoff.isoformat(),
-            _provenance=True,
-            _stop_on_rate_limit=True,
-        )
+        response, structured = collect_news_observations(request, routed, now)
+        if structured is not None:
+            return structured
         sources, body = _routed_sources(response, now)
+
         if _is_failure(body):
             return _unavailable("news", "news_retrieval_failed", sources=sources), ()
         records = extract_provenance(response)

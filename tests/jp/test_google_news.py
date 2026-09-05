@@ -101,6 +101,25 @@ class GetNewsTests(unittest.TestCase):
         out = self._run(items)
         self.assertEqual(out.count("### [direct] 第一三共が投資"), 1)
 
+    def test_reports_separate_source_filter_counts(self):
+        items = [
+            _parsed("第一三共が決算を発表", d=10),
+            _parsed("第一三共が決算を発表", d=9),
+            _parsed("第一三共が研究事業へ投資", d=8),
+            _parsed("第一三共が投資を発表", "Mshale", d=7),
+            _parsed("第一三共の未来の決算", d=20),
+        ]
+        with mock.patch.object(gn, "get_config", return_value={"news_article_limit": 1}):
+            out = self._run(items)
+
+        self.assertIn("upstream_returned=5", out)
+        self.assertIn("date_filtered=1", out)
+        self.assertIn("relevance_filtered=1", out)
+        self.assertIn("duplicates=1", out)
+        self.assertIn("source_truncated=1", out)
+        self.assertIn("candidates=1", out)
+        self.assertIn("dropped=2; omitted_by_limit=1", out)
+
     def test_sorted_newest_first(self):
         items = [_parsed("第一三共の古い決算", d=6), _parsed("第一三共の新しい決算", d=10)]
         out = self._run(items)
@@ -115,6 +134,8 @@ class GetNewsTests(unittest.TestCase):
     def test_no_items_returns_no_news_line(self):
         out = self._run([])
         self.assertIn("No Google News found for 4568.T", out)
+        self.assertIn("upstream_returned=0", out)
+        self.assertIn("candidates=0", out)
 
     def test_malformed_date_returns_no_news_line(self):
         out = self._run([_parsed("記事")], start="bad", end="date")

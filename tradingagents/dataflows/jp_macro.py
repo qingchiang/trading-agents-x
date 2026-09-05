@@ -88,7 +88,7 @@ def fetch_series(
             ),
             "actual_source": "Japan Ministry of Finance",
         }
-    _series_cache.put(cache_key, data)
+    _series_cache.put_observation(cache_key, data)
     return data
 
 

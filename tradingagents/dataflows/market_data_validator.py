@@ -112,6 +112,14 @@ def render_verified_market_snapshot(
     currency = instrument_currency(symbol)
     indicator_values: dict[str, str] = {}
     for name in selected:
+        required = {
+            "close_10_ema": 10, "close_50_sma": 50, "close_200_sma": 200,
+            "rsi": 15, "boll": 20, "boll_ub": 20, "boll_lb": 20,
+            "macd": 35, "macds": 35, "macdh": 35, "atr": 15,
+        }.get(name, 1)
+        if len(stock_df) < required:
+            indicator_values[name] = f"N/A (requires {required} observations; got {len(stock_df)})"
+            continue
         try:
             stock_df[name]  # triggers stockstats calculation
             indicator_values[name] = _fmt(stock_df.iloc[-1][name])
@@ -171,6 +179,15 @@ def render_verified_market_snapshot(
         "percentage moves unless directly supported by tool output with concrete "
         "dates and prices.",
     ]
+    from .source_observations import publish_observation
+
+    publish_observation(
+        source, "verified_market_snapshot", symbol,
+        {"latest": {field: latest.get(field) for field in ("Open", "High", "Low", "Close", "Volume")},
+         "indicators": indicator_values, "currency": currency, "adjustment_basis": adjustment},
+        effective_date=latest_date, available_on=latest_date,
+        timing="market-date filtered snapshot; conservatively available at market day end",
+    )
     return attach_provenance(
         "\n".join(lines),
         ProvenanceRecord(

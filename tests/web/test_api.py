@@ -246,6 +246,8 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: "")
     service = AnalysisService(
         web_settings,
         repository=web_repository,
@@ -275,12 +277,14 @@ Date,Open,High,Low,Close,Volume
     )
     assert node["collection_summary"]["domains"][0]["sources"][0]["source"] == "jquants"
     domains = {domain["domain"]: domain for domain in node["collection_summary"]["domains"]}
+    assert domains["market"]["diagnostic"] == {"code": "market_snapshot_unavailable"}
+    assert node["performance"]["stock"]["status"] == "calculated"
     availability = {
         domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     }
     news = domains["news"]
     assert news["state"] == "empty"
-    assert news["diagnostic"] == {"code": "bounded_feed_no_observed_records"}
+    assert news["diagnostic"] == {"code": "bounded_feed_no_observed_records.news_context_partial"}
     assert news["sources"] == [
         {
             "source": "edinet",
@@ -291,7 +295,7 @@ Date,Open,High,Low,Close,Volume
     ]
     fundamentals = domains["fundamentals"]
     assert fundamentals["state"] == "partial"
-    assert fundamentals["diagnostic"] == {"code": "near_live_snapshot"}
+    assert fundamentals["diagnostic"] == {"code": "near_live_snapshot.financial_inputs_partial"}
     assert fundamentals["sources"] == [
         {
             "source": "yfinance",
@@ -300,7 +304,7 @@ Date,Open,High,Low,Close,Volume
             "diagnostic": {"code": "near_live_snapshot"},
         }
     ]
-    assert availability == {"market": "available", "news": "missing", "fundamentals": "limited"}
+    assert availability == {"market": "limited", "news": "missing", "fundamentals": "limited"}
     assert node["performance"]["benchmarks"] == []
 
 
@@ -408,6 +412,7 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
+    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
     synthesis_inputs = []
 
     def synthesize(input_):
@@ -445,14 +450,16 @@ Date,Open,High,Low,Close,Volume
     )
     assert node["performance"]["benchmarks"] == []
     domains = {domain["domain"]: domain for domain in node["collection_summary"]["domains"]}
+    assert domains["market"]["diagnostic"] == {"code": "market_snapshot_unavailable"}
+    assert node["performance"]["stock"]["status"] == "calculated"
     assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
     assert domains["news"]["state"] == "empty"
-    assert domains["news"]["diagnostic"] == {"code": "bounded_feed_no_observed_records"}
-    assert domains["fundamentals"]["diagnostic"] == {"code": "near_live_snapshot"}
+    assert domains["news"]["diagnostic"] == {"code": "bounded_feed_no_observed_records.news_context_partial"}
+    assert domains["fundamentals"]["diagnostic"] == {"code": "near_live_snapshot.financial_inputs_partial"}
     assert {
         domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     } == {
-        "market": "available",
+        "market": "limited",
         "news": "missing",
         "fundamentals": "limited",
     }

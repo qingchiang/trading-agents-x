@@ -69,6 +69,7 @@ from .market_data_validator import (
 )
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .rate_limit import stop_on_rate_limit_scope
+from .source_observations import routed_observations
 from .symbol_utils import normalize_symbol
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -625,7 +626,7 @@ def route_to_vendor(
             # ordinary Full routes retain their existing signatures/semantics.
             if _require_adjusted and method == "get_stock_data" and vendor == "jquants":
                 vendor_kwargs = {**kwargs, "require_adjusted": True}
-            with stop_on_rate_limit_scope(_stop_on_rate_limit):
+            with stop_on_rate_limit_scope(_stop_on_rate_limit), routed_observations(fallback=vendor_index > 0):
                 result = impl_func(*args, **vendor_kwargs)
             if _provenance and isinstance(result, str):
                 existing_records = extract_provenance(result)

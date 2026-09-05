@@ -103,6 +103,12 @@ def get_analyst_ratings_payload(
     # sentiment rules own how to weight it (kept out of here so they don't drift).
     retrieved = datetime.now(UTC)
     retrieved_at = retrieved.isoformat(timespec="seconds")
+    from ..source_observations import publish_observation
+
+    publish_observation(
+        "yfinance", "analyst_consensus", ticker, ratings,
+        retrieved_at=retrieved,
+    )
     facts = tuple(
         StructuredNumericFact(
             key=name,

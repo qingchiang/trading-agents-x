@@ -34,6 +34,8 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request
 
 from ..config import get_config
+from ..news_diagnostics import CandidateFilterCounts
+from ..news_selection import source_output_limit
 from ..symbol_utils import tokyo_securities_base
 from .calendar import tokyo_today
 from .http_util import USER_AGENT, fetch_bytes
@@ -115,7 +117,7 @@ def _search(code: str, start_compact: str, end_compact: str, timeout: float) -> 
     return raw.decode("utf-8", "replace") if raw is not None else None
 
 
-def _parse_rows(page_html: str) -> list[dict]:
+def _parse_rows(page_html: str, *, counts: CandidateFilterCounts | None = None) -> list[dict]:
     """Parse disclosure rows out of a TDnet search result page.
 
     Returns dicts with ``code`` (5-digit), ``title``, ``pdf`` (absolute URL) and
@@ -123,20 +125,28 @@ def _parse_rows(page_html: str) -> list[dict]:
     and recency sort). Rows missing required cells or an unparseable timestamp are
     skipped — an undated row can't be proven in-window.
     """
+    counts = counts if counts is not None else CandidateFilterCounts()
     rows = []
     for block in _ROW_RE.finditer(page_html):
+        counts.upstream_returned += 1
         row = block.group("row")
         time_m = _TIME_RE.search(row)
         code_m = _CODE_RE.search(row)
         title_cell = _TITLE_CELL_RE.search(row)
         if not (time_m and code_m and title_cell):
+            counts.invalid_records += 1
             continue
         anchor = _ANCHOR_RE.search(title_cell.group(1))
         if not anchor:
+            counts.invalid_records += 1
             continue
         title = _clean(anchor.group("text"))
         at = _parse_timestamp(_clean(time_m.group(1)))
-        if not title or at is None:
+        if at is None:
+            counts.date_filtered += 1
+            continue
+        if not title:
+            counts.invalid_records += 1
             continue
         rows.append({
             "code": _clean(code_m.group(1)),
@@ -191,27 +201,33 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     page = _search(code, start_date.replace("-", ""), end_date.replace("-", ""), timeout)
-    rows = _parse_rows(page) if page else []
+    counts = CandidateFilterCounts()
+    rows = _parse_rows(page, counts=counts) if page else []
     _warn_if_truncated(page, code, len(rows))
     # Re-check server-side filters locally: exact code (``q`` is a free-word match)
     # and the disclosure date within the window (the search accepts loose/reversed
     # ranges, so look-ahead safety must be enforced here, not trusted to it).
-    matches = [
-        r for r in rows
-        if tokyo_securities_base(r["code"]) == code and start <= r["at"].date() <= end
-    ]
+    matches = []
+    for row in rows:
+        if tokyo_securities_base(row["code"]) != code:
+            counts.relevance_filtered += 1
+        elif not start <= row["at"].date() <= end:
+            counts.date_filtered += 1
+        else:
+            matches.append(row)
     if not matches:
-        return _no_disclosures(ticker, start_date, end_date)
+        return _no_disclosures(ticker, start_date, end_date) + "\n" + counts.render()
 
     matches.sort(key=lambda r: r["at"], reverse=True)  # most recent first
-    kept = matches[: get_config()["news_article_limit"]]
+    kept = matches[: source_output_limit(get_config()["news_article_limit"])]
+    counts.source_truncated = len(matches) - len(kept)
     body = "\n\n".join(
         f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"
         for r in kept
     )
     return (
         f"## {ticker} timely disclosures (TDnet 適時開示), "
-        f"from {start_date} to {end_date}:\n\n{body}"
+        f"from {start_date} to {end_date}:\n\n{counts.render()}\n\n{body}"
     )
 
 

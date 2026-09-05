@@ -21,6 +21,7 @@ class PrefetchedEvidenceBlock(TypedDict):
     records: list[dict[str, str | None]]
     temporal_scope: str
     structured_numeric_facts: NotRequired[list[StructuredNumericFact]]
+    source_observation: NotRequired[dict]
 
 
 class AgentState(MessagesState):
@@ -32,6 +33,7 @@ class AgentState(MessagesState):
     sentiment_report: Annotated[str, "Sentiment analyst narrative"]
     news_report: Annotated[str, "News analyst narrative"]
     fundamentals_report: Annotated[str, "Fundamentals analyst narrative"]
+    fundamental_inputs: NotRequired[dict]
     sentiment_confidence: Annotated[
         float | None,
         "Locally calculated confidence shared with the research graph",

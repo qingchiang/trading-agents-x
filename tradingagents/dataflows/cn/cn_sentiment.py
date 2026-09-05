@@ -171,6 +171,15 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5)
         financing = row.get("融资余额", row.get("融资余额(元)"))
         buy = row.get("融资买入额", row.get("融资买入额(元)"))
         short = row.get("融券余量", row.get("融券余量(股/份)"))
+    from ..source_observations import publish_observation
+
+    publish_observation(
+        "SSE" if exchange == "sh" else "SZSE", "margin_balances", f"{code}:{trade_date}",
+        {"financing_balance": financing, "financing_buys": buy, "lending_shares": short,
+         "financing_currency": "CNY", "lending_unit": "shares"},
+        effective_date=trade_date,
+        timing="current exchange positioning snapshot; trade date is not publication time",
+    )
     return (
         f"Official margin detail for {code} on {trade_date}: financing balance="
         f"{_amount(financing)} CNY; financing buys={_amount(buy)} CNY; "
@@ -299,6 +308,10 @@ def get_holding_changes(ticker: str, curr_date: str) -> str:
             ]
             for row in matched:
                 visible = row["published"].date()
+                from ..source_observations import publish_observation
+
+                publish_observation("CNINFO", "news_article", row.get("url", row["title"]),
+                                    row, available_on=visible, fallback=True)
                 events.append(
                     (
                         visible,
@@ -504,6 +517,14 @@ def _major_holder_events(records: list[dict], start, end) -> list[tuple]:
                 f"shares={_amount(shares)}; timing={_visibility_timing(row)}",
             )
         )
+        from ..source_observations import publish_observation
+
+        publish_observation(
+            "Eastmoney", "holding_changes", f"{holder}:{visible}",
+            {"holder": holder, "direction": direction, "shares": shares, "unit": "shares"},
+            effective_date=visible,
+            available_on=visible if "non-strict" not in _visibility_timing(row) else None,
+        )
     return events
 
 
@@ -526,6 +547,14 @@ def _executive_events(records: list[dict], start, end) -> list[tuple]:
                 f"shares={_amount(abs(shares) if not pd.isna(shares) else None)}; "
                 f"timing={_visibility_timing(row)}",
             )
+        )
+        from ..source_observations import publish_observation
+
+        publish_observation(
+            "Eastmoney", "holding_changes", f"{person}:{visible}",
+            {"person": person, "role": role, "direction": direction, "shares": shares, "unit": "shares"},
+            effective_date=visible,
+            available_on=visible if "non-strict" not in _visibility_timing(row) else None,
         )
     return events
 
@@ -614,6 +643,13 @@ def get_research_signal_payload(
     currency = instrument_currency(ticker)
     selected = sorted(rows, key=lambda item: item["published"], reverse=True)[:8]
     for index, row in enumerate(selected, start=1):
+        from ..source_observations import publish_observation
+
+        publish_observation(
+            source, "analyst_rating", f"{row['institution']}:{row['published']}",
+            row, effective_date=row["published"], available_on=row["published"],
+            fallback=source == "Eastmoney Research",
+        )
         target = f"{_display(row['target_low'])}–{_display(row['target_high'])}"
         detail = (
             f"- {row['published']}: {row['institution']}; rating={row['rating']}; "
@@ -689,6 +725,11 @@ def get_important_announcements(ticker: str, curr_date: str) -> str:
     if not rows:
         return f"<CNINFO important announcements: no matched events in {start} to {end}>"
     rows.sort(key=lambda row: row["published"], reverse=True)
+    from ..source_observations import publish_observation
+
+    for row in rows[:10]:
+        publish_observation("CNINFO", "news_article", row.get("url", row["title"]),
+                            row, available_on=row["published"])
     return "Important company announcements (exact-code, disclosure-date filtered):\n" + "\n".join(
         f"- {row['published'].strftime('%Y-%m-%d %H:%M')} CST: {row['title']}" for row in rows[:10]
     )

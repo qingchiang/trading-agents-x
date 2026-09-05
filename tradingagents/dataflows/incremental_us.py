@@ -37,6 +37,12 @@ from tradingagents.application.contracts import (
     MarketSeriesResult,
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
+from tradingagents.dataflows.incremental_inputs import (
+    append_financials,
+    append_market_context,
+    append_news_context,
+    collect_news_observations,
+)
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.dataflows.stocktwits import (
@@ -90,13 +96,17 @@ def collect_us_incremental(
                 route_to_vendor=routed,
                 now=now,
             )
+            result, extra = append_market_context(request, result, stock_series, routed)
             domains.append(result)
             if candidate is not None:
                 evidence.append(candidate)
                 stock_series_evidence_ref = candidate.evidence.ref
+            evidence.extend(extra)
         elif domain == "news":
             result, candidates = _collect_news(request, route_to_vendor=routed, now=now)
+            result, extra = append_news_context(request, result, routed)
             domains.append(result)
+            evidence.extend(extra)
             evidence.extend(candidates)
         elif domain == "fundamentals":
             result, candidate = _collect_fundamentals(
@@ -104,7 +114,9 @@ def collect_us_incremental(
                 route_to_vendor=routed,
                 now=now,
             )
+            result, extra = append_financials(request, result, routed)
             domains.append(result)
+            evidence.extend(extra)
             if candidate is not None:
                 evidence.append(candidate)
         elif domain == "social":
@@ -264,15 +276,11 @@ def _collect_news(
     now: Callable[[], datetime],
 ) -> tuple[CollectionDomainResult, tuple[IncrementalEvidenceCandidate, ...]]:
     try:
-        response = route_to_vendor(
-            "get_news",
-            request.instrument,
-            request.baseline_analysis_cutoff.isoformat(),
-            request.analysis_cutoff.isoformat(),
-            _provenance=True,
-            _stop_on_rate_limit=True,
-        )
+        response, structured = collect_news_observations(request, route_to_vendor, now)
+        if structured is not None:
+            return structured
         source, body = _routed_text(response, now=now)
+
         if _is_failure_response(body):
             return _unavailable_domain("news", "news_retrieval_failed", source=source), ()
         if _is_empty_response(body):
@@ -421,13 +429,25 @@ def _collect_social(
         content=body,
         origins=(_near_live_origin(source, "social_snapshot"),),
     )
+    observed = []
+    for stamp in re.findall(r"^\[([^·]+) ·", body, re.MULTILINE):
+        try:
+            if stamp.endswith((" EDT", " EST")):
+                offset = "-04:00" if stamp.endswith(" EDT") else "-05:00"
+                value = datetime.fromisoformat(stamp[:-4] + offset)
+            else:
+                value = datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+            if value.tzinfo is not None:
+                observed.append(value)
+        except ValueError:
+            continue
     return (
         CollectionDomainResult(
             domain="social",
             state=CollectionResultState.PARTIAL,
             sources=(source,),
-            observed_from=request.window_start,
-            observed_through=request.window_end,
+            observed_from=min(observed) if observed else None,
+            observed_through=max(observed) if observed else None,
             temporal_bases=(CollectionTemporalBasis.NEAR_LIVE_ADVISORY,),
             evidence_refs=(item.ref,),
             diagnostic=CollectionDiagnostic(code="bounded_current_social_feed"),

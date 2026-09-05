@@ -231,6 +231,11 @@ Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
 | 中国 A 股 | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
 | 产品边界 | 美国/默认、东京 `.T`、中国大陆 `.SS`/`.SZ` 股票 | 路由前执行正向候选校验 |
 
+Full 与 Incremental 按已启用的研究角色复用财务、专业信号和宏观输入。
+个股／全球新闻默认输出上限仍为 30／10 条；请求触发的有界源缓存可保留
+曾获取的材料，但不证明期间覆盖完整。来源窗口、配置方式及时间接纳规则见
+[Full 与 Incremental 数据输入说明](../data-inputs.md)。
+
 历史分析以标的所在市场的本地日期为准。Evidence 保留 requested/effective
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；
 封存时会拒绝未来可见证据。缺数据表示 unknown，不能自动解释成中性或利空。

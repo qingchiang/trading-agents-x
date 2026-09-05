@@ -301,6 +301,56 @@ def test_google_news_deduplicates_and_drops_future(monkeypatch):
 
 
 @pytest.mark.unit
+def test_google_news_reports_separate_source_filter_counts(monkeypatch):
+    monkeypatch.setattr(
+        google_news,
+        "_company_names",
+        lambda _ticker: ("贵州茅台酒股份有限公司", "贵州茅台酒股份有限公司"),
+    )
+    monkeypatch.setattr(google_news, "news_quotas", lambda: (1, 1, 1))
+    monkeypatch.setattr(
+        google_news,
+        "_fetch_items",
+        lambda _query: [
+            {
+                "title": "贵州茅台酒股份有限公司发布业绩",
+                "source": "证券时报",
+                "published": datetime(2026, 1, 10, 10),
+            },
+            {
+                "title": "贵州茅台酒股份有限公司：发布业绩",
+                "source": "证券时报",
+                "published": datetime(2026, 1, 10, 9),
+            },
+            {
+                "title": "贵州茅台酒股份有限公司扩大投资",
+                "source": "证券时报",
+                "published": datetime(2026, 1, 9, 10),
+            },
+            {
+                "title": "600519 今日行情",
+                "source": "未知",
+                "published": datetime(2026, 1, 8, 10),
+            },
+            {
+                "title": "贵州茅台酒股份有限公司未来事项",
+                "source": "证券时报",
+                "published": datetime(2026, 1, 11, 1),
+            },
+        ],
+    )
+
+    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+
+    assert "upstream_returned=5" in result
+    assert "date_filtered=1" in result
+    assert "relevance_filtered=1" in result
+    assert "duplicates=1" in result
+    assert "source_truncated=1" in result
+    assert "candidates=1" in result
+
+
+@pytest.mark.unit
 def test_google_news_queries_short_and_legal_names(monkeypatch):
     queries = []
     monkeypatch.setattr(
@@ -314,12 +364,14 @@ def test_google_news_queries_short_and_legal_names(monkeypatch):
         lambda query: queries.append(query) or [],
     )
 
-    google_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
 
     assert set(queries) == {
         '"贵州茅台" 600519 股票',
         '"贵州茅台酒股份有限公司" 600519 股票',
     }
+    assert "upstream_returned=0" in result
+    assert "candidates=0" in result
 
 
 @pytest.mark.unit

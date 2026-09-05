@@ -6,7 +6,7 @@ import json
 import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -75,6 +75,8 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
+from tradingagents.dataflows.lookahead import is_near_live
+from tradingagents.dataflows.source_observations import SourceObservation
 from tradingagents.graph.analyst_synthesis import (
     evidence_warnings as _evidence_warnings,
     invoke_analyst_report as _invoke_analyst_report,
@@ -505,7 +507,9 @@ class ResearchGraph:
                 "sentiment_confidence": None,
                 "prefetched_evidence": [],
             }
-            with use_config(dict(context.dataflow_config)):
+            from tradingagents.dataflows.source_observations import capture_observations
+
+            with use_config(dict(context.dataflow_config)), capture_observations() as observations:
                 result = self._analyst_subgraphs[analyst].invoke(
                     local_state,
                     config={
@@ -521,8 +525,11 @@ class ResearchGraph:
                 narrative,
                 requested_date=context.request.analysis_date,
                 analyst=analyst,
+                instrument=context.request.ticker,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
+            observed_items = [_full_observation_evidence(o, context.request.analysis_date, context.request.ticker) for o in observations]
+            evidence = list({item.ref: item for item in (*evidence, *observed_items)}.values())
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
                 "confidence_override": (
@@ -655,10 +662,24 @@ class ResearchGraph:
         self._start_node(runtime, node)
         check_cancelled(runtime.context)
         deduped: dict[str, EvidenceItem] = {}
-        for analyst_items in state.get("analyst_evidence_items", {}).values():
+        article_refs: dict[tuple[str, str], str] = {}
+        analyst_items_by_role = {}
+        for role, analyst_items in sorted(state.get("analyst_evidence_items", {}).items(), key=lambda pair: pair[0] != "news"):
+            role_items = {}
             for raw in analyst_items:
                 item = EvidenceItem.model_validate(raw)
+                observation = item.provenance.get("observation", {})
+                values = observation.get("values", {})
+                record = values.get("link") or values.get("url")
+                if observation.get("kind") == "news_article" and record:
+                    key = (observation["source"], record)
+                    if key in article_refs:
+                        item = deduped[article_refs[key]]
+                    else:
+                        article_refs[key] = item.ref
                 deduped[item.ref] = item
+                role_items[item.ref] = item.model_dump(mode="json")
+            analyst_items_by_role[role] = list(role_items.values())
         bundle = EvidenceBundle(
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
@@ -677,6 +698,7 @@ class ResearchGraph:
         )
         return {
             "evidence_bundle": bundle.model_dump(mode="json"),
+            "analyst_evidence_items": analyst_items_by_role,
         }
 
     def _reports_ready(
@@ -1518,6 +1540,34 @@ def _analyst_route(state: AgentState) -> str:
     return "done"
 
 
+def _full_observation_evidence(
+    observation: SourceObservation,
+    requested_date: date,
+    instrument: str | None,
+) -> EvidenceItem:
+    """Apply the existing near-live boundary at every Full observation entrance."""
+    if observation.is_pit or is_near_live(
+        requested_date.isoformat(), instrument, now=observation.retrieved_at,
+    ):
+        return observation.evidence(requested_date, instrument=instrument)
+    timing = observation.timing + "; unavailable outside market-local near-live window"
+    if observation.fallback:
+        timing += "; fallback source used"
+    return _evidence_from_records(
+        (ProvenanceRecord(
+            evidence=observation.kind,
+            source=observation.source,
+            requested=requested_date.isoformat(),
+            effective=str(observation.effective_date or "retrieval-time snapshot"),
+            timing=timing,
+            retrieved_at=observation.retrieved_at.isoformat(),
+        ),),
+        requested_date=requested_date,
+        content=None,
+        temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+    )
+
+
 def _collect_evidence(
     messages: Iterable[Any],
     _narrative: str,
@@ -1525,6 +1575,7 @@ def _collect_evidence(
     requested_date: date,
     analyst: str,
     prefetched_blocks: Iterable[dict[str, Any]] = (),
+    instrument: str | None = None,
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
     content_groups: dict[
@@ -1565,6 +1616,22 @@ def _collect_evidence(
 
     tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
     for message in tool_messages:
+        if isinstance(message.content, str) and "<!-- news-observation:" in message.content:
+            from tradingagents.dataflows.news_selection import emit_news
+            from tradingagents.dataflows.source_observations import capture_observations
+
+            with capture_observations() as news_observations:
+                emit_news(message.content, "news", instrument or "", global_news=getattr(message, "name", "") == "get_global_news", metadata_only=True)
+            records = extract_provenance(message.content)
+            fallback = any("fallback vendor selected" in record.timing for record in records)
+            for observation in news_observations:
+                observation = replace(observation, fallback=observation.fallback or fallback)
+                item = _full_observation_evidence(observation, requested_date, instrument)
+                items[item.ref] = item
+            # Preserve collection diagnostics without assigning article content or identity.
+            collect_payload(records, None)
+            # Producer metadata owns item timing, including cached revisions.
+            continue
         artifact = getattr(message, "artifact", None)
         if is_evidence_tool_artifact(artifact):
             records = artifact_records(artifact)
@@ -1636,6 +1703,11 @@ def _collect_evidence(
         )
 
     for block in prefetched_blocks:
+        if block.get("source_observation"):
+            observation = SourceObservation.load(block["source_observation"])
+            item = _full_observation_evidence(observation, requested_date, instrument)
+            items[item.ref] = item
+            continue
         raw_records = block.get("records", [])
         records = []
         for raw in raw_records:

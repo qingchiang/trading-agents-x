@@ -202,7 +202,7 @@ def fetch_series(
         "start_date": start_date,
         "points": points,
     }
-    _series_cache.put(cache_key, data)
+    _series_cache.put_observation(cache_key, data)
     return data
 
 

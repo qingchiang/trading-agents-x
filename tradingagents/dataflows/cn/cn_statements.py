@@ -128,10 +128,16 @@ _FIELDS = {
             ("Cash paid to suppliers", ("购买商品、接受劳务支付的现金",)),
             ("Cash paid to employees", ("支付给职工以及为职工支付的现金",)),
             ("Net operating cash flow", ("经营活动产生的现金流量净额",)),
-            ("Capital expenditure", ("购建固定资产、无形资产和其他长期资产支付的现金",)),
+            ("Capital expenditure", (
+                "购建固定资产、无形资产和其他长期资产支付的现金",
+                "购建固定资产、无形资产和其他长期资产所支付的现金",
+            )),
             ("Net investing cash flow", ("投资活动产生的现金流量净额",)),
             ("Borrowing proceeds", ("取得借款收到的现金",)),
-            ("Dividends and interest paid", ("分配股利、利润或偿付利息支付的现金",)),
+            ("Dividends and interest paid", (
+                "分配股利、利润或偿付利息支付的现金",
+                "分配股利、利润或偿付利息所支付的现金",
+            )),
             ("Net financing cash flow", ("筹资活动产生的现金流量净额",)),
             ("Net increase in cash", ("现金及现金等价物净增加额",)),
             ("Ending cash balance", ("期末现金及现金等价物余额",)),
@@ -288,6 +294,9 @@ def _yfinance_supplement(
             ),
         )
     retrieved = datetime.now(UTC).isoformat(timespec="seconds")
+    from ..source_observations import publish_yahoo_statement
+
+    publish_yahoo_statement(sub, ticker, kind, freq, source="yfinance statement supplement")
     block = (
         "\n\n## Supplemental line items (yfinance)\n"
         f"Requested analysis date: {requested}\n"
@@ -350,6 +359,24 @@ def _statement(
         axis=1, how="all"
     )
     entity_type = classify_entity(profile, populated_fields.columns)
+    from ..source_observations import publish_observation, scalar
+
+    for _, row in visible.iterrows():
+        values = {}
+        for label, aliases in _FIELDS[kind][entity_type]:
+            column = _find_column(visible.columns, aliases)
+            values[label] = scalar(row[column]) if column else None
+        values.update(currency=scalar(row.get("Currency")),
+                      unit="source currency units",
+                      period_basis="instant" if kind == "balance" else "YTD",
+                      entity_type=entity_type)
+        has_visibility = pd.notna(row.get("PublishDate")) or pd.notna(row.get("UpdateDate"))
+        publish_observation(
+            "AkShare / Sina CompanyFinanceService", f"financial_{kind}",
+            f"{canonical}:{row['ReportDate'].date()}", values,
+            effective_date=row["ReportDate"],
+            available_on=row["VisibilityDate"] if has_visibility else None,
+        )
     table, missing = _render_sina_table(visible, kind, entity_type)
     requested = curr_date or "not provided (live retrieval)"
     effective = visible["VisibilityDate"].max().strftime("%Y-%m-%d")

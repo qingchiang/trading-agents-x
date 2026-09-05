@@ -35,6 +35,7 @@ def _state(tool_content: str):
         "company_of_interest": "6501.T",
         "trade_date": "2026-07-17",
         "asset_type": "stock",
+        "fundamental_inputs": {"responses": {}, "observations": []},
         "messages": [ToolMessage(content=tool_content, tool_call_id="call-1")],
     }
 
@@ -123,6 +124,55 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
     assert {"fundamentals overview", "balance sheet", "cash flow statement"} <= (
         missing
     )
+
+
+@pytest.mark.unit
+def test_fundamentals_full_prefetch_does_not_report_methods_as_not_requested():
+    methods = (
+        "get_fundamentals",
+        "get_income_statement",
+        "get_balance_sheet",
+        "get_cashflow",
+    )
+    responses = {
+        method: (
+            "<get_cashflow unavailable: VendorRateLimitError>"
+            if method == "get_cashflow"
+            else attach_provenance(
+                f"DATA FOR {method}",
+                ProvenanceRecord(
+                    evidence=method,
+                    source="fixture",
+                    requested="2026-07-17",
+                    effective="2026-07-16",
+                    timing="disclosure-date filtered",
+                ),
+            )
+        )
+        for method in methods
+    }
+    state = {
+        "company_of_interest": "6501.T",
+        "trade_date": "2026-07-17",
+        "asset_type": "stock",
+        "fundamental_inputs": {"responses": responses, "observations": []},
+        "messages": [],
+    }
+
+    result = create_fundamentals_analyst(_final_llm())(state)
+
+    records = [
+        record
+        for block in result["prefetched_evidence"]
+        for record in block["records"]
+    ]
+    assert not [record for record in records if record["timing"] == "not requested"]
+    failed = [
+        block
+        for block in result["prefetched_evidence"]
+        if block["content"] is None and block["records"] == []
+    ]
+    assert len(failed) == 1
 
 
 @pytest.mark.unit

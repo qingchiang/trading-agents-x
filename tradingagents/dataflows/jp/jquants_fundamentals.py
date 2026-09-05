@@ -170,9 +170,21 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
     lines = [f"# {title} for {canonical} (J-Quants summary, latest {len(rows)} periods)"]
     for r in rows:
         parts = []
+        values = {"currency": "JPY", "unit": "JPY; EPS/BPS in JPY per share", "period_basis": "YTD", "reporting_basis": _reporting_basis(r)}
         for label, spec in field_specs:
             value = _fmt(spec(r)) if callable(spec) else _fmt_field(r, spec)
             parts.append(f"{label}={value}")
+            values[label] = spec(r) if callable(spec) else r.get(spec)
+        from ..source_observations import publish_observation
+
+        kind = "balance" if title.startswith("Balance") else "cashflow" if title.startswith("Cash") else "income"
+        if kind == "balance":
+            values["period_basis"] = "instant"
+        publish_observation(
+            "J-Quants", f"financial_{kind}",
+            f"{canonical}:{r.get('CurPerEn')}:{r.get('DocType')}", values,
+            effective_date=r.get("CurPerEn"), available_on=r.get("DiscDate"),
+        )
         lines.append(f"- {_period_label(r)}: " + ", ".join(parts))
     return "\n".join(lines)
 

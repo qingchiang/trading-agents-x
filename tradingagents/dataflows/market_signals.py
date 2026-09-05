@@ -24,6 +24,7 @@ from .jp.edinet_holdings import get_large_holdings
 from .jp.jquants_sentiment import get_margin_balance, get_short_positions
 from .jp.yfinance_sentiment import get_analyst_ratings_payload
 from .lookahead import is_near_live
+from .source_observations import SourceObservation, capture_observations
 from .symbol_utils import match_exchange_suffix
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class FetchedSentimentSignal:
     body: str
     retrieved_at: str | None = None
     structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
+    observations: tuple[SourceObservation, ...] = ()
 
 
 def _jp_signals() -> tuple[SentimentSignal, ...]:
@@ -219,6 +221,7 @@ def fetch_sentiment_signals(
     fetched = []
     for spec in sentiment_signal_specs(ticker):
         structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
+        observations = []
         if spec.live_only and not is_near_live(curr_date, ticker):
             body = (
                 "<live-only source unavailable for historical or future "
@@ -226,7 +229,8 @@ def fetch_sentiment_signals(
             )
         else:
             try:
-                result = spec.fetch(ticker, curr_date)
+                with capture_observations() as observations:
+                    result = spec.fetch(ticker, curr_date)
                 if isinstance(result, tuple):
                     body, structured_numeric_facts = result
                 else:
@@ -245,6 +249,11 @@ def fetch_sentiment_signals(
                 body,
                 retrieved_at,
                 tuple(structured_numeric_facts),
+                tuple(sorted(
+                    observations,
+                    key=lambda o: str(o.available_on or o.effective_date or ""),
+                    reverse=True,
+                )[:8] if spec.tag == "cn_holding_changes" else observations),
             )
         )
     return tuple(fetched)
