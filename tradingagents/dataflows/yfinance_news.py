@@ -132,7 +132,7 @@ def get_news_yfinance(
         Formatted string containing news articles
     """
     article_limit = get_config()["news_article_limit"]
-    candidate_limit = min(max(article_limit * 4, 20), 100)
+    candidate_limit = max(1, min(int(get_config().get("yahoo_news_candidate_limit", 200)), 200))
     # Query Yahoo with the canonical symbol, like every other yfinance path —
     # a raw broker/forex alias (for example, XAUUSD) otherwise silently
     # returns no news. Keep the user's ticker in the report header.
@@ -185,7 +185,10 @@ def get_news_yfinance(
                 f"({len(candidates)} in-window candidates dropped)"
             )
 
-        kept = relevant[:article_limit]
+        from .news_selection import select_temporal
+
+        kept = select_temporal(relevant, article_limit, start_date, end_date,
+                               published=lambda row: row[0]["pub_date"])
         direct_count = sum(tier == "direct" for _, tier in kept)
         candidate_count = sum(tier == "candidate" for _, tier in kept)
         context_count = sum(tier == "context" for _, tier in kept)
@@ -207,7 +210,8 @@ def get_news_yfinance(
             news_str += "\n"
 
         stats = (
-            f"Quality filter: candidates={len(candidates)}; relevant={len(relevant)}; "
+            f"Quality filter: upstream_returned={len(news)}; date_filtered={len(news) - len(candidates)}; "
+            f"candidates={len(candidates)}; relevant={len(relevant)}; "
             f"kept={len(kept)} (direct={direct_count}, candidate={candidate_count}, "
             f"context={context_count}); "
             f"dropped={dropped_count}; omitted_by_limit={omitted_count}."
@@ -246,7 +250,7 @@ def get_global_news_yfinance(
         look_back_days = config["global_news_lookback_days"]
     if limit is None:
         limit = config["global_news_article_limit"]
-    search_queries = config["global_news_queries"]
+    search_queries = config["global_news_queries"][:min(5, max(1, int(config.get("global_news_query_limit", 5))))]
 
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = curr_dt - relativedelta(days=look_back_days)
@@ -257,7 +261,7 @@ def get_global_news_yfinance(
     try:
         for query in search_queries:
             search = yf_retry(lambda q=query: yf.Search(
-                query=q, news_count=limit, enable_fuzzy_query=True,
+                query=q, news_count=config.get("global_news_candidate_limit", 10), enable_fuzzy_query=True,
             ))
             for article in search.news or []:
                 data = _extract_article_data(article)

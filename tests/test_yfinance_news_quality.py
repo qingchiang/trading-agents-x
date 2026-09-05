@@ -93,7 +93,7 @@ def test_quality_dedupe_and_limit_run_after_date_filter(monkeypatch):
     ]
     out, seen = _run(monkeypatch, articles, limit=2)
 
-    assert seen["count"] == 20
+    assert seen["count"] == 200
     assert "future event" not in out
     assert out.count("### [direct]") == 2
     assert "candidates=20; relevant=2; kept=2" in out
@@ -169,4 +169,4 @@ def test_focused_yahoo_rate_limit_does_not_retry(monkeypatch):
 
     with stop_on_rate_limit_scope(True), pytest.raises(VendorRateLimitError):
         ynews.get_news_yfinance("NVDA", "2025-05-01", "2025-05-09")
-    assert calls == [40]
+    assert calls == [200]

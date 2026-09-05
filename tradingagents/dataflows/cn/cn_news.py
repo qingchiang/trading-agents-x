@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 
 from tradingagents.provenance import (
@@ -16,6 +17,7 @@ from tradingagents.provenance import (
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_quality import canonical_headline
+from ..news_selection import candidate_scope, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .google_news import get_news as _google_news
 from .news_sources import (
@@ -52,49 +54,13 @@ def _dedupe_blocks(
     blocks: list[str], limit: int
 ) -> tuple[list[str], list[_MergeCounts]]:
     """Deduplicate across sources and enforce the final article limit."""
-    seen: set[str] = set()
-    output = []
-    counts = []
-    article_count = 0
-    for block in blocks:
-        if article_count >= limit:
-            returned = sum(
-                paragraph.startswith("### ") for paragraph in block.split("\n\n")[1:]
-            )
-            counts.append(_MergeCounts(returned, 0, 0, returned))
-            continue
-        paragraphs = block.split("\n\n")
-        kept = [paragraphs[0]]
-        returned = 0
-        duplicates = 0
-        cap_omitted = 0
-        for paragraph in paragraphs[1:]:
-            if not paragraph.startswith("### "):
-                kept.append(paragraph)
-                continue
-            returned += 1
-            key = _article_key(paragraph)
-            if not key or key in seen:
-                duplicates += 1
-                continue
-            seen.add(key)
-            if article_count < limit:
-                kept.append(paragraph)
-                article_count += 1
-            else:
-                cap_omitted += 1
-        kept_count = sum(paragraph.startswith("### ") for paragraph in kept[1:])
-        counts.append(
-            _MergeCounts(returned, duplicates, kept_count, cap_omitted)
-        )
-        if len(kept) > 1:
-            output.append("\n\n".join(kept))
-    return output, counts
+    return merge_news_blocks(blocks, limit)
 
 
 def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
     try:
-        return fetch(ticker, start_date, end_date)
+        with candidate_scope():
+            return fetch(ticker, start_date, end_date)
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
@@ -132,15 +98,17 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
             rendered = list(
                 pool.map(
-                    lambda feed: _safe_feed(
-                        feed[0], feed[1], ticker, start_date, end_date
-                    ),
-                    feeds,
+                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, start_date, end_date),
+                    [(copy_context(), feed) for feed in feeds],
                 )
             )
     article_limit = max(1, int(get_config()["news_article_limit"]))
-    blocks, merged_counts = _dedupe_blocks(
-        [item for item in rendered if item.startswith("## ")], article_limit
+    base_quotas = ((article_limit + 1) // 2, article_limit // 4,
+                   article_limit - (article_limit + 1) // 2 - article_limit // 4)
+    blocks, merged_counts = merge_news_blocks(
+        [item for item in rendered if item.startswith("## ")], article_limit,
+        start_date, end_date,
+        quotas=[q for q, item in zip(base_quotas, rendered, strict=True) if item.startswith("## ")],
     )
     notes: list[tuple[str, ProvenanceRecord]] = []
     bound_blocks: list[str] = []

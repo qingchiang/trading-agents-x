@@ -36,6 +36,7 @@ from ..news_quality import (
     canonical_headline,
     classify_google_article,
 )
+from ..news_selection import source_output_limit
 from .company_info import get_company_name
 from .http_util import USER_AGENT, fetch_bytes
 from .jquants_common import to_jquants_code
@@ -155,7 +156,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         seen_titles.add(title_key)
         relevant.append((it, classification.tier))
 
-    kept = relevant[: get_config()["news_article_limit"]]
+    kept = relevant[: source_output_limit(get_config()["news_article_limit"])]
     if not kept:
         return (
             f"No relevant Google News found for {ticker} between {start_date} and "

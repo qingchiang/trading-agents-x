@@ -46,6 +46,10 @@ _RESEARCH_FETCH_LOCK = RLock()
 def news_quotas() -> tuple[int, int, int]:
     """Return per-source candidate caps; the assembler owns the final total cap."""
     total = max(1, int(get_config()["news_article_limit"]))
+    from ..news_selection import in_candidate_scope, source_output_limit
+
+    if in_candidate_scope():
+        return (source_output_limit(total),) * 3
     disclosure = max(1, (total + 1) // 2)
     research = max(1, total // 4)
     media = max(1, total - disclosure - research)
@@ -145,7 +149,7 @@ def disclosure_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
     fetch_start = _shared_fetch_start(start, end)
-    page_size = min(max(get_config()["news_article_limit"] * 4, 30), 100)
+    page_size = max(1, min(int(get_config().get("cn_news_candidate_limit", 100)), 100))
     cache_key = ("cninfo", code, end.isoformat(), page_size)
     with _CNINFO_FETCH_LOCK:
         with _FEED_CACHE_LOCK:
@@ -226,7 +230,7 @@ def research_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
     fetch_start = _shared_fetch_start(start, end)
-    page_size = min(max(get_config()["news_article_limit"] * 4, 30), 100)
+    page_size = max(1, min(int(get_config().get("cn_news_candidate_limit", 100)), 100))
     cache_key = ("eastmoney-research", code, end.isoformat(), page_size)
     with _RESEARCH_FETCH_LOCK:
         with _FEED_CACHE_LOCK:

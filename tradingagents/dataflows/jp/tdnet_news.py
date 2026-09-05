@@ -34,6 +34,7 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request
 
 from ..config import get_config
+from ..news_selection import source_output_limit
 from ..symbol_utils import tokyo_securities_base
 from .calendar import tokyo_today
 from .http_util import USER_AGENT, fetch_bytes
@@ -204,7 +205,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         return _no_disclosures(ticker, start_date, end_date)
 
     matches.sort(key=lambda r: r["at"], reverse=True)  # most recent first
-    kept = matches[: get_config()["news_article_limit"]]
+    kept = matches[: source_output_limit(get_config()["news_article_limit"])]
     body = "\n\n".join(
         f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"
         for r in kept

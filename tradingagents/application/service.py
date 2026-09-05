@@ -506,6 +506,11 @@ class AnalysisService:
                 key: data_config.get(key)
                 for key in (
                     "news_article_limit",
+                    "yahoo_news_candidate_limit",
+                    "cn_news_candidate_limit",
+                    "global_news_candidate_limit",
+                    "global_news_query_limit",
+                    "news_selection_version",
                     "sentiment_filing_limit",
                     "ticker_news_lookback_days",
                     "social_lookback_days",

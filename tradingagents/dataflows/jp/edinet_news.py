@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 
 from ..config import get_config
+from ..news_selection import source_output_limit
 from ..symbol_utils import tokyo_securities_base
 from .edinet_common import (
     documents_on,
@@ -62,7 +63,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     common outcome — not a data-availability failure).
     """
     code = to_jquants_code(ticker)
-    limit = get_config()["news_article_limit"]
+    limit = source_output_limit(get_config()["news_article_limit"])
     dates = list(iter_window_dates(start_date, end_date))
     scanned_start = dates[0] if dates else start_date
 

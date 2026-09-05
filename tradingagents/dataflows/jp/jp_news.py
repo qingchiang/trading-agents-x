@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 
 from tradingagents.provenance import (
@@ -39,6 +40,7 @@ from tradingagents.provenance import (
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_quality import canonical_headline
+from ..news_selection import candidate_scope, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .edinet_common import effective_window as _edinet_effective_window
 from .edinet_news import get_news as _edinet_news
@@ -108,39 +110,7 @@ def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_Merge
     equivalent official disclosure wins over a media headline and remaining
     prompt capacity is assigned to official sources first.
     """
-    remaining = max(1, limit)
-    seen: set[str] = set()
-    merged: list[str] = []
-    counts: list[_MergeCounts] = []
-    for block in blocks:
-        parsed = _split_feed_block(block)
-        kept: list[str] = []
-        duplicates = 0
-        cap_omitted = 0
-        for item in parsed.items:
-            key = _item_key(item)
-            if not key:
-                continue
-            if key in seen:
-                duplicates += 1
-                continue
-            seen.add(key)
-            if remaining > 0:
-                kept.append(item)
-                remaining -= 1
-            else:
-                cap_omitted += 1
-        counts.append(
-            _MergeCounts(
-                returned=len(parsed.items),
-                duplicates=duplicates,
-                kept=len(kept),
-                cap_omitted=cap_omitted,
-            )
-        )
-        if kept:
-            merged.append(f"{parsed.preamble}\n\n" + "\n\n".join(kept))
-    return merged, counts
+    return merge_news_blocks(blocks, limit)
 
 
 def _safe_feed(
@@ -159,7 +129,8 @@ def _safe_feed(
     hide the keyless Google-News media feed entirely.
     """
     try:
-        return fetch(ticker, start_date, end_date)
+        with candidate_scope():
+            return fetch(ticker, start_date, end_date)
     except VendorRateLimitError:
         if stop_on_rate_limit:
             raise
@@ -236,15 +207,13 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
             rendered = list(
                 pool.map(
-                    lambda request: _safe_feed(
-                        request[0], request[1], ticker, request[2], request[3]
-                    ),
-                    feed_requests,
+                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, pair[1][2], pair[1][3]),
+                    [(copy_context(), request) for request in feed_requests],
                 )
             )
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
     limit = max(1, int(get_config()["news_article_limit"]))
-    blocks, merged_counts = _merge_blocks(data_blocks, limit)
+    blocks, merged_counts = merge_news_blocks(data_blocks, limit, start_date, end_date)
     notes: list[tuple[str, ProvenanceRecord]] = []
     omitted_data_records: list[ProvenanceRecord] = []
     bound_blocks: list[str] = []
