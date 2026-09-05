@@ -118,9 +118,17 @@ def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=Non
                         item = row.record_id or row.link or row.title
                         version = _hash([row.title, row.content, row.published])
                         existing = connection.execute(
-                            "SELECT version FROM articles WHERE scope=? AND item=?", (scope, item)
-                        ).fetchall()
-                        revision = bool(existing) and (version,) not in existing
+                            "SELECT version,payload FROM articles WHERE scope=? AND item=? ORDER BY retrieved DESC,rowid DESC LIMIT 1",
+                            (scope, item),
+                        ).fetchone()
+                        if existing:
+                            previous = NewsCandidate(**json.loads(existing[1]))
+                            if version == _hash([previous.title, previous.content, previous.published]):
+                                continue
+                            # A -> B -> A is a newly observed revision, not a
+                            # cache hit on A's original historical occurrence.
+                            version = _hash([version, existing[0]])
+                        revision = existing is not None
                         row = replace(row, retrieved_at=retrieved.isoformat(), revision=revision,
                                       market_day=retrieved.astimezone(market_timezone(scope_key)).date().isoformat() if revision else row.market_day)
                         connection.execute(
@@ -150,6 +158,9 @@ def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=Non
             if fetched is not None:
                 return fetched
             raise fetch_error
+        # Refresh outcome belongs to this read, never to the saved article
+        # version or its semantic identity.
+        rows = [replace(row, refresh_failure=failure) for row in rows]
         rows.extend(replace(r, retrieved_at=retrieved.isoformat()) for r in fresh if r.day is None)
         if not rows:
             return fetched if fetched is not None else header

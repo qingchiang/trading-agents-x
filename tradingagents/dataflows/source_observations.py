@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from tradingagents.application.contracts import EvidenceItem, EvidenceOrigin
@@ -65,7 +65,7 @@ class SourceObservation:
     @property
     def content(self) -> str:
         return f"{self.kind}: {self.key}\n" + json.dumps(
-            {k: v for k, v in self.values.items() if self.kind != "macro_indicator" or k != "display"},
+            self.values,
             ensure_ascii=False,
             sort_keys=True,
             allow_nan=False,
@@ -73,11 +73,16 @@ class SourceObservation:
 
     @property
     def identity(self) -> str:
+        identity_values = (
+            {key: value for key, value in self.values.items() if key != "display"}
+            if self.kind == "macro_indicator"
+            else self.values
+        )
         payload = [
             self.source,
             self.kind,
             self.key,
-            self.values,
+            identity_values,
             scalar(self.effective_date),
             scalar(self.available_on),
             None if self.available_on else scalar(self.available_at),
@@ -102,14 +107,21 @@ class SourceObservation:
             fields[key] = as_date(fields.get(key))
         return cls(**fields)
 
-    def evidence(self, requested_date: date) -> EvidenceItem:
+    def evidence(self, requested_date: date, *, instrument: str | None = None) -> EvidenceItem:
+        available_at = self.available_at
+        if available_at is None and self.available_on is not None:
+            from .symbol_utils import market_timezone
+
+            if instrument is None:
+                raise ValueError("instrument is required for date-only publication evidence")
+            available_at = datetime.combine(self.available_on, time.max, tzinfo=market_timezone(instrument))
         source_id = re.sub(r"[^a-z0-9_.-]+", "_", self.source.casefold()).strip("_")
         return EvidenceItem.create(
             source=source_id,
             evidence_type=self.kind,
             requested_date=requested_date,
             effective_date=self.effective_date,
-            available_at=self.available_at,
+            available_at=available_at,
             content=self.content,
             fallback=self.fallback,
             origins=(

@@ -523,9 +523,10 @@ class ResearchGraph:
                 narrative,
                 requested_date=context.request.analysis_date,
                 analyst=analyst,
+                instrument=context.request.ticker,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
-            observed_items = [o.evidence(context.request.analysis_date) for o in observations]
+            observed_items = [o.evidence(context.request.analysis_date, instrument=context.request.ticker) for o in observations]
             evidence = list({item.ref: item for item in (*evidence, *observed_items)}.values())
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
@@ -1544,6 +1545,7 @@ def _collect_evidence(
     requested_date: date,
     analyst: str,
     prefetched_blocks: Iterable[dict[str, Any]] = (),
+    instrument: str | None = None,
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
     content_groups: dict[
@@ -1591,7 +1593,7 @@ def _collect_evidence(
             with capture_observations() as news_observations:
                 emit_news(message.content, "news", "", global_news=getattr(message, "name", "") == "get_global_news")
             for observation in news_observations:
-                item = observation.evidence(requested_date)
+                item = observation.evidence(requested_date, instrument=instrument)
                 items[item.ref] = item
             # Producer metadata owns item timing, including cached revisions.
             continue
@@ -1670,7 +1672,7 @@ def _collect_evidence(
             from tradingagents.dataflows.source_observations import SourceObservation
 
             observation = SourceObservation.load(block["source_observation"])
-            item = observation.evidence(requested_date)
+            item = observation.evidence(requested_date, instrument=instrument)
             items[item.ref] = item
             continue
         raw_records = block.get("records", [])

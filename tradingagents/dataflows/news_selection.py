@@ -46,42 +46,58 @@ def publication_day(value) -> date | None:
         return None
 
 
+def publication_instant(value) -> datetime:
+    """Order reliable timestamps without discarding their intraday precision."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(re.sub(r"\s+(?:JST|CST)$", "", value).replace("Z", "+00:00"))
+        except ValueError:
+            value = publication_day(value)
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=UTC)
+    return datetime.min.replace(tzinfo=UTC)
+
+
 def select_temporal[T](
     rows: list[T],
     limit: int,
     start_date: str,
     end_date: str,
     *,
-    published: Callable[[T], date | datetime | None],
+    published: Callable[[T], date | datetime | str | None],
+    dated: Callable[[T], date | None] | None = None,
 ) -> list[T]:
     """Reserve one third for three earlier time bands, borrowing unused slots."""
     if limit <= 0:
         return []
-    if len(rows) <= limit:
-        return list(rows)
-    start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
-    recent_start = max(start, end - timedelta(days=6))
     ordered = sorted(
         enumerate(rows),
-        key=lambda pair: publication_day(published(pair[1])) or date.min,
+        key=lambda pair: publication_instant(published(pair[1])),
         reverse=True,
     )
+    if len(rows) <= limit:
+        return [row for _, row in ordered]
+    start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    recent_start = max(start, end - timedelta(days=6))
+    day = dated or (lambda row: publication_day(published(row)))
     recent = [
         pair
         for pair in ordered
-        if (publication_day(published(pair[1])) or date.min) >= recent_start
+        if (day(pair[1]) or date.min) >= recent_start
     ]
     older = [
         pair
         for pair in ordered
-        if start <= (publication_day(published(pair[1])) or date.min) < recent_start
+        if start <= (day(pair[1]) or date.min) < recent_start
     ]
     reserved = limit // 3 if older else 0
     chosen = recent[: limit - reserved]
     width = max(1, (recent_start - start).days)
     buckets = [[], [], []]
     for pair in older:
-        offset = (publication_day(published(pair[1])) - start).days
+        offset = (day(pair[1]) - start).days
         buckets[min(2, offset * 3 // width)].append(pair)
     for _ in range(reserved):
         for bucket in buckets:
@@ -112,6 +128,7 @@ class NewsCandidate:
     retrieved_at: str | None = None
     revision: bool = False
     market_day: str | None = None
+    refresh_failure: str | None = None
 
     @classmethod
     def from_item(cls, source: str, item: str) -> NewsCandidate:
@@ -196,7 +213,9 @@ def merge_news_blocks(blocks, limit, start_date=None, end_date=None, quotas=None
     merged, counts = [], []
     for i, (header, rows) in enumerate(parsed):
         kept = (
-            select_temporal(rows, budgets[i], start_date, end_date, published=lambda r: r.day)
+            select_temporal(rows, budgets[i], start_date, end_date,
+                            published=lambda r: r.retrieved_at if r.revision else r.published,
+                            dated=lambda r: r.day)
             if start_date and end_date
             else rows[: budgets[i]]
         )
@@ -229,6 +248,11 @@ def emit_news(block: str, source: str, ticker: str, *, global_news=False) -> Non
                 stamp = stamp.replace(tzinfo=market_timezone(ticker))
         except (ValueError, TypeError, AttributeError):
             pass
+        timing = ("near-live revision; revision publication unknown" if row.revision else
+                  "publication dated; bounded news selection" if row.day else
+                  "near-live undated news; publication time unknown")
+        if row.refresh_failure:
+            timing += f"; news cache refresh failed: {row.refresh_failure}; retained cached material"
         publish_observation(
             row.source or source, "global_news_article" if global_news else "news_article",
             row.record_id or row.link or row.title,
@@ -238,9 +262,7 @@ def emit_news(block: str, source: str, ticker: str, *, global_news=False) -> Non
             available_at=None if row.revision else stamp,
             available_on=None if row.revision or stamp else row.day,
             retrieved_at=datetime.fromisoformat(row.retrieved_at) if row.retrieved_at else datetime.now(UTC),
-            timing=("near-live revision; revision publication unknown" if row.revision else
-                    "publication dated; bounded news selection" if row.day else
-                    "near-live undated news; publication time unknown"),
+            timing=timing,
         )
 
 

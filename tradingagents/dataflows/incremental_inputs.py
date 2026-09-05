@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
 from tradingagents.application.contracts import (
     CollectionDiagnostic,
     CollectionDomainResult,
+    CollectionResultState,
     CollectionSourceProvenance,
     IncrementalEvidenceCandidate,
 )
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 from .financial_inputs import collect_financial_inputs
 from .jp.jquants_sentiment import get_market_investor_flows
@@ -41,7 +43,7 @@ def observation_candidates(request, observations):
             if not 0 <= age <= request.near_live_max_age_days:
                 continue
         candidates.append(
-            IncrementalEvidenceCandidate(evidence=observation.evidence(request.analysis_cutoff))
+            IncrementalEvidenceCandidate(evidence=observation.evidence(request.analysis_cutoff, instrument=request.instrument))
         )
     return tuple(candidates)
 
@@ -59,6 +61,8 @@ def augment_domain(request, domain, observations):
                 source=re.sub(r"[^a-z0-9_.-]+", "_", origin.source.casefold()).strip("_"),
                 retrieved_at=datetime.fromisoformat(origin.retrieved_at),
                 fallback=candidate.evidence.fallback,
+                diagnostic=(CollectionDiagnostic(code="news_cache_refresh_failed")
+                            if "news cache refresh failed" in origin.timing else None),
             )
         )
         bases.append("pit" if candidate.evidence.available_at else "near_live_advisory")
@@ -70,6 +74,7 @@ def augment_domain(request, domain, observations):
                 update={
                     "retrieved_at": max(source.retrieved_at, previous.retrieved_at),
                     "fallback": source.fallback or previous.fallback,
+                    "diagnostic": source.diagnostic or previous.diagnostic,
                 }
             )
         combined_sources[source.source] = source
@@ -86,6 +91,61 @@ def augment_domain(request, domain, observations):
     ), candidates
 
 
+def retain_input_limitations(result, responses, *, failure_code=None, now=None):
+    """Keep producer limitations without replacing admitted material's retrieval time."""
+    domain, candidates = result
+    sources = {source.source: source for source in domain.sources}
+    limited = False
+    for response in responses:
+        for record in extract_provenance(response):
+            timing = record.timing.casefold()
+            code = next((code for token, code in (
+                ("cache refresh failed", "news_cache_refresh_failed"),
+                ("unavailable", "upstream_source_unavailable"),
+                ("partial", "upstream_source_partial"),
+                ("source_window_limited", "source_window_limited"),
+                ("truncated_by_global_cap", "truncated_by_global_cap"),
+            ) if token in timing), None)
+            if code is None or "fallback vendor selected" in timing:
+                continue
+            limited = True
+            name = re.sub(r"[^a-z0-9_.-]+", "_", record.source.casefold()).strip("_")
+            previous = sources.get(name)
+            if previous is not None:
+                sources[name] = previous.model_copy(update={
+                    "diagnostic": previous.diagnostic or CollectionDiagnostic(code=code),
+                })
+            else:
+                try:
+                    stamp = datetime.fromisoformat(record.retrieved_at or "")
+                    if stamp.tzinfo is None:
+                        raise ValueError("missing timezone")
+                except ValueError:
+                    stamp = now() if now else datetime.now(UTC)
+                sources[name] = CollectionSourceProvenance(
+                    source=name, retrieved_at=stamp, diagnostic=CollectionDiagnostic(code=code),
+                )
+    if limited or failure_code:
+        diagnostic = domain.diagnostic
+        if diagnostic is None or diagnostic.code == "bounded_source_observations" or not domain.sources:
+            diagnostic = CollectionDiagnostic(code=failure_code or "upstream_inputs_limited")
+        elif failure_code and failure_code not in diagnostic.code.split("."):
+            diagnostic = CollectionDiagnostic(code=f"{diagnostic.code}.{failure_code}")
+        domain = domain.model_copy(update={
+            "sources": tuple(sources.values()),
+            "state": CollectionResultState.PARTIAL if domain.evidence_refs else domain.state,
+            "diagnostic": diagnostic,
+        })
+    return domain, candidates
+
+
+def _input_failed(response):
+    body = strip_provenance_markers(str(response)).strip().casefold()
+    return body.startswith(("error", "failed")) or bool(
+        re.fullmatch(r"<[^<>]*unavailable[^<>]*>", body)
+    )
+
+
 def append_financials(request, domain, routed):
     inputs = collect_financial_inputs(
         request.instrument,
@@ -94,8 +154,11 @@ def append_financials(request, domain, routed):
         include_overview=False,
         stop_on_rate_limit=True,
     )
-    return augment_domain(
-        request, domain, [SourceObservation.load(o) for o in inputs["observations"]]
+    responses = tuple(inputs["responses"].values())
+    return retain_input_limitations(
+        augment_domain(request, domain, [SourceObservation.load(o) for o in inputs["observations"]]),
+        responses,
+        failure_code="financial_inputs_partial" if any(map(_input_failed, responses)) else None,
     )
 
 
@@ -107,11 +170,17 @@ def collect_professional_signals(request, fetch):
         state="unavailable",
         diagnostic=CollectionDiagnostic(code="no_usable_professional_signals"),
     )
-    return augment_domain(request, empty, observations)
+    responses = [result.body for result in results]
+    return retain_input_limitations(
+        augment_domain(request, empty, observations), responses,
+        failure_code="professional_signals_partial" if any(map(_input_failed, responses)) else None,
+    )
 
 
 def append_news_context(request, domain, routed):
     observations = []
+    responses = []
+    failed = False
     calls = [
         lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
                        (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
@@ -123,15 +192,23 @@ def append_news_context(request, domain, routed):
     for call in calls:
         with capture_observations() as captured:
             try:
-                call()
+                response = call()
             except Exception:
+                failed = True
                 continue
+            responses.append(response)
+            failed = failed or _input_failed(response)
             observations.extend(captured)
-    return augment_domain(request, domain, observations)
+    return retain_input_limitations(
+        augment_domain(request, domain, observations), responses,
+        failure_code="news_context_partial" if failed else None,
+    )
 
 
 def append_market_context(request, domain, series, routed):
     observations = []
+    response = ""
+    failed = False
     if series is not None:
         points = [p for p in series.points if request.window_start < p.completed_at <= request.window_end]
         if points:
@@ -154,13 +231,16 @@ def append_market_context(request, domain, series, routed):
             ))
     with capture_observations() as captured:
         try:
-            routed("get_verified_market_snapshot", request.instrument,
+            response = routed("get_verified_market_snapshot", request.instrument,
                    request.analysis_cutoff.isoformat(), 5, _provenance=True, _stop_on_rate_limit=True)
         except Exception:
-            pass
+            failed = True
         else:
             observations.extend(captured)
-    return augment_domain(request, domain, observations)
+    return retain_input_limitations(
+        augment_domain(request, domain, observations), (response,),
+        failure_code="market_snapshot_unavailable" if failed or _input_failed(response) else None,
+    )
 
 
 def dedupe_news_domains(domains, candidates):

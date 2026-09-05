@@ -141,6 +141,7 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
         requested_date=request.analysis_cutoff,
         analyst="social",
         prefetched_blocks=[{"source_observation": observed.dump()}],
+        instrument=request.instrument,
     )
     assert len(admitted) == 1
     assert (
@@ -207,3 +208,23 @@ def test_cn_news_signal_deduplication_preserves_valid_domain_contracts():
     assert not domains[1].evidence_refs
     for domain in domains:
         CollectionDomainResult.model_validate(domain.model_dump())
+
+
+def test_full_statement_evidence_resolves_publication_day_in_its_market():
+    from zoneinfo import ZoneInfo
+
+    import pytest
+
+    from tradingagents.application.contracts import EvidenceBundle
+    from tradingagents.dataflows.source_observations import SourceObservation
+    from tradingagents.graph.research_graph import _collect_evidence
+
+    observation = SourceObservation("J-Quants", "financial_income", "9984.T:2026-06-30",
+                                    {"Revenue": 100}, datetime(2026, 9, 5, tzinfo=UTC),
+                                    effective_date=date(2026, 6, 30), available_on=date(2026, 9, 5))
+    items = _collect_evidence([], "", requested_date=date(2026, 9, 5), analyst="fundamentals",
+                              prefetched_blocks=[{"source_observation": observation.dump()}],
+                              instrument="9984.T")
+    assert items[0].available_at == datetime(2026, 9, 5, 23, 59, 59, 999999, tzinfo=ZoneInfo("Asia/Tokyo"))
+    with pytest.raises(ValueError, match="after the analysis cutoff"):
+        EvidenceBundle(instrument="9984.T", analysis_date=date(2026, 9, 4), items=tuple(items))

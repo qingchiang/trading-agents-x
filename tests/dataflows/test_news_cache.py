@@ -152,3 +152,63 @@ def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_p
                            lambda: "## feed\n\n### event\nPublished: 2026-09-03T16:00:00Z", config=config)
     row = split_candidates(body)[1][0]
     assert row.day.isoformat() == "2026-09-04"
+
+
+def test_refresh_failure_survives_incremental_admission_without_changing_article_identity(tmp_path, monkeypatch):
+    from tests.dataflows.test_incremental_us_collector import _request
+    from tradingagents.application.incremental_collection import normalize_incremental_collection
+    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.dataflows.incremental_us import collect_us_incremental
+    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.dataflows.news_selection import finalize_news
+
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    request = _request(enabled_domains=("news",), baseline=current.date()-timedelta(days=4),
+                       target=current.date(), window_start=current-timedelta(days=4), window_end=current)
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    attempt_time = current
+    def fetch():
+        if attempt_time == current:
+            return "## news\n\n### event\nPublished: 2026-09-03T10:00:00Z"
+        raise RuntimeError("source unavailable")
+    def route(method, *_args, **_kwargs):
+        if method != "get_news":
+            return "No news found"
+        block = fetch_news_feed("yfinance", "GOOG", "2026-09-01", "2026-09-05", fetch,
+                                config=config, now=lambda: attempt_time)
+        return finalize_news(block, "yfinance", "GOOG", "2026-09-01", "2026-09-05", 30)
+    original = collect_us_incremental(request, route_to_vendor=route, now=lambda: current)
+    attempt_time = current + timedelta(minutes=16)
+    refreshed = collect_us_incremental(request, route_to_vendor=route, now=lambda: attempt_time)
+    summary, items, _ = normalize_incremental_collection(request, refreshed, sealed_at=attempt_time)
+    assert len(items) == 1
+    assert "cache refresh failed" in items[0].origins[0].timing
+    assert items[0].origins[0].retrieved_at == current.isoformat()
+    assert summary.domains[0].sources[0].diagnostic.code == "news_cache_refresh_failed"
+    assert items[0].provenance["observation_identity"] == original.evidence[0].evidence.provenance["observation_identity"]
+
+
+def test_cache_tracks_content_reversion_as_a_new_observed_version(tmp_path):
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.dataflows.news_selection import split_candidates
+
+    config = {**get_config(), "data_cache_dir": str(tmp_path), "news_cache_refresh_seconds": 0}
+    current = datetime(2026, 9, 3, 10, tzinfo=UTC)
+    def request(text, now, end="2026-09-05"):
+        return fetch_news_feed("source", "GOOG", "2026-09-01", end,
+                               lambda: f"## feed\n\n### event\nPublished: 2026-09-01\n{text}\nLink: https://example.test/1",
+                               config=config, now=lambda: now)
+    first = request("A", current)
+    request("B", current + timedelta(days=1))
+    reverted = request("A", current + timedelta(days=2))
+    row = split_candidates(reverted)[1][0]
+    assert "\nA\n" in row.content
+    assert row.retrieved_at == (current + timedelta(days=2)).isoformat()
+    assert row.revision
+    # Original history remains accessible; reading it does not backdate A's reversion.
+    past = fetch_news_feed("source", "GOOG", "2026-09-01", "2026-09-03", lambda: "No news found",
+                           config=config, now=lambda: current + timedelta(days=2, minutes=1))
+    assert split_candidates(past)[1][0].retrieved_at == split_candidates(first)[1][0].retrieved_at

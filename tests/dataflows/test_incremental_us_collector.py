@@ -229,7 +229,7 @@ def test_us_collector_reports_yahoo_error_as_unavailable_with_actual_source() ->
     )
     domain = collected.collection_summary.domains[0]
     assert domain.state.value == "unavailable"
-    assert domain.diagnostic.code == "news_retrieval_failed"
+    assert domain.diagnostic.code == "news_retrieval_failed.news_context_partial"
     assert domain.sources[0].source == "yfinance"
 
 

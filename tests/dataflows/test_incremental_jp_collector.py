@@ -543,7 +543,7 @@ Disclosed: 2026-07-22 11:00 JST
         for source in domain.sources
     }
     assert diagnostics == {
-        "tdnet": None,
+        "tdnet": "source_window_limited",
         "edinet": "upstream_source_unavailable",
         "google_news": "upstream_source_unavailable",
     }
@@ -784,7 +784,7 @@ def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> No
     domain = collected.collection_summary.domains[0]
     assert domain.state.value == "unavailable"
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "fundamentals_retrieval_failed"
+    assert domain.diagnostic.code == "fundamentals_retrieval_failed.financial_inputs_partial"
     assert domain.sources[0].source == "yfinance"
     assert domain.sources[0].fallback is True
     assert collected.evidence == ()

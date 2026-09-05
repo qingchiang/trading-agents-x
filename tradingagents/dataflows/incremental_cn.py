@@ -33,6 +33,7 @@ from tradingagents.dataflows.incremental_inputs import (
     append_news_context,
     augment_domain,
     collect_professional_signals,
+    retain_input_limitations,
 )
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.market_signals import fetch_sentiment_signals
@@ -236,10 +237,11 @@ def _collect_news(request, routed, now):
             from dataclasses import replace
 
             fallback = any("fallback vendor selected" in r.timing for r in extract_provenance(response))
-            return augment_domain(request, CollectionDomainResult(
+            result = augment_domain(request, CollectionDomainResult(
                 domain="news", state="unavailable",
                 diagnostic=CollectionDiagnostic(code="bounded_no_admitted_articles"),
             ), [replace(o, fallback=o.fallback or fallback) for o in news_observations])
+            return retain_input_limitations(result, (response,), now=now)
         sources, body = _routed_sources(response, now)
 
         if _is_failure(body):

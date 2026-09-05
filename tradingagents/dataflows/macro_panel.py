@@ -240,6 +240,7 @@ def _cell(
     if summary is None:
         audit(data, "—", "available; no observations in requested window")
         return "n/a"
+    yoy = None
     if display == "exact_yoy":
         yoy = exact_year_over_year(data["points"])
         if yoy is None:
@@ -262,11 +263,26 @@ def _cell(
     from .source_observations import publish_observation
 
     if data.get("retrieved_at"):
+        observation_values = {
+            "value": summary.last_val,
+            "observation_date": summary.last_date,
+            "display": rendered,
+            "units": data.get("units"),
+            "frequency": data.get("frequency"),
+        }
+        if yoy is not None:
+            observation_values["year_over_year"] = {
+                "base_date": yoy.prior_date,
+                "base_value": yoy.prior_val,
+                "current_date": yoy.last_date,
+                "current_value": yoy.last_val,
+                "pct": yoy.pct,
+            }
         publish_observation(
             str(data.get("actual_source") or _SOURCE_LABELS.get(source, source)),
-            "macro_indicator", indicator,
-            {"value": summary.last_val, "observation_date": summary.last_date,
-             "display": rendered, "units": data.get("units"), "frequency": data.get("frequency")},
+            "macro_indicator",
+            indicator,
+            observation_values,
             effective_date=summary.last_date,
             retrieved_at=datetime.fromisoformat(data["retrieved_at"]),
             timing="current macro backdrop; observation date is not a release timestamp",
