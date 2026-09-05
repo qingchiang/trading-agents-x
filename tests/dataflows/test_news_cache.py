@@ -251,3 +251,60 @@ def test_cache_tracks_content_reversion_as_a_new_observed_version(tmp_path):
     past = fetch_news_feed("source", "GOOG", "2026-09-01", "2026-09-03", lambda: "No news found",
                            config=config, now=lambda: current + timedelta(days=2, minutes=1))
     assert split_candidates(past)[1][0].retrieved_at == split_candidates(first)[1][0].retrieved_at
+
+
+def test_full_news_separates_availability_diagnostics_from_articles():
+    from langchain_core.messages import ToolMessage
+
+    from tradingagents.dataflows.news_selection import NewsCandidate, render_candidate
+    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    article = NewsCandidate("cninfo", "real event", "### real event", "2026-09-04T10:00:00+08:00",
+                            retrieved_at=current.isoformat())
+    success = ProvenanceRecord("get_news", "cninfo", "2026-09-01 to 2026-09-05", "2026-09-04", "publication-date filtered")
+    failure = ProvenanceRecord("get_news", "eastmoney", "2026-09-01 to 2026-09-05", "unknown", "source unavailable")
+    body = attach_evidence_span(attach_provenance("## feed\n\n" + render_candidate(article), success), temporal_scope="point_in_time")
+    body += "\n\n" + attach_provenance("### Source availability notes\n<Eastmoney unavailable>", failure)
+    evidence = _collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")], "",
+                                 requested_date=current.date(), analyst="news", instrument="600309.SS")
+    articles = [item for item in evidence if item.evidence_type == "news_article"]
+    assert len(articles) == 1
+    assert articles[0].source == "cninfo"
+    diagnostics = [item for item in evidence if item.content is None]
+    assert any(origin.source == "eastmoney" and "unavailable" in origin.timing for item in diagnostics for origin in item.origins)
+
+
+def test_cn_query_recovery_does_not_revise_unchanged_cached_article(tmp_path, monkeypatch):
+    import sqlite3
+
+    from tradingagents.dataflows.cn import google_news
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.dataflows.news_selection import split_candidates
+
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    partial = True
+    monkeypatch.setattr(google_news, "_company_names", lambda _: ("贵州茅台酒股份有限公司", "贵州茅台"))
+    def fetch(query):
+        if "股份有限公司" in query:
+            if partial:
+                raise TimeoutError("unavailable")
+            return []
+        return [{"title": "贵州茅台发布业绩", "source": "证券时报", "published": datetime(2026, 9, 4, 10)}]
+    monkeypatch.setattr(google_news, "_fetch_items", fetch)
+    args = ("google", "600519.SS", "2026-09-01", "2026-09-05", lambda: google_news.get_news("600519.SS", "2026-09-01", "2026-09-05"))
+    first = fetch_news_feed(*args, config=config, now=lambda: current)
+    partial = False
+    recovered = fetch_news_feed(*args, config=config, now=lambda: current + timedelta(minutes=16))
+    first_header, first_rows = split_candidates(first)
+    recovered_header, recovered_rows = split_candidates(recovered)
+    assert "name queries failed" in first_header
+    assert "name queries failed" not in recovered_header
+    assert first_rows == recovered_rows
+    assert not recovered_rows[0].revision
+    assert recovered_rows[0].retrieved_at == current.isoformat()
+    with sqlite3.connect(tmp_path / "news" / "sources.sqlite3") as db:
+        assert db.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1

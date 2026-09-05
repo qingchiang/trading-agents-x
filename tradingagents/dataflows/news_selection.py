@@ -234,11 +234,14 @@ def render_candidate(row: NewsCandidate) -> str:
     return row.content + f"\nObservation: retrieved {row.retrieved_at}{timing}" + "\n<!-- news-observation: " + json.dumps(metadata, ensure_ascii=False) + " -->"
 
 
-def emit_news(block: str, source: str, ticker: str, *, global_news=False) -> None:
+def emit_news(block: str, source: str, ticker: str, *, global_news=False, metadata_only=False) -> None:
     from .source_observations import publish_observation
     from .symbol_utils import market_timezone
 
     for row in split_candidates(block, source)[1]:
+        if metadata_only and row.retrieved_at is None:
+            # Full rehydrates producer records; presentation headings are not articles.
+            continue
         stamp = None
         try:
             if len(row.published) <= 10:

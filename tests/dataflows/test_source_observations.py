@@ -263,7 +263,8 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
     sealed = _collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")], "",
                                requested_date=current.date(), analyst="news", instrument="GOOG")
     combined = {item.ref: item for item in [*sealed, *(o.evidence(current.date(), instrument="GOOG") for o in observed)]}
-    assert len(combined) == 1
+    assert sum(item.evidence_type == "news_article" for item in combined.values()) == 1
+    assert all(item.content is None for item in combined.values() if item.evidence_type != "news_article")
     assert all(item.fallback and item.origins[0].fallback for item in combined.values())
 
 

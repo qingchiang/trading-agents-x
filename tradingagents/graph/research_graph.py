@@ -1591,12 +1591,15 @@ def _collect_evidence(
             from tradingagents.dataflows.source_observations import capture_observations
 
             with capture_observations() as news_observations:
-                emit_news(message.content, "news", instrument or "", global_news=getattr(message, "name", "") == "get_global_news")
-            fallback = any("fallback vendor selected" in record.timing for record in extract_provenance(message.content))
+                emit_news(message.content, "news", instrument or "", global_news=getattr(message, "name", "") == "get_global_news", metadata_only=True)
+            records = extract_provenance(message.content)
+            fallback = any("fallback vendor selected" in record.timing for record in records)
             for observation in news_observations:
                 observation = replace(observation, fallback=observation.fallback or fallback)
                 item = observation.evidence(requested_date, instrument=instrument)
                 items[item.ref] = item
+            # Preserve collection diagnostics without assigning article content or identity.
+            collect_payload(records, None)
             # Producer metadata owns item timing, including cached revisions.
             continue
         artifact = getattr(message, "artifact", None)

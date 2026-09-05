@@ -247,6 +247,9 @@ def append_market_context(request, domain, series, routed):
     if series is not None:
         points = [p for p in series.points if request.window_start < p.completed_at <= request.window_end]
         if points:
+            baseline_points = [p for p in series.points if p.completed_at <= request.window_start]
+            if baseline_points:
+                points.insert(0, max(baseline_points, key=lambda p: p.completed_at))
             closes = [p.adjusted_close for p in points]
             peak = closes[0]
             drawdown = 0.0
@@ -262,7 +265,9 @@ def append_market_context(request, domain, series, routed):
                 series.retrieved_at, effective_date=points[-1].session,
                 available_at=points[-1].completed_at,
                 fallback=series.fallback,
-                timing="completed observations in the actual interval; one provider and adjustment basis",
+                timing=("completed observations including the latest available baseline endpoint"
+                        if baseline_points else "baseline endpoint unavailable; completed observed subinterval")
+                       + "; one provider and adjustment basis",
             ))
     with capture_observations() as captured:
         try:

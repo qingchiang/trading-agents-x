@@ -102,13 +102,21 @@ def create_fundamentals_analyst(llm):
                 else str(result.content)
             )
             records = extract_provenance(state["messages"])
+            attempted = {
+                *inputs["responses"],
+                *(record.evidence for record in records),
+            }
             prefetched_evidence += missing_evidence_blocks(
                 records,
                 (
-                    ("get_fundamentals", "fundamentals overview"),
-                    ("get_income_statement", "income statement"),
-                    ("get_balance_sheet", "balance sheet"),
-                    ("get_cashflow", "cash flow statement"),
+                    (method, label)
+                    for method, label in (
+                        ("get_fundamentals", "fundamentals overview"),
+                        ("get_income_statement", "income statement"),
+                        ("get_balance_sheet", "balance sheet"),
+                        ("get_cashflow", "cash flow statement"),
+                    )
+                    if method not in attempted
                 ),
                 requested_date=current_date,
             )

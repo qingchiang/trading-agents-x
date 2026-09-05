@@ -182,5 +182,5 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         )
     return (
         f"## {ticker} media headlines (Google News China), from {start_date} "
-        f"to {end_date}:\n\n{counts.render()}\n\n{body}{availability}"
+        f"to {end_date}:\n\n{counts.render()}{availability}\n\n{body}"
     )

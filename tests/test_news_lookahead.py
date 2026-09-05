@@ -218,3 +218,45 @@ def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypat
     assert "truncated=5" in output
     assert "SECOND QUERY EVENT 4" in output
     assert "SECOND QUERY EVENT 5" not in output
+
+
+@pytest.mark.parametrize("limit,expected_queries", [(1, 1), (20, 2)])
+def test_global_output_target_is_independent_of_per_query_candidates(monkeypatch, limit, expected_queries):
+    from tradingagents.dataflows.config import get_config, use_config
+
+    calls = []
+    class Search:
+        def __init__(self, *, query, news_count, **kwargs):
+            calls.append((query, news_count))
+            self.news = [{"title": f"{query} event {i}", "providerPublishTime": _epoch("2025-05-05")}
+                         for i in range(news_count)]
+    monkeypatch.setattr(ynews.yf, "Search", Search)
+    monkeypatch.setattr(ynews, "yf_retry", lambda fn: fn())
+    with use_config({**get_config(), "news_cache_enabled": False,
+                     "global_news_queries": ["first", "second", "third"],
+                     "global_news_candidate_limit": 10}):
+        output = ynews.get_global_news_yfinance("2025-05-09", limit=limit)
+    assert len(calls) == expected_queries
+    assert all(count == 10 for _, count in calls)
+    assert output.count("\n### ") == limit
+
+
+def test_global_larger_output_target_cannot_reuse_smaller_refresh(tmp_path, monkeypatch):
+    from tradingagents.dataflows.config import get_config, use_config
+
+    calls = []
+    class Search:
+        def __init__(self, *, query, news_count, **kwargs):
+            calls.append(query)
+            self.news = [{"title": f"{query} event {i}", "providerPublishTime": _epoch("2025-05-05")}
+                         for i in range(news_count)]
+    monkeypatch.setattr(ynews.yf, "Search", Search)
+    monkeypatch.setattr(ynews, "yf_retry", lambda fn: fn())
+    with use_config({**get_config(), "news_cache_enabled": True, "data_cache_dir": str(tmp_path),
+                     "news_cache_retention_days": 10000,
+                     "global_news_queries": ["first", "second", "third"],
+                     "global_news_candidate_limit": 10}):
+        ynews.get_global_news_yfinance("2025-05-09", limit=10)
+        output = ynews.get_global_news_yfinance("2025-05-09", limit=20)
+    assert calls == ["first", "first", "second"]
+    assert output.count("\n### ") == 20

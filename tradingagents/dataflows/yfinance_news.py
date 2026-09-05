@@ -306,7 +306,7 @@ def _get_global_news_yfinance(
                     all_news.append(article)
                 else:
                     duplicates += 1
-            if len(all_news) >= candidate_limit:
+            if len(all_news) >= limit:
                 break
 
         news_str = ""
@@ -360,6 +360,6 @@ def get_global_news_yfinance(curr_date: str, look_back_days: int | None = None, 
         with candidate_scope():
             return _get_global_news_yfinance(curr_date, days, limit)
     block = fetch_news_feed("yfinance-global", "global", start, curr_date, fetch,
-                            budget=config.get("global_news_candidate_limit", 10), config=config,
+                            budget=(config.get("global_news_candidate_limit", 10), limit), config=config,
                             global_feed=True)
     return finalize_news(block, "yfinance-global", "", start, curr_date, limit, global_news=True)

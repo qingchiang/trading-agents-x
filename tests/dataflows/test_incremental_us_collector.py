@@ -477,3 +477,22 @@ def test_default_us_collector_commits_a_full_to_incremental_service_journey(
         "completed_stock_session",
     )
     assert any(event.event_type == "incremental.collection_completed" for event in repository.list_events(result.run_id))
+
+
+@pytest.mark.parametrize("target_close", [110, 90])
+def test_market_interval_includes_baseline_endpoint_when_snapshot_fails(target_close):
+    def route(method, *args, **kwargs):
+        if method == "get_stock_data":
+            return _market_response().replace("109,111,108,110", f"{target_close},{target_close},{target_close},{target_close}")
+        raise RuntimeError("snapshot unavailable")
+    result = collect_us_incremental(_request(), route_to_vendor=route,
+                                   now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC))
+    interval = next(c.evidence.provenance["observation"]["values"] for c in result.evidence
+                    if c.evidence.evidence_type == "market_interval")
+    assert interval["start_session"] == "2026-07-20"
+    assert interval["end_session"] == "2026-07-24"
+    assert interval["completed_rows"] == 2
+    assert interval["close_change"] == pytest.approx(target_close / 101 - 1)
+    assert interval["min_close"] == min(101, target_close)
+    assert interval["max_close"] == max(101, target_close)
+    assert interval["maximum_drawdown"] == pytest.approx(min(0, target_close / 101 - 1))
