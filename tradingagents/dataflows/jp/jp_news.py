@@ -15,8 +15,9 @@ data and raise ``NoMarketDataError`` only when none did, letting the router fall
 through to yfinance (English media) as a last resort.
 
 The three sub-feeds are independent blocking calls, so we fetch them concurrently
-(their wall time becomes the slowest one, not the sum). Extended requests keep
-the full range for EDINET/Google but clamp TDnet to its 31-date free archive.
+(their wall time becomes the slowest one, not the sum). Upstream requests respect
+EDINET's 90-day scan limit and TDnet's 31-date free archive; Google keeps the
+requested window. Previously cached candidates may supplement those source windows.
 Output order (statutory → timely → media) is preserved regardless. The
 assembler applies the configured ticker-news limit once, after cross-source
 headline deduplication, so the three feeds share one prompt budget and official
@@ -26,10 +27,8 @@ disclosures retain priority over media when that budget is exhausted.
 from __future__ import annotations
 
 import logging
-import re
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
 
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -41,7 +40,6 @@ from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_cache import fetch_news_feed
 from ..news_diagnostics import candidate_filter_note
-from ..news_quality import canonical_headline
 from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .edinet_common import effective_window as _edinet_effective_window
@@ -59,60 +57,6 @@ logger = logging.getLogger(__name__)
 # re-fetching. Kept in sync with the sub-feeds' headers by their tests.
 _DATA_PREFIX = "## "
 _NOTE_PREFIX = "<"
-
-_ITEM_START_RE = re.compile(r"(?m)^### ")
-_TIER_PREFIX_RE = re.compile(r"^\[(?:direct|candidate|context)\]\s*", re.I)
-_ITEM_METADATA_RE = re.compile(r"\s+\((?:source|filer):[^)]*\)\s*$", re.I)
-
-
-@dataclass(frozen=True)
-class _FeedBlock:
-    """One rendered sub-feed split into its preamble and news items."""
-
-    preamble: str
-    items: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _MergeCounts:
-    """Auditable disposition of items received from one sub-feed."""
-
-    returned: int
-    duplicates: int
-    kept: int
-    cap_omitted: int
-
-
-def _split_feed_block(block: str) -> _FeedBlock:
-    """Split a sub-feed block without depending on its source-specific body."""
-    starts = [match.start() for match in _ITEM_START_RE.finditer(block)]
-    if not starts:
-        return _FeedBlock(block.rstrip(), ())
-    preamble = block[: starts[0]].rstrip()
-    items = tuple(
-        block[start : starts[index + 1] if index + 1 < len(starts) else None].rstrip()
-        for index, start in enumerate(starts)
-    )
-    return _FeedBlock(preamble, items)
-
-
-def _item_key(item: str) -> str:
-    """Return a source-neutral normalized key for an item's Markdown title."""
-    title = item.splitlines()[0].removeprefix("### ").strip()
-    title = _TIER_PREFIX_RE.sub("", title)
-    title = _ITEM_METADATA_RE.sub("", title)
-    return canonical_headline(title)
-
-
-def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_MergeCounts]]:
-    """Deduplicate and cap blocks in source-priority order.
-
-    Returns rendered non-empty blocks plus disposition counts aligned with the
-    input. EDINET and TDnet precede Google News at the caller, so an
-    equivalent official disclosure wins over a media headline and remaining
-    prompt capacity is assigned to official sources first.
-    """
-    return merge_news_blocks(blocks, limit)
 
 
 def _safe_feed(

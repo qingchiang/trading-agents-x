@@ -356,7 +356,7 @@ def render_filings(records: list[dict], format_fn, limit: int) -> str:
     """Sort ``records`` newest-first, cap at ``limit``, and join with blank lines.
 
     Shared by both EDINET feeds: ``format_fn`` renders one record's header+detail,
-    ``limit`` is the per-feed item cap (``news_article_limit``). ``submitDateTime``
+    ``limit`` is the caller's per-feed candidate or output cap. ``submitDateTime``
     is the real filing time, so sorting on it is also the recency order callers want.
     """
     ordered = sorted(records, key=lambda r: r.get("submitDateTime") or "", reverse=True)

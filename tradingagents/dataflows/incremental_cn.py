@@ -31,14 +31,12 @@ from tradingagents.dataflows.incremental_inputs import (
     append_financials,
     append_market_context,
     append_news_context,
-    augment_domain,
+    collect_news_observations,
     collect_professional_signals,
-    retain_input_limitations,
 )
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.market_signals import fetch_sentiment_signals
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
-from tradingagents.dataflows.source_observations import capture_observations
 from tradingagents.provenance import (
     EvidenceSpan,
     extract_evidence_spans,
@@ -224,24 +222,9 @@ def _collect_market(request, routed, now):
 def _collect_news(request, routed, now):
     sources = ()
     try:
-        with capture_observations() as news_observations:
-            response = routed(
-                "get_news",
-                request.instrument,
-                request.baseline_analysis_cutoff.isoformat(),
-                request.analysis_cutoff.isoformat(),
-                _provenance=True,
-                _stop_on_rate_limit=True,
-            )
-        if news_observations:
-            from dataclasses import replace
-
-            fallback = any("fallback vendor selected" in r.timing for r in extract_provenance(response))
-            result = augment_domain(request, CollectionDomainResult(
-                domain="news", state="unavailable",
-                diagnostic=CollectionDiagnostic(code="bounded_no_admitted_articles"),
-            ), [replace(o, fallback=o.fallback or fallback) for o in news_observations])
-            return retain_input_limitations(result, (response,), now=now)
+        response, structured = collect_news_observations(request, routed, now)
+        if structured is not None:
+            return structured
         sources, body = _routed_sources(response, now)
 
         if _is_failure(body):

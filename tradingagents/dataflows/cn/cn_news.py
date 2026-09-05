@@ -6,7 +6,6 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
 
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -18,7 +17,6 @@ from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_cache import fetch_news_feed
 from ..news_diagnostics import candidate_filter_note
-from ..news_quality import canonical_headline
 from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
 from .google_news import get_news as _google_news
@@ -33,30 +31,6 @@ _PARTIAL_QUERY_RE = re.compile(
     r"(?P<failed>\d+) of (?P<total>\d+) (?:Google News )?name queries failed",
     re.IGNORECASE,
 )
-
-
-@dataclass(frozen=True)
-class _MergeCounts:
-    returned: int
-    duplicates: int
-    kept: int
-    cap_omitted: int
-
-
-def _article_key(paragraph: str) -> str:
-    first_line = paragraph.splitlines()[0].removeprefix("### ").strip()
-    if first_line.startswith("[") and "] " in first_line:
-        first_line = first_line.split("] ", 1)[1]
-    for marker in (" (source:", " (institution:"):
-        first_line = first_line.split(marker, 1)[0]
-    return canonical_headline(first_line)
-
-
-def _dedupe_blocks(
-    blocks: list[str], limit: int
-) -> tuple[list[str], list[_MergeCounts]]:
-    """Deduplicate across sources and enforce the final article limit."""
-    return merge_news_blocks(blocks, limit)
 
 
 def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:

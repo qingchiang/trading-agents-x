@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
@@ -12,6 +13,7 @@ from tradingagents.application.contracts import (
     CollectionDomainResult,
     CollectionResultState,
     CollectionSourceProvenance,
+    IncrementalCollectionRequest,
     IncrementalEvidenceCandidate,
 )
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
@@ -143,6 +145,42 @@ def retain_input_limitations(result, responses, *, failure_code=None, now=None):
             "diagnostic": diagnostic,
         })
     return domain, candidates
+
+
+def collect_news_observations(
+    request: IncrementalCollectionRequest,
+    routed: Callable[..., object],
+    now: Callable[[], datetime],
+) -> tuple[
+    object,
+    tuple[CollectionDomainResult, tuple[IncrementalEvidenceCandidate, ...]] | None,
+]:
+    """Collect shared news records, leaving text-only responses to market adapters."""
+    with capture_observations() as observations:
+        response = routed(
+            "get_news",
+            request.instrument,
+            request.baseline_analysis_cutoff.isoformat(),
+            request.analysis_cutoff.isoformat(),
+            _provenance=True,
+            _stop_on_rate_limit=True,
+        )
+    if not observations:
+        return response, None
+    fallback = any(
+        "fallback vendor selected" in record.timing
+        for record in extract_provenance(response)
+    )
+    result = augment_domain(
+        request,
+        CollectionDomainResult(
+            domain="news",
+            state="unavailable",
+            diagnostic=CollectionDiagnostic(code="bounded_no_admitted_articles"),
+        ),
+        [replace(row, fallback=row.fallback or fallback) for row in observations],
+    )
+    return response, retain_input_limitations(result, (response,), now=now)
 
 
 def _input_failed(response):

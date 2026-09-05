@@ -41,12 +41,10 @@ from tradingagents.dataflows.incremental_inputs import (
     append_financials,
     append_market_context,
     append_news_context,
-    augment_domain,
-    retain_input_limitations,
+    collect_news_observations,
 )
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
-from tradingagents.dataflows.source_observations import capture_observations
 from tradingagents.dataflows.stocktwits import (
     fetch_stocktwits_messages as _default_stocktwits_fetch,
 )
@@ -278,24 +276,9 @@ def _collect_news(
     now: Callable[[], datetime],
 ) -> tuple[CollectionDomainResult, tuple[IncrementalEvidenceCandidate, ...]]:
     try:
-        with capture_observations() as news_observations:
-            response = route_to_vendor(
-                "get_news",
-                request.instrument,
-                request.baseline_analysis_cutoff.isoformat(),
-                request.analysis_cutoff.isoformat(),
-                _provenance=True,
-                _stop_on_rate_limit=True,
-            )
-        if news_observations:
-            from dataclasses import replace
-
-            fallback = any("fallback vendor selected" in r.timing for r in extract_provenance(response))
-            result = augment_domain(request, CollectionDomainResult(
-                domain="news", state="unavailable",
-                diagnostic=CollectionDiagnostic(code="bounded_no_admitted_articles"),
-            ), [replace(o, fallback=o.fallback or fallback) for o in news_observations])
-            return retain_input_limitations(result, (response,), now=now)
+        response, structured = collect_news_observations(request, route_to_vendor, now)
+        if structured is not None:
+            return structured
         source, body = _routed_text(response, now=now)
 
         if _is_failure_response(body):
