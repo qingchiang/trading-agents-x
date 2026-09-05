@@ -1,6 +1,9 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_states import missing_evidence_blocks
+from tradingagents.agents.utils.agent_states import (
+    missing_evidence_blocks,
+    prefetched_evidence_block,
+)
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -11,6 +14,9 @@ from tradingagents.agents.utils.fundamental_data_tools import (
     get_fundamentals_for_analysis,
     get_income_statement_for_analysis,
 )
+from tradingagents.dataflows.financial_inputs import collect_financial_inputs
+from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.source_observations import SourceObservation
 from tradingagents.provenance import extract_provenance
 
 
@@ -18,6 +24,21 @@ def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
+        inputs = state.get("fundamental_inputs")
+        if inputs is None:
+            inputs = collect_financial_inputs(
+                state["company_of_interest"], current_date, route=route_to_vendor,
+            )
+        observations = [SourceObservation.load(o) for o in inputs["observations"]]
+        core = inputs["responses"].get("get_fundamentals", "")
+        core += "\n\n" + "\n\n".join(
+            f"{o.content}\nSource: {o.source}; {o.timing}; retrieved: {o.retrieved_at.isoformat()}"
+            for o in observations
+        )
+        if not observations:
+            core += "\n\n" + "\n\n".join(
+                value for method, value in inputs["responses"].items() if method != "get_fundamentals"
+            )
 
         tools = [
             get_fundamentals_for_analysis,
@@ -33,6 +54,8 @@ def create_fundamentals_analyst(llm):
             + " The workflow injects the exact analysis date into every fundamental tool call; do not attempt to supply or override `curr_date`."
             + " Treat missing or unprovided financial fields as unknown, never as zero. Data labelled `not point-in-time historical data` must not be presented as evidence that was available on a historical analysis date; explicitly state that limitation instead. Do not substitute EBIT, pretax income, or another subtotal for operating or ordinary profit unless the source itself defines that mapping."
             + " Preserve source, requested-date, retrieval-time, and point-in-time limitation labels when citing exact figures. Do not create data-quality-warning or provenance sections; the workflow records source metadata separately."
+            + " Core financial data has already been fetched below. Use these summaries first; tools can retrieve the cached statement detail. YTD values are cumulative, not standalone quarters.\n\n"
+            + core
             + get_language_instruction(),
         )
 
@@ -62,7 +85,15 @@ def create_fundamentals_analyst(llm):
         result = chain.invoke(state["messages"])
 
         report = ""
-        prefetched_evidence = []
+        prefetched_evidence = [
+            prefetched_evidence_block(body, extract_provenance(body))
+            for body in inputs["responses"].values()
+        ]
+        prefetched_evidence.extend({
+            "content": o.content, "records": [],
+            "temporal_scope": "point_in_time" if o.is_pit else "live_only",
+            "source_observation": o.dump(),
+        } for o in observations)
 
         if len(result.tool_calls) == 0:
             report = (
@@ -71,7 +102,7 @@ def create_fundamentals_analyst(llm):
                 else str(result.content)
             )
             records = extract_provenance(state["messages"])
-            prefetched_evidence = missing_evidence_blocks(
+            prefetched_evidence += missing_evidence_blocks(
                 records,
                 (
                     ("get_fundamentals", "fundamentals overview"),
@@ -86,6 +117,7 @@ def create_fundamentals_analyst(llm):
             "messages": [result],
             "fundamentals_report": report,
             "prefetched_evidence": prefetched_evidence,
+            "fundamental_inputs": inputs,
         }
 
     return fundamentals_analyst_node

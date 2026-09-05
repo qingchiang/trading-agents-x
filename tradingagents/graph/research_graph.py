@@ -1636,6 +1636,13 @@ def _collect_evidence(
         )
 
     for block in prefetched_blocks:
+        if block.get("source_observation"):
+            from tradingagents.dataflows.source_observations import SourceObservation
+
+            observation = SourceObservation.load(block["source_observation"])
+            item = observation.evidence(requested_date)
+            items[item.ref] = item
+            continue
         raw_records = block.get("records", [])
         records = []
         for raw in raw_records:

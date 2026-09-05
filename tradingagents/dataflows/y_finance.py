@@ -440,6 +440,9 @@ def get_balance_sheet(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no balance sheet data")
 
+        from .source_observations import publish_yahoo_statement
+
+        publish_yahoo_statement(data, canonical, "balance", freq)
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
@@ -474,6 +477,9 @@ def get_cashflow(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no cash flow data")
 
+        from .source_observations import publish_yahoo_statement
+
+        publish_yahoo_statement(data, canonical, "cashflow", freq)
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
@@ -508,6 +514,9 @@ def get_income_statement(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no income statement data")
 
+        from .source_observations import publish_yahoo_statement
+
+        publish_yahoo_statement(data, canonical, "income", freq)
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 

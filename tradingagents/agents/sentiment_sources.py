@@ -317,6 +317,12 @@ def prepare_sentiment_sources(
             applicable=not (spec.live_only and not live_run),
             structured_numeric_facts=result.structured_numeric_facts,
         )
+        for observation in result.observations:
+            evidence_blocks.append({
+                "content": observation.content, "records": [],
+                "temporal_scope": "point_in_time" if observation.is_pit else "live_only",
+                "source_observation": observation.dump(),
+            })
 
     source_ids = [source.source_id for source in sources]
     if len(source_ids) != len(set(source_ids)):

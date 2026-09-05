@@ -18,6 +18,29 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 )
 
 
+def test_full_prefetches_financial_core_and_reuses_it_on_next_model_call(monkeypatch):
+    from langchain_core.runnables import RunnableLambda
+
+    calls = []
+    prompts = []
+
+    def route(method, *args, **kwargs):
+        calls.append(method)
+        return f"core data {method}"
+
+    class Model:
+        def bind_tools(self, tools):
+            return RunnableLambda(lambda prompt: prompts.append(prompt.to_string()) or AIMessage(content="report"))
+
+    monkeypatch.setattr(fa, "route_to_vendor", route)
+    node = fa.create_fundamentals_analyst(Model())
+    state = {"company_of_interest": "GOOG", "trade_date": "2026-09-05", "messages": []}
+    first = node(state)
+    node({**state, **first})
+    assert len(calls) == 4
+    assert "core data get_cashflow" in prompts[0]
+
+
 @pytest.mark.unit
 def test_fundamentals_prompt_preserves_missing_and_historical_data_boundaries():
     source = inspect.getsource(fa)

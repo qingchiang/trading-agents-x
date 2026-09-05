@@ -82,6 +82,13 @@ def _format_filing(record: dict) -> str:
     """
     label = _DOC_TYPE_LABELS.get(str(record.get("docTypeCode")), "Ownership/control filing")
     filer = record.get("filerName") or "Unknown filer"
+    from ..source_observations import publish_observation
+
+    publish_observation(
+        "EDINET", "ownership_filing", str(record.get("docID")),
+        {key: record.get(key) for key in ("docID", "docDescription", "filerName", "docTypeCode")},
+        available_on=record.get("submitDateTime"), effective_date=record.get("periodEnd"),
+    )
     line = f"### {label} — filed by {filer}"
     detail = filing_detail_line(record)
     return f"{line}\n{detail}" if detail else line

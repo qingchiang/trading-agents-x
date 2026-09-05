@@ -159,6 +159,9 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
             kind, curr_date, "available; curated line items were empty"
         )
     retrieved = datetime.now(UTC).isoformat(timespec="seconds")
+    from ..source_observations import publish_yahoo_statement
+
+    publish_yahoo_statement(sub, ticker, kind, freq, source="yfinance curated detail")
     block = (
         "\n\n## Line-item detail (yfinance, curated live snapshot, may lag)\n"
         f"Requested analysis date: {_requested_date_label(curr_date)}\n"

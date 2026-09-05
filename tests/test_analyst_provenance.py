@@ -35,6 +35,7 @@ def _state(tool_content: str):
         "company_of_interest": "6501.T",
         "trade_date": "2026-07-17",
         "asset_type": "stock",
+        "fundamental_inputs": {"responses": {}, "observations": []},
         "messages": [ToolMessage(content=tool_content, tool_call_id="call-1")],
     }
 

@@ -32,8 +32,13 @@ from tradingagents.application.contracts import (
     MarketSeriesResult,
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
+from tradingagents.dataflows.incremental_inputs import (
+    append_financials,
+    collect_professional_signals,
+)
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.jp.calendar import completed_market_date, is_tse_open
+from tradingagents.dataflows.market_signals import fetch_sentiment_signals
 from tradingagents.provenance import (
     EvidenceSpan,
     extract_evidence_spans,
@@ -92,12 +97,13 @@ def collect_japan_incremental(
             evidence.extend(candidates)
         elif domain == "fundamentals":
             result, candidates = _collect_fundamentals(request, routed, now)
+            result, extra = append_financials(request, result, routed)
+            domains.append(result)
+            evidence.extend((*candidates, *extra))
+        elif domain == "social":
+            result, candidates = collect_professional_signals(request, fetch_sentiment_signals)
             domains.append(result)
             evidence.extend(candidates)
-        elif domain == "social":
-            # The existing JP sentiment tools are analyst-only aggregates, not a
-            # configured collection route with auditable observation timestamps.
-            domains.append(_unavailable("social", "japan_social_route_unavailable"))
         else:
             raise ValueError(f"unsupported Japanese collection domain: {domain}")
 

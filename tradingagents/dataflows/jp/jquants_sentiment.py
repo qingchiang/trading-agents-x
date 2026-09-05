@@ -162,6 +162,16 @@ def _margin_published_by(record_date: str, curr: date) -> bool:
 
 
 def _margin_week(record: dict) -> str:
+    from ..source_observations import as_date, publish_observation
+
+    period = as_date(record.get("Date"))
+    if period:
+        publish_observation(
+            "J-Quants", "margin_balances", str(period), record,
+            effective_date=period,
+            available_on=add_business_days(period, _MARGIN_PUBLICATION_BUSINESS_DAYS),
+            timing="inferred publication date: T+2 TSE business days; weekly positioning",
+        )
     long_bal = parse_number(record.get("LongVol"))  # 信用買残 (margin longs)
     short_bal = parse_number(record.get("ShrtVol"))  # 信用売残 (margin shorts)
     ratio = (
@@ -228,6 +238,12 @@ _SHORT_MAX_ROWS = 8
 
 
 def _short_event(record: dict) -> str:
+    from ..source_observations import publish_observation
+
+    publish_observation(
+        "J-Quants", "short_positions", str(record.get("DiscDate")), record,
+        effective_date=record.get("CalcDate"), available_on=record.get("DiscDate"),
+    )
     seller = record.get("SSName") or "?"
     ratio = parse_number(record.get("ShrtPosToSO"))
     prev = parse_number(record.get("PrevRptRatio"))

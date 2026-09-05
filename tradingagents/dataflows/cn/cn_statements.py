@@ -294,6 +294,9 @@ def _yfinance_supplement(
             ),
         )
     retrieved = datetime.now(UTC).isoformat(timespec="seconds")
+    from ..source_observations import publish_yahoo_statement
+
+    publish_yahoo_statement(sub, ticker, kind, freq, source="yfinance statement supplement")
     block = (
         "\n\n## Supplemental line items (yfinance)\n"
         f"Requested analysis date: {requested}\n"
@@ -356,6 +359,23 @@ def _statement(
         axis=1, how="all"
     )
     entity_type = classify_entity(profile, populated_fields.columns)
+    from ..source_observations import publish_observation, scalar
+
+    for _, row in visible.iterrows():
+        values = {}
+        for label, aliases in _FIELDS[kind][entity_type]:
+            column = _find_column(visible.columns, aliases)
+            values[label] = scalar(row[column]) if column else None
+        values.update(currency=scalar(row.get("Currency")),
+                      period_basis="instant" if kind == "balance" else "YTD",
+                      entity_type=entity_type)
+        has_visibility = pd.notna(row.get("PublishDate")) or pd.notna(row.get("UpdateDate"))
+        publish_observation(
+            "AkShare / Sina CompanyFinanceService", f"financial_{kind}",
+            f"{canonical}:{row['ReportDate'].date()}", values,
+            effective_date=row["ReportDate"],
+            available_on=row["VisibilityDate"] if has_visibility else None,
+        )
     table, missing = _render_sina_table(visible, kind, entity_type)
     requested = curr_date or "not provided (live retrieval)"
     effective = visible["VisibilityDate"].max().strftime("%Y-%m-%d")
