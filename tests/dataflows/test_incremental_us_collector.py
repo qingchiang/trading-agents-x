@@ -20,6 +20,14 @@ from tradingagents.dataflows.rate_limit import stop_on_rate_limit_requested
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
+@pytest.fixture(autouse=True)
+def _isolate_shared_background(monkeypatch):
+    from tradingagents.dataflows import incremental_inputs
+
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
+
+
 def _request(
     *,
     enabled_domains=("market",),

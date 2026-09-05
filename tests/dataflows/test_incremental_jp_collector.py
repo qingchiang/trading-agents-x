@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest import mock
 
+import pytest
+
 from tradingagents.application.contracts import (
     IncrementalCollectionRequest,
     PerformanceComponentStatus,
@@ -22,6 +24,14 @@ from tradingagents.provenance import (
     attach_evidence_span,
     attach_provenance,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_background(monkeypatch):
+    from tradingagents.dataflows import incremental_inputs
+
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
 
 
 def _request(
@@ -87,9 +97,12 @@ def test_japan_collector_uses_adjusted_jquants_series_and_completed_tse_sessions
     ]
     assert collected.stock_series.source == "jquants"
     assert collected.stock_series.adjustment_basis == "jquants_split_dividend_adjusted_close"
-    assert collected.collection_summary.domains[0].evidence_refs == (
-        collected.stock_series_evidence_ref,
+    assert collected.collection_summary.domains[0].evidence_refs == tuple(
+        candidate.evidence.ref for candidate in collected.evidence
     )
+    assert [candidate.evidence.evidence_type for candidate in collected.evidence] == [
+        "adjusted_close", "market_interval",
+    ]
 
 
 def test_japan_collector_omits_non_tse_rows_without_losing_the_adjusted_series() -> None:

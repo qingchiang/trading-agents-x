@@ -457,6 +457,11 @@ def assess_information_advancement(
 
 def _incremental_observation_identity(item: EvidenceItem) -> str:
     """Return a stable identity for the observation, not its retrieval rendering."""
+    structured = item.provenance.get("observation")
+    if isinstance(structured, dict):
+        from tradingagents.dataflows.source_observations import SourceObservation
+
+        return SourceObservation.load(structured).identity
     temporal_identity: dict[str, str] = {}
     if item.effective_date is not None:
         temporal_identity["effective_date"] = item.effective_date.isoformat()

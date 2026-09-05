@@ -20,6 +20,14 @@ from tradingagents.dataflows.incremental_cn import collect_mainland_china_increm
 from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 
 
+@pytest.fixture(autouse=True)
+def _isolate_shared_background(monkeypatch):
+    from tradingagents.dataflows import incremental_inputs
+
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
+
+
 def _request(
     *,
     enabled_domains: tuple[str, ...] = ("market",),
@@ -100,9 +108,12 @@ def test_mainland_collector_uses_one_qfq_series_and_completed_sessions(
     ]
     assert collected.stock_series.source == "akshare_tencent"
     assert collected.stock_series.adjustment_basis == "qfq_forward_adjusted"
-    assert collected.collection_summary.domains[0].evidence_refs == (
-        collected.stock_series_evidence_ref,
+    assert collected.collection_summary.domains[0].evidence_refs == tuple(
+        candidate.evidence.ref for candidate in collected.evidence
     )
+    assert [candidate.evidence.evidence_type for candidate in collected.evidence] == [
+        "adjusted_close", "market_interval",
+    ]
     performance = calculate_stock_performance(_request(), collected.stock_series)
     assert performance.stock.calculation is not None
     assert performance.stock.calculation.start_value == 100

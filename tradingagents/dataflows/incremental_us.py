@@ -37,7 +37,11 @@ from tradingagents.application.contracts import (
     MarketSeriesResult,
 )
 from tradingagents.dataflows.errors import VendorRateLimitError
-from tradingagents.dataflows.incremental_inputs import append_financials
+from tradingagents.dataflows.incremental_inputs import (
+    append_financials,
+    append_market_context,
+    append_news_context,
+)
 from tradingagents.dataflows.interface import route_to_vendor as _default_route_to_vendor
 from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.dataflows.stocktwits import (
@@ -91,13 +95,17 @@ def collect_us_incremental(
                 route_to_vendor=routed,
                 now=now,
             )
+            result, extra = append_market_context(request, result, stock_series, routed)
             domains.append(result)
             if candidate is not None:
                 evidence.append(candidate)
                 stock_series_evidence_ref = candidate.evidence.ref
+            evidence.extend(extra)
         elif domain == "news":
             result, candidates = _collect_news(request, route_to_vendor=routed, now=now)
+            result, extra = append_news_context(request, result, routed)
             domains.append(result)
+            evidence.extend(extra)
             evidence.extend(candidates)
         elif domain == "fundamentals":
             result, candidate = _collect_fundamentals(

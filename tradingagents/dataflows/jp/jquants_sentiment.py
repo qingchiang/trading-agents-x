@@ -59,6 +59,13 @@ def _fmt_num(value, *, signed: bool = False) -> str:
 
 
 def _format_week(record: dict) -> str:
+    from ..source_observations import publish_observation
+
+    publish_observation(
+        "J-Quants", "market_investor_flows", str(record.get("EnDate")),
+        {**record, "scope": "aggregate exchange-section context, not company order flow"},
+        effective_date=record.get("EnDate"), available_on=record.get("PubDate"),
+    )
     flows = " · ".join(
         f"{label} {_fmt_num(record.get(key), signed=True)}" for label, key in _FLOW_FIELDS
     )

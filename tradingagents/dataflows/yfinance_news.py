@@ -279,6 +279,13 @@ def get_global_news_yfinance(
             if not _in_news_window(data["pub_date"], start_dt, curr_dt):
                 continue
             news_str += f"### {data['title']} (source: {data['publisher']})\n"
+            from .source_observations import publish_observation
+
+            publish_observation(
+                "yfinance", "global_news_article", data["link"] or data["title"],
+                {"title": data["title"], "summary": data["summary"], "link": data["link"],
+                 "publisher": data["publisher"]}, available_at=data["pub_date"],
+            )
             if data["pub_date"] is not None:
                 news_str += f"Published: {data['pub_date'].isoformat()}\n"
             if data["summary"]:

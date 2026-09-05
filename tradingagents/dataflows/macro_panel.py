@@ -257,6 +257,21 @@ def _cell(
         pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
         rendered = f"{summary.last_val} ({summary.last_date}, Δ {summary.delta:+.2f}{pct})"
     audit(data, summary.last_date, str(data.get("timing") or "observation-date filtered"))
+    from datetime import datetime
+
+    from .source_observations import publish_observation
+
+    if data.get("retrieved_at"):
+        publish_observation(
+            str(data.get("actual_source") or _SOURCE_LABELS.get(source, source)),
+            "macro_indicator", indicator,
+            {"value": summary.last_val, "observation_date": summary.last_date,
+             "display": rendered, "units": data.get("units"), "frequency": data.get("frequency")},
+            effective_date=summary.last_date,
+            retrieved_at=datetime.fromisoformat(data["retrieved_at"]),
+            timing="current macro backdrop; observation date is not a release timestamp",
+            fallback=bool(data.get("fallback_reason")),
+        )
     if stats is not None:
         stats["successes"] = int(stats["successes"]) + 1
         dates = stats["dates"]

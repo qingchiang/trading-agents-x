@@ -812,7 +812,7 @@ def fetch_series(
     if fallback_reason:
         data["fallback_reason"] = fallback_reason
     data.update(metadata)
-    _series_cache.put(cache_key, data)
+    _series_cache.put_observation(cache_key, data)
     return data
 
 

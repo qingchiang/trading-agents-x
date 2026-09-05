@@ -15,7 +15,9 @@ from tradingagents.application.contracts import (
 )
 
 from .financial_inputs import collect_financial_inputs
-from .source_observations import SourceObservation
+from .jp.jquants_sentiment import get_market_investor_flows
+from .macro_panel import get_global_macro_panel
+from .source_observations import SourceObservation, capture_observations
 
 
 def observation_candidates(request, observations):
@@ -105,3 +107,56 @@ def collect_professional_signals(request, fetch):
         diagnostic=CollectionDiagnostic(code="no_usable_professional_signals"),
     )
     return augment_domain(request, empty, observations)
+
+
+def append_news_context(request, domain, routed):
+    observations = []
+    calls = [
+        lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
+                       (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
+                       _provenance=True, _stop_on_rate_limit=True),
+        lambda: get_global_macro_panel(request.analysis_cutoff.isoformat()),
+    ]
+    if request.market == "japan":
+        calls.append(lambda: get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat()))
+    for call in calls:
+        with capture_observations() as captured:
+            try:
+                call()
+            except Exception:
+                continue
+            observations.extend(captured)
+    return augment_domain(request, domain, observations)
+
+
+def append_market_context(request, domain, series, routed):
+    observations = []
+    if series is not None:
+        points = [p for p in series.points if request.window_start < p.completed_at <= request.window_end]
+        if points:
+            closes = [p.adjusted_close for p in points]
+            peak = closes[0]
+            drawdown = 0.0
+            for close in closes:
+                peak = max(peak, close)
+                drawdown = min(drawdown, close / peak - 1)
+            observations.append(SourceObservation(
+                series.source, "market_interval", request.instrument,
+                {"start_session": points[0].session.isoformat(), "end_session": points[-1].session.isoformat(),
+                 "close_change": closes[-1] / closes[0] - 1, "min_close": min(closes),
+                 "max_close": max(closes), "maximum_drawdown": drawdown,
+                 "adjustment_basis": series.adjustment_basis, "completed_rows": len(points)},
+                series.retrieved_at, effective_date=points[-1].session,
+                available_at=points[-1].completed_at,
+                fallback=series.fallback,
+                timing="completed observations in the actual interval; one provider and adjustment basis",
+            ))
+    with capture_observations() as captured:
+        try:
+            routed("get_verified_market_snapshot", request.instrument,
+                   request.analysis_cutoff.isoformat(), 5, _provenance=True, _stop_on_rate_limit=True)
+        except Exception:
+            pass
+        else:
+            observations.extend(captured)
+    return augment_domain(request, domain, observations)

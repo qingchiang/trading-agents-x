@@ -505,7 +505,9 @@ class ResearchGraph:
                 "sentiment_confidence": None,
                 "prefetched_evidence": [],
             }
-            with use_config(dict(context.dataflow_config)):
+            from tradingagents.dataflows.source_observations import capture_observations
+
+            with use_config(dict(context.dataflow_config)), capture_observations() as observations:
                 result = self._analyst_subgraphs[analyst].invoke(
                     local_state,
                     config={
@@ -523,6 +525,8 @@ class ResearchGraph:
                 analyst=analyst,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
+            observed_items = [o.evidence(context.request.analysis_date) for o in observations]
+            evidence = list({item.ref: item for item in (*evidence, *observed_items)}.values())
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
                 "confidence_override": (
