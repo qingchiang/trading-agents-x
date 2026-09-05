@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
 import {
   api,
+  ApiError,
+  type AnalysisCutoffContext,
   type AnalysisRequest,
   type Capabilities,
   type DiscoveredModel,
@@ -20,6 +22,30 @@ import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
 const customModelValue = "__custom_model_id__";
+
+type AnalysisDateMode = "auto" | "manual";
+
+function reconcileAnalysisDate(
+  context: AnalysisCutoffContext,
+  mode: AnalysisDateMode,
+  manualDate: string,
+) {
+  if (mode === "manual" && manualDate <= context.max_analysis_date) {
+    return {
+      analysisDate: manualDate,
+      mode,
+      manualDate,
+      adjusted: false,
+    } as const;
+  }
+  return {
+    analysisDate: context.market_date,
+    mode: "auto",
+    manualDate: "",
+    adjusted: mode === "manual",
+  } as const;
+}
+
 export default function NewRun() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -45,7 +71,13 @@ export default function NewRun() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelWarning, setModelWarning] = useState("");
   const [ticker, setTicker] = useState("");
-  const [analysisDate, setAnalysisDate] = useState(today());
+  const [analysisDate, setAnalysisDate] = useState("");
+  const [analysisContext, setAnalysisContext] =
+    useState<AnalysisCutoffContext | null>(null);
+  const [analysisContextLoading, setAnalysisContextLoading] = useState(false);
+  const [analysisContextError, setAnalysisContextError] = useState("");
+  const [analysisDateNotice, setAnalysisDateNotice] = useState("");
+  const [analysisContextRefresh, setAnalysisContextRefresh] = useState(0);
   const [profile, setProfile] = useState<"fast" | "standard" | "deep">(
     "standard",
   );
@@ -74,14 +106,91 @@ export default function NewRun() {
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const researchKindSelectedByUser = useRef(false);
   const baselineSelectedByUser = useRef(false);
+  const analysisDateMode = useRef<AnalysisDateMode>("auto");
+  const manualAnalysisDate = useRef("");
+  const applyAnalysisContext = useCallback((
+    context: AnalysisCutoffContext,
+    selection?: { mode: AnalysisDateMode; manualDate: string },
+  ) => {
+    const reconciliation = reconcileAnalysisDate(
+      context,
+      selection?.mode ?? analysisDateMode.current,
+      selection?.manualDate ?? manualAnalysisDate.current,
+    );
+    setAnalysisContext(context);
+    analysisDateMode.current = reconciliation.mode;
+    manualAnalysisDate.current = reconciliation.manualDate;
+    setAnalysisDate(reconciliation.analysisDate);
+    return reconciliation;
+  }, []);
 
   useEffect(() => {
     let active = true;
     const instrument = ticker.trim().toUpperCase();
+    if (!instrument) {
+      setAnalysisContext(null);
+      setAnalysisContextLoading(false);
+      setAnalysisContextError("");
+      setAnalysisDate("");
+      return () => {
+        active = false;
+      };
+    }
+    setAnalysisContextLoading(true);
+    setAnalysisContextError("");
+    void api.analysisCutoffContext(instrument)
+      .then((context) => {
+        if (!active) return;
+        const reconciliation = applyAnalysisContext(context);
+        if (reconciliation.adjusted) {
+          setAnalysisDateNotice(t("analysisDateAdjusted", {
+            date: context.market_date,
+            timezone: context.market_timezone,
+          }));
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setAnalysisContext(null);
+        setAnalysisContextError(t("marketDateUnavailable"));
+      })
+      .finally(() => {
+        if (active) setAnalysisContextLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [analysisContextRefresh, applyAnalysisContext, t, ticker]);
+
+  useEffect(() => {
+    if (!analysisContext) return;
+    const observedAt = Date.parse(analysisContext.observed_at);
+    const validUntil = Date.parse(analysisContext.valid_until);
+    if (!Number.isFinite(observedAt) || !Number.isFinite(validUntil)) return;
+    const timer = window.setTimeout(
+      () => setAnalysisContextRefresh((value) => value + 1),
+      Math.min(2_147_483_647, Math.max(10, validUntil - observedAt)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [analysisContext]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible" && ticker.trim()) {
+        setAnalysisContextRefresh((value) => value + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
+  }, [ticker]);
+
+  useEffect(() => {
+    let active = true;
+    const instrument = analysisContext?.instrument ?? "";
     setFullBaselines([]);
     setPrimaryCycleWarned(false);
     setBaselineEligibilityError("");
-    if (!instrument) return () => {
+    if (!instrument || !analysisDate) return () => {
       active = false;
     };
     const loadBaselines = async () => {
@@ -129,7 +238,7 @@ export default function NewRun() {
     return () => {
       active = false;
     };
-  }, [analysisDate, entry.baseline, lockedKind, t, ticker]);
+  }, [analysisContext, analysisDate, entry.baseline, lockedKind, t]);
 
   useEffect(() => {
     let active = true;
@@ -170,7 +279,9 @@ export default function NewRun() {
             : data.defaults.profile) as "fast" | "standard" | "deep",
         );
         setTicker(sourceIsTerminal ? (sourceRequest?.ticker ?? "") : "");
-        setAnalysisDate(today());
+        analysisDateMode.current = "auto";
+        manualAnalysisDate.current = "";
+        setAnalysisDate("");
         setAnalysts(
           sourceIsTerminal
             ? [...(sourceRequest?.analysts ?? analystKeys)]
@@ -372,25 +483,44 @@ export default function NewRun() {
       : quickModel;
     const resolvedDeepModel =
       deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
-    const payload: RunCreateRequest = {
-      ticker,
-      analysis_date: analysisDate,
-      asset_type: "stock",
-      profile,
-      analysts: analysts as AnalysisRequest["analysts"],
-      llm_provider: provider,
-      quick_model: resolvedQuickModel,
-      deep_model: resolvedDeepModel,
-      quick_reasoning_effort: quickReasoning,
-      deep_reasoning_effort: deepReasoning,
-      output_language: outputLanguage,
-      research_kind: researchKind,
-      full_baseline_run_id:
-        researchKind === "incremental" ? fullBaselineRunId || null : null,
-      make_primary: researchKind === "full" ? makePrimary : null,
-      source_run_id: sourceRunId || null,
-    };
+    let latestContext: AnalysisCutoffContext;
     try {
+      latestContext = await api.analysisCutoffContext(ticker.trim());
+    } catch {
+      setAnalysisContext(null);
+      setAnalysisContextError(t("marketDateUnavailable"));
+      setAnalysisDate("");
+      setSubmitting(false);
+      return;
+    }
+    try {
+      const reconciliation = applyAnalysisContext(latestContext);
+      if (reconciliation.adjusted) {
+        setAnalysisDateNotice(t("analysisDateAdjusted", {
+          date: latestContext.market_date,
+          timezone: latestContext.market_timezone,
+        }));
+        setSubmitting(false);
+        return;
+      }
+      const payload: RunCreateRequest = {
+        ticker: latestContext.instrument,
+        analysis_date: reconciliation.analysisDate,
+        asset_type: "stock",
+        profile,
+        analysts: analysts as AnalysisRequest["analysts"],
+        llm_provider: provider,
+        quick_model: resolvedQuickModel,
+        deep_model: resolvedDeepModel,
+        quick_reasoning_effort: quickReasoning,
+        deep_reasoning_effort: deepReasoning,
+        output_language: outputLanguage,
+        research_kind: researchKind,
+        full_baseline_run_id:
+          researchKind === "incremental" ? fullBaselineRunId || null : null,
+        make_primary: researchKind === "full" ? makePrimary : null,
+        source_run_id: sourceRunId || null,
+      };
       const fingerprint = JSON.stringify(payload);
       if (submission.current?.fingerprint !== fingerprint) {
         submission.current = {
@@ -405,7 +535,17 @@ export default function NewRun() {
         typeof cause === "object" && cause !== null && "code" in cause
           ? (cause as { code?: unknown }).code
           : undefined;
-      if (apiCode === "unsupported_instrument") {
+      if (apiCode === "future_analysis_cutoff" && cause instanceof ApiError && cause.context) {
+        applyAnalysisContext(cause.context, {
+          mode: "manual",
+          manualDate: cause.requestedAnalysisDate ?? analysisDate,
+        });
+        setAnalysisDateNotice(t("futureAnalysisDate", {
+          date: cause.requestedAnalysisDate ?? analysisDate,
+          marketDate: cause.context.market_date,
+          timezone: cause.context.market_timezone,
+        }));
+      } else if (apiCode === "unsupported_instrument") {
         setError(t("unsupportedInstrument"));
       } else if (apiCode === "instrument_eligibility_unavailable") {
         setError(t("eligibilityUnavailable"));
@@ -450,8 +590,15 @@ export default function NewRun() {
                   autoComplete="on"
                   list={recentInstrumentListId}
                   spellCheck={false}
+                  disabled={submitting}
                   value={ticker}
-                  onChange={(event) => setTicker(event.target.value)}
+                  onChange={(event) => {
+                    setTicker(event.target.value);
+                    setAnalysisContext(null);
+                    setAnalysisContextError("");
+                    setAnalysisDateNotice("");
+                    setAnalysisDate("");
+                  }}
                   placeholder="7203.T"
                 />
                 <RecentInstrumentDatalist instruments={recentInstruments} />
@@ -465,10 +612,26 @@ export default function NewRun() {
                   required
                   type="date"
                   autoComplete="off"
+                  disabled={submitting || !analysisContext || analysisContextLoading}
+                  max={analysisContext?.max_analysis_date}
                   value={analysisDate}
-                  onChange={(event) => setAnalysisDate(event.target.value)}
+                  onChange={(event) => {
+                    analysisDateMode.current = "manual";
+                    manualAnalysisDate.current = event.target.value;
+                    setAnalysisDate(event.target.value);
+                    setAnalysisDateNotice("");
+                  }}
                 />
-                <small>{t("cutoffHint")}</small>
+                <small>
+                  {analysisContext
+                    ? t("marketDateContext", {
+                        date: analysisContext.market_date,
+                        timezone: analysisContext.market_timezone,
+                      })
+                    : t("cutoffHint")}
+                </small>
+                {analysisContextError && <small className="warning" role="alert">{analysisContextError}</small>}
+                {analysisDateNotice && <small className="warning" role="status">{analysisDateNotice}</small>}
               </label>
             </div>
           </div>
@@ -776,6 +939,9 @@ export default function NewRun() {
             className="button primary large"
             disabled={
               submitting ||
+              analysisContextLoading ||
+              analysisContext === null ||
+              !analysisDate ||
               capabilities === null ||
               modelsLoading ||
               !provider ||
@@ -818,12 +984,6 @@ function BaselinePreview({
       {baseline.thesis && <p>{baseline.thesis}</p>}
     </article>
   );
-}
-
-function today() {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
 }
 
 function reportLanguageLabel(value: string) {

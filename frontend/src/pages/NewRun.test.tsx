@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
   api,
+  ApiError,
   type Capabilities,
   type FullBaselineCandidate,
   type ProviderModelCatalog,
@@ -12,8 +13,10 @@ import i18n from "../i18n";
 import { Router, usePathname } from "../router";
 import NewRun from "./NewRun";
 
-vi.mock("../api/client", () => ({
+vi.mock("../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/client")>()),
   api: {
+    analysisCutoffContext: vi.fn(),
     capabilities: vi.fn(),
     providerModels: vi.fn(),
     createRun: vi.fn(),
@@ -102,6 +105,15 @@ const modelCatalog = {
   warning: null,
 } as ProviderModelCatalog;
 
+const analysisCutoffContext = {
+  instrument: "NVDA",
+  market_timezone: "America/New_York",
+  market_date: "2026-08-29",
+  max_analysis_date: "2026-08-29",
+  observed_at: "2026-08-29T03:00:00Z",
+  valid_until: "2026-08-30T04:00:00Z",
+};
+
 function baseline(id: string, cycleWarning = false): FullBaselineCandidate {
   return {
     id,
@@ -127,6 +139,10 @@ beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
+  vi.mocked(api.analysisCutoffContext).mockImplementation(async (instrument) => ({
+    ...analysisCutoffContext,
+    instrument: instrument.trim().toUpperCase(),
+  }));
   vi.mocked(api.providerModels).mockResolvedValue(modelCatalog);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
   vi.mocked(api.baselineCandidates).mockResolvedValue({
@@ -134,6 +150,329 @@ beforeEach(async () => {
     before: "2026-07-24",
     items: [],
   });
+});
+
+test.each([
+  ["ahead", "2026-08-28"],
+  ["behind", "2026-08-30"],
+])("uses the server market date when the browser date is %s", async (_, marketDate) => {
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({
+    ...analysisCutoffContext,
+    market_date: marketDate,
+    max_analysis_date: marketDate,
+  });
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  await screen.findAllByRole("option", { name: "Quick" });
+  const date = screen.getByLabelText(/^Analysis date/);
+  expect(date).toBeDisabled();
+  expect(date).toHaveValue("");
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  await waitFor(() => expect(date).toHaveValue(marketDate));
+  expect(date).toHaveAttribute("max", marketDate);
+  expect(api.baselineCandidates).toHaveBeenCalledWith("NVDA", marketDate);
+});
+
+test("preserves a valid manual date and resets it when a new market makes it future", async () => {
+  vi.mocked(api.analysisCutoffContext).mockImplementation(async (instrument) => {
+    const normalized = instrument.trim().toUpperCase();
+    return normalized === "7203.T"
+      ? {
+          ...analysisCutoffContext,
+          instrument: normalized,
+          market_timezone: "Asia/Tokyo",
+          market_date: "2026-08-28",
+          max_analysis_date: "2026-08-28",
+        }
+      : { ...analysisCutoffContext, instrument: normalized };
+  });
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  const ticker = screen.getByLabelText(/^Ticker/);
+  const date = screen.getByLabelText(/^Analysis date/);
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(date).toHaveValue("2026-08-29"));
+
+  fireEvent.change(date, { target: { value: "2026-08-20" } });
+  fireEvent.change(ticker, { target: { value: "7203.T" } });
+  expect(date).toHaveValue("");
+  await waitFor(() => expect(date).toHaveAttribute("max", "2026-08-28"));
+  expect(date).toHaveValue("2026-08-20");
+
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(date).toHaveAttribute("max", "2026-08-29"));
+  fireEvent.change(date, { target: { value: "2026-08-29" } });
+  fireEvent.change(ticker, { target: { value: "7203.T" } });
+
+  await waitFor(() => expect(date).toHaveValue("2026-08-28"));
+  expect(
+    screen.getByText(/selected date is in the future for this market/i),
+  ).toBeVisible();
+  expect(api.createRun).not.toHaveBeenCalled();
+});
+
+test("ignores a stale cutoff response after the ticker changes", async () => {
+  let resolveNvda!: (value: typeof analysisCutoffContext) => void;
+  let resolveAapl!: (value: typeof analysisCutoffContext) => void;
+  vi.mocked(api.analysisCutoffContext).mockImplementation(
+    (instrument) => new Promise((resolve) => {
+      if (instrument === "NVDA") resolveNvda = resolve;
+      if (instrument === "AAPL") resolveAapl = resolve;
+    }),
+  );
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  const ticker = screen.getByLabelText(/^Ticker/);
+  const date = screen.getByLabelText(/^Analysis date/);
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledWith("NVDA"));
+  fireEvent.change(ticker, { target: { value: "AAPL" } });
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledWith("AAPL"));
+
+  resolveAapl({
+    ...analysisCutoffContext,
+    instrument: "AAPL",
+    market_date: "2026-08-28",
+    max_analysis_date: "2026-08-28",
+  });
+  await waitFor(() => expect(date).toHaveValue("2026-08-28"));
+  resolveNvda({ ...analysisCutoffContext, instrument: "NVDA" });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(date).toHaveValue("2026-08-28");
+  expect(screen.getByText(/Market date: 2026-08-28/)).toBeVisible();
+});
+
+test("keeps submission unavailable when the cutoff context fails", async () => {
+  vi.mocked(api.analysisCutoffContext).mockRejectedValue(new Error("offline"));
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  expect(await screen.findByText(/market date could not be loaded/i)).toBeVisible();
+  expect(screen.getByLabelText(/^Analysis date/)).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Queue research/ })).toBeDisabled();
+  expect(api.baselineCandidates).not.toHaveBeenCalled();
+});
+
+test("refreshes the cutoff when the page becomes visible and at valid_until", async () => {
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce({
+      ...analysisCutoffContext,
+      valid_until: "2026-08-29T03:00:00.025Z",
+    })
+    .mockResolvedValue(analysisCutoffContext);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(2));
+
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
+  act(() => document.dispatchEvent(new Event("visibilitychange")));
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(3));
+});
+
+test("refreshes from the server validity window when the browser clock is wrong", async () => {
+  vi.setSystemTime(new Date("2027-08-29T03:00:00Z"));
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({
+    ...analysisCutoffContext,
+    observed_at: "2026-08-29T03:00:00Z",
+    valid_until: "2026-08-29T03:00:00.100Z",
+  });
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+  });
+  expect(api.analysisCutoffContext).toHaveBeenCalledTimes(1);
+  await waitFor(
+    () => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(2),
+    { timeout: 500 },
+  );
+});
+
+test("rechecks the server cutoff immediately before submitting an automatic date", async () => {
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce({
+      ...analysisCutoffContext,
+      market_date: "2026-08-28",
+      max_analysis_date: "2026-08-28",
+    })
+    .mockResolvedValueOnce(analysisCutoffContext);
+  vi.mocked(api.createRun).mockResolvedValue({ id: "fresh-cutoff-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toHaveValue("2026-08-28"));
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(api.createRun).toHaveBeenCalled());
+  expect(vi.mocked(api.createRun).mock.calls[0][0]).toMatchObject({
+    ticker: "NVDA",
+    analysis_date: "2026-08-29",
+  });
+});
+
+test("keeps submission unavailable when the submit-time cutoff refresh fails", async () => {
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce(analysisCutoffContext)
+    .mockRejectedValueOnce(new Error("offline"));
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  const date = screen.getByLabelText(/^Analysis date/);
+  const submit = screen.getByRole("button", { name: /Queue research/ });
+  await waitFor(() => expect(date).toBeEnabled());
+  fireEvent.click(submit);
+
+  expect(await screen.findByText(/market date could not be loaded/i)).toBeVisible();
+  expect(date).toBeDisabled();
+  expect(submit).toBeDisabled();
+  expect(api.createRun).not.toHaveBeenCalled();
+});
+
+test("locks the instrument cutoff while the submit-time context is pending", async () => {
+  let resolveSubmitContext!: (value: typeof analysisCutoffContext) => void;
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce(analysisCutoffContext)
+    .mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSubmitContext = resolve;
+    }));
+  vi.mocked(api.createRun).mockResolvedValue({ id: "locked-cutoff-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  const ticker = screen.getByLabelText(/^Ticker/);
+  const date = screen.getByLabelText(/^Analysis date/);
+  fireEvent.change(ticker, { target: { value: "NVDA" } });
+  await waitFor(() => expect(date).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(api.analysisCutoffContext).toHaveBeenCalledTimes(2));
+  expect(ticker).toBeDisabled();
+  expect(date).toBeDisabled();
+
+  await act(async () => resolveSubmitContext(analysisCutoffContext));
+  await waitFor(() => expect(api.createRun).toHaveBeenCalledTimes(1));
+});
+
+test("requires confirmation instead of submitting when a refreshed cutoff invalidates a manual date", async () => {
+  vi.mocked(api.analysisCutoffContext)
+    .mockResolvedValueOnce({
+      ...analysisCutoffContext,
+      market_date: "2026-08-30",
+      max_analysis_date: "2026-08-30",
+    })
+    .mockResolvedValueOnce({
+      ...analysisCutoffContext,
+      market_date: "2026-08-28",
+      max_analysis_date: "2026-08-28",
+    });
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  const date = screen.getByLabelText(/^Analysis date/);
+  await waitFor(() => expect(date).toHaveValue("2026-08-30"));
+  fireEvent.change(date, { target: { value: "2026-08-29" } });
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(date).toHaveValue("2026-08-28"));
+  expect(api.createRun).not.toHaveBeenCalled();
+  expect(screen.getByText(/review it before submitting/i)).toBeVisible();
+});
+
+test("shows the latest market context when the server rejects a crossed-midnight date", async () => {
+  const rejectedContext = {
+    ...analysisCutoffContext,
+    market_date: "2026-08-28",
+    max_analysis_date: "2026-08-28",
+  };
+  vi.mocked(api.createRun).mockRejectedValue(new ApiError(
+    422,
+    "future_analysis_cutoff",
+    "future cutoff",
+    rejectedContext,
+    "2026-08-29",
+  ));
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toHaveValue("2026-08-28"));
+  expect(screen.getByText(/later than the current market date/i)).toBeVisible();
+  expect(api.createRun).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("Run opened")).not.toBeInTheDocument();
 });
 
 afterEach(() => {
@@ -292,6 +631,7 @@ test("reuses the idempotency key when a browser submission is retried", async ()
     target: { value: "NVDA" },
   });
 
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
   await screen.findByText("temporary network error");
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
@@ -332,6 +672,7 @@ test.each([
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
 
   await screen.findByText(message);
@@ -352,6 +693,7 @@ test("keeps UI locale and report output language independent", async () => {
   fireEvent.change(screen.getByLabelText(/^Report language/), {
     target: { value: "ja" },
   });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
 
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
@@ -431,6 +773,7 @@ test("loads a terminal run as an editable template and preserves custom values",
     "/runs/source-run",
   );
 
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
 
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
@@ -633,6 +976,7 @@ test("preserves a configured custom report language", async () => {
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
 
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
@@ -737,6 +1081,7 @@ test("supports independent custom IDs for every selectable provider", async () =
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
+  await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
 
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());

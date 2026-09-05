@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
+
+from .contracts import AnalysisCutoffContext
+
 
 class InstrumentEligibilityError(Exception):
     """Base class for failures while admitting a research instrument."""
@@ -47,6 +51,28 @@ class InstrumentEligibilityUnavailableError(
 EligibilityUnavailableError = InstrumentEligibilityUnavailableError
 
 
+class FutureAnalysisCutoffError(ValueError):
+    """The requested Analysis Cutoff is after the instrument's market date."""
+
+    code = "future_analysis_cutoff"
+    status_code = 422
+
+    def __init__(
+        self,
+        instrument: str,
+        requested_analysis_date: date,
+        context: AnalysisCutoffContext,
+    ) -> None:
+        self.instrument = instrument
+        self.requested_analysis_date = requested_analysis_date
+        self.context = context
+        super().__init__(
+            f"Analysis cutoff {requested_analysis_date.isoformat()} is after "
+            f"the current market date {context.market_date.isoformat()} for "
+            f"{instrument}."
+        )
+
+
 class InvalidIncrementalBaselineError(ValueError):
     """An Incremental request did not name an eligible active Full Baseline."""
 
@@ -81,6 +107,7 @@ class InvalidResearchNodeComparisonError(ValueError):
 
 __all__ = [
     "EligibilityUnavailableError",
+    "FutureAnalysisCutoffError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
     "IncrementalCollectionCommitUnavailableError",

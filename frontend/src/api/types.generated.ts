@@ -5,6 +5,24 @@
 
 export interface components {
   schemas: {
+    AnalysisCutoffContext: {
+      instrument: string;
+      market_date: string;
+      market_timezone: string;
+      max_analysis_date: string;
+      observed_at: string;
+      valid_until: string;
+    };
+    AnalysisCutoffError: {
+      code: components["schemas"]["AnalysisCutoffErrorCode"];
+      message: string;
+    };
+    AnalysisCutoffErrorCode: "future_analysis_cutoff";
+    AnalysisCutoffErrorResponse: {
+      context: components["schemas"]["AnalysisCutoffContext"];
+      error: components["schemas"]["AnalysisCutoffError"];
+      requested_analysis_date: string;
+    };
     AnalysisRequest: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];

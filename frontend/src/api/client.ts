@@ -1,6 +1,10 @@
 import type { components } from "./types.generated";
 
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
+export type AnalysisCutoffContext =
+  components["schemas"]["AnalysisCutoffContext"];
+export type AnalysisCutoffErrorResponse =
+  components["schemas"]["AnalysisCutoffErrorResponse"];
 export type RunCreateRequest = components["schemas"]["RunCreateRequest"];
 export type RunView = components["schemas"]["RunView"];
 export type RunSummaryView = components["schemas"]["RunSummaryView"];
@@ -76,6 +80,8 @@ export class ApiError extends Error {
     public status: number,
     public code: string | undefined,
     message: string,
+    public context?: AnalysisCutoffContext,
+    public requestedAnalysisDate?: string,
   ) {
     super(message);
   }
@@ -93,22 +99,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = response.statusText;
     let code: string | undefined;
+    let context: AnalysisCutoffContext | undefined;
+    let requestedAnalysisDate: string | undefined;
     try {
       const payload = await response.json();
       message = payload.error?.message || payload.detail || message;
       code = payload.error?.code;
+      context = payload.context;
+      requestedAnalysisDate = payload.requested_analysis_date;
     } catch {
       // Preserve the HTTP status text.
     }
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("tradingagents:auth-required"));
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(
+      response.status,
+      code,
+      message,
+      context,
+      requestedAnalysisDate,
+    );
   }
   return (await response.json()) as T;
 }
 
 export const api = {
+  analysisCutoffContext: (instrument: string) =>
+    request<AnalysisCutoffContext>(
+      `/api/v1/instruments/${encodeURIComponent(instrument)}/analysis-cutoff-context`,
+    ),
   health: () => request<Health>("/api/v1/health"),
   capabilities: () =>
     request<Capabilities>("/api/v1/capabilities"),

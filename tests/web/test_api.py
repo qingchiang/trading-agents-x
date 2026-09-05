@@ -1666,6 +1666,114 @@ async def test_sse_rejects_invalid_replay_cursor(
 
 
 @pytest.mark.anyio
+async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
+    web_settings,
+    web_repository,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+            AssertionError("date context must not call the eligibility vendor")
+        ),
+        now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
+    )
+    transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/api/v1/instruments/600519/analysis-cutoff-context"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "instrument": "600519.SS",
+        "market_timezone": "Asia/Shanghai",
+        "market_date": "2026-09-01",
+        "max_analysis_date": "2026-09-01",
+        "observed_at": "2026-09-01T15:30:00Z",
+        "valid_until": "2026-09-01T16:00:00Z",
+    }
+
+
+@pytest.mark.anyio
+async def test_analysis_cutoff_context_rejects_a_known_unsupported_instrument(
+    web_client: httpx.AsyncClient,
+) -> None:
+    response = await web_client.get(
+        "/api/v1/instruments/SPX500/analysis-cutoff-context"
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_instrument"
+
+
+@pytest.mark.anyio
+async def test_future_analysis_cutoff_returns_context_without_creating_a_run(
+    web_settings,
+    web_repository,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda ticker: {
+            "symbol": ticker,
+            "quote_type": "EQUITY",
+        },
+        now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
+    )
+    transport = httpx.ASGITransport(
+        app=create_app(web_settings, service=service),
+        raise_app_exceptions=False,
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        rejected = await client.post(
+            "/api/v1/runs",
+            json={**_payload(), "analysis_date": "2026-09-02"},
+        )
+        runs = await client.get("/api/v1/runs")
+
+    assert rejected.status_code == 422
+    payload = rejected.json()
+    assert payload["error"]["code"] == "future_analysis_cutoff"
+    assert payload["requested_analysis_date"] == "2026-09-02"
+    assert payload["context"]["instrument"] == "NVDA"
+    assert payload["context"]["market_timezone"] == "America/New_York"
+    assert payload["context"]["market_date"] == "2026-09-01"
+    assert runs.status_code == 200
+    assert runs.json()["total"] == 0
+
+
+@pytest.mark.anyio
+async def test_future_analysis_cutoff_precedes_vendor_admission_failure(
+    web_settings,
+    web_repository,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+            RuntimeError("vendor unavailable")
+        ),
+        now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
+    )
+    transport = httpx.ASGITransport(
+        app=create_app(web_settings, service=service),
+        raise_app_exceptions=False,
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        rejected = await client.post(
+            "/api/v1/runs",
+            json={**_payload(), "analysis_date": "2026-09-02"},
+        )
+        runs = await client.get("/api/v1/runs")
+
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "future_analysis_cutoff"
+    assert runs.status_code == 200
+    assert runs.json()["total"] == 0
+
+
+@pytest.mark.anyio
 async def test_openapi_contains_versioned_run_center_contract(
     web_client: httpx.AsyncClient,
 ) -> None:
@@ -1681,6 +1789,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/cancel",
         "/api/v1/runs/{run_id}/retry",
         "/api/v1/runs/{run_id}/export",
+        "/api/v1/instruments/{instrument}/analysis-cutoff-context",
         "/api/v1/instruments/recent",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
@@ -1692,16 +1801,40 @@ async def test_openapi_contains_versioned_run_center_contract(
     create_run_422 = paths["/api/v1/runs"]["post"]["responses"]["422"]
     response_schema = create_run_422["content"]["application/json"]["schema"]
     assert {member["$ref"] for member in response_schema["anyOf"]} == {
+        "#/components/schemas/AnalysisCutoffErrorResponse",
         "#/components/schemas/InstrumentAdmissionErrorResponse",
         "#/components/schemas/RequestValidationErrorResponse",
     }
     assert {
+        "future_analysis_cutoff",
         "unsupported_instrument",
         "validation_error",
     } <= set(create_run_422["content"]["application/json"]["examples"])
     assert schema["components"]["schemas"]["RequestValidationErrorCode"]["enum"] == [
         "validation_error"
     ]
+
+
+@pytest.mark.anyio
+async def test_openapi_documents_analysis_cutoff_context_errors(
+    web_client: httpx.AsyncClient,
+) -> None:
+    schema = (await web_client.get("/openapi.json")).json()
+    response = schema["paths"][
+        "/api/v1/instruments/{instrument}/analysis-cutoff-context"
+    ]["get"]["responses"]["422"]
+
+    assert {
+        member["$ref"]
+        for member in response["content"]["application/json"]["schema"]["anyOf"]
+    } == {
+        "#/components/schemas/InstrumentAdmissionErrorResponse",
+        "#/components/schemas/RequestValidationErrorResponse",
+    }
+    assert set(response["content"]["application/json"]["examples"]) == {
+        "unsupported_instrument",
+        "validation_error",
+    }
 
 
 @pytest.mark.anyio

@@ -1554,6 +1554,17 @@ class AnalysisRequest(FrozenModel):
         return self
 
 
+class AnalysisCutoffContext(FrozenModel):
+    """Server-observed market-local date boundary for a Listed Instrument."""
+
+    instrument: str
+    market_timezone: str
+    market_date: date
+    max_analysis_date: date
+    observed_at: datetime
+    valid_until: datetime
+
+
 class RunRequestSnapshot(FrozenModel):
     """Tolerant request data retained with a Run for history inspection.
 

@@ -15,6 +15,7 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Path as PathParam,
     Query,
     Request,
     Response,
@@ -24,6 +25,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from tradingagents.application.contracts import (
+    AnalysisCutoffContext,
     EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
@@ -37,6 +39,7 @@ from tradingagents.application.contracts import (
     report_language_value,
 )
 from tradingagents.application.errors import (
+    FutureAnalysisCutoffError,
     IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
     InvalidIncrementalBaselineError,
@@ -63,6 +66,7 @@ from tradingagents.version import __version__
 
 from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
 from .models import (
+    AnalysisCutoffErrorResponse,
     CapabilitiesResponse,
     FullBaselineCandidates,
     HealthResponse,
@@ -185,6 +189,22 @@ def create_app(
     ):
         return _error(503, exc.code, str(exc))
 
+    @app.exception_handler(FutureAnalysisCutoffError)
+    async def future_analysis_cutoff(
+        _request: Request,
+        exc: FutureAnalysisCutoffError,
+    ):
+        payload = AnalysisCutoffErrorResponse(
+            error={"code": exc.code, "message": str(exc)},
+            requested_analysis_date=exc.requested_analysis_date,
+            context=exc.context,
+        )
+        return Response(
+            status_code=exc.status_code,
+            media_type="application/json",
+            content=payload.model_dump_json(),
+        )
+
     @app.exception_handler(EvidenceNotSealedError)
     async def evidence_not_sealed(
         _request: Request,
@@ -284,10 +304,35 @@ def create_app(
         responses={
             422: {
                 "description": "The request is invalid or the symbol is a confirmed unsupported instrument.",
-                "model": InstrumentAdmissionErrorResponse | RequestValidationErrorResponse,
+                "model": (
+                    AnalysisCutoffErrorResponse
+                    | InstrumentAdmissionErrorResponse
+                    | RequestValidationErrorResponse
+                ),
                 "content": {
                     "application/json": {
                         "examples": {
+                            "future_analysis_cutoff": {
+                                "summary": "Analysis cutoff is after the market date",
+                                "value": {
+                                    "error": {
+                                        "code": "future_analysis_cutoff",
+                                        "message": (
+                                            "The requested Analysis Cutoff is after the "
+                                            "current market date."
+                                        ),
+                                    },
+                                    "requested_analysis_date": "2026-09-02",
+                                    "context": {
+                                        "instrument": "NVDA",
+                                        "market_timezone": "America/New_York",
+                                        "market_date": "2026-09-01",
+                                        "max_analysis_date": "2026-09-01",
+                                        "observed_at": "2026-09-01T15:30:00Z",
+                                        "valid_until": "2026-09-02T04:00:00Z",
+                                    },
+                                },
+                            },
                             "unsupported_instrument": {
                                 "summary": "Confirmed non-equity",
                                 "value": {
@@ -372,6 +417,57 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ):
         return repository.recent_instruments(limit=limit)
+
+    @app.get(
+        f"{API_PREFIX}/instruments/{{instrument}}/analysis-cutoff-context",
+        response_model=AnalysisCutoffContext,
+        responses={
+            422: {
+                "description": "The instrument path is invalid or names an unsupported product symbol.",
+                "model": (
+                    InstrumentAdmissionErrorResponse
+                    | RequestValidationErrorResponse
+                ),
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "unsupported_instrument": {
+                                "summary": "Unsupported product symbol",
+                                "value": {
+                                    "error": {
+                                        "code": "unsupported_instrument",
+                                        "message": "Unsupported product symbol.",
+                                    }
+                                },
+                            },
+                            "validation_error": {
+                                "summary": "Malformed instrument path",
+                                "value": {
+                                    "error": {
+                                        "code": "validation_error",
+                                        "message": "Request validation failed",
+                                    },
+                                    "details": [
+                                        {
+                                            "location": ["path", "instrument"],
+                                            "message": (
+                                                "String should have at most 64 characters"
+                                            ),
+                                            "type": "string_too_long",
+                                        }
+                                    ],
+                                },
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    )
+    def analysis_cutoff_context(
+        instrument: Annotated[str, PathParam(min_length=1, max_length=64)],
+    ):
+        return service.analysis_cutoff_context(instrument)
 
     @app.get(f"{API_PREFIX}/timelines", response_model=ResearchTimelinePage)
     def list_timelines(
