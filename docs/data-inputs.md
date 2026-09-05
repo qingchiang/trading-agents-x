@@ -34,6 +34,10 @@ stored with each refreshed series and survives cache hits. Near-live admission
 uses the existing zero-to-five market-local-day rule, not the age of the economic
 observation. Information identity excludes retrieval time and presentation order;
 macro display-window changes alone do not advance the information frontier.
+Full applies the same boundary to captured, prefetched and cached structured
+observations, using their original retrieval time. Out-of-window live observations
+retain unavailable-source diagnostics without their values; dated PIT inputs remain
+eligible under their publication-time rules.
 Yahoo statements use this same near-live boundary in Full prefetch and statement
 tools; older dated requests do not fetch current Yahoo statement frames. Configured
 JP/CN point-in-time statement providers retain their disclosure-date behavior.

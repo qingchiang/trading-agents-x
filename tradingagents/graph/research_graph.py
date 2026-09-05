@@ -75,6 +75,8 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
+from tradingagents.dataflows.lookahead import is_near_live
+from tradingagents.dataflows.source_observations import SourceObservation
 from tradingagents.graph.analyst_synthesis import (
     evidence_warnings as _evidence_warnings,
     invoke_analyst_report as _invoke_analyst_report,
@@ -526,7 +528,7 @@ class ResearchGraph:
                 instrument=context.request.ticker,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
-            observed_items = [o.evidence(context.request.analysis_date, instrument=context.request.ticker) for o in observations]
+            observed_items = [_full_observation_evidence(o, context.request.analysis_date, context.request.ticker) for o in observations]
             evidence = list({item.ref: item for item in (*evidence, *observed_items)}.values())
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
@@ -1538,6 +1540,34 @@ def _analyst_route(state: AgentState) -> str:
     return "done"
 
 
+def _full_observation_evidence(
+    observation: SourceObservation,
+    requested_date: date,
+    instrument: str | None,
+) -> EvidenceItem:
+    """Apply the existing near-live boundary at every Full observation entrance."""
+    if observation.is_pit or is_near_live(
+        requested_date.isoformat(), instrument, now=observation.retrieved_at,
+    ):
+        return observation.evidence(requested_date, instrument=instrument)
+    timing = observation.timing + "; unavailable outside market-local near-live window"
+    if observation.fallback:
+        timing += "; fallback source used"
+    return _evidence_from_records(
+        (ProvenanceRecord(
+            evidence=observation.kind,
+            source=observation.source,
+            requested=requested_date.isoformat(),
+            effective=str(observation.effective_date or "retrieval-time snapshot"),
+            timing=timing,
+            retrieved_at=observation.retrieved_at.isoformat(),
+        ),),
+        requested_date=requested_date,
+        content=None,
+        temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+    )
+
+
 def _collect_evidence(
     messages: Iterable[Any],
     _narrative: str,
@@ -1596,7 +1626,7 @@ def _collect_evidence(
             fallback = any("fallback vendor selected" in record.timing for record in records)
             for observation in news_observations:
                 observation = replace(observation, fallback=observation.fallback or fallback)
-                item = observation.evidence(requested_date, instrument=instrument)
+                item = _full_observation_evidence(observation, requested_date, instrument)
                 items[item.ref] = item
             # Preserve collection diagnostics without assigning article content or identity.
             collect_payload(records, None)
@@ -1674,10 +1704,8 @@ def _collect_evidence(
 
     for block in prefetched_blocks:
         if block.get("source_observation"):
-            from tradingagents.dataflows.source_observations import SourceObservation
-
             observation = SourceObservation.load(block["source_observation"])
-            item = observation.evidence(requested_date, instrument=instrument)
+            item = _full_observation_evidence(observation, requested_date, instrument)
             items[item.ref] = item
             continue
         raw_records = block.get("records", [])

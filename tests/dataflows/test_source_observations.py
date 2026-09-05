@@ -339,3 +339,71 @@ def test_cn_news_deduplication_preserves_failures_for_partial_and_empty_social()
         else:
             assert not social.evidence_refs
             assert "articles_already_in_news" in social.diagnostic.code
+
+
+def test_full_structured_near_live_guard_covers_each_ingress():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from langchain_core.messages import ToolMessage
+
+    from tradingagents.application.contracts import AnalysisRequest, EvidenceItem
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.dataflows.news_selection import NewsCandidate, render_candidate
+    from tradingagents.dataflows.source_observations import SourceObservation, publish_observation
+    from tradingagents.graph.research_graph import ResearchGraph, _collect_evidence
+
+    retrieved = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    cutoff = date(2020, 1, 2)
+    observation = SourceObservation("FRED", "macro_indicator", "rate", {"value": 12345}, retrieved,
+                                    effective_date=date(2020, 1, 1))
+    def invoke(*args, **kwargs):
+        publish_observation(observation.source, observation.kind, observation.key, observation.values,
+                            effective_date=observation.effective_date, retrieved_at=retrieved)
+        return {"messages": [], "news_report": "fixture"}
+    graph = ResearchGraph.__new__(ResearchGraph)
+    graph._analyst_subgraphs = {"news": SimpleNamespace(invoke=invoke)}
+    graph.metrics = Mock()
+    graph._start_node = graph._finish_node = lambda *args, **kwargs: None
+    context = SimpleNamespace(request=AnalysisRequest(ticker="GOOG", analysis_date=cutoff),
+                              dataflow_config=get_config(), instrument_context="GOOG", cancel_requested=lambda: False,
+                              shutdown_requested=lambda: False)
+    output = graph._create_analyst_collect_node("news")({}, SimpleNamespace(context=context))
+    captured = [EvidenceItem.model_validate(item) for item in output["analyst_evidence_items"]["news"]]
+    prefetched = _collect_evidence([], "", requested_date=cutoff, analyst="news", instrument="GOOG",
+                                  prefetched_blocks=[{"source_observation": observation.dump()}])
+    revision = NewsCandidate("yfinance", "revised", "### revised\n12345", "2020-01-01T10:00:00Z",
+                             retrieved_at=retrieved.isoformat(), revision=True, market_day="2026-09-05")
+    rehydrated = _collect_evidence([ToolMessage(content=render_candidate(revision), tool_call_id="news", name="get_news")], "",
+                                  requested_date=cutoff, analyst="news", instrument="GOOG")
+    for items in (captured, prefetched, rehydrated):
+        assert all(item.content is None for item in items)
+        assert all(item.quality.value == "unavailable" for item in items)
+        assert "12345" not in str([item.model_dump() for item in items])
+        assert any("near-live" in origin.timing and origin.retrieved_at == retrieved.isoformat()
+                   for item in items for origin in item.origins)
+
+
+def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit():
+    from datetime import timedelta
+
+    from tradingagents.dataflows.source_observations import SourceObservation
+    from tradingagents.dataflows.symbol_utils import market_timezone
+    from tradingagents.graph.research_graph import _collect_evidence
+
+    # The same instant falls on different US and Asian calendar dates.
+    retrieved = datetime(2026, 9, 5, 1, tzinfo=UTC)
+    for ticker in ("GOOG", "9984.T", "600309.SS"):
+        local_day = retrieved.astimezone(market_timezone(ticker)).date()
+        for age in (-1, 0, 5, 6):
+            cutoff = local_day - timedelta(days=age)
+            row = SourceObservation("fixture", "macro_indicator", "rate", {"value": 2}, retrieved,
+                                    effective_date=date(2020, 1, 1))
+            evidence = _collect_evidence([], "", requested_date=cutoff, analyst="news", instrument=ticker,
+                                         prefetched_blocks=[{"source_observation": row.dump()}])[0]
+            assert (evidence.content is not None) == (0 <= age <= 5)
+        pit = SourceObservation("fixture", "financial_income", "period", {"value": 2}, retrieved,
+                                effective_date=date(2019, 12, 31), available_on=date(2020, 1, 2))
+        evidence = _collect_evidence([], "", requested_date=date(2020, 1, 3), analyst="fundamentals", instrument=ticker,
+                                     prefetched_blocks=[{"source_observation": pit.dump()}])[0]
+        assert evidence.content is not None
