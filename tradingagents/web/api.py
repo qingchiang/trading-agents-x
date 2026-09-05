@@ -421,6 +421,48 @@ def create_app(
     @app.get(
         f"{API_PREFIX}/instruments/{{instrument}}/analysis-cutoff-context",
         response_model=AnalysisCutoffContext,
+        responses={
+            422: {
+                "description": "The instrument path is invalid or names an unsupported product symbol.",
+                "model": (
+                    InstrumentAdmissionErrorResponse
+                    | RequestValidationErrorResponse
+                ),
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "unsupported_instrument": {
+                                "summary": "Unsupported product symbol",
+                                "value": {
+                                    "error": {
+                                        "code": "unsupported_instrument",
+                                        "message": "Unsupported product symbol.",
+                                    }
+                                },
+                            },
+                            "validation_error": {
+                                "summary": "Malformed instrument path",
+                                "value": {
+                                    "error": {
+                                        "code": "validation_error",
+                                        "message": "Request validation failed",
+                                    },
+                                    "details": [
+                                        {
+                                            "location": ["path", "instrument"],
+                                            "message": (
+                                                "String should have at most 64 characters"
+                                            ),
+                                            "type": "string_too_long",
+                                        }
+                                    ],
+                                },
+                            },
+                        }
+                    }
+                },
+            }
+        },
     )
     def analysis_cutoff_context(
         instrument: Annotated[str, PathParam(min_length=1, max_length=64)],

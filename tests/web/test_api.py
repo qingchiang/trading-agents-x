@@ -1816,6 +1816,28 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
+async def test_openapi_documents_analysis_cutoff_context_errors(
+    web_client: httpx.AsyncClient,
+) -> None:
+    schema = (await web_client.get("/openapi.json")).json()
+    response = schema["paths"][
+        "/api/v1/instruments/{instrument}/analysis-cutoff-context"
+    ]["get"]["responses"]["422"]
+
+    assert {
+        member["$ref"]
+        for member in response["content"]["application/json"]["schema"]["anyOf"]
+    } == {
+        "#/components/schemas/InstrumentAdmissionErrorResponse",
+        "#/components/schemas/RequestValidationErrorResponse",
+    }
+    assert set(response["content"]["application/json"]["examples"]) == {
+        "unsupported_instrument",
+        "validation_error",
+    }
+
+
+@pytest.mark.anyio
 async def test_recent_instruments_exclude_trashed_runs_and_include_names(
     web_client: httpx.AsyncClient,
     web_repository,

@@ -6596,12 +6596,50 @@
           "422": {
             "content": {
               "application/json": {
+                "examples": {
+                  "unsupported_instrument": {
+                    "summary": "Unsupported product symbol",
+                    "value": {
+                      "error": {
+                        "code": "unsupported_instrument",
+                        "message": "Unsupported product symbol."
+                      }
+                    }
+                  },
+                  "validation_error": {
+                    "summary": "Malformed instrument path",
+                    "value": {
+                      "details": [
+                        {
+                          "location": [
+                            "path",
+                            "instrument"
+                          ],
+                          "message": "String should have at most 64 characters",
+                          "type": "string_too_long"
+                        }
+                      ],
+                      "error": {
+                        "code": "validation_error",
+                        "message": "Request validation failed"
+                      }
+                    }
+                  }
+                },
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Analysis Cutoff Context Api V1 Instruments  Instrument  Analysis Cutoff Context Get"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The instrument path is invalid or names an unsupported product symbol."
           }
         },
         "summary": "Analysis Cutoff Context"
