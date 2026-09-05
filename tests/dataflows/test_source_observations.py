@@ -285,3 +285,56 @@ def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
     with use_config({**get_config(), "tool_vendors": {"get_verified_market_snapshot": "alpha_vantage,yfinance"}}), capture_observations() as observed:
         interface.route_to_vendor("get_verified_market_snapshot", "GOOG", "2026-09-05", 5, _provenance=True)
     assert len(observed) == 1 and observed[0].fallback
+
+
+def test_cn_news_deduplication_preserves_failures_for_partial_and_empty_social():
+    from tests.dataflows.test_incremental_cn_collector import _request
+    from tradingagents.application.contracts import (
+        CollectionDiagnostic,
+        CollectionDomainResult,
+        CollectionSourceProvenance,
+        CollectionSummary,
+        IncrementalCollectionResult,
+    )
+    from tradingagents.application.incremental_collection import normalize_incremental_collection
+    from tradingagents.dataflows.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.dataflows.source_observations import SourceObservation
+
+    request = _request(enabled_domains=("news", "social"))
+    retrieved = datetime(2026, 7, 24, tzinfo=UTC)
+    announcement = SourceObservation("CNINFO", "news_article", "one", {"title": "event", "link": "https://example.test/1"},
+                                     retrieved, available_on=date(2026, 7, 21))
+    rating = SourceObservation("Eastmoney", "analyst_rating", "two", {"rating": "buy"}, retrieved,
+                               available_on=date(2026, 7, 22), fallback=True)
+    for keep_rating in (True, False):
+        domains, candidates = [], []
+        for role, observations in (("news", [announcement]), ("social", [announcement] + ([rating] if keep_rating else []))):
+            empty = CollectionDomainResult(domain=role, state="unavailable", diagnostic=CollectionDiagnostic(code="test"))
+            domain, extra = augment_domain(request, empty, observations)
+            domains.append(domain)
+            candidates.extend(extra)
+        social = domains[1]
+        social = social.model_copy(update={
+            "diagnostic": CollectionDiagnostic(code="professional_signals_partial"),
+            "sources": tuple(source.model_copy(update={"diagnostic": CollectionDiagnostic(code="upstream_source_partial")})
+                             for source in social.sources) + (
+                CollectionSourceProvenance(source="sse", retrieved_at=retrieved,
+                                           diagnostic=CollectionDiagnostic(code="upstream_source_unavailable")),
+            ),
+        })
+        domains, candidates = dedupe_news_domains([domains[0], social], candidates)
+        result = IncrementalCollectionResult(collection_summary=CollectionSummary(version="1", market=request.market, domains=tuple(domains)),
+                                             evidence=tuple(candidates))
+        summary, _, _ = normalize_incremental_collection(request, result, sealed_at=request.window_end)
+        social = summary.domains[1]
+        sources = {source.source: source for source in social.sources}
+        assert sources["sse"].diagnostic.code == "upstream_source_unavailable"
+        assert sources["cninfo"].diagnostic.code == "upstream_source_partial"
+        assert "professional_signals_partial" in social.diagnostic.code
+        if keep_rating:
+            assert len(social.evidence_refs) == 1
+            assert sources["eastmoney"].diagnostic.code == "upstream_source_partial"
+            assert sources["eastmoney"].retrieved_at == retrieved and sources["eastmoney"].fallback
+        else:
+            assert not social.evidence_refs
+            assert "articles_already_in_news" in social.diagnostic.code

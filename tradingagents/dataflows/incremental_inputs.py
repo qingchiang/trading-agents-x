@@ -314,8 +314,11 @@ def dedupe_news_domains(domains, candidates):
             refs.append(ref)
         updates = {"evidence_refs": tuple(dict.fromkeys(refs))}
         if domain.evidence_refs and not refs:
+            code = "articles_already_in_news"
+            if domain.diagnostic and domain.diagnostic.code != "bounded_source_observations":
+                code = f"{domain.diagnostic.code}.{code}"
             updates.update(state="empty", temporal_bases=(), observed_from=None, observed_through=None,
-                           diagnostic=CollectionDiagnostic(code="articles_already_in_news"))
+                           diagnostic=CollectionDiagnostic(code=code))
         elif len(refs) < len(domain.evidence_refs):
             sources = {}
             for ref in refs:
@@ -327,6 +330,12 @@ def dedupe_news_domains(domains, candidates):
                         fallback=origin.fallback or bool(previous and previous.fallback),
                         retrieved_at=max(stamp, previous.retrieved_at) if previous else stamp,
                     )
+            for source in domain.sources:
+                if source.diagnostic is not None:
+                    # Failed/limited inputs remain part of the collection even
+                    # when their successful articles were already used in news.
+                    retained = sources.get(source.source, source)
+                    sources[source.source] = retained.model_copy(update={"diagnostic": source.diagnostic})
             updates["sources"] = tuple(sources.values())
             updates["temporal_bases"] = tuple(dict.fromkeys(
                 "pit" if items[ref].evidence.available_at else "near_live_advisory" for ref in refs
