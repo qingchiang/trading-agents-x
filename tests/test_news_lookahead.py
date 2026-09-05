@@ -151,3 +151,20 @@ def test_global_news_empty_after_filter_is_informative(monkeypatch):
     out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
     assert "No global news found" in out
     assert "###" not in out  # no empty article body
+
+
+def test_global_news_continues_past_expired_candidates_and_preserves_publication(monkeypatch):
+    class Search:
+        calls = 0
+
+        def __init__(self, **kwargs):
+            Search.calls += 1
+            self.news = [{
+                "title": "expired" if Search.calls == 1 else "eligible",
+                "providerPublishTime": _epoch("2025-01-01" if Search.calls == 1 else "2025-05-05"),
+            }]
+
+    monkeypatch.setattr(ynews.yf, "Search", Search)
+    output = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=1)
+    assert "eligible" in output
+    assert "Published: 2025-05-05T00:00:00+00:00" in output

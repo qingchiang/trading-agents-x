@@ -36,6 +36,19 @@ def _frame(*, bank: bool = False) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def test_cashflow_preserves_sina_outflows_with_alternate_labels(monkeypatch):
+    frame = _frame()
+    frame["购建固定资产、无形资产和其他长期资产所支付的现金"] = [125, 80]
+    frame["分配股利、利润或偿付利息所支付的现金"] = [45, 30]
+    monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
+    monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_: None)
+    monkeypatch.setattr(cn_statements, "fetch_finance_records", lambda *_: ("600309.SS", frame))
+    output = cn_statements.get_cashflow("600309.SS", curr_date="2026-03-21")
+    assert "Missing mapped fields: Capital expenditure" not in output
+    assert ",125," in output
+    assert ",45," in output
+
+
 @pytest.mark.unit
 def test_visibility_uses_later_conflicting_date_and_keeps_old_revision():
     frame = pd.DataFrame(

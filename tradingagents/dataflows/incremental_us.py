@@ -421,13 +421,25 @@ def _collect_social(
         content=body,
         origins=(_near_live_origin(source, "social_snapshot"),),
     )
+    observed = []
+    for stamp in re.findall(r"^\[([^·]+) ·", body, re.MULTILINE):
+        try:
+            if stamp.endswith((" EDT", " EST")):
+                offset = "-04:00" if stamp.endswith(" EDT") else "-05:00"
+                value = datetime.fromisoformat(stamp[:-4] + offset)
+            else:
+                value = datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+            if value.tzinfo is not None:
+                observed.append(value)
+        except ValueError:
+            continue
     return (
         CollectionDomainResult(
             domain="social",
             state=CollectionResultState.PARTIAL,
             sources=(source,),
-            observed_from=request.window_start,
-            observed_through=request.window_end,
+            observed_from=min(observed) if observed else None,
+            observed_through=max(observed) if observed else None,
             temporal_bases=(CollectionTemporalBasis.NEAR_LIVE_ADVISORY,),
             evidence_refs=(item.ref,),
             diagnostic=CollectionDiagnostic(code="bounded_current_social_feed"),

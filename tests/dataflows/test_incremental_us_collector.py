@@ -66,6 +66,20 @@ Date,Open,High,Low,Close,Volume
     )
 
 
+def test_social_observed_range_describes_messages_not_requested_window():
+    result = collect_us_incremental(
+        _request(enabled_domains=("social",)),
+        fetch_stocktwits_messages=lambda *a, **kw: (
+            "[2026-07-24 12:00:00 EDT · @one · Bullish] first\n"
+            "[2026-07-24 13:00:00 EDT · @two · no-label] second"
+        ),
+        now=lambda: datetime(2026, 7, 25, tzinfo=UTC),
+    )
+    domain = result.collection_summary.domains[0]
+    assert domain.observed_from == datetime(2026, 7, 24, 16, tzinfo=UTC)
+    assert domain.observed_through == datetime(2026, 7, 24, 17, tzinfo=UTC)
+
+
 def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -> None:
     calls = []
 

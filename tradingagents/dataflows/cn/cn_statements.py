@@ -128,10 +128,16 @@ _FIELDS = {
             ("Cash paid to suppliers", ("购买商品、接受劳务支付的现金",)),
             ("Cash paid to employees", ("支付给职工以及为职工支付的现金",)),
             ("Net operating cash flow", ("经营活动产生的现金流量净额",)),
-            ("Capital expenditure", ("购建固定资产、无形资产和其他长期资产支付的现金",)),
+            ("Capital expenditure", (
+                "购建固定资产、无形资产和其他长期资产支付的现金",
+                "购建固定资产、无形资产和其他长期资产所支付的现金",
+            )),
             ("Net investing cash flow", ("投资活动产生的现金流量净额",)),
             ("Borrowing proceeds", ("取得借款收到的现金",)),
-            ("Dividends and interest paid", ("分配股利、利润或偿付利息支付的现金",)),
+            ("Dividends and interest paid", (
+                "分配股利、利润或偿付利息支付的现金",
+                "分配股利、利润或偿付利息所支付的现金",
+            )),
             ("Net financing cash flow", ("筹资活动产生的现金流量净额",)),
             ("Net increase in cash", ("现金及现金等价物净增加额",)),
             ("Ending cash balance", ("期末现金及现金等价物余额",)),

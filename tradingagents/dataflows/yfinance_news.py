@@ -248,41 +248,27 @@ def get_global_news_yfinance(
         limit = config["global_news_article_limit"]
     search_queries = config["global_news_queries"]
 
+    curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_dt = curr_dt - relativedelta(days=look_back_days)
+    start_date = start_dt.strftime("%Y-%m-%d")
     all_news = []
     seen_titles = set()
 
     try:
         for query in search_queries:
             search = yf_retry(lambda q=query: yf.Search(
-                query=q,
-                news_count=limit,
-                enable_fuzzy_query=True,
+                query=q, news_count=limit, enable_fuzzy_query=True,
             ))
-
-            if search.news:
-                for article in search.news:
-                    # Handle both flat and nested structures
-                    if "content" in article:
-                        data = _extract_article_data(article)
-                        title = data["title"]
-                    else:
-                        title = article.get("title", "")
-
-                    # Deduplicate by title
-                    if title and title not in seen_titles:
-                        seen_titles.add(title)
-                        all_news.append(article)
-
+            for article in search.news or []:
+                data = _extract_article_data(article)
+                title = data["title"]
+                if not _in_news_window(data["pub_date"], start_dt, curr_dt):
+                    continue
+                if title and title not in seen_titles:
+                    seen_titles.add(title)
+                    all_news.append(article)
             if len(all_news) >= limit:
                 break
-
-        if not all_news:
-            return f"No global news found for {curr_date}"
-
-        # Calculate date range
-        curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-        start_dt = curr_dt - relativedelta(days=look_back_days)
-        start_date = start_dt.strftime("%Y-%m-%d")
 
         news_str = ""
         kept = 0
@@ -293,6 +279,8 @@ def get_global_news_yfinance(
             if not _in_news_window(data["pub_date"], start_dt, curr_dt):
                 continue
             news_str += f"### {data['title']} (source: {data['publisher']})\n"
+            if data["pub_date"] is not None:
+                news_str += f"Published: {data['pub_date'].isoformat()}\n"
             if data["summary"]:
                 news_str += f"{data['summary']}\n"
             if data["link"]:
