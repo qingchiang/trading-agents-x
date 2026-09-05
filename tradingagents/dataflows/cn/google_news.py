@@ -14,6 +14,7 @@ import requests
 from tradingagents.version import USER_AGENT
 
 from ..errors import VendorRateLimitError
+from ..news_diagnostics import CandidateFilterCounts
 from ..news_quality import (
     build_chinese_company_aliases,
     canonical_headline,
@@ -104,6 +105,7 @@ def _safe_query(query: str) -> tuple[list[dict], Exception | None]:
 
 def get_news(ticker: str, start_date: str, end_date: str) -> str:
     """Return entity-filtered Chinese media headlines within CST calendar days."""
+    counts = CandidateFilterCounts()
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -112,7 +114,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     # code biases ranking but never establishes direct evidence by itself.
     query_names = tuple(dict.fromkeys(name for name in (short_name, full_name) if name))
     if not query_names:
-        return f"No Google News China coverage identity for {ticker}"
+        return f"No Google News China coverage identity for {ticker}\n{counts.render()}"
     queries = tuple(f'"{name}" {code} 股票' for name in query_names)
     if stop_on_rate_limit_requested():
         query_results = [_safe_query(query) for query in queries]
@@ -123,13 +125,16 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     if len(failures) == len(query_results):
         raise failures[0]
     candidates = [item for feed, _exc in query_results for item in feed]
-    items = [
-        item
-        for item in candidates
-        if item["title"]
-        and item["published"] is not None
-        and start <= item["published"] < end + timedelta(days=1)
-    ]
+    counts.upstream_returned = len(candidates)
+    items = []
+    for item in candidates:
+        if not item["title"] or item["published"] is None:
+            counts.invalid_records += 1
+            continue
+        if not start <= item["published"] < end + timedelta(days=1):
+            counts.date_filtered += 1
+            continue
+        items.append(item)
     aliases = build_chinese_company_aliases(code, full_name, short_name)
     items.sort(key=lambda item: item["published"], reverse=True)
     seen: set[str] = set()
@@ -137,23 +142,32 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     for item in items:
         classification = classify_chinese_google_article(item["title"], item["source"], aliases)
         key = canonical_headline(item["title"])
-        if classification.tier == "drop" or not key or key in seen:
+        if classification.tier == "drop":
+            counts.relevance_filtered += 1
+            continue
+        if not key:
+            counts.invalid_records += 1
+            continue
+        if key in seen:
+            counts.duplicates += 1
             continue
         seen.add(key)
         relevant.append((item, classification.tier))
 
     _disclosure_limit, _research_limit, media_limit = news_quotas()
     kept = relevant[:media_limit]
+    counts.source_truncated = len(relevant) - len(kept)
     if not kept:
         if failures:
             return (
                 f"<Google News China partially unavailable: {len(failures)} of "
                 f"{len(query_results)} name queries failed; successful queries returned "
-                "no relevant items>"
+                f"no relevant items>\n{counts.render()}"
             )
         return (
             f"No relevant Google News China found for {ticker} between {start_date} "
             f"and {end_date} after quality filtering ({len(items)} candidates dropped)"
+            f"\n{counts.render()}"
         )
     body = "\n\n".join(
         f"### [{tier}] {item['title']} (source: {item['source']})\n"
@@ -168,5 +182,5 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         )
     return (
         f"## {ticker} media headlines (Google News China), from {start_date} "
-        f"to {end_date}:\n\n{body}{availability}"
+        f"to {end_date}:\n\n{counts.render()}\n\n{body}{availability}"
     )

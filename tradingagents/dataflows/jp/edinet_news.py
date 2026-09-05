@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 
 from ..config import get_config
+from ..news_diagnostics import CandidateFilterCounts
 from ..news_selection import source_output_limit
 from ..symbol_utils import tokyo_securities_base
 from .edinet_common import (
@@ -69,21 +70,21 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
 
     # EDINET carries the 5-digit securities code (``99840``); reduce it to the
     # 4-digit base so it compares equal to the ticker's J-Quants code (``9984``).
-    matches = [
-        record
-        for date_str in dates
-        for record in documents_on(date_str)
-        if tokyo_securities_base(record.get("secCode")) == code
-    ]
+    records = [record for date_str in dates for record in documents_on(date_str)]
+    matches = [record for record in records if tokyo_securities_base(record.get("secCode")) == code]
+    counts = CandidateFilterCounts(
+        upstream_returned=len(records), relevance_filtered=len(records) - len(matches),
+        source_truncated=max(0, len(matches) - limit),
+    )
 
     if not matches:
         return (
             f"No EDINET disclosures found for {ticker} between {scanned_start} and "
-            f"{end_date}"
+            f"{end_date}\n{counts.render()}"
         )
 
     # Most recent first, capped like the other news vendors.
     items = render_filings(matches, _format_filing, limit)
     return (
-        f"## {ticker} EDINET disclosures, from {scanned_start} to {end_date}:\n\n{items}"
+        f"## {ticker} EDINET disclosures, from {scanned_start} to {end_date}:\n\n{counts.render()}\n\n{items}"
     )

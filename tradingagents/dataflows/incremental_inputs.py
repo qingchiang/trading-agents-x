@@ -16,6 +16,12 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
+from .errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+    VendorTransportError,
+)
 from .financial_inputs import collect_financial_inputs
 from .jp.jquants_sentiment import get_market_investor_flows
 from .macro_panel import get_global_macro_panel
@@ -146,6 +152,26 @@ def _input_failed(response):
     )
 
 
+def _typed_vendor_failure_code(exc: Exception) -> str | None:
+    """Return the stable, secret-free diagnostic for a typed vendor failure."""
+    if isinstance(exc, VendorRateLimitError):
+        return "rate_limited"
+    if isinstance(exc, VendorTransportError):
+        return "transport_failure"
+    if isinstance(exc, VendorNotConfiguredError):
+        return "not_configured"
+    if isinstance(exc, NoMarketDataError):
+        return "no_usable_data"
+    return None
+
+
+def _context_failure_code(domain, generic_code, typed_codes):
+    codes = [generic_code, *dict.fromkeys(typed_codes)]
+    if typed_codes and domain.diagnostic is not None and not domain.sources:
+        codes.insert(0, domain.diagnostic.code)
+    return ".".join(codes)
+
+
 def append_financials(request, domain, routed):
     inputs = collect_financial_inputs(
         request.instrument,
@@ -181,6 +207,7 @@ def append_news_context(request, domain, routed):
     observations = []
     responses = []
     failed = False
+    typed_failures = []
     calls = [
         lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
                        (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
@@ -193,15 +220,22 @@ def append_news_context(request, domain, routed):
         with capture_observations() as captured:
             try:
                 response = call()
-            except Exception:
+            except Exception as exc:
                 failed = True
+                code = _typed_vendor_failure_code(exc)
+                if code is not None:
+                    typed_failures.append(code)
                 continue
             responses.append(response)
             failed = failed or _input_failed(response)
             observations.extend(captured)
     return retain_input_limitations(
         augment_domain(request, domain, observations), responses,
-        failure_code="news_context_partial" if failed else None,
+        failure_code=(
+            _context_failure_code(domain, "news_context_partial", typed_failures)
+            if failed
+            else None
+        ),
     )
 
 
@@ -209,6 +243,7 @@ def append_market_context(request, domain, series, routed):
     observations = []
     response = ""
     failed = False
+    typed_failures = []
     if series is not None:
         points = [p for p in series.points if request.window_start < p.completed_at <= request.window_end]
         if points:
@@ -233,13 +268,23 @@ def append_market_context(request, domain, series, routed):
         try:
             response = routed("get_verified_market_snapshot", request.instrument,
                    request.analysis_cutoff.isoformat(), 5, _provenance=True, _stop_on_rate_limit=True)
-        except Exception:
+        except Exception as exc:
             failed = True
+            code = _typed_vendor_failure_code(exc)
+            if code is not None:
+                typed_failures.append(code)
         else:
             observations.extend(captured)
+    snapshot_failed = failed or _input_failed(response)
     return retain_input_limitations(
         augment_domain(request, domain, observations), (response,),
-        failure_code="market_snapshot_unavailable" if failed or _input_failed(response) else None,
+        failure_code=(
+            _context_failure_code(
+                domain, "market_snapshot_unavailable", typed_failures
+            )
+            if snapshot_failed
+            else None
+        ),
     )
 
 

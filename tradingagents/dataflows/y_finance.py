@@ -361,26 +361,22 @@ def _statement_header(title: str, canonical: str, freq: str, curr_date: str | No
     )
 
 
-def _historical_tokyo_statement_unavailable(
+def _historical_statement_unavailable(
     ticker: str, curr_date: str | None
 ) -> str | None:
-    """Fail closed when a dated historical JP fallback reaches current statements.
+    """Fail closed when a dated historical request reaches current statements.
 
     ``curr_date=None`` retains the public dataflow's legacy live-retrieval mode;
     graph-facing tools inject the analysis date from workflow state.
     """
     canonical = normalize_symbol(ticker)
-    if (
-        curr_date is None
-        or not canonical.endswith(".T")
-        or is_near_live(curr_date, canonical)
-    ):
+    if curr_date is None or is_near_live(curr_date, canonical):
         return None
     return (
         f"HISTORICAL_DATA_UNAVAILABLE: yfinance statements for {canonical} are "
         f"current retrievals without filing timestamps and were not requested for "
-        f"historical analysis date {curr_date}. J-Quants disclosure-date-filtered "
-        "statements were unavailable; do not estimate missing values."
+        f"historical analysis date {curr_date}. Use a configured point-in-time "
+        "statement provider when available; do not estimate missing values."
     )
 
 
@@ -406,6 +402,8 @@ def get_statement_frame(
     if attr is None:
         return None
     canonical = normalize_symbol(ticker)
+    if curr_date is not None and not is_near_live(curr_date, canonical):
+        return None
     try:
         obj = yf.Ticker(canonical)
         data = yf_retry(lambda: getattr(obj, attr))
@@ -423,7 +421,7 @@ def get_balance_sheet(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get balance sheet data from yfinance."""
-    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
         return unavailable
     canonical = normalize_symbol(ticker)
@@ -460,7 +458,7 @@ def get_cashflow(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get cash flow data from yfinance."""
-    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
         return unavailable
     canonical = normalize_symbol(ticker)
@@ -497,7 +495,7 @@ def get_income_statement(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get income statement data from yfinance."""
-    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
         return unavailable
     canonical = normalize_symbol(ticker)

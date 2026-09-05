@@ -31,6 +31,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from ..config import get_config
+from ..news_diagnostics import CandidateFilterCounts
 from ..news_quality import (
     build_company_aliases,
     canonical_headline,
@@ -127,22 +128,33 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     code = to_jquants_code(ticker)
     name = get_company_name(ticker)
     query = f"{name} {code}" if name else code
+    counts = CandidateFilterCounts()
 
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
     except (TypeError, ValueError):
-        return f"No Google News found for {ticker} between {start_date} and {end_date}"
+        return (
+            f"No Google News found for {ticker} between {start_date} and {end_date}"
+            f"\n{counts.render()}"
+        )
 
     fetched = _fetch_items(query, timeout)
-    candidates = [
-        it
-        for it in fetched
-        if it["title"]
-        and _in_window(it["pub_date"], start_dt, end_dt)
-    ]
+    counts.upstream_returned = len(fetched)
+    candidates = []
+    for item in fetched:
+        if not item["title"]:
+            counts.invalid_records += 1
+            continue
+        if not _in_window(item["pub_date"], start_dt, end_dt):
+            counts.date_filtered += 1
+            continue
+        candidates.append(item)
     if not candidates:
-        return f"No Google News found for {ticker} between {start_date} and {end_date}"
+        return (
+            f"No Google News found for {ticker} between {start_date} and {end_date}"
+            f"\n{counts.render()}"
+        )
     aliases = build_company_aliases(ticker, name)
     candidates.sort(key=lambda it: it["pub_date"], reverse=True)
     relevant = []
@@ -152,17 +164,25 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
             it["title"], it["source"], aliases
         )
         title_key = canonical_headline(it["title"])
-        if classification.tier == "drop" or not title_key or title_key in seen_titles:
+        if classification.tier == "drop":
+            counts.relevance_filtered += 1
+            continue
+        if not title_key:
+            counts.invalid_records += 1
+            continue
+        if title_key in seen_titles:
+            counts.duplicates += 1
             continue
         seen_titles.add(title_key)
         relevant.append((it, classification.tier))
 
     kept = relevant[: source_output_limit(get_config()["news_article_limit"])]
+    counts.source_truncated = len(relevant) - len(kept)
     if not kept:
         return (
             f"No relevant Google News found for {ticker} between {start_date} and "
             f"{end_date} after quality filtering ({len(candidates)} in-window "
-            "candidates dropped)"
+            f"candidates dropped)\n{counts.render()}"
         )
 
     direct_count = sum(tier == "direct" for _, tier in kept)
@@ -183,5 +203,5 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     )
     return (
         f"## {ticker} News (media, Google News), from {start_date} to {end_date}:"
-        f"\n\n{stats}\n\n{body}"
+        f"\n\n{stats}\n{counts.render()}\n\n{body}"
     )

@@ -65,19 +65,35 @@ class TestYFinanceFundamentalsLookahead:
 
         assert calls == ["info"]
 
-    def test_us_historical_statement_remains_available_with_period_end_warning(self):
-        ticker_obj = mock.MagicMock()
-        ticker_obj.income_stmt = pd.DataFrame(
-            {pd.Timestamp("2023-01-31"): [100]},
-            index=["Total Revenue"],
-        )
-        with mock.patch.object(yf_data.yf, "Ticker", return_value=ticker_obj) as ticker:
-            out = yf_data.get_income_statement("NVDA", "annual", "2023-06-01")
-        ticker.assert_called_once_with("NVDA")
-        assert "Requested analysis date: 2023-06-01" in out
-        assert "Not point-in-time historical data" in out
-        assert "period end only, not filing/publication timestamp" in out
-        assert "Total Revenue" in out
+    @pytest.mark.parametrize(
+        ("ticker_symbol", "method_name"),
+        [
+            ("NVDA", "get_income_statement"),
+            ("9984.T", "get_balance_sheet"),
+            ("600519.SS", "get_cashflow"),
+        ],
+    )
+    def test_historical_statement_does_not_request_current_yfinance_frame(
+        self, ticker_symbol, method_name
+    ):
+        with mock.patch.object(
+            yf_data, "is_near_live", return_value=False
+        ), mock.patch.object(yf_data.yf, "Ticker") as ticker:
+            out = getattr(yf_data, method_name)(ticker_symbol, "quarterly", "2020-01-15")
+        ticker.assert_not_called()
+        assert "HISTORICAL_DATA_UNAVAILABLE" in out
+        assert "without filing timestamps" in out
+        assert "2020-01-15" in out
+
+    def test_historical_statement_frame_helper_does_not_request_yfinance(self):
+        with mock.patch.object(
+            yf_data, "is_near_live", return_value=False
+        ), mock.patch.object(yf_data.yf, "Ticker") as ticker:
+            frame = yf_data.get_statement_frame(
+                "600519.SS", "income", "quarterly", "2020-01-15"
+            )
+        ticker.assert_not_called()
+        assert frame is None
 
     def test_no_date_statement_is_labelled_as_live_retrieval(self):
         ticker_obj = mock.MagicMock()
@@ -89,17 +105,3 @@ class TestYFinanceFundamentalsLookahead:
             out = yf_data.get_income_statement("9984.T", "annual", None)
         assert "not provided (treated as live retrieval)" in out
         assert "Not point-in-time historical data" in out
-
-    @pytest.mark.parametrize(
-        "method_name",
-        ["get_balance_sheet", "get_cashflow", "get_income_statement"],
-    )
-    def test_jp_historical_statement_fallback_does_not_request_yfinance(self, method_name):
-        with mock.patch.object(
-            yf_data, "is_near_live", return_value=False
-        ), mock.patch.object(yf_data.yf, "Ticker") as ticker:
-            out = getattr(yf_data, method_name)("9984.T", "annual", "2020-01-15")
-        ticker.assert_not_called()
-        assert "HISTORICAL_DATA_UNAVAILABLE" in out
-        assert "without filing timestamps" in out
-        assert "2020-01-15" in out

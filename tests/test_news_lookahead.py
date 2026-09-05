@@ -150,6 +150,7 @@ def test_global_news_empty_after_filter_is_informative(monkeypatch):
     monkeypatch.setattr(ynews.yf, "Search", FakeSearch)
     out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
     assert "No global news found" in out
+    assert "upstream_returned=" in out and "date_filtered=" in out
     assert "###" not in out  # no empty article body
 
 
@@ -168,3 +169,52 @@ def test_global_news_continues_past_expired_candidates_and_preserves_publication
     output = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=1)
     assert "eligible" in output
     assert "Published: 2025-05-05T00:00:00+00:00" in output
+
+
+def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypatch):
+    from tradingagents.dataflows.config import get_config, use_config
+
+    def article(title, index):
+        return {
+            "title": title,
+            "publisher": "Example",
+            "link": f"https://example.test/{index}",
+            "providerPublishTime": _epoch("2025-05-05"),
+        }
+
+    first_query = [
+        article(title, index)
+        for index in range(5)
+        for title in (f"MACRO EVENT {index}", f"macro event {index}")
+    ]
+    second_query = [
+        article(f"SECOND QUERY EVENT {index}", index + 10) for index in range(10)
+    ]
+    queries = []
+
+    class Search:
+        def __init__(self, *, query, **_kwargs):
+            queries.append(query)
+            self.news = first_query if query == "first" else second_query
+
+    monkeypatch.setattr(ynews.yf, "Search", Search)
+    monkeypatch.setattr(ynews, "yf_retry", lambda fn, **_kwargs: fn())
+    config = {
+        **get_config(),
+        "news_cache_enabled": False,
+        "global_news_queries": ["first", "second"],
+        "global_news_query_limit": 2,
+        "global_news_candidate_limit": 10,
+        "global_news_article_limit": 10,
+    }
+    with use_config(config):
+        output = ynews.get_global_news_yfinance(
+            "2025-05-09", look_back_days=7, limit=10
+        )
+
+    assert queries == ["first", "second"]
+    assert output.count("\n### ") == 10
+    assert "candidates=15" in output
+    assert "truncated=5" in output
+    assert "SECOND QUERY EVENT 4" in output
+    assert "SECOND QUERY EVENT 5" not in output

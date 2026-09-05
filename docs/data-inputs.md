@@ -34,6 +34,9 @@ stored with each refreshed series and survives cache hits. Near-live admission
 uses the existing zero-to-five market-local-day rule, not the age of the economic
 observation. Information identity excludes retrieval time and presentation order;
 macro display-window changes alone do not advance the information frontier.
+Yahoo statements use this same near-live boundary in Full prefetch and statement
+tools; older dated requests do not fetch current Yahoo statement frames. Configured
+JP/CN point-in-time statement providers retain their disclosure-date behavior.
 
 ## News budgets and selection
 
@@ -56,10 +59,12 @@ eligible candidates. Small candidate sets retain every eligible distinct item.
 CN announcement observations duplicated between news and sentiment share one
 source article in sealed inputs, with references kept closed.
 
-Source output reports candidate and filtering counts where exposed by the
-adapter; assemblers report duplicates, kept and truncated counts. Cache merge
-reports saved candidates and cache additions. These describe observed candidates,
-not the number of articles that the upstream service omitted before responding.
+Yahoo, CNINFO, Eastmoney, Google, EDINET and TDnet outputs report upstream rows,
+date and relevance losses, invalid records, duplicates and source truncation separately; assemblers report final duplicates,
+kept and truncated counts. CN source memory caches retain the original upstream
+counts before applying a later request's window. Cache merge reports saved
+candidates and cache additions. These describe observed candidates, not articles
+that the upstream service omitted before responding.
 
 ## Request-triggered news source cache
 
@@ -85,6 +90,8 @@ the requested window, candidate budget and relevant routing/selection settings;
 a narrow or smaller fetch cannot certify a wider request. Only currently invoked,
 configured sources can read their cache scope. Cached candidates are reselected
 for each Full or Incremental request's window and output cap.
+Company feeds use the instrument's market calendar; ticker-less global feeds use
+UTC, including cached revisions, so they do not inherit a US market date.
 
 Content revisions with recognizable source identity are separate versions. When
 a revision has no reliable public timestamp, it is a near-live observation at

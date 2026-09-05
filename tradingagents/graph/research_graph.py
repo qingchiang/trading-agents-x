@@ -6,7 +6,7 @@ import json
 import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -1591,8 +1591,10 @@ def _collect_evidence(
             from tradingagents.dataflows.source_observations import capture_observations
 
             with capture_observations() as news_observations:
-                emit_news(message.content, "news", "", global_news=getattr(message, "name", "") == "get_global_news")
+                emit_news(message.content, "news", instrument or "", global_news=getattr(message, "name", "") == "get_global_news")
+            fallback = any("fallback vendor selected" in record.timing for record in extract_provenance(message.content))
             for observation in news_observations:
+                observation = replace(observation, fallback=observation.fallback or fallback)
                 item = observation.evidence(requested_date, instrument=instrument)
                 items[item.ref] = item
             # Producer metadata owns item timing, including cached revisions.

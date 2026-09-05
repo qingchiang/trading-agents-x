@@ -154,6 +154,45 @@ def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_p
     assert row.day.isoformat() == "2026-09-04"
 
 
+def test_global_cache_uses_utc_publication_day(tmp_path):
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.dataflows.news_selection import split_candidates
+
+    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return "## feed\n\n### event\nPublished: 2026-09-05T01:00:00Z"
+
+    # Seed the same source/scope using the previous market-local calendar policy.
+    fetch_news_feed(
+        "global-source",
+        "global",
+        "2026-09-05",
+        "2026-09-05",
+        fetch,
+        config=config,
+        now=lambda: current,
+    )
+    body = fetch_news_feed(
+        "global-source",
+        "global",
+        "2026-09-05",
+        "2026-09-05",
+        fetch,
+        config=config,
+        now=lambda: current,
+        global_feed=True,
+    )
+
+    assert len(calls) == 2
+    row = split_candidates(body)[1][0]
+    assert row.day.isoformat() == "2026-09-05"
+
+
 def test_refresh_failure_survives_incremental_admission_without_changing_article_identity(tmp_path, monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.application.incremental_collection import normalize_incremental_collection

@@ -11,12 +11,18 @@ from .config import get_config
 from .errors import VendorRateLimitError
 from .instrument_identity import identity_names, resolve_search_identity
 from .news_cache import fetch_news_feed
+from .news_diagnostics import CandidateFilterCounts
 from .news_quality import (
     build_company_aliases,
     canonical_headline,
     classify_yahoo_article,
 )
-from .news_selection import candidate_scope, finalize_news, in_candidate_scope
+from .news_selection import (
+    candidate_scope,
+    finalize_news,
+    in_candidate_scope,
+    publication_day,
+)
 from .stockstats_utils import yf_retry
 from .symbol_utils import market_timezone, normalize_symbol
 
@@ -150,8 +156,9 @@ def _get_news_yfinance(
         stock = yf.Ticker(canonical)
         news = yf_retry(lambda: stock.get_news(count=candidate_limit))
 
+        counts = CandidateFilterCounts(upstream_returned=len(news or []))
         if not news:
-            return f"No news found for {ticker}{resolved}"
+            return f"No news found for {ticker}{resolved}\n{counts.render()}"
 
         # Parse date range for filtering
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -165,8 +172,9 @@ def _get_news_yfinance(
             ):
                 candidates.append(data)
 
+        counts.date_filtered = len(news) - len(candidates)
         if not candidates:
-            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}\n{counts.render()}"
 
         relevant = []
         irrelevant_count = duplicate_count = 0
@@ -185,11 +193,13 @@ def _get_news_yfinance(
             seen_titles.add(title_key)
             relevant.append((data, classification.tier))
 
+        counts.relevance_filtered = irrelevant_count
+        counts.duplicates = duplicate_count
         if not relevant:
             return (
                 f"No relevant news found for {ticker}{resolved} between {start_date} "
                 f"and {end_date} after quality filtering "
-                f"({len(candidates)} in-window candidates dropped)"
+                f"({len(candidates)} in-window candidates dropped)\n{counts.render()}"
             )
 
         from .news_selection import select_temporal
@@ -201,6 +211,7 @@ def _get_news_yfinance(
         context_count = sum(tier == "context" for _, tier in kept)
         dropped_count = len(candidates) - len(relevant)
         omitted_count = len(relevant) - len(kept)
+        counts.source_truncated = omitted_count
         news_str = ""
         for data, tier in kept:
             news_str += f"### [{tier}] {data['title']} (source: {data['publisher']})\n"
@@ -226,7 +237,7 @@ def _get_news_yfinance(
         )
         return (
             f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n"
-            f"{stats}\n\n{news_str}"
+            f"{stats}\n{counts.render()}\n\n{news_str}"
         )
 
     except Exception as e:
@@ -259,19 +270,20 @@ def _get_global_news_yfinance(
     if limit is None:
         limit = config["global_news_article_limit"]
     search_queries = config["global_news_queries"][:min(5, max(1, int(config.get("global_news_query_limit", 5))))]
+    candidate_limit = max(1, int(config.get("global_news_candidate_limit", 10)))
 
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = curr_dt - relativedelta(days=look_back_days)
     start_date = start_dt.strftime("%Y-%m-%d")
     all_news = []
     returned = date_filtered = duplicates = query_count = 0
-    seen_titles = set()
+    seen_keys = set()
 
     try:
         for query in search_queries:
             query_count += 1
             search = yf_retry(lambda q=query: yf.Search(
-                query=q, news_count=config.get("global_news_candidate_limit", 10), enable_fuzzy_query=True,
+                query=q, news_count=candidate_limit, enable_fuzzy_query=True,
             ))
             returned += len(search.news or [])
             for article in search.news or []:
@@ -280,12 +292,21 @@ def _get_global_news_yfinance(
                 if not _in_news_window(data["pub_date"], start_dt, curr_dt):
                     date_filtered += 1
                     continue
-                if title and title not in seen_titles:
-                    seen_titles.add(title)
+                keys = {
+                    (
+                        "title",
+                        canonical_headline(title),
+                        str(publication_day(data["pub_date"]) or ""),
+                    )
+                }
+                if data["link"]:
+                    keys.add(("url", data["link"]))
+                if title and not seen_keys.intersection(keys):
+                    seen_keys.update(keys)
                     all_news.append(article)
                 else:
                     duplicates += 1
-            if len(all_news) >= config.get("global_news_candidate_limit", 10):
+            if len(all_news) >= candidate_limit:
                 break
 
         news_str = ""
@@ -309,7 +330,8 @@ def _get_global_news_yfinance(
         # All candidates fell outside the window -> say so rather than return an
         # empty-bodied report (#993).
         if kept == 0:
-            return f"No global news found between {start_date} and {curr_date}"
+            counts = CandidateFilterCounts(upstream_returned=returned, date_filtered=date_filtered, duplicates=duplicates)
+            return f"No global news found between {start_date} and {curr_date}\n{counts.render()}"
 
         return (f"## Global Market News, from {start_date} to {curr_date}:\n\n"
                 f"Candidate filter: queries={query_count}; upstream_returned={returned}; "
@@ -338,5 +360,6 @@ def get_global_news_yfinance(curr_date: str, look_back_days: int | None = None, 
         with candidate_scope():
             return _get_global_news_yfinance(curr_date, days, limit)
     block = fetch_news_feed("yfinance-global", "global", start, curr_date, fetch,
-                            budget=config.get("global_news_candidate_limit", 10), config=config)
+                            budget=config.get("global_news_candidate_limit", 10), config=config,
+                            global_feed=True)
     return finalize_news(block, "yfinance-global", "", start, curr_date, limit, global_news=True)

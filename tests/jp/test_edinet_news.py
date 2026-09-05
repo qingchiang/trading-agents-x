@@ -87,7 +87,7 @@ class NewsRenderTests(unittest.TestCase):
         with self._patch({"2026-06-22": [_doc("72030")]}):  # only another company
             out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
         self.assertEqual(
-            out, "No EDINET disclosures found for 9984.T between 2026-06-22 and 2026-06-22"
+            out.splitlines()[0], "No EDINET disclosures found for 9984.T between 2026-06-22 and 2026-06-22"
         )
 
     def test_window_iterates_each_date_and_sorts_recent_first(self):

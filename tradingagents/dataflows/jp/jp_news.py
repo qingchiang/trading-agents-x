@@ -40,6 +40,7 @@ from tradingagents.provenance import (
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_cache import fetch_news_feed
+from ..news_diagnostics import candidate_filter_note
 from ..news_quality import canonical_headline
 from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
@@ -244,6 +245,9 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             timing = "available; no relevant items in window; returned_items=0"
         if limited:
             timing += "; source_window_limited"
+        filter_note = candidate_filter_note(block)
+        if filter_note:
+            timing += "; " + filter_note
         record = ProvenanceRecord(
             evidence="get_news",
             source=source,
@@ -262,7 +266,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                 )
             )
             merged_index += 1
-        elif block.startswith(_DATA_PREFIX):
+        elif block.startswith(_DATA_PREFIX) or filter_note:
             # Retain the auditable cap/duplicate disposition without binding a
             # non-rendered item to this source's evidence span.
             omitted_data_records.append(record)
@@ -271,7 +275,10 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         raise NoMarketDataError(
             ticker,
             detail="no EDINET/TDnet disclosures or media news in the window",
-            availability_notes=(attach_provenance(note, record) for note, record in notes),
+            availability_notes=(
+                *(attach_provenance(note, record) for note, record in notes),
+                *(attach_provenance("", record) for record in omitted_data_records),
+            ),
         )
     if notes:
         bound_blocks.append(

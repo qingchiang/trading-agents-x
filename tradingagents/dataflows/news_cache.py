@@ -48,7 +48,18 @@ def _eligible(rows, start, end):
     return list(latest.values())
 
 
-def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=None, config=None):
+def fetch_news_feed(
+    source,
+    scope_key,
+    start,
+    end,
+    fetch,
+    *,
+    budget=100,
+    now=None,
+    config=None,
+    global_feed=False,
+):
     """Reuse exact refreshes and merge previously observed, eligible candidates.
 
     Failures never certify a successful refresh. Cache errors degrade to the
@@ -61,13 +72,17 @@ def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=Non
     connection = None
     if not config.get("news_cache_enabled", True) or not config.get("data_cache_dir"):
         return fetch()
+    calendar_timezone = UTC if global_feed else market_timezone(scope_key)
     # Only non-secret selection/routing settings participate; credentials are
     # neither persisted nor logged. A disabled source is never invoked here.
     settings = {k: config.get(k) for k in (
         "data_vendors", "data_vendors_by_market", "tool_vendors", "global_news_queries",
         "global_news_query_limit", "global_news_candidate_limit", "news_selection_version",
     )}
-    scope = _hash([source, scope_key, settings])
+    scope_parts = [source, scope_key, settings]
+    if global_feed:
+        scope_parts.insert(2, "utc_global")
+    scope = _hash(scope_parts)
     signature = _hash([start, end, budget, settings])
     interval = max(0, int(config.get("news_cache_refresh_seconds", 900)))
     retention = max(1, int(config.get("news_cache_retention_days", 90)))
@@ -98,9 +113,9 @@ def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=Non
                             raise ValueError("date-only publication")
                         stamp = datetime.fromisoformat(clean_date.replace("Z", "+00:00"))
                         if stamp.tzinfo is None:
-                            stamp = stamp.replace(tzinfo=market_timezone(scope_key))
+                            stamp = stamp.replace(tzinfo=calendar_timezone)
                         row = replace(row, published=stamp.isoformat(),
-                                      market_day=stamp.astimezone(market_timezone(scope_key)).date().isoformat())
+                                      market_day=stamp.astimezone(calendar_timezone).date().isoformat())
                     except (ValueError, TypeError, AttributeError):
                         pass
                     normalized.append(row)
@@ -130,7 +145,7 @@ def fetch_news_feed(source, scope_key, start, end, fetch, *, budget=100, now=Non
                             version = _hash([version, existing[0]])
                         revision = existing is not None
                         row = replace(row, retrieved_at=retrieved.isoformat(), revision=revision,
-                                      market_day=retrieved.astimezone(market_timezone(scope_key)).date().isoformat() if revision else row.market_day)
+                                      market_day=retrieved.astimezone(calendar_timezone).date().isoformat() if revision else row.market_day)
                         connection.execute(
                             "INSERT OR IGNORE INTO articles VALUES (?,?,?,?,?,?)",
                             (scope, item, version, row.day.isoformat(), retrieved.timestamp(), json.dumps(asdict(row))),

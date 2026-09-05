@@ -17,6 +17,7 @@ from tradingagents.provenance import (
 from ..config import get_config
 from ..errors import NoMarketDataError, VendorRateLimitError
 from ..news_cache import fetch_news_feed
+from ..news_diagnostics import candidate_filter_note
 from ..news_quality import canonical_headline
 from ..news_selection import candidate_scope, emit_news, merge_news_blocks
 from ..rate_limit import stop_on_rate_limit_requested
@@ -135,6 +136,9 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             timing = partial_timing or "unavailable"
         else:
             timing = "available; no relevant items in window; returned_items=0"
+        filter_note = candidate_filter_note(output)
+        if filter_note:
+            timing += "; " + filter_note
         record = ProvenanceRecord(
             evidence="get_news",
             source=source,
@@ -161,7 +165,8 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             ticker,
             detail="no CNINFO announcements, Eastmoney research, or Chinese media news in the window",
             availability_notes=(
-                attach_provenance(note, record) for note, record in notes
+                *(attach_provenance(note, record) for note, record in notes),
+                *(attach_provenance("", record) for record in unbound_records if "Candidate filter:" in record.timing),
             ),
         )
     if notes:

@@ -228,3 +228,60 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
     assert items[0].available_at == datetime(2026, 9, 5, 23, 59, 59, 999999, tzinfo=ZoneInfo("Asia/Tokyo"))
     with pytest.raises(ValueError, match="after the analysis cutoff"):
         EvidenceBundle(instrument="9984.T", analysis_date=date(2026, 9, 4), items=tuple(items))
+
+
+def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
+    from langchain_core.messages import ToolMessage
+
+    from tradingagents.dataflows import interface
+    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.dataflows.errors import NoMarketDataError
+    from tradingagents.dataflows.news_selection import (
+        NewsCandidate,
+        finalize_news,
+        render_candidate,
+    )
+    from tradingagents.dataflows.source_observations import (
+        capture_observations,
+        publish_observation,
+    )
+    from tradingagents.graph.research_graph import _collect_evidence
+
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    def failed(*_a, **_k):
+        publish_observation("alpha_vantage", "news_article", "discard", {"title": "partial"}, retrieved_at=current)
+        raise NoMarketDataError("GOOG")
+    def fallback(*_a, **_k):
+        row = NewsCandidate("yfinance", "event", "### event", published="2026-09-04T10:00:00Z",
+                            retrieved_at=current.isoformat())
+        return finalize_news("## news\n\n" + render_candidate(row), "yfinance", "GOOG", "2026-09-01", "2026-09-05", 30)
+    monkeypatch.setitem(interface.VENDOR_METHODS, "get_news", {"alpha_vantage": failed, "yfinance": fallback})
+    with use_config({**get_config(), "tool_vendors": {"get_news": "alpha_vantage,yfinance"}}), capture_observations() as observed:
+        body = interface.route_to_vendor("get_news", "GOOG", "2026-09-01", "2026-09-05", _provenance=True)
+    assert len(observed) == 1
+    assert observed[0].fallback
+    sealed = _collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")], "",
+                               requested_date=current.date(), analyst="news", instrument="GOOG")
+    combined = {item.ref: item for item in [*sealed, *(o.evidence(current.date(), instrument="GOOG") for o in observed)]}
+    assert len(combined) == 1
+    assert all(item.fallback and item.origins[0].fallback for item in combined.values())
+
+
+def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
+    from tradingagents.dataflows import interface
+    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.dataflows.errors import NoMarketDataError
+    from tradingagents.dataflows.source_observations import (
+        capture_observations,
+        publish_observation,
+    )
+
+    def failed(*_a, **_k):
+        raise NoMarketDataError("GOOG")
+    def snapshot(*_a, **_k):
+        publish_observation("yfinance", "verified_market_snapshot", "GOOG", {"close": 100})
+        return "snapshot"
+    monkeypatch.setitem(interface.VENDOR_METHODS, "get_verified_market_snapshot", {"alpha_vantage": failed, "yfinance": snapshot})
+    with use_config({**get_config(), "tool_vendors": {"get_verified_market_snapshot": "alpha_vantage,yfinance"}}), capture_observations() as observed:
+        interface.route_to_vendor("get_verified_market_snapshot", "GOOG", "2026-09-05", 5, _provenance=True)
+    assert len(observed) == 1 and observed[0].fallback

@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, time
 from typing import Any
 
@@ -148,6 +148,18 @@ def capture_observations() -> Iterator[list[SourceObservation]]:
         yield observations
     finally:
         _sink.reset(token)
+
+
+@contextmanager
+def routed_observations(*, fallback: bool) -> Iterator[None]:
+    """Publish only the successful route leg, with its actual fallback status."""
+    parent = _sink.get()
+    if parent is None:
+        yield
+        return
+    with capture_observations() as observations:
+        yield
+    parent.extend(replace(row, fallback=row.fallback or fallback) for row in observations)
 
 
 def publish_observation(
