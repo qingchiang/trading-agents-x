@@ -1,5 +1,7 @@
 import Icon from "./Icon";
-import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { WorkspaceNavigationTarget } from "./ResearchWorkspace";
+import { useContext, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export type SectionNavigationEntry = {
@@ -27,6 +29,7 @@ export default function FloatingSectionNavigation({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const workspaceTarget = useContext(WorkspaceNavigationTarget);
   const slotRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => readOpenState(storageKey));
 
@@ -38,7 +41,7 @@ export default function FloatingSectionNavigation({
     sessionStorage.setItem(storageKey, next ? "open" : "closed");
   };
 
-  return (
+  const content = (
     <>
       <div className="floating-navigation-slot" ref={slotRef}>
         <div
@@ -97,6 +100,7 @@ export default function FloatingSectionNavigation({
       </label>
     </>
   );
+  return workspaceTarget === undefined ? content : workspaceTarget ? createPortal(content, workspaceTarget) : null;
 }
 
 function readOpenState(storageKey: string): boolean {

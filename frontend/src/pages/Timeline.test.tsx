@@ -169,6 +169,7 @@ function detail(): TimelineDetail {
 }
 
 beforeEach(async () => {
+  vi.stubGlobal("ResizeObserver", class { constructor(private callback: ResizeObserverCallback) {} observe() { this.callback([{ contentRect: { width: 1440 } } as ResizeObserverEntry], this as unknown as ResizeObserver); } disconnect() {} });
   vi.resetAllMocks();
   Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
   await i18n.changeLanguage("en");

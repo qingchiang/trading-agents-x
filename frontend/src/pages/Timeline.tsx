@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ResearchNodeComparison, type ResearchNodeComparisonSelection, type ResearchNodeView, type TimelineDetail } from "../api/client";
+import ResearchWorkspace from "../components/ResearchWorkspace";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import { ActionMenu } from "../components/Interaction";
@@ -132,8 +133,7 @@ export default function Timeline() {
         }}>×</button></span>)}
       <button className="button primary" disabled={selections.length !== 2 || busy} onClick={() => void compare()}>{t("compareSelectedNodes")}</button>
     </aside>}
-    <div className="research-workspace">
-      <details className="workspace-history" open={window.innerWidth > 1024 || undefined}><summary>{t("historyNavigation")}</summary>
+    <ResearchWorkspace history={<div className="workspace-history">
         <nav aria-label={t("historyNavigation")}>
           {cycles.map(cycle => <details className="history-cycle" open={cycle.is_primary || cycle.id === selected?.cycle_id || comparisonMode} key={cycle.id}>
             <summary>{cycle.baseline.analysis_date} {cycle.is_primary && <small>{t("primaryCycle")}</small>}{cycle.cycle_warning && <small className="warning">{t("fullResearchRecommended")}</small>}</summary>
@@ -159,9 +159,9 @@ export default function Timeline() {
           <button className="button" disabled={cycleOffset === 0} onClick={() => update({ cycle_offset: String(Math.max(0, cycleOffset - CYCLE_PAGE_SIZE)), node: null, view: null })}>{t("previous")}</button>
           <button className="button" disabled={cycleOffset + cycles.length >= (detail.timeline.cycle_total ?? 0)} onClick={() => update({ cycle_offset: String(cycleOffset + CYCLE_PAGE_SIZE), node: null, view: null })}>{t("next")}</button>
         </div>}
-      </details>
+      </div>}>
       {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace key={selected.id} /></Suspense>}
-    </div>
+    </ResearchWorkspace>
     {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} onClose={closeComparison} /></Suspense>}
     {pendingNode && lifecycleMode && <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={busy} onCancel={() => setPendingNode(null)} onConfirm={() => void lifecycle()}>
       <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
