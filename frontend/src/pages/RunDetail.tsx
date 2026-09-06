@@ -1,3 +1,4 @@
+import PerformanceSection from "../components/PerformanceSection";
 import { useReadingPosition } from "../useReadingPosition";
 import type { TFunction } from "i18next";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +12,6 @@ import ResearchKindBadge from "../components/ResearchKindBadge";
 import RunActivityView from "../components/RunActivityView";
 import StatusBadge from "../components/StatusBadge";
 import { buildEvidenceReferenceIndex, type EvidenceDisplayGroup, type EvidenceReferenceIndex } from "../evidence";
-import { localizePerformanceReason } from "../i18n";
 import { baselineComponentText, groupReassessment, reassessmentDispositionCounts, type ReassessmentGroupKey, } from "../reassessment";
 import { Link, useLocation, useNavigate, useParams, } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
@@ -641,20 +641,15 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           <>
           <IncrementalBriefPanel
             brief={detail.incremental_context?.analysis_brief ?? null}
+            baselineDate={detail.incremental_context?.full_baseline.analysis_date}
+            onView={selectView}
             node={detail.research_node ?? null}
             runId={run.id}
             runStatus={run.status}
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
           />
-          {detail.research_node && <>
-            <ReassessmentPanel node={detail.research_node} baselineDecision={detail.incremental_context?.full_baseline.decision ?? null} currentDecision={decision} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} />
-            <PerformanceSection node={detail.research_node} />
-            {decision && <details className="incremental-complete-decision" open={!detail.incremental_context?.analysis_brief || undefined}>
-              <summary>{t("completeJudgment")}</summary>
-              <ResearchDecisionContentView decision={decision} numericAudit={detail.result?.numeric_audit} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} onOpenWarnings={() => setWarningOpenRequest(value => value + 1)} />
-            </details>}
-          </>}
+
           </>
         )}
 
@@ -779,6 +774,8 @@ function IncrementalDecisionPanel({
 }
 
 function IncrementalBriefPanel({
+  onView,
+  baselineDate,
   brief,
   node,
   runId,
@@ -786,6 +783,8 @@ function IncrementalBriefPanel({
   evidenceIndex,
   onEvidence,
 }: {
+  onView: (view: ViewName) => void;
+  baselineDate?: string;
   brief: IncrementalAnalysisBrief | null;
   node: ResearchNodeView | null;
   runId: string;
@@ -806,10 +805,11 @@ function IncrementalBriefPanel({
           <h2>{t("analysisBrief")}</h2>
         </div>
       </div>
-      {node && <IncrementalOutcomeSummary node={node} />}
+      {node && <><p className="brief-period">{t("baselineDate")}: {baselineDate ?? "—"} → {t("selectedCutoff")}: {node.analysis_date}</p><IncrementalOutcomeSummary node={node} /></>}
       {!brief ? (
         <div className="empty-state">
           {t(briefUnavailableLabel(runStatus))}
+          <p><button className="button" onClick={() => onView("reassessment")}>{t("reassessment")}</button> <button className="button" onClick={() => onView("decision")}>{t("completeJudgment")}</button></p>
         </div>
       ) : (
         <ResearchMarkdownReader
@@ -817,11 +817,14 @@ function IncrementalBriefPanel({
           sections={brief.report_sections}
           runId={runId}
           reportKey="incremental-brief"
+          extraSections={node?.performance ? [{ id: "performance", anchor: "performance", title: t("performance"), source_refs: [] }] : []}
+          after={node && <PerformanceSection node={node} baselineDate={baselineDate} />}
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}
 
         />
       )}
+      {!brief && node && <PerformanceSection node={node} baselineDate={baselineDate} />}
     </article>
   );
 }
@@ -1021,93 +1024,6 @@ function ReassessmentEntryCard({
       />
     </article>
   );
-}
-
-function PerformanceSection({ node }: { node: ResearchNodeView }) {
-  const { t } = useTranslation();
-  const performance = node.performance;
-  if (!performance) return null;
-  return (
-    <section className="decision-section incremental-performance-section">
-      <div className="decision-section-heading">
-        <div>
-          <p className="eyebrow">{t("sinceFullBaseline")}</p>
-          <h2>{t("performance")}</h2>
-        </div>
-      </div>
-      <div className="performance-card-grid">
-        <PerformanceCard
-          label={t("currentInstrument")}
-          component={performance.stock}
-        />
-        {(performance.benchmarks ?? []).map((benchmark) => (
-          <PerformanceCard
-            label={benchmark.name}
-            component={benchmark.component}
-            reportedDifference={benchmark.reported_difference}
-            key={benchmark.name}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function PerformanceCard({
-  label,
-  component,
-  reportedDifference,
-}: {
-  label: string;
-  component: NonNullable<ResearchNodeView["performance"]>["stock"];
-  reportedDifference?: number | null;
-}) {
-  const { t } = useTranslation();
-  const calculation = component.calculation;
-  return (
-    <article className={`performance-card ${component.status}`}>
-      <header>
-        <strong>{label}</strong>
-        <span>{t(`performance_${component.status}`)}</span>
-      </header>
-      {calculation ? (
-        <>
-          <strong className="performance-return">
-            {formatReturn(calculation.unrounded_return)}
-          </strong>
-          <small>
-            {calculation.start_session} · {formatEndpointValue(calculation.start_value)} →{" "}
-            {calculation.end_session} · {formatEndpointValue(calculation.end_value)}
-          </small>
-          <span className="performance-adjustment-basis">
-            {t("adjustmentBasis")}: {calculation.adjustment_basis}
-          </span>
-        </>
-      ) : (
-        <p>{localizePerformanceReason(t, component.reason)}</p>
-      )}
-      {reportedDifference !== null && reportedDifference !== undefined && (
-        <p className="reported-difference">
-          {t("reportedBenchmarkDifference")}:{" "}
-          <strong>{formatReturn(reportedDifference)}</strong>
-        </p>
-      )}
-    </article>
-  );
-}
-
-function formatReturn(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "percent",
-    maximumFractionDigits: 2,
-    signDisplay: "exceptZero",
-  }).format(value);
-}
-
-function formatEndpointValue(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 4,
-  }).format(value);
 }
 
 function advancementLabel(t: TFunction, reasons: string[]): string {
@@ -1644,7 +1560,7 @@ function returnViewLabel(t: TFunction, view: ReturnViewName): string {
 }
 
 function viewLabel(view: ViewName, incremental: boolean): string {
-  if (view === "decision") return "overview";
+  if (view === "decision") return incremental ? "completeJudgment" : "overview";
   if (view === "brief") return "analysisBrief";
   if (view === "timeline") return "activity";
   if (view === "evidence" && incremental) return "evidenceUpdates";

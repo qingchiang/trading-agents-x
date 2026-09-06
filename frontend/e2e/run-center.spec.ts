@@ -753,7 +753,7 @@ test("runs, templates, trash, and restores local research", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("button", { name: "Open evidence ev_0123456789ab" }).first()).toBeFocused();
-  await page.getByRole("tab", { name: "Reports" }).click();
+  await page.getByRole("tab", { name: "Research reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -795,7 +795,7 @@ test("runs, templates, trash, and restores local research", async ({
       .first(),
   ).toBeHidden();
 
-  await page.getByRole("tab", { name: "Activity" }).click();
+  await page.getByRole("tab", { name: "Run progress" }).click();
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Attempt metrics")).toBeHidden();
   await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(

@@ -798,46 +798,48 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   );
 
   expect(await screen.findByRole("heading", { name: "Analysis brief" })).toBeVisible();
-  expect(screen.getByText("The full Decision was regenerated.")).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Reassessment", exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByText("Complete judgment")).not.toBeInTheDocument();
+  expect(screen.getByText("Overall assessment updated.")).toBeVisible();
   expect(screen.getByText("The filing requires a new Decision thesis.")).toBeVisible();
   expect(
-    screen.getByText("This Incremental node triggered the full-research warning."),
+    screen.getByText("This update recommends new full research."),
   ).toBeVisible();
   expect(screen.getByText("A complete refresh would resolve the scope gap.")).toBeVisible();
   expect(screen.getAllByText("Current instrument")[0]).toBeVisible();
   expect(screen.getAllByText("S&P 500")[0]).toBeVisible();
   expect(screen.getAllByText("NASDAQ 100")[0]).toBeVisible();
-  expect(screen.getAllByText(/Reported benchmark difference/)).toHaveLength(2);
-  expect(
-    screen.getAllByText("2026-07-20 · 100.1235 → 2026-07-24 · 112.9877"),
-  ).toHaveLength(3);
+  expect(screen.getAllByText("Instrument minus benchmark")).toHaveLength(3);
+  expect(screen.getByText("+8 pp")).toBeVisible();
+  expect(screen.getByText("+6 pp")).toBeVisible();
+  expect(screen.getAllByText("2026-07-20 → 2026-07-24")).toHaveLength(3);
   expect(screen.getAllByText(/split-adjusted close/)).toHaveLength(3);
   expect(screen.getByRole("tab", { name: "Analysis brief" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: "Research reports" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Deliberation" })).not.toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Analysis brief" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Run progress" })).toBeVisible();
   expect(
     screen.getAllByRole("tab").map((tab) => tab.textContent),
   ).toEqual([
     "Analysis brief",
     "Reassessment",
-    "Overview",
+    "Full assessment",
     "Evidence updates",
-    "Activity",
+    "Run progress",
     "Diagnostics",
   ]);
-  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
   await waitFor(() =>
     expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "run-view-decision"),
   );
   expect(
-    within(screen.getByRole("tabpanel")).getByText("The full Decision was regenerated."),
+    within(screen.getByRole("tabpanel")).getByText("Overall assessment updated."),
   ).toBeVisible();
   expect(screen.queryByText("Current instrument")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
@@ -853,7 +855,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "The filing changes the outlook.",
   );
 
-  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
   expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
   expect(screen.getByText("Balanced research summary.")).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
@@ -964,9 +966,9 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(
     await screen.findByText("This historical run did not record an analysis brief."),
   ).toBeVisible();
-  await waitFor(() => expect(screen.getByText("This version did not record a Decision outcome.")).toBeVisible());
-  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
-  await waitFor(() => expect(screen.getByText("This version did not record a Decision outcome.")).toBeVisible());
+  await waitFor(() => expect(screen.getByText("The overall assessment outcome was not recorded.")).toBeVisible());
+  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
+  await waitFor(() => expect(screen.getByText("The overall assessment outcome was not recorded.")).toBeVisible());
   await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
 });
 
@@ -1024,7 +1026,7 @@ test("streams through historical failed attempts before closing on the current s
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("heading", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Run progress" });
   const stream = FakeEventSource.instance;
 
   await act(async () => {
@@ -1075,7 +1077,7 @@ test("opens a fresh event stream from the last sequence after retry", async () =
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("heading", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Run progress" });
   const first = FakeEventSource.instance;
   act(() => first.emit("run.failed", {
     run_id: "run-1",
@@ -1156,12 +1158,12 @@ test("explains when an Incremental Decision is inherited unchanged", async () =>
   );
 
   expect(
-    await screen.findByText("The full Decision is inherited from the Full baseline."),
+    await screen.findByText("Overall assessment unchanged; baseline assessment retained."),
   ).toBeVisible();
   expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
   expect(
-    await screen.findByText("The full Decision is inherited from the Full baseline."),
+    await screen.findByText("Overall assessment unchanged; baseline assessment retained."),
   ).toBeInTheDocument();
   expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
 });
@@ -1180,11 +1182,11 @@ test("shows when an earlier Incremental node keeps the Cycle Warning active", as
   expect(await screen.findByText("Full research recommended")).toBeVisible();
   expect(
     screen.getByText(
-      "An earlier active Incremental node in this Research Cycle triggered the warning; this node did not add a new reason.",
+      "An earlier update in this cycle recommended new full research.",
     ),
   ).toBeVisible();
   expect(
-    screen.queryByText("This Incremental node triggered the full-research warning."),
+    screen.queryByText("This update recommends new full research."),
   ).not.toBeInTheDocument();
 });
 
@@ -1270,7 +1272,7 @@ test("localizes Incremental activity and keeps one technical event log per attem
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("tab", { name: "Run progress" });
 
   act(() =>
     FakeEventSource.instance.emit("incremental.collection_completed", {
@@ -1316,7 +1318,7 @@ test("orders work units within each attempt and restores the activity preference
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("tab", { name: "Activity" });
+  await screen.findByRole("tab", { name: "Run progress" });
 
   act(() => {
     FakeEventSource.instance.emit("node.completed", {

@@ -71,6 +71,7 @@ export function ResearchMarkdownReader({
   onEvidence,
   before,
   after,
+  extraSections = [],
 }: {
   markdown: string;
   sections: AnalystReport["report_sections"];
@@ -80,6 +81,7 @@ export function ResearchMarkdownReader({
   onEvidence: (ref: string) => void;
   before?: ReactNode;
   after?: ReactNode;
+  extraSections?: AnalystReport["report_sections"];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
@@ -87,7 +89,7 @@ export function ResearchMarkdownReader({
 
   return (
     <div className="report-reading-layout">
-      <ReportSectionNavigation sections={sections} containerRef={scrollRef} />
+      <ReportSectionNavigation sections={[...sections, ...extraSections]} containerRef={scrollRef} />
       <div className="analyst-report" ref={scrollRef}>
         {before}
         <Markdown
