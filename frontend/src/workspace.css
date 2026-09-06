@@ -1,0 +1,97 @@
+/* Shared visual foundation: compact navigation and quiet document reading. */
+:root {
+  --ink: #202938;
+  --muted: #596574;
+  --muted-2: #697585;
+  --line: #dde2e7;
+  --line-soft: #e9edf0;
+  --surface-soft: #f6f7f8;
+  --blue: #315f9e;
+  --blue-dark: #254e86;
+  --blue-soft: #edf3fa;
+  --radius: 8px;
+  --shadow: none;
+}
+body { background: #f7f8fa; }
+.app-shell { grid-template-columns: 216px minmax(0, 1fr); }
+.sidebar { background: #f0f2f5; color: var(--ink); border-right: 1px solid var(--line); }
+.brand-mark { background: var(--blue); box-shadow: none; border-radius: 6px; }
+.brand strong { color: var(--ink); }
+.brand small, .sidebar-foot, .sidebar-foot small, .sidebar-foot label { color: var(--muted); }
+.sidebar nav a { color: var(--muted); font-weight: 500; border-radius: 6px; }
+.sidebar nav a:hover, .sidebar nav a.active { color: var(--blue-dark); background: #e4ebf5; border-color: transparent; }
+.sidebar-foot select { background: #fff; color: var(--ink); border-color: var(--line); }
+.sidebar-collapse-button { color: var(--muted); background: transparent; border-color: var(--line); }
+.main-content { padding: 28px clamp(20px, 3vw, 44px) 48px; }
+.page-header { margin-bottom: 22px; }
+.page-header h1, .instrument-identity.prominent .instrument-primary-name { font-size: 28px; }
+h2, .panel-header h2 { font-size: 20px; }
+.panel, .metric-card, .research-cycle, .research-node-card, .timeline-summary-card { box-shadow: none; background: #fff; border-radius: 8px; }
+.eyebrow { display: none; }
+.button { border-radius: 6px; box-shadow: none; }
+.brand-copy small { display: none; }
+.metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.metric-card { min-height: 80px; }
+.metric-card strong { font-size: 24px; }
+.metric-line { display: none; }
+.profile-card, .check-card { background: #fff; box-shadow: none; border-radius: 6px; }
+.form-section { display: block; }
+.form-section .step { display: none; }
+.form-section-body { padding: 22px; }
+.run-heading { gap: 14px; }
+.run-title { gap: 12px; }
+.decision-hero { display: block; }
+.decision-rating-v2 { flex-direction: row; flex-wrap: wrap; gap: 12px; justify-content: flex-start; min-height: 0; padding: 20px 26px 0; color: var(--ink); background: transparent; text-align: left; }
+.decision-rating-v2 strong { color: var(--ink); font-size: 20px; margin: 0; }
+.decision-rating-v2 span, .decision-rating-v2 small { color: var(--muted); }
+.decision-summary, .decision-section { padding: 22px 26px; }
+.decision-summary h2 { margin-top: 12px; }
+.decision-horizon-summary { background: transparent; border: 0; padding: 0; }
+.research-opinion-notice { padding: 0; background: transparent; font-size: 12px; font-weight: 400; text-transform: none; }
+.scenario-card, .valuation-card, .research-list, .adjustment-card { background: transparent; border-radius: 0; box-shadow: none; }
+.scenario-card { border: 0; border-top: 2px solid var(--line); padding: 16px 0; }
+.scenario-grid { gap: 24px; }
+.decision-content, .incremental-outcome-summary, .reassessment-groups { max-width: 100%; }
+.decision-content .markdown, .research-list .markdown, .analyst-report .markdown, .deliberation-flow .markdown { font-size: 16px; line-height: 1.75; }
+.decision-summary > .markdown, .decision-section > .markdown { max-width: 800px; }
+.report-reading-layout { display: grid; grid-template-columns: 180px minmax(0, 800px); justify-content: center; align-items: start; gap: 24px; padding: 24px; }
+.analyst-report { max-height: none; overflow: visible; padding: 0; min-width: 0; width: 100%; max-width: 800px; margin: 0 auto; }
+.analyst-report .markdown :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top: 24px; }
+.floating-navigation-slot { position: sticky; top: 24px; width: auto; pointer-events: auto; }
+.report-reading-layout .floating-section-navigation, .floating-section-navigation { position: static; width: 100%; transform: none; }
+.floating-section-navigation nav { background: transparent; box-shadow: none; border: 0; border-radius: 0; max-height: calc(100dvh - 70px); }
+.floating-section-navigation.collapsed { width: 34px; }
+.floating-navigation-trigger { box-shadow: none; background: #fff; }
+.floating-section-select { display: none; }
+.report-panel > .panel-header { padding: 18px 24px; }
+.action-menu { position: relative; display: inline-block; }
+.action-menu-content { position: absolute; right: 0; top: calc(100% + 5px); min-width: 210px; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px #15263b20; z-index: 40; display: grid; gap: 3px; }
+.action-menu-content .button, .action-menu-content a { text-align: left; justify-content: flex-start; width: 100%; border: 0; }
+.view-tabs { box-shadow: none; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; }
+.view-tabs button { border-radius: 0; border-bottom: 2px solid transparent; }
+.view-tabs button.active { border-bottom-color: var(--blue); background: transparent; }
+button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.source-drawer, .comparison-modal, .confirm-card { box-shadow: 0 12px 40px #16283d24; }
+@media (max-width: 1120px) {
+  .report-reading-layout { display: block; }
+  .floating-navigation-slot { display: none; }
+  .floating-section-select { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 0 16px; margin-bottom: 20px; }
+  .floating-section-select select { width: auto; max-width: 100%; }
+}
+@media (max-width: 820px) {
+  .app-shell { display: block; }
+  .main-content { padding: 68px 16px 36px; }
+  .sidebar { background: #f0f2f5; }
+  .decision-rating-v2 { min-height: 0; }
+}
+@media (max-width: 640px) {
+  .report-reading-layout { padding: 18px 16px; }
+  .analyst-report { padding: 0; }
+  .page-header h1, .instrument-identity.prominent .instrument-primary-name { font-size: 24px; }
+  .page-header { gap: 12px; }
+  .decision-summary, .decision-section { padding: 18px 16px; }
+  .decision-rating-v2 { padding: 18px 16px 0; }
+  .action-menu-content { max-width: calc(100vw - 32px); }
+}
+.brand { gap: 8px; padding-inline: 0; }
+.brand strong { font-size: 14px; }

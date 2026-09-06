@@ -108,27 +108,12 @@ export function ResearchMarkdownReader({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
-  useLayoutEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
-    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
-    };
-  }, [scrollStorageKey]);
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      sessionStorage.setItem(
-        scrollStorageKey,
-        String(scrollRef.current.scrollTop),
-      );
-    }
-  };
+  useReadingPosition(scrollStorageKey, scrollRef);
+
   return (
     <div className="report-reading-layout">
       <ReportSectionNavigation sections={sections} containerRef={scrollRef} />
-      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+      <div className="analyst-report" ref={scrollRef}>
         {before}
         <Markdown
           evidenceAliases={evidenceIndex.aliases}
@@ -158,25 +143,10 @@ function LegacyMarkdownReader({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
-  useLayoutEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
-    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
-    };
-  }, [scrollStorageKey]);
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      sessionStorage.setItem(
-        scrollStorageKey,
-        String(scrollRef.current.scrollTop),
-      );
-    }
-  };
+  useReadingPosition(scrollStorageKey, scrollRef);
+
   return (
-    <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+    <div className="analyst-report" ref={scrollRef}>
       <Markdown
         evidenceAliases={evidenceIndex.aliases}
         onEvidence={onEvidence}
@@ -201,21 +171,21 @@ function ReportSectionNavigation({
     const container = containerRef.current;
     if (!container || sections.length === 0) return;
     const update = () => {
-      const threshold = container.scrollTop + 48;
+      const threshold = 96;
       let next = sections[0].anchor;
       for (const section of sections) {
         const candidate = document.getElementById(headingDomId(section.anchor));
         const heading =
           candidate && container.contains(candidate) ? candidate : null;
-        if (heading && headingScrollTop(container, heading) <= threshold) {
+        if (heading && heading.getBoundingClientRect().top <= threshold) {
           next = section.anchor;
         }
       }
       setActive(next);
     };
     update();
-    container.addEventListener("scroll", update, { passive: true });
-    return () => container.removeEventListener("scroll", update);
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
   }, [containerRef, sections]);
 
   if (sections.length === 0) return null;
@@ -225,7 +195,8 @@ function ReportSectionNavigation({
     const heading =
       container && candidate && container.contains(candidate) ? candidate : null;
     if (!container || !heading) return;
-    container.scrollTop = Math.max(headingScrollTop(container, heading) - 16, 0);
+    heading.scrollIntoView?.({ block: "start" });
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${encodeURIComponent(anchor)}`);
     heading.focus({ preventScroll: true });
     setActive(anchor);
   };
@@ -246,10 +217,24 @@ function ReportSectionNavigation({
   );
 }
 
-function headingScrollTop(container: HTMLElement, heading: HTMLElement): number {
-  const containerTop = container.getBoundingClientRect().top;
-  const headingTop = heading.getBoundingClientRect().top;
-  return container.scrollTop + headingTop - containerTop;
+function useReadingPosition(key: string, ref: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    let frame = requestAnimationFrame(() => {
+      const anchor = decodeURIComponent(window.location.hash.slice(1));
+      const heading = anchor ? document.getElementById(headingDomId(anchor)) : null;
+      if (heading && ref.current?.contains(heading)) heading.scrollIntoView?.({ block: "start" });
+      else {
+        const saved = sessionStorage.getItem(key);
+        if (saved !== null) window.scrollTo?.(0, Math.max(0, Number(saved) || 0));
+      }
+    });
+    const save = () => sessionStorage.setItem(key, String(window.scrollY));
+    window.addEventListener("scroll", save, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", save);
+    };
+  }, [key, ref]);
 }
 
 function headingDomId(anchor: string): string {

@@ -1,5 +1,6 @@
 import { PropsWithChildren, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import Icon from "./Icon";
 import i18n from "../i18n";
 import { Link, usePathname } from "../router";
 
@@ -56,7 +57,7 @@ export default function Layout({ children }: PropsWithChildren) {
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
       >
-        ☰
+        <Icon name="menu" />
       </button>
       <aside className="sidebar" id="primary-sidebar">
         <button
@@ -65,7 +66,7 @@ export default function Layout({ children }: PropsWithChildren) {
           aria-label={t("closeNavigation")}
           onClick={() => setDrawerOpen(false)}
         >
-          ×
+          <Icon name="close" />
         </button>
         <div className="brand">
           <div className="brand-mark">TX</div>
@@ -84,7 +85,7 @@ export default function Layout({ children }: PropsWithChildren) {
               title={collapsed ? t(item.key) : undefined}
             >
               <span className="nav-icon" aria-hidden="true">
-                {item.icon}
+                <Icon name={item.key} />
               </span>
               <span className="nav-label">{t(item.key)}</span>
             </Link>

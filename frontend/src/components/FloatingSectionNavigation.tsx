@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export type SectionNavigationEntry = {
@@ -28,31 +28,7 @@ export default function FloatingSectionNavigation({
   const { t } = useTranslation();
   const slotRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => readOpenState(storageKey));
-  const [external, setExternal] = useState(false);
 
-  useEffect(() => {
-    const slot = slotRef.current;
-    const reader = slot?.parentElement;
-    const sidebar = document.querySelector<HTMLElement>(".sidebar");
-    if (!slot || !reader) return;
-    const update = () => {
-      const readerLeft = reader.getBoundingClientRect().left;
-      const sidebarRight = sidebar?.getBoundingClientRect().right ?? 0;
-      setExternal(readerLeft - sidebarRight >= 218);
-    };
-    update();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(update);
-    observer?.observe(reader);
-    if (sidebar) observer?.observe(sidebar);
-    window.addEventListener("resize", update);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, []);
 
   if (entries.length === 0) return null;
   const toggle = () => {
@@ -65,9 +41,7 @@ export default function FloatingSectionNavigation({
     <>
       <div className="floating-navigation-slot" ref={slotRef}>
         <div
-          className={`floating-section-navigation ${open ? "open" : "collapsed"} ${
-            external ? "external" : "overlay"
-          }`}
+          className={`floating-section-navigation ${open ? "open" : "collapsed"} `}
         >
           {open ? (
             <nav aria-label={ariaLabel}>

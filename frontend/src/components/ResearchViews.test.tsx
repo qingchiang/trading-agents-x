@@ -120,19 +120,15 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   const reportScroller = document.querySelector<HTMLElement>(".analyst-report");
   const reportHeading = screen.getByRole("heading", { name: "Market view" });
   expect(reportScroller).not.toBeNull();
-  reportScroller!.scrollTop = 40;
-  vi.spyOn(reportScroller!, "getBoundingClientRect").mockReturnValue({
-    top: 100,
-  } as DOMRect);
-  vi.spyOn(reportHeading, "getBoundingClientRect").mockReturnValue({
-    top: 260,
-  } as DOMRect);
+  reportHeading.scrollIntoView = vi.fn();
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Report section navigation" }),
     ).getByRole("button", { name: "Market view" }),
   );
-  expect(reportScroller!.scrollTop).toBe(184);
+  expect(reportHeading.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  expect(reportHeading).toHaveFocus();
+  expect(window.location.hash).toBe("#market-view");
   expect(screen.queryByText(evidenceRef)).not.toBeInTheDocument();
   const footnote = screen.getByRole("button", {
     name: `Open evidence ${evidenceRef}`,

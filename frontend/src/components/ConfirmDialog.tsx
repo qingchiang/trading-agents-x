@@ -1,4 +1,6 @@
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useId, useRef } from "react";
+
+import { useModal } from "./Interaction";
 
 export default function ConfirmDialog({
   title,
@@ -21,14 +23,7 @@ export default function ConfirmDialog({
   const descriptionId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    cancelRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onCancel]);
+  const dialogRef = useModal<HTMLDivElement>(true, onCancel, busy);
 
   return (
     <div
@@ -39,6 +34,8 @@ export default function ConfirmDialog({
     >
       <div
         className="confirm-card"
+        ref={dialogRef}
+        tabIndex={-1}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
