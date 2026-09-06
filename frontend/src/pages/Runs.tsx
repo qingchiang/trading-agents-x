@@ -37,8 +37,18 @@ export default function Runs() {
     setQuery(search.get("q") ?? ""); setStatus(search.get("status") ?? ""); setKind(search.get("research_kind") ?? "");
     setPage(null); setSelected([]); setError("");
     search.set("limit", "12"); search.set("offset", String(offset)); search.set("trash_state", trash ? "trashed" : "active");
-    api.runGroups(`?${search}`).then(value => { if (active) setPage(value); }, cause => { if (active) setError(String(cause)); });
-    return () => { active = false; };
+    let pending = false;
+    const refresh = async () => {
+      if (pending) return;
+      pending = true;
+      try { const value = await api.runGroups(`?${search}`); if (active) { setPage(value); setError(""); } }
+      catch (cause) { if (active) setError(String(cause)); }
+      finally { pending = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, [location.search, revision]);
   const update = (values: Record<string, string | null>) => {
     const next = new URLSearchParams(location.search);
@@ -49,7 +59,7 @@ export default function Runs() {
   const act = async (run: RunSummaryView, action: "cancel" | "retry") => {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError("");
-    try { await api.action(run.id, action); setRevision(value => value + 1); }
+    try { await api.action(run.id, action); setNotice(t(action === "cancel" ? "taskCancelSent" : "taskRetrySent")); setRevision(value => value + 1); }
     catch (cause) { setError(String(cause)); }
     finally { lock.current = false; setBusy(false); }
   };

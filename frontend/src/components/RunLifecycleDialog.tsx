@@ -3,6 +3,18 @@ import { useTranslation } from "react-i18next";
 import { api, type RunLifecyclePreview } from "../api/client";
 import ConfirmDialog from "./ConfirmDialog";
 
+const lifecycleMessages: Record<string, string> = {
+  "Some selected runs no longer exist.": "lifecycleMissing",
+  "Only completed, failed or cancelled tasks can be moved to Trash.": "lifecycleRunning",
+  "All affected research must be in Trash before permanent deletion.": "lifecycleActive",
+  "restored Full must remain a valid current Full Baseline": "lifecycleInvalidBaseline",
+  "an Incremental cannot be restored while its Full remains in Trash": "lifecycleParentTrashed",
+  "restored Incremental must retain a valid current Full Baseline": "lifecycleInvalidRelation",
+  "restore contains duplicate same-Cycle/cutoff slots": "lifecycleDuplicateDate",
+  "restore conflicts with an active slot for the same Cycle/cutoff": "lifecycleDateConflict",
+  "The affected research changed. Refresh the preview and confirm again.": "lifecycleScopeChanged",
+};
+
 export type LifecycleAction = "trash" | "restore" | "purge";
 export default function RunLifecycleDialog({ runIds, action, onClose, onDone }: {
   runIds: string[]; action: LifecycleAction; onClose: () => void; onDone: (changed: number) => void;
@@ -30,16 +42,16 @@ export default function RunLifecycleDialog({ runIds, action, onClose, onDone }: 
         : action === "restore" ? await api.restoreRuns(runIds, preview.affected_run_ids)
         : await api.purgeRuns(runIds, preview.affected_run_ids);
       onDone(result.changed);
-    } catch (cause) { setError(String(cause)); setRevision(value => value + 1); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setRevision(value => value + 1); }
     finally { lock.current = false; setBusy(false); }
   };
   return <ConfirmDialog title={t(`lifecycleTitle_${action}`)} confirmLabel={t(action === "trash" ? "confirmTimelineTrash" : action === "restore" ? "restore" : "confirmPurge")} cancelLabel={t("cancel")} busy={busy} confirmDisabled={!preview || missingChoice || Boolean(preview.blocked_reasons?.length)} onCancel={onClose} onConfirm={() => void submit()}>
     <p>{t(action === "purge" ? "purgeResearchImpact" : "lifecyclePreviewHint")}</p>
-    {error && <p role="alert">{error} <button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></p>}
+    {error && <p role="alert">{t(lifecycleMessages[error] ?? error, { defaultValue: error })} <button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></p>}
     {!preview ? <p role="status">{t("loading")}</p> : <>
       <p><strong>{t("affectedResearch", { count: preview.affected_runs.length })}</strong></p>
       <ul className="lifecycle-impact-list">{preview.affected_runs.map(run => <li key={run.id}>{run.instrument_name ?? run.request.ticker} · {run.request.analysis_date} · {t(run.research_kind === "incremental" ? "incrementalResearch" : "fullResearch")}</li>)}</ul>
-      {preview.blocked_reasons?.map(reason => <p role="alert" key={reason}>{t(reason, { defaultValue: reason })}</p>)}
+      {preview.blocked_reasons?.map(reason => <p role="alert" key={reason}>{t(lifecycleMessages[reason] ?? reason, { defaultValue: reason })}</p>)}
       {Object.entries(preview.primary_replacements ?? {}).map(([id, candidates]) => <label className="replacement-choice" key={id}>{t("replacementPrimaryCycle")}<select value={replacements[id] ?? ""} onChange={event => setReplacements(current => ({ ...current, [id]: event.target.value }))}><option value="">{t("selectReplacementCycle")}</option>{candidates.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.analysis_date} · {candidate.rating ?? "—"}</option>)}</select></label>)}
     </>}
   </ConfirmDialog>;

@@ -158,6 +158,12 @@ function ReportSectionNavigation({
           next = section.anchor;
         }
       }
+      // The final section may be too short to reach the top of the viewport.
+      if (window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2) {
+        const last = sections.at(-1)!;
+        const heading = document.getElementById(headingDomId(last.anchor));
+        if (heading && container.contains(heading) && heading.getBoundingClientRect().top < window.innerHeight) next = last.anchor;
+      }
       setActive(next);
     };
     update();

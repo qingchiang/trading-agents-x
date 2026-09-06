@@ -230,3 +230,25 @@ async def test_groups_page_whole_cycles_and_do_not_count_hidden_trash(
     assert (await web_client.get("/api/v1/run-groups?limit=1")).json()["total"] == 1
     trash = (await web_client.get("/api/v1/run-groups?trash_state=trashed")).json()
     assert [item["id"] for item in trash["items"]] == [later.id]
+
+
+@pytest.mark.anyio
+async def test_restore_preview_reports_existing_cycle_cutoff_conflict(
+    web_client, web_repository, web_settings
+):
+    from tests.application.test_cycle_trash_lifecycle import _commit_node
+
+    baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
+    child = _commit_node(
+        web_repository, web_settings, analysis_date=date(2026, 7, 21), baseline_id=baseline.id
+    )
+    web_repository.trash_runs_detailed((child.id,))
+    _commit_node(
+        web_repository, web_settings, analysis_date=date(2026, 7, 21), baseline_id=baseline.id
+    )
+    response = await web_client.post(
+        "/api/v1/runs/lifecycle-preview", json={"run_ids": [child.id], "action": "restore"}
+    )
+    assert response.status_code == 200
+    assert any("active slot" in reason for reason in response.json()["blocked_reasons"])
+    assert web_repository.get_run(child.id).trashed_at is not None

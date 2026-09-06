@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { api, type RunGroupPage, type RunSummaryView } from "../api/client";
 import i18n from "../i18n";
@@ -105,4 +105,17 @@ test("shows a baseline, its research and related unfinished tasks as separate ow
   expect(screen.getByRole("link", { name: "Read research" })).toHaveAttribute("href", "/timelines/NVDA?node=full");
   expect(screen.getByLabelText("Select run NVDA")).toBeDisabled();
   expect(screen.getAllByRole("link", { name: "Execution details" })).toHaveLength(2);
+});
+
+test("refreshes task state without clearing an unsubmitted search", async () => {
+  vi.mocked(api.runGroups).mockResolvedValue(groups([run("one", "NVDA", "running")]));
+  render(<Router initialPath="/runs"><Runs /></Router>);
+  await screen.findByText("NVIDIA Corporation");
+  fireEvent.change(screen.getByLabelText("Search runs"), { target: { value: "draft search" } });
+  vi.useFakeTimers();
+  try {
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(api.runGroups).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Search runs")).toHaveValue("draft search");
+  } finally { vi.useRealTimers(); }
 });

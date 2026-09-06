@@ -642,24 +642,13 @@ class RunRepository:
                     blocked.append(
                         "All affected research must be in Trash before permanent deletion."
                     )
-                node = nodes.get(record.id)
-                if action == "restore" and record.trashed_at is not None and node:
-                    if node.research_kind == "full" and (
-                        record.status != RunStatus.SUCCEEDED.value
-                        or record.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
-                    ):
-                        blocked.append(
-                            "The full baseline is no longer compatible with this research version."
-                        )
-                    if (
-                        node.research_kind == "incremental"
-                        and node.full_baseline_run_id not in affected
-                    ):
-                        baseline = session.get(RunRecord, node.full_baseline_run_id)
-                        if baseline is None or baseline.trashed_at is not None:
-                            blocked.append(
-                                "Restore the full baseline before restoring its incremental research."
-                            )
+            if action == "restore":
+                try:
+                    _validate_restoration(
+                        session, {record.id for record in records if record.trashed_at is not None}
+                    )
+                except InvalidRunTransitionError as error:
+                    blocked.append(str(error))
             replacements = {}
             if action == "trash":
                 for primary in session.scalars(
@@ -929,74 +918,7 @@ class RunRepository:
             for children in cascade_children.values():
                 restore_ids.update(child.id for child in children)
 
-            for full_id in full_ids:
-                full = records[full_id]
-                if (
-                    full.status != RunStatus.SUCCEEDED.value
-                    or full.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
-                ):
-                    raise InvalidRunTransitionError(
-                        "restored Full must remain a valid current Full Baseline"
-                    )
-
-            restoring_nodes = {
-                node.run_id: node
-                for node in session.scalars(
-                    select(ResearchNodeRecord).where(ResearchNodeRecord.run_id.in_(restore_ids))
-                )
-            }
-            restoring_slots: set[tuple[str, date]] = set()
-            for run_id, node in restoring_nodes.items():
-                if node.research_kind != "incremental":
-                    continue
-                baseline = session.get(RunRecord, node.full_baseline_run_id)
-                baseline_node = session.get(ResearchNodeRecord, node.full_baseline_run_id)
-                if baseline is None or (
-                    baseline.trashed_at is not None and baseline.id not in restore_ids
-                ):
-                    raise InvalidRunTransitionError(
-                        "an Incremental cannot be restored while its Full remains in Trash"
-                    )
-                run = session.get(RunRecord, run_id)
-                baseline_request = RunRequestSnapshot.model_validate(baseline.request_json)
-                incremental_request = RunRequestSnapshot.model_validate(run.request_json)
-                if (
-                    baseline_node is None
-                    or baseline_node.research_kind != "full"
-                    or baseline.status != RunStatus.SUCCEEDED.value
-                    or baseline.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
-                    or baseline_request.ticker != incremental_request.ticker
-                    or baseline_request.analysis_date >= incremental_request.analysis_date
-                ):
-                    raise InvalidRunTransitionError(
-                        "restored Incremental must retain a valid current Full Baseline"
-                    )
-                slot = (node.full_baseline_run_id, run.incremental_cutoff)
-                if slot in restoring_slots:
-                    raise InvalidRunTransitionError(
-                        "restore contains duplicate same-Cycle/cutoff slots"
-                    )
-                restoring_slots.add(slot)
-                conflict = session.scalar(
-                    select(RunRecord.id).where(
-                        RunRecord.research_kind == "incremental",
-                        RunRecord.full_baseline_run_id == node.full_baseline_run_id,
-                        RunRecord.incremental_cutoff == run.incremental_cutoff,
-                        RunRecord.trashed_at.is_(None),
-                        RunRecord.status.in_(
-                            (
-                                RunStatus.QUEUED.value,
-                                RunStatus.RUNNING.value,
-                                RunStatus.SUCCEEDED.value,
-                            )
-                        ),
-                        RunRecord.id.not_in(restore_ids),
-                    )
-                )
-                if conflict is not None:
-                    raise InvalidRunTransitionError(
-                        "restore conflicts with an active slot for the same Cycle/cutoff"
-                    )
+            _validate_restoration(session, restore_ids)
 
             fulls_by_instrument: dict[str, list[str]] = {}
             for full_id in full_ids:
@@ -3556,6 +3478,74 @@ class RunRepository:
             research_rating=ResearchRating(rating) if rating else None,
             research_confidence=(ResearchConfidenceLevel(confidence) if confidence else None),
         )
+
+
+def _validate_restoration(session: Session, restore_ids: set[str]) -> None:
+    """Validate the same restoration preconditions in previews and write transactions."""
+    restoring_nodes = {
+        node.run_id: node
+        for node in session.scalars(
+            select(ResearchNodeRecord).where(ResearchNodeRecord.run_id.in_(restore_ids))
+        )
+    }
+    for run_id, node in restoring_nodes.items():
+        if node.research_kind == "full":
+            full = session.get(RunRecord, run_id)
+            if (
+                full.status != RunStatus.SUCCEEDED.value
+                or full.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
+            ):
+                raise InvalidRunTransitionError(
+                    "restored Full must remain a valid current Full Baseline"
+                )
+    restoring_slots: set[tuple[str, date]] = set()
+    for run_id, node in restoring_nodes.items():
+        if node.research_kind != "incremental":
+            continue
+        baseline = session.get(RunRecord, node.full_baseline_run_id)
+        baseline_node = session.get(ResearchNodeRecord, node.full_baseline_run_id)
+        if baseline is None or (baseline.trashed_at is not None and baseline.id not in restore_ids):
+            raise InvalidRunTransitionError(
+                "an Incremental cannot be restored while its Full remains in Trash"
+            )
+        run = session.get(RunRecord, run_id)
+        baseline_request = RunRequestSnapshot.model_validate(baseline.request_json)
+        incremental_request = RunRequestSnapshot.model_validate(run.request_json)
+        if (
+            baseline_node is None
+            or baseline_node.research_kind != "full"
+            or baseline.status != RunStatus.SUCCEEDED.value
+            or baseline.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
+            or baseline_request.ticker != incremental_request.ticker
+            or baseline_request.analysis_date >= incremental_request.analysis_date
+        ):
+            raise InvalidRunTransitionError(
+                "restored Incremental must retain a valid current Full Baseline"
+            )
+        slot = (node.full_baseline_run_id, run.incremental_cutoff)
+        if slot in restoring_slots:
+            raise InvalidRunTransitionError("restore contains duplicate same-Cycle/cutoff slots")
+        restoring_slots.add(slot)
+        conflict = session.scalar(
+            select(RunRecord.id).where(
+                RunRecord.research_kind == "incremental",
+                RunRecord.full_baseline_run_id == node.full_baseline_run_id,
+                RunRecord.incremental_cutoff == run.incremental_cutoff,
+                RunRecord.trashed_at.is_(None),
+                RunRecord.status.in_(
+                    (
+                        RunStatus.QUEUED.value,
+                        RunStatus.RUNNING.value,
+                        RunStatus.SUCCEEDED.value,
+                    )
+                ),
+                RunRecord.id.not_in(restore_ids),
+            )
+        )
+        if conflict is not None:
+            raise InvalidRunTransitionError(
+                "restore conflicts with an active slot for the same Cycle/cutoff"
+            )
 
 
 def _lifecycle_scope(

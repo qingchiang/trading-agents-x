@@ -16,9 +16,12 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
   const panel = useModal<HTMLElement>(open && !wide, () => setOpen(false));
   useEffect(() => {
     if (!container.current || typeof ResizeObserver === "undefined") return;
+    let previousWide: boolean | undefined;
     const observer = new ResizeObserver(([entry]) => {
-      setWide(entry.contentRect.width >= 1100);
-      setOpen(false);
+      const nextWide = entry.contentRect.width >= 1100;
+      setWide(nextWide);
+      if (previousWide !== nextWide) setOpen(false);
+      previousWide = nextWide;
     });
     observer.observe(container.current);
     return () => observer.disconnect();

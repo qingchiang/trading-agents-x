@@ -546,7 +546,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
                 {t("updateThisResearch")}
               </span>
             )}
-          {terminal.has(run.status) && (
+          {!workspace && terminal.has(run.status) && (
             <Link
               className="button"
               to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}
@@ -575,7 +575,10 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           </a>
           </ActionMenu>
           {!workspace && activeView === "diagnostics" && <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=timeline`}>{t("activity")}</Link>}
-          <Link className="text-link" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
+          {workspace ? <ActionMenu label={t("moreResearchActions")}>
+            {terminal.has(run.status) && <Link className="button" to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}>{t("cloneAsFullResearch")}</Link>}
+            <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
+          </ActionMenu> : <Link className="text-link" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>}
         </div>
       </header>
       {error && <div className="alert">{error}</div>}

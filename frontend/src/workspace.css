@@ -1,18 +1,18 @@
 /* Shared visual foundation: compact navigation and quiet document reading. */
 :root {
   --ink: #202938;
-  --muted: #596574;
+  --muted: #526278;
   --muted-2: #697585;
-  --line: #dde2e7;
+  --line: #cbd4e0;
   --line-soft: #e9edf0;
-  --surface-soft: #f6f7f8;
+  --surface-soft: #eef2f7;
   --blue: #315f9e;
   --blue-dark: #254e86;
   --blue-soft: #edf3fa;
   --radius: 8px;
   --shadow: none;
 }
-body { background: #f7f8fa; }
+body { background: #eef2f7; }
 .app-shell { grid-template-columns: 216px minmax(0, 1fr); }
 .sidebar { background: #142338; color: #eef3fb; border-right: 1px solid #263951; }
 .brand-mark { background: var(--blue); box-shadow: none; border-radius: 6px; }
@@ -96,7 +96,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .brand { gap: 8px; padding-inline: 0; }
 .brand strong { font-size: 14px; }
 .workspace-context { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; color: var(--muted); font-size: 13px; }
-.research-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+.research-workspace { gap: 24px; align-items: start; }
 .workspace-history { position: sticky; top: 20px; max-height: calc(100dvh - 40px); overflow-y: auto; }
 .workspace-history > summary { padding: 12px 0; font-size: 14px; font-weight: 650; cursor: pointer; }
 .history-cycle { padding: 12px 0; border-top: 1px solid var(--line); }
@@ -113,23 +113,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .workspace-reader > .run-heading { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; }
 .workspace-reader > .run-heading > div:first-child { display: none; flex: 0 1 auto; }
 .workspace-reader .run-heading .subtitle { margin: 0; }
-.workspace-reader .report-reading-layout { grid-template-columns: 140px minmax(0, 800px); gap: 16px; padding: 20px; }
 .research-limitations { padding: 14px 18px; margin: 12px 0; background: #fff8e9; border-left: 3px solid #bc8b30; font-size: 14px; }
 .research-limitations ul { margin: 8px 0 0; padding-left: 20px; }
 .diagnostics-view { min-width: 0; }
 .diagnostic-section { border-bottom: 1px solid var(--line); padding: 16px 0; }
 .diagnostic-section summary { cursor: pointer; }
 .diagnostic-section pre { max-height: 560px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f0f2f5; padding: 16px; font-size: 12px; }
-@media (max-width: 1280px) {
-  .workspace-reader .report-reading-layout { display: block; }
-  .workspace-reader .floating-navigation-slot { display: none; }
-  .workspace-reader .floating-section-select { display: flex; padding-bottom: 16px; gap: 8px; flex-wrap: wrap; }
-}
-@media (max-width: 1024px) {
-  .research-workspace { display: block; }
-  .workspace-history { position: static; max-height: 300px; margin-bottom: 18px; background: var(--surface-soft); padding: 0 12px; }
-  .workspace-history nav { max-height: 230px; overflow-y: auto; }
-}
 
 .global-new-research { margin-bottom: 20px; justify-content: center; }
 .secondary-line { display: block; color: var(--muted); margin-top: 5px; }
@@ -151,7 +140,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .request-summary { padding: 24px 0; }
 .interface-preferences { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 0 0 32px; }
 .interface-preferences h2 { flex-basis: 100%; }
-.interface-preferences label { display: flex; gap: 12px; align-items: center; }
+.interface-preferences label { display: flex; gap: 12px; align-items: center; max-width: 100%; }
+.interface-preferences select { width: auto; max-width: 100%; }
+.interface-preferences input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; }
 @media (max-width: 700px) {
   .workbench-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
   .workbench-list li > a { grid-column: 1 / -1; }
@@ -170,16 +161,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .task-filters > summary { cursor: pointer; padding-bottom: 12px; }
 .comparison-baselines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .comparison-baselines p { margin: 0; font-size: 14px; line-height: 1.8; }
-.incremental-complete-decision { margin-top: 24px; }
-.incremental-complete-decision > summary { padding: 20px 24px; cursor: pointer; font-weight: 600; border-block: 1px solid var(--line); }
 .activity-timing { padding: 0 24px 18px; }
 
 /* Workspace v2: one alignment boundary and content-sized panels. */
-:root { --line: #cbd4e0; --muted: #526278; --surface-soft: #eef2f7; }
-body { background: #eef2f7; }
 .research-header .back-link { display: block; margin-bottom: 8px; }
-.research-header { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.research-header .instrument-identity { display: flex; }
+.research-header { flex-wrap: wrap; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.research-header > div:first-child { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.research-header .instrument-identity { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.research-header .instrument-primary-name, .research-summary .instrument-primary-name, .task-group .instrument-primary-name { flex-shrink: 1; white-space: normal; overflow-wrap: anywhere; }
 .workspace-context { color: #445570; gap: 6px 18px; }
 .workspace-reader .view-tabs { background: #fff; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; }
 .view-tabs { overflow-x: auto; flex-wrap: nowrap; }
@@ -187,7 +176,7 @@ body { background: #eef2f7; }
 .view-tabs button.active { color: #234f99; background: #e8f0fc; }
 .workspace-reader .report-reading-layout { display: block; padding: 24px; }
 .workspace-reader .floating-navigation-slot { display: none; }
-.workspace-reader .floating-section-select { display: flex; margin-bottom: 18px; }
+.workspace-reader .floating-section-select { display: none; }
 .analyst-report { max-width: none; margin: 0; }
 .markdown > :is(p,ul,ol,blockquote), .decision-summary > .markdown { max-width: 880px; }
 .decision-content .decision-lists-grid, .scenario-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); }
@@ -204,10 +193,6 @@ body { background: #eef2f7; }
 .table-wrap { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .form-section-body { background: #fff; }
 .interface-preferences { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-bottom: 24px; }
-@media (max-width: 1390px) {
-  .research-workspace { display: block; }
-  .workspace-history { position: static; max-height: 300px; margin-bottom: 16px; }
-}
 @media (max-width: 640px) {
   .workspace-reader .report-reading-layout { padding: 16px; }
   .workspace-reader > .run-heading .action-row { justify-content: flex-start; }
@@ -292,3 +277,17 @@ body { background: #eef2f7; }
 .library-cycles .history-select { display: flex; gap: 16px; }
 @media (max-width: 1250px) { .workbench-columns { grid-template-columns: 1fr; } .workbench-support { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; } }
 @media (max-width: 700px) { .task-group-heading { flex-direction: column; align-items: start; } .task-row { gap: 10px 16px; padding: 12px; } .task-actions { margin-left: 0; width: 100%; } .task-filter-bar label { flex: 1 1 130px; } .research-summary header { flex-wrap: wrap; } .research-summary header > div { text-align: left; } }
+
+/* Keep navigation and secondary actions from consuming the reading viewport. */
+.workspace-reader #run-view-brief > .brief-period { display: none; }
+.workbench-region .empty-state { min-height: 0; padding: 18px 0; }
+.workbench-region .panel-header > a { flex-shrink: 0; white-space: nowrap; }
+.research-summary .instrument-primary-name { font-size: 17px; font-weight: 650; }
+@media (max-width: 640px) {
+  .workspace-reader > .run-heading { margin-bottom: 12px; }
+  .workspace-reader > .run-heading .action-row { gap: 8px; }
+  .workspace-reader > .run-heading .button { padding: 8px 10px; font-size: 13px; }
+  .workspace-reader #run-view-brief > .panel-header { display: none; }
+  .workspace-reader .incremental-outcome-summary { padding: 16px; }
+  .research-header { margin-bottom: 16px; padding-bottom: 14px; }
+}
