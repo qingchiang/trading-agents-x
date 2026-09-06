@@ -1,13 +1,10 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type ResearchNodeView, type ResearchNodeComparison, type ResearchNodeComparisonSelection, type TimelineDetail, type ResearchTimelinePage } from "../api/client";
-import { Link, useLocation, useNavigate } from "../router";
-import { InstrumentIdentity } from "../components/Instruments";
-import ResearchRatingBadge from "../components/ResearchRatingBadge";
-import ResearchKindBadge from "../components/ResearchKindBadge";
+import { api, type ResearchNodeComparison, type ResearchNodeComparisonSelection, type ResearchNodeView, type TimelineDetail } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { InstrumentIdentity } from "../components/Instruments";
 import { ActionMenu } from "../components/Interaction";
-import { researchConfidenceLabel } from "../i18n";
+import { Link, useLocation, useNavigate } from "../router";
 const ResearchLibrary = lazy(() => import("./ResearchLibrary"));
 const RunDetail = lazy(() => import("./RunDetail"));
 const NodeComparison = lazy(() => import("../components/NodeComparison"));
@@ -20,6 +17,10 @@ export default function Timeline() {
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isList = location.pathname === "/timelines";
   const instrument = decodeURIComponent(location.pathname.split("/").at(-1) ?? "");
+  const currentInstrument = useRef(instrument);
+  currentInstrument.current = instrument;
+  const rememberedCycles = useRef<{ instrument: string; dates: Record<string, string> }>({ instrument, dates: {} });
+  if (rememberedCycles.current.instrument !== instrument) rememberedCycles.current = { instrument, dates: {} };
   const requestedNode = params.get("node") ?? "";
   const showRetainedTrash = params.get("trash_state") === "all";
   const cycleOffset = Math.max(0, Number(params.get("cycle_offset")) || 0);
@@ -28,7 +29,8 @@ export default function Timeline() {
     const split = value.indexOf(":");
     return { node_id: value.slice(split + 1), lifecycle_state: value.slice(0, split) === "trashed" ? "trashed" : "active" } as ResearchNodeComparisonSelection;
   });
-  const [detail, setDetail] = useState<TimelineDetail | null>(null);
+  const [loadedDetail, setDetail] = useState<TimelineDetail | null>(null);
+  const detail = loadedDetail?.timeline.instrument === instrument ? loadedDetail : null;
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [comparison, setComparison] = useState<ResearchNodeComparison | null>(null);
@@ -43,7 +45,7 @@ export default function Timeline() {
   };
   useEffect(() => {
     let active = true;
-    setError(""); setDetail(null); setComparison(null);
+    setError(""); setDetail(null); setComparison(null); setBusy(false);
     if (!isList) {
       void api.timeline(instrument, CYCLE_PAGE_SIZE, cycleOffset, showRetainedTrash ? "all" : "active", requestedNode || undefined)
         .then(value => {
@@ -66,6 +68,11 @@ export default function Timeline() {
     : nodes.find(node => node.id === primaryCycle?.head_run_id) ?? nodes.find(node => node.id === cycles[0]?.head_run_id);
   const selectedCycle = cycles.find(cycle => cycle.id === selected?.cycle_id);
   const activeFullCycles = detail?.timeline.active_full_cycles ?? [];
+  for (const cycle of cycles) rememberedCycles.current.dates[cycle.id] = cycle.baseline.analysis_date;
+  for (const cycle of activeFullCycles) rememberedCycles.current.dates[cycle.id] = cycle.analysis_date;
+  const selectionKey = `${instrument}:${params.getAll("compare").join("|")}`;
+  const currentSelection = useRef(selectionKey);
+  currentSelection.current = selectionKey;
   const closeComparison = useCallback(() => setComparison(null), []);
   const toggleComparison = (node: ResearchNodeView) => {
     const next = new URLSearchParams(params);
@@ -79,9 +86,9 @@ export default function Timeline() {
   const compare = async () => {
     if (selections.length !== 2 || busy) return;
     setBusy(true); setError("");
-    try { setComparison(await api.compareResearchNodes(instrument, selections)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    try { const value = await api.compareResearchNodes(instrument, selections); if (currentSelection.current === selectionKey) setComparison(value); }
+    catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (currentInstrument.current === instrument) setBusy(false); }
   };
   const lifecycle = async () => {
     if (!pendingNode || !lifecycleMode || busy) return;
@@ -91,14 +98,14 @@ export default function Timeline() {
       if (lifecycleMode === "purge") await api.purgeRuns([pendingNode.id]);
       else await api.trashRuns([pendingNode.id], replacementPrimary ? { [pendingNode.id]: replacementPrimary } : {});
       setPendingNode(null); setRevision(value => value + 1);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    } catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (currentInstrument.current === instrument) setBusy(false); }
   };
   const mutate = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
     try { await action(); setRevision(value => value + 1); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (currentInstrument.current === instrument) setBusy(false); }
   };
   if (isList) return <Suspense fallback={<div className="loading">{t("loading")}</div>}><ResearchLibrary /></Suspense>;
   return <section>
@@ -126,7 +133,7 @@ export default function Timeline() {
       <button className="button primary" disabled={selections.length !== 2 || busy} onClick={() => void compare()}>{t("compareSelectedNodes")}</button>
     </aside>}
     <div className="research-workspace">
-      <details className="workspace-history" open><summary>{t("historyNavigation")}</summary>
+      <details className="workspace-history" open={window.innerWidth > 1024 || undefined}><summary>{t("historyNavigation")}</summary>
         <nav aria-label={t("historyNavigation")}>
           {cycles.map(cycle => <details className="history-cycle" open={cycle.is_primary || cycle.id === selected?.cycle_id || comparisonMode} key={cycle.id}>
             <summary>{cycle.baseline.analysis_date} {cycle.is_primary && <small>{t("primaryCycle")}</small>}{cycle.cycle_warning && <small className="warning">{t("fullResearchRecommended")}</small>}</summary>
@@ -155,7 +162,7 @@ export default function Timeline() {
       </details>
       {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace key={selected.id} /></Suspense>}
     </div>
-    {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} onClose={closeComparison} /></Suspense>}
+    {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} onClose={closeComparison} /></Suspense>}
     {pendingNode && lifecycleMode && <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={busy} onCancel={() => setPendingNode(null)} onConfirm={() => void lifecycle()}>
       <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
       {lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some(cycle => cycle.id !== pendingNode.id) && <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={event => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter(cycle => cycle.id !== pendingNode.id).map(cycle => <option value={cycle.id} key={cycle.id}>{cycle.analysis_date} · {cycle.rating}</option>)}</select></label>}
@@ -163,4 +170,3 @@ export default function Timeline() {
     </ConfirmDialog>}
   </section>;
 }
-function Confidence({ value }: { value?: "low" | "medium" | "high" | null }) { const { t } = useTranslation(); return <span>{value ? researchConfidenceLabel(t, value) : t("notRecorded")}</span>; }

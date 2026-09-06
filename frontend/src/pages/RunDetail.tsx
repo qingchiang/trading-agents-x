@@ -1,52 +1,21 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useReadingPosition } from "../useReadingPosition";
 import type { TFunction } from "i18next";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  api,
-  type AnalysisResult,
-  type AnalystReport,
-  type Capabilities,
-  type EvidenceBundle,
-  type IncrementalAnalysisBrief,
-  type ResearchArtifact,
-  type ResearchDecision,
-  type ResearchNodeView,
-  type RunDetail as RunDetailType,
-  type RunEvent,
-} from "../api/client";
-import { InstrumentIdentity } from "../components/Instruments";
+import { api, type AnalysisResult, type AnalystReport, type Capabilities, type EvidenceBundle, type IncrementalAnalysisBrief, type ResearchArtifact, type ResearchDecision, type ResearchNodeView, type RunDetail as RunDetailType, type RunEvent, } from "../api/client";
 import EvidenceLinks from "../components/EvidenceLinks";
-import { ActionMenu, tabsKeyDown, useModal } from "../components/Interaction";
-import { useMarketDate } from "../useMarketDate";
+import EvidenceSourceDrawer from "../components/EvidenceSourceDrawer";
+import { InstrumentIdentity } from "../components/Instruments";
+import { ActionMenu, tabsKeyDown } from "../components/Interaction";
 import ResearchKindBadge from "../components/ResearchKindBadge";
-import {
-  buildEvidenceReferenceIndex,
-  groupEvidenceRefs,
-  type EvidenceDisplayGroup,
-  type EvidenceReferenceIndex,
-} from "../evidence";
+import RunActivityView from "../components/RunActivityView";
 import StatusBadge from "../components/StatusBadge";
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "../router";
-import { formatUtcDate, trashDeadline } from "../trash";
-import {
-  aggregateRunActivity,
-  type ActivityAction,
-  type ActivitySignal,
-  type ActivityStage,
-  type ActivityState,
-} from "../runActivity";
-import {
-  baselineComponentText,
-  groupReassessment,
-  reassessmentDispositionCounts,
-  type ReassessmentGroupKey,
-} from "../reassessment";
+import { buildEvidenceReferenceIndex, type EvidenceDisplayGroup, type EvidenceReferenceIndex } from "../evidence";
 import { localizePerformanceReason } from "../i18n";
+import { baselineComponentText, groupReassessment, reassessmentDispositionCounts, type ReassessmentGroupKey, } from "../reassessment";
+import { Link, useLocation, useNavigate, useParams, } from "../router";
+import { formatUtcDate, trashDeadline } from "../trash";
+import { useMarketDate } from "../useMarketDate";
 
 const RunDiagnostics = lazy(() => import("../components/RunDiagnostics"));
 const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
@@ -109,8 +78,6 @@ const viewNames = [
   "decision",
 ] as const;
 
-const timelineOrderStorageKey = "tradingagents-timeline-order";
-type TimelineOrder = "newest" | "oldest";
 
 type ViewName = (typeof viewNames)[number];
 type ReturnViewName = Exclude<ViewName, "evidence">;
@@ -138,7 +105,8 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
   const currentRun = useRef(runId);
   currentRun.current = runId;
   const [actionBusy, setActionBusy] = useState(false);
-  const [detail, setDetail] = useState<RunDetailType | null>(null);
+  const [loadedDetail, setDetail] = useState<RunDetailType | null>(null);
+  const detail = loadedDetail?.run.id === runId ? loadedDetail : null;
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [evidence, setEvidence] = useState<EvidenceBundle | null>(null);
   const [baselineEvidence, setBaselineEvidence] = useState<EvidenceBundle | null>(null);
@@ -146,6 +114,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
   const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
+  const evidenceTrigger = useRef<{ element: HTMLElement; label: string | null; index: number; scroll: number } | null>(null);
   const [warningOpenRequest, setWarningOpenRequest] = useState(0);
   const [artifactRefreshRequest, setArtifactRefreshRequest] = useState(0);
   const latestEventSequence = useRef(0);
@@ -170,6 +139,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
     isViewName(normalizedRequestedView) && availableViews.includes(normalizedRequestedView)
       ? normalizedRequestedView
       : defaultView;
+  useReadingPosition(`tradingagents-reading:${runId}:${activeView}`, undefined, Boolean(detail) && !["reports", "brief"].includes(activeView));
   const requestedReport = searchParams.get("report") ?? "";
   const focusedEvidence = searchParams.get("ref") ?? "";
 
@@ -389,7 +359,6 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           report:
             view === "reports" && activeReport ? activeReport : undefined,
         }),
-        { replace: true },
       );
     },
     [activeReport, navigate, runId],
@@ -402,7 +371,6 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           view: "reports",
           report,
         }),
-        { replace: true },
       );
     },
     [navigate, runId],
@@ -426,7 +394,21 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
     [activeReport, activeView, navigate, runId],
   );
   const openSourceDrawer = useCallback((ref: string) => {
+    const element = document.activeElement as HTMLElement;
+    const label = element.getAttribute("aria-label");
+    const peers = Array.from(document.querySelectorAll<HTMLElement>("button[aria-label]")).filter(item => item.getAttribute("aria-label") === label);
+    evidenceTrigger.current = { element, label, index: peers.indexOf(element), scroll: window.scrollY };
     setSourceDrawerRef(ref);
+  }, []);
+  const closeSourceDrawer = useCallback(() => {
+    setSourceDrawerRef(null);
+    requestAnimationFrame(() => {
+      const trigger = evidenceTrigger.current;
+      if (!trigger) return;
+      const replacement = Array.from(document.querySelectorAll<HTMLElement>("button[aria-label]")).filter(item => item.getAttribute("aria-label") === trigger.label)[Math.max(0, trigger.index)];
+      window.scrollTo?.(0, trigger.scroll);
+      (trigger.element.isConnected ? trigger.element : replacement)?.focus({ preventScroll: true });
+    });
   }, []);
 
   const requestedReturnView = searchParams.get("return_view");
@@ -475,7 +457,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
   if (!detail || detail.run.id !== runId) {
     return <div className="loading">{error || t("loading")}</div>;
   }
-  const { run, result } = detail;
+  const { run } = detail;
   const canUpdateResearch =
     run.is_research_node &&
     run.status === "succeeded" &&
@@ -547,7 +529,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
               {t("researchTimeline")}
             </Link>
           )}
-          {marketDate.error && <span className="warning" role="status">{marketDate.error}</span>}
+          {marketDate.error && <span className="warning" role="status">{t("futureContextUnavailable")} <button className="button" onClick={marketDate.retry}>{t("retryLoad")}</button></span>}
           {canUpdateResearch && (
             <Link
               className="button primary"
@@ -668,6 +650,10 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           {detail.research_node && <>
             <ReassessmentPanel node={detail.research_node} baselineDecision={detail.incremental_context?.full_baseline.decision ?? null} currentDecision={decision} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} />
             <PerformanceSection node={detail.research_node} />
+            {decision && <details className="incremental-complete-decision" open={!detail.incremental_context?.analysis_brief || undefined}>
+              <summary>{t("completeJudgment")}</summary>
+              <ResearchDecisionContentView decision={decision} numericAudit={detail.result?.numeric_audit} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} onOpenWarnings={() => setWarningOpenRequest(value => value + 1)} />
+            </details>}
           </>}
           </>
         )}
@@ -683,7 +669,8 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
         )}
 
         {activeView === "timeline" && (
-          <TimelinePanel
+          <RunActivityView
+            elapsedSeconds={run.metrics?.wall_time_seconds}
             events={events}
             researchKind={isIncremental ? "incremental" : "full"}
             currentAttempt={run.attempt}
@@ -742,7 +729,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
         <EvidenceSourceDrawer
           evidenceRef={sourceDrawerRef}
           evidenceIndex={evidenceIndex}
-          onClose={() => setSourceDrawerRef(null)}
+          onClose={closeSourceDrawer}
           key={sourceDrawerRef ?? "closed"}
         />
       </Suspense>
@@ -1040,13 +1027,6 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
   const { t } = useTranslation();
   const performance = node.performance;
   if (!performance) return null;
-  const auditRows = [
-    { label: t("currentInstrument"), component: performance.stock },
-    ...(performance.benchmarks ?? []).map((benchmark) => ({
-      label: benchmark.name,
-      component: benchmark.component,
-    })),
-  ].filter((row) => row.component.calculation);
   return (
     <section className="decision-section incremental-performance-section">
       <div className="decision-section-heading">
@@ -1069,9 +1049,6 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
           />
         ))}
       </div>
-      {auditRows.length > 0 && (
-        <></>
-      )}
     </section>
   );
 }
@@ -1150,179 +1127,6 @@ function reassessmentGroupLabel(group: ReassessmentGroupKey): string {
   return `reassessmentGroup_${group}`;
 }
 
-function TimelinePanel({
-  events,
-  researchKind,
-  currentAttempt,
-  runStatus,
-}: {
-  events: RunEvent[];
-  researchKind: "full" | "incremental";
-  currentAttempt: number;
-  runStatus: RunDetailType["run"]["status"];
-}) {
-  const { t } = useTranslation();
-  const [order, setOrder] = useState<TimelineOrder>(readTimelineOrder);
-  const attempts = useMemo(
-    () => aggregateRunActivity(events, researchKind, { currentAttempt, runStatus }),
-    [currentAttempt, events, researchKind, runStatus],
-  );
-  const latest = attempts[0];
-  const stages = researchKind === "incremental"
-    ? (["collection", "incremental_semantic", "incremental_serialization", "commit"] as ActivityStage[])
-    : (["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit"] as ActivityStage[]);
-  const updateOrder = (next: TimelineOrder) => {
-    setOrder(next);
-    localStorage.setItem(timelineOrderStorageKey, next);
-  };
-  return (
-    <article
-      className="panel audit-panel timeline-panel"
-      id="run-view-timeline"
-      role="tabpanel"
-    >
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">{t("liveEvents")}</p>
-          <h2>{t("activity")}</h2>
-        </div>
-        <div className="timeline-controls">
-          <div
-            className="timeline-order"
-            role="group"
-            aria-label={t("timelineOrder")}
-          >
-            <button
-              type="button"
-              className={order === "newest" ? "active" : ""}
-              aria-pressed={order === "newest"}
-              onClick={() => updateOrder("newest")}
-            >
-              {t("latestFirst")}
-            </button>
-            <button
-              type="button"
-              className={order === "oldest" ? "active" : ""}
-              aria-pressed={order === "oldest"}
-              onClick={() => updateOrder("oldest")}
-            >
-              {t("earliestFirst")}
-            </button>
-          </div>
-          <span className="event-count">{events.length}</span>
-        </div>
-      </div>
-      {latest && (
-        <div className="activity-stage-overview">
-          <div className="activity-live-summary" aria-live="polite" aria-atomic="true">
-            <span>{t("currentResearchStage")}</span>
-            <strong>{t(activityStageLabel(latest.currentStage))}</strong>
-            <small>{t(activityStateLabel(latest.state))}</small>
-          </div>
-          <ol className="activity-stage-track" aria-label={t("researchProgress") }>
-            {stages.map((stage) => {
-              const state = latest.stageStates[stage] ?? "pending";
-              return (
-                <li className={state} key={stage}>
-                  <span aria-hidden="true" />
-                  <small>{t(activityStageLabel(stage))}</small>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
-      <div className="activity-attempts">
-        {attempts.map((attempt, attemptIndex) => (
-          <details className={`activity-attempt ${attempt.state}`} open={attemptIndex === 0} key={attempt.attempt}>
-            <summary>
-              <span>{t("researchAttempt", { count: attempt.attempt })}</span>
-              <span className={`activity-state ${attempt.state}`}>{t(activityStateLabel(attempt.state))}</span>
-            </summary>
-            <div
-              className="activity-attempt-body"
-              tabIndex={0}
-              aria-label={t("attemptActivityLog", { count: attempt.attempt })}
-            >
-              <div className="activity-work-units">
-                {[...attempt.workUnits]
-                  .sort((left, right) =>
-                    order === "newest"
-                      ? right.lastSequence - left.lastSequence
-                      : left.firstSequence - right.firstSequence,
-                  )
-                  .map((unit) => {
-                    const diagnostics = activityDiagnostics(unit.events);
-                    return (
-                      <article className={`activity-work-unit ${unit.state}`} key={unit.key}>
-                        <span className="activity-work-marker" aria-hidden="true" />
-                        <div>
-                          <strong>
-                            {t(activityStageLabel(unit.stage))}
-                            {unit.role ? ` · ${activityRoleLabel(t, unit.role)}` : ""}
-                            {` · ${t(activityActionLabel(unit.action))}`}
-                          </strong>
-                          <div className="activity-unit-statuses">
-                            <span className={`activity-state ${unit.state}`}>
-                              {t(activityStateLabel(unit.state))}
-                            </span>
-                            {unit.signals
-                              .filter((signal) => signal !== unit.state)
-                              .map((signal) => (
-                                <span className={`activity-state ${signal}`} key={signal}>
-                                  {t(activitySignalLabel(signal))}
-                                </span>
-                              ))}
-                          </div>
-                          <code className="activity-node-key">{unit.node}</code>
-                          <small>
-                            #{unit.firstSequence}–{unit.lastSequence} · {formatTime(unit.events.at(-1)?.created_at ?? "")}
-                          </small>
-                          {diagnostics.length > 0 && (
-                            <p className="activity-diagnostic">
-                              <span>{t("activityDiagnostic")}</span>
-                              {diagnostics.map((diagnostic) => (
-                                <code key={diagnostic}>{diagnostic}</code>
-                              ))}
-                            </p>
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })}
-              </div>
-              {attempt.events.length > 0 && (
-                <></>
-              )}
-            </div>
-          </details>
-        ))}
-        {events.length === 0 && (
-          <div className="empty-state">{t("waitingForEvents")}</div>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function readTimelineOrder(): TimelineOrder {
-  return localStorage.getItem(timelineOrderStorageKey) === "oldest"
-    ? "oldest"
-    : "newest";
-}
-
-function activityDiagnostics(events: RunEvent[]): string[] {
-  const fields = ["reason_code", "error_code", "recovery_method"] as const;
-  return [...new Set(events.flatMap((event) =>
-    fields.flatMap((field) => {
-      const value = event.payload?.[field];
-      return typeof value === "string" || typeof value === "number"
-        ? [String(value)]
-        : [];
-    }),
-  ))];
-}
-
 function DeliberationPanel({
   artifacts,
   onEvidence,
@@ -1384,9 +1188,6 @@ function EvidencePanel({
   incrementalNode: ResearchNodeView | null;
 }) {
   const { t } = useTranslation();
-  const diagnostics = incrementalNode
-    ? collectionDiagnostics(incrementalNode)
-    : [];
   return (
     <article
       className="panel audit-panel"
@@ -1454,9 +1255,6 @@ function EvidencePanel({
                 </div>
               ))}
             </div>
-            {diagnostics.length > 0 && (
-              <></>
-            )}
           </section>
         </div>
       )}
@@ -1476,7 +1274,6 @@ function EvidencePanel({
                 evidenceIndex={evidenceIndex}
                 mode="readable"
               />
-              <></>
             </>
           ) : (
             <EvidenceBundleSummary
@@ -1511,31 +1308,6 @@ function EvidencePanel({
       )}
     </article>
   );
-}
-
-function collectionDiagnostics(node: ResearchNodeView) {
-  return (node.collection_summary?.domains ?? []).flatMap((domain) => {
-    const diagnostics = domain.diagnostic
-      ? [{
-          key: `${domain.domain}:domain:${domain.diagnostic.code}`,
-          domain: domain.domain,
-          code: domain.diagnostic.code,
-          source: "",
-          retrievedAt: "",
-        }]
-      : [];
-    (domain.sources ?? []).forEach((source, index) => {
-      if (!source.diagnostic) return;
-      diagnostics.push({
-        key: `${domain.domain}:source:${source.source}:${index}:${source.diagnostic.code}`,
-        domain: domain.domain,
-        code: source.diagnostic.code,
-        source: source.source,
-        retrievedAt: source.retrieved_at,
-      });
-    });
-    return diagnostics;
-  });
 }
 
 function EvidenceBundleSummary({
@@ -1666,97 +1438,6 @@ function EvidenceCard({
   );
 }
 
-function EvidenceSourceDrawer({
-  evidenceRef,
-  evidenceIndex,
-  onClose,
-}: {
-  evidenceRef: string | null;
-  evidenceIndex: EvidenceReferenceIndex;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const group = evidenceRef
-    ? evidenceIndex.groups.find((candidate) =>
-        candidate.refs.includes(evidenceRef),
-      )
-    : undefined;
-
-  const drawerRef = useModal<HTMLElement>(Boolean(evidenceRef), onClose);
-
-  if (!evidenceRef) return null;
-  return (
-    <div className="source-drawer-layer" role="presentation">
-      <button
-        type="button"
-        className="source-drawer-backdrop"
-        aria-label={t("closeSourceDetails")}
-        onClick={onClose}
-      />
-      <aside
-        className="source-drawer"
-        ref={drawerRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("sourceDetails")}
-      >
-        <header>
-          <div>
-            <p className="eyebrow">{t("sourceDetails")}</p>
-            <h2>{group?.sources.join(", ") || t("unknownSource")}</h2>
-          </div>
-          <button type="button" className="button" onClick={onClose}>
-            {t("close")}
-          </button>
-        </header>
-        {!group ? (
-          <div className="empty-state">{t("evidenceReferenceUnavailable")}</div>
-        ) : (
-          <>
-            <dl className="evidence-metadata">
-              <div>
-                <dt>{t("evidenceOrigin")}</dt>
-                <dd>
-                  {group.origins
-                    .map((origin) => t(`evidenceOrigin_${origin}`))
-                    .join(", ")}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("quality")}</dt>
-                <dd>{t(`quality_${group.quality}`)}</dd>
-              </div>
-              <div>
-                <dt>{t("effectiveDate")}</dt>
-                <dd>{evidenceDates(group).join(", ") || "—"}</dd>
-              </div>
-              <div>
-                <dt>{t("fallback")}</dt>
-                <dd>{group.fallback ? t("yes") : t("no")}</dd>
-              </div>
-            </dl>
-            {group.canonical.content && (
-              <div className="source-drawer-content">
-                <Markdown>{group.canonical.content}</Markdown>
-              </div>
-            )}
-            {group.canonical.value !== null &&
-              group.canonical.value !== undefined && (
-                <p className="source-drawer-value">
-                  <strong>{t("value")}:</strong>{" "}
-                  {String(group.canonical.value)}{" "}
-                  {group.canonical.unit ?? ""}
-                </p>
-              )}
-
-          </>
-        )}
-      </aside>
-    </div>
-  );
-}
-
 function ReportsPanel({
   runId,
   reports,
@@ -1791,9 +1472,10 @@ function ReportsPanel({
         <div className="empty-state">{t("noReports")}</div>
       ) : (
         <>
-          <div className="tabs">
+          <div className="tabs" role="tablist" aria-label={t("reports")} onKeyDown={tabsKeyDown}>
             {reportNames.map((name) => (
               <button
+                role="tab" aria-selected={activeReport === name} tabIndex={activeReport === name ? 0 : -1}
                 className={activeReport === name ? "active" : ""}
                 onClick={() => onReport(name)}
                 key={name}
@@ -1870,7 +1552,6 @@ function warningKey(warning: VisibleWarning): string {
     : [
         warning.code,
         warning.evidence_ref,
-        warning.source,
         warning.message,
       ].join(":");
 }
@@ -1883,20 +1564,6 @@ function dedupeWarnings(warnings: VisibleWarning[]): VisibleWarning[] {
     seen.add(key);
     return true;
   });
-}
-
-function evidenceDates(group: EvidenceDisplayGroup): string[] {
-  return Array.from(
-    new Set(
-      group.items.flatMap((item) =>
-        item.effective_date
-          ? [item.effective_date]
-          : item.requested_date
-            ? [item.requested_date]
-            : [],
-      ),
-    ),
-  );
 }
 
 function isAnalystReport(content: ArtifactContent): content is AnalystReport {
@@ -1934,16 +1601,6 @@ function latestResearchDecision(
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
-}
-
-async function copyEvidenceRef(ref: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(ref);
-    }
-  } catch {
-    // Clipboard permission failures do not affect evidence navigation.
-  }
 }
 
 function isViewName(value: string | null): value is ViewName {
@@ -2006,40 +1663,6 @@ function briefUnavailableLabel(
   return "historicalBriefUnavailable";
 }
 
-const eventLabelKeys: Record<string, string> = {
-  "run.queued": "statusQueued",
-  "run.started": "eventRunStarted",
-  "run.resumed": "eventRunResumed",
-  "run.succeeded": "statusSucceeded",
-  "run.failed": "statusFailed",
-  "run.cancelled": "statusCancelled",
-  "run.cancel_requested": "eventCancellationRequested",
-  "run.retry_queued": "eventRetryQueued",
-  "node.started": "eventNodeStarted",
-  "node.completed": "eventNodeCompleted",
-  "phase.started": "eventPhaseStarted",
-  "phase.completed": "eventPhaseCompleted",
-  "node.context_prepared": "eventContextPrepared",
-  "evidence.sealed": "eventEvidenceSealed",
-  "node.output_retry": "eventOutputRetry",
-  "node.output_recovered": "eventOutputRecovered",
-  "node.output_failed": "eventOutputFailed",
-  "node.numeric_audit_retry": "eventNumericAuditUpdated",
-  "node.numeric_audit_recovered": "eventNumericAuditUpdated",
-  "node.numeric_audit_degraded": "eventNumericAuditUpdated",
-  "decision.numeric_display_scale_normalized": "eventDecisionNormalized",
-  "decision.numeric_singleton_promoted": "eventDecisionNormalized",
-  "decision.numeric_range_reordered": "eventDecisionNormalized",
-  "artifact.created": "eventArtifactCreated",
-  "incremental.collection_completed": "eventIncrementalCollectionCompleted",
-  "incremental.no_advancement": "eventIncrementalNoAdvancement",
-  "incremental.synthesis_started": "eventIncrementalSynthesisStarted",
-  "incremental.synthesis_completed": "eventIncrementalSynthesisCompleted",
-};
-
-function eventLabel(t: TFunction, event: RunEvent): string {
-  return t(eventLabelKeys[event.event_type] ?? "eventWorkflowActivity");
-}
 
 function runDetailPath(
   runId: string,
@@ -2059,29 +1682,6 @@ function runDetailPath(
   return `/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ""}`;
 }
 
-function activityStageLabel(stage: ActivityStage): string {
-  return `activityStage_${stage}`;
-}
-
-function activityStateLabel(state: ActivityState): string {
-  return `activityState_${state}`;
-}
-
-function activityActionLabel(action: ActivityAction): string {
-  return `activityAction_${action}`;
-}
-
-function activitySignalLabel(signal: ActivitySignal): string {
-  return `activitySignal_${signal}`;
-}
-
-function activityRoleLabel(t: TFunction, role: string): string {
-  const analystKey = `${role}Analyst`;
-  return ["market", "social", "news", "fundamentals"].includes(role)
-    ? t(analystKey)
-    : t(`activityRole_${role}`);
-}
-
 function cleanupLabel(
   trashedAt: string,
   retentionDays: number,
@@ -2095,12 +1695,4 @@ function cleanupLabel(
       ? t("trashCleanupDue")
       : t("trashDaysRemaining", { count: deadline.remainingDays }),
   });
-}
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value));
 }

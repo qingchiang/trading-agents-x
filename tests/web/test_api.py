@@ -2263,3 +2263,67 @@ async def test_validation_error_does_not_echo_request_values(
     assert payload["error"]["code"] == "validation_error"
     assert payload["details"]
     assert {"location", "message", "type"} <= set(payload["details"][0])
+
+
+@pytest.mark.anyio
+async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
+    web_client: httpx.AsyncClient, web_repository, web_settings,
+) -> None:
+    def commit_full(analysis_date: date, *, make_primary: bool | None, confidence: str, ticker: str = "NVDA") -> str:
+        request = AnalysisRequest(
+            ticker=ticker,
+            analysis_date=analysis_date,
+            make_primary=make_primary,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="2",
+            information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
+            method_snapshot={"schema_version": "1"},
+            research_kind="full",
+        )
+        web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
+        web_repository.set_instrument_local_name(run.id, "英伟达")
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=analysis_date,
+            effective_date=analysis_date,
+            content=run.id,
+        )
+        evidence = EvidenceBundle(instrument=ticker, analysis_date=analysis_date, items=(item,))
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument=ticker,
+                reports={},
+                decision=research_decision(
+                    confidence=confidence,
+                    thesis=f"Decision from {analysis_date.isoformat()}.",
+                    evidence_refs=(item.ref,),
+                ),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    primary = commit_full(date(2026, 7, 20), make_primary=True, confidence="medium")
+    commit_full(date(2026, 7, 24), make_primary=False, confidence="high")
+    for ticker in ("AAPL", "MSFT"):
+        commit_full(date(2026, 7, 25), make_primary=True, confidence="high", ticker=ticker)
+    page = (await web_client.get("/api/v1/timelines?q=nvda&limit=1")).json()
+    assert page["total"] == 1
+    assert page["items"][0]["primary_head_run_id"] == primary
+    assert page["items"][0]["primary_analysis_date"] == "2026-07-20"
+    assert page["items"][0]["latest_analysis_date"] == "2026-07-24"
+    assert page["items"][0]["primary_confidence"] == "medium"
+    named = (await web_client.get("/api/v1/timelines?q=英伟达&limit=1&offset=1")).json()
+    assert named["total"] == 3
+    assert named["items"][0]["instrument"] == "MSFT"
+    assert (await web_client.get("/api/v1/timelines?warning_only=true")).json()["total"] == 0

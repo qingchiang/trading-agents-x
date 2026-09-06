@@ -1,29 +1,12 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
 import type { TFunction } from "i18next";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  api,
-  type ResearchNodeComparison,
-  type ResearchNodeComparisonSelection,
-  type ResearchNodeView,
-  type ResearchTimelinePage,
-  type TimelineDetail,
-} from "../api/client";
-import ConfirmDialog from "./ConfirmDialog";
-import { InstrumentIdentity } from "./Instruments";
-import ResearchRatingBadge from "./ResearchRatingBadge";
-import ResearchKindBadge from "./ResearchKindBadge";
-import { Link, usePathname } from "../router";
+import { type ResearchNodeComparison, type ResearchNodeView } from "../api/client";
 import { localizePerformanceReason, researchConfidenceLabel } from "../i18n";
+import { Link } from "../router";
+import { useModal } from "./Interaction";
+import ResearchKindBadge from "./ResearchKindBadge";
 
 function Confidence({ value }: { value?: "low" | "medium" | "high" | null }) {
   const { t } = useTranslation();
@@ -162,14 +145,16 @@ type ProductComparisonRow = {
 
 export default function NodeComparisonModal({
   comparison,
+  baselineDates = {},
   onClose,
 }: {
   comparison: ResearchNodeComparison;
+  baselineDates?: Record<string, string>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useModal<HTMLDivElement>(true, onClose);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [swapped, setSwapped] = useState(false);
   const [changedOnly, setChangedOnly] = useState(true);
@@ -189,12 +174,6 @@ export default function NodeComparisonModal({
       (section) =>
         !CORE_DECISION_FIELDS.has(section.key) &&
         !RAW_DECISION_FIELDS.has(section.key),
-    ),
-    changedOnly,
-  );
-  const rawSections = filterDecisionSections(
-    comparison.decision_sections.filter((section) =>
-      RAW_DECISION_FIELDS.has(section.key),
     ),
     changedOnly,
   );
@@ -253,42 +232,10 @@ export default function NodeComparisonModal({
         comparison.sides,
         (side) => reassessmentComparisonText(t, side),
       ),
-      productRow("method", t("method"), comparison.sides, methodSummary),
     ],
     changedOnly,
   );
 
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = focusableElements(dialogRef.current);
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
-    };
-  }, [onClose]);
 
   return (
     <div
@@ -347,6 +294,7 @@ export default function NodeComparisonModal({
           aria-label={t("nodeComparison")}
           tabIndex={0}
         >
+          <div className="comparison-baselines">{sides.map(side => <p key={side.node_id}><strong>{side.analysis_date}</strong><br /><Link to={`/timelines/${encodeURIComponent(comparison.instrument)}?node=${encodeURIComponent(side.cycle_id)}${side.lifecycle_state === "trashed" ? "&trash_state=all" : ""}`}>{t("baselineDate")}: {baselineDates[side.cycle_id] ?? (side.research_kind === "full" ? side.analysis_date : t("notRecorded"))}</Link></p>)}</div>
           {comparison.method_changed && (
             <div className="notice" role="status">
               {t("methodChanged")}
@@ -375,7 +323,7 @@ export default function NodeComparisonModal({
             />
           </ComparisonDisclosure>
 
-          <ComparisonDisclosure title={t("updateAudit")}>
+          <ComparisonDisclosure title={t("updateDetails")}>
             <ComparisonProductList
               rows={updateProducts}
               sides={sides}
@@ -383,27 +331,7 @@ export default function NodeComparisonModal({
             />
           </ComparisonDisclosure>
 
-          <ComparisonDisclosure title={t("rawAudit")} audit>
-            <ComparisonSectionList
-              sections={rawSections}
-              sides={sides}
-              sideIndexes={sideIndexes}
-            />
-            <section className="comparison-raw-sides">
-              {sides.map((side) => (
-                <div key={side.node_id}>
-                  <h3>{side.analysis_date}</h3>
-                  <dl className="definition-list compact-definition-list">
-                    <div>
-                      <dt>{t("researchSchema")}</dt>
-                      <dd>{side.research_schema_version}</dd>
-                    </div>
-                  </dl>
-                  <pre>{JSON.stringify(side, null, 2)}</pre>
-                </div>
-              ))}
-            </section>
-          </ComparisonDisclosure>
+          <div className="action-row">{sides.map(side => <Link key={side.node_id} to={`/runs/${encodeURIComponent(side.node_id)}?view=diagnostics`}>{side.analysis_date} · {t("runDiagnostics")}</Link>)}</div>
         </div>
       </div>
     </div>
@@ -689,31 +617,11 @@ function reassessmentComparisonText(
   return entries
     .map(
       (entry) =>
-        `${entry.component_id}: ${t(
+        `${t(
           `reassessment_${entry.disposition}`,
         )} · ${entry.reason}`,
     )
     .join("\n");
-}
-
-function methodSummary(side: ComparisonSide): string | null {
-  return [side.method_snapshot.llm_provider, side.method_snapshot.deep_model]
-    .filter(Boolean)
-    .join(" / ") || null;
-}
-
-function focusableElements(container: HTMLElement | null): HTMLElement[] {
-  if (!container) return [];
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => {
-    if (element.hasAttribute("hidden")) return false;
-    const closedDetails = element.closest("details:not([open])");
-    if (!closedDetails) return true;
-    return closedDetails.querySelector(":scope > summary") === element;
-  });
 }
 
 

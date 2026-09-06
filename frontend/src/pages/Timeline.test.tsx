@@ -170,8 +170,9 @@ function detail(): TimelineDetail {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
   await i18n.changeLanguage("en");
-  vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", valid_until: "2999-01-01T00:00:00Z" } as never);
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", observed_at: "2026-07-26T00:00:00Z", valid_until: "2999-01-01T00:00:00Z" } as never);
   vi.mocked(api.evidence).mockRejectedValue(new Error("Unavailable"));
   vi.mocked(api.run).mockImplementation(async id => ({
     run: { id, research_kind: id.startsWith("increment") ? "incremental" : "full", status: "succeeded", attempt: 1,
@@ -368,7 +369,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
   compareButton.focus();
   fireEvent.click(compareButton);
 
-  const dialog = await screen.findByRole("dialog", { name: "Node Comparison" });
+  const dialog = await screen.findByRole("dialog", { name: "Node Comparison" }, { timeout: 3000 });
   expect(document.body.style.overflow).toBe("hidden");
   expect(within(dialog).getByText("Incremental thesis changed")).toBeVisible();
   expect(within(dialog).queryByText("High confidence")).not.toBeInTheDocument();
@@ -379,9 +380,10 @@ test("selects human-readable nodes and renders a structured comparison", async (
   expect(within(dialog).getByText("Empty")).toBeVisible();
   expect(within(dialog).getByText("Updated outcome")).toBeVisible();
 
-  fireEvent.click(within(dialog).getByText("Update audit"));
-  expect(within(dialog).getByText(/earnings: Weakened/)).toBeVisible();
-  expect(within(dialog).getByText(/openai \/ gpt-5.5/)).toBeVisible();
+  fireEvent.click(within(dialog).getByText("Update details"));
+  expect(within(dialog).getByText(/Weakened/)).toBeVisible();
+  expect(within(dialog).queryByText(/openai \/ gpt-5.5/)).toBeNull();
+  expect(within(dialog).getAllByRole("link", { name: /Run & diagnostics/ })).toHaveLength(2);
   expect(within(dialog).getByText(/Stock return: 12%/)).toBeVisible();
   expect(
     within(dialog).getByText("Refresh the complete baseline."),

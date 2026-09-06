@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 export function focusableElements(container: HTMLElement): HTMLElement[] {
@@ -78,6 +79,7 @@ export function ActionMenu({ label, children }: { label: string; children: React
     }
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
+      if (!open) { setOpen(true); requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>('.action-menu-content a, .action-menu-content button')?.focus()); return; }
       const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('.action-menu-content a, .action-menu-content button') ?? []);
       const current = items.indexOf(document.activeElement as HTMLElement);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
@@ -93,7 +95,8 @@ export function ActionMenu({ label, children }: { label: string; children: React
 export function AsyncState({ loading, error, retry, children }: {
   loading?: boolean; error?: string; retry?: () => void; children?: ReactNode;
 }) {
-  if (error) return <div className="alert" role="alert">{error}{retry && <button type="button" className="button" onClick={retry}>↻</button>}</div>;
+  const { t } = useTranslation();
+  if (error) return <div className="alert" role="alert">{error}{retry && <button type="button" className="button" onClick={retry}>{t("retryLoad")}</button>}</div>;
   if (loading) return <div className="loading" role="status">{children}</div>;
   return <>{children}</>;
 }

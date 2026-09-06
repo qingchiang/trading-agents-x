@@ -454,7 +454,7 @@ beforeEach(async () => {
   localStorage.removeItem("tradingagents-timeline-order");
   localStorage.removeItem("tradingagents-audit-details-open");
   await i18n.changeLanguage("en");
-  vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", valid_until: "2999-01-01T00:00:00Z" } as never);
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", observed_at: "2026-07-26T00:00:00Z", valid_until: "2999-01-01T00:00:00Z" } as never);
   vi.mocked(api.run).mockResolvedValue(detail);
   vi.mocked(api.evidence).mockResolvedValue(detail.result!.evidence!);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
@@ -847,9 +847,9 @@ test("dispatches Incremental research to its own summary and root-baseline updat
 
   fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
   await waitFor(() => expect(api.evidence).toHaveBeenCalledTimes(1));
-  const briefHeading = await screen.findByRole("heading", { name: "Key update" });
-  expect(briefHeading).toBeVisible();
-  expect(briefHeading.closest("article")).toHaveTextContent(
+  await screen.findByRole("heading", { name: "Key update" });
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Key update" })).toBeVisible());
+  expect(screen.getByRole("heading", { name: "Key update" }).closest("article")).toHaveTextContent(
     "The filing changes the outlook.",
   );
 
@@ -1298,8 +1298,8 @@ test("localizes Incremental activity and keeps one technical event log per attem
   const activityTitle = await screen.findByText("Collection · Collection update");
   const workUnit = activityTitle.closest("article");
   expect(within(workUnit!).getByText("Completed")).toBeVisible();
-  expect(within(workUnit!).getByText("incremental.collect")).toBeVisible();
-  expect(screen.getByText("schema_validation")).toBeVisible();
+  expect(within(workUnit!).queryByText("incremental.collect")).toBeNull();
+  expect(screen.queryByText("schema_validation")).toBeNull();
   const attempt = screen.getByText("Attempt 1").closest("details");
   expect(within(attempt!).queryByText("Audit details")).not.toBeInTheDocument();
   expect(within(attempt!).queryByText("Technical events (2)")).not.toBeInTheDocument();
@@ -1342,17 +1342,18 @@ test("orders work units within each attempt and restores the activity preference
   const attempt = screen.getByText("Attempt 1").closest("details");
   expect(attempt).not.toBeNull();
   const nodes = () =>
-    within(attempt!).getAllByText(/^(analyst\.news\.report|risk\.review)$/)
-      .map((element) => element.textContent);
+    Array.from(attempt!.querySelectorAll(".activity-work-unit strong")).map(element => element.textContent);
 
   expect(screen.getByRole("button", { name: "Earliest first" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  expect(nodes()).toEqual(["analyst.news.report", "risk.review"]);
+  expect(nodes()[0]).toMatch(/Analysis reports/);
+  expect(nodes()[1]).toMatch(/Risk/);
 
   fireEvent.click(screen.getByRole("button", { name: "Latest first" }));
-  expect(nodes()).toEqual(["risk.review", "analyst.news.report"]);
+  expect(nodes()[0]).toMatch(/Risk/);
+  expect(nodes()[1]).toMatch(/Analysis reports/);
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("newest");
 });
 
@@ -1788,7 +1789,7 @@ test("localizes canonical report labels for zh-CN", async () => {
     ).toBeVisible();
   });
   const labels = ["基本面", "市场", "新闻", "舆情"].map((name) =>
-    screen.getByRole("button", { name }),
+    screen.getByRole("tab", { name }),
   );
   labels.slice(0, -1).forEach((label, index) => {
     expect(

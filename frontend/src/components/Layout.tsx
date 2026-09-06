@@ -1,6 +1,7 @@
 import { PropsWithChildren, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Icon from "./Icon";
+import { useModal } from "./Interaction";
 import i18n from "../i18n";
 import { Link, usePathname } from "../router";
 
@@ -19,6 +20,7 @@ export default function Layout({ children }: PropsWithChildren) {
     () => localStorage.getItem(sidebarPreferenceKey) === "true",
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const sidebarRef = useModal<HTMLElement>(drawerOpen, () => setDrawerOpen(false));
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -63,7 +65,7 @@ export default function Layout({ children }: PropsWithChildren) {
       >
         <Icon name="menu" />
       </button>
-      <aside className="sidebar" id="primary-sidebar">
+      <aside className="sidebar" id="primary-sidebar" ref={sidebarRef} role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen || undefined} aria-label={t("primaryNavigation")}>
         <button
           type="button"
           className="mobile-sidebar-close"
@@ -103,7 +105,7 @@ export default function Layout({ children }: PropsWithChildren) {
           aria-expanded={!collapsed}
           onClick={toggleCollapsed}
         >
-          <span aria-hidden="true">{collapsed ? "›" : "‹"}</span>
+          <Icon name="menu" />
           <span className="nav-label">
             {t(collapsed ? "expandSidebar" : "collapseSidebar")}
           </span>

@@ -147,7 +147,7 @@ function result(id: string) {
     },
     decision: {
       rating: "Hold",
-      confidence: 0.65,
+      confidence: "medium",
       executive_summary: "The evidence supports a balanced research opinion.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
@@ -707,11 +707,11 @@ test("runs, templates, trash, and restores local research", async ({
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "研究工作台" })).toBeVisible();
+  await expect(page.getByText("NVIDIA Corporation").first()).toBeVisible();
   await page.getByLabel("界面语言").selectOption("en");
 
-  await page.getByRole("link", { name: "New run", exact: true }).click();
+  await page.getByRole("link", { name: "New research", exact: true }).click();
   const ticker = page.getByLabel(/^Ticker/);
   await expect(ticker).toHaveAttribute("name", "ticker");
   await expect(ticker).toHaveAttribute("list", "recent-instruments");
@@ -752,8 +752,17 @@ test("runs, templates, trash, and restores local research", async ({
     page.getByRole("heading", { name: "fixture-feed" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Open evidence ev_0123456789ab" }).first()).toBeFocused();
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("navigation", { name: "Report section navigation" }).getByRole("button", { name: "Risk lens" }).click();
+  await expect(page).toHaveURL(/#risk/);
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/view=reports.*#risk/);
+  await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(24);
 
   await page.goto("/runs/run-report?view=decision");
   await expect(
@@ -773,6 +782,8 @@ test("runs, templates, trash, and restores local research", async ({
   expect(decisionWidth.summary).toBeGreaterThan(decisionWidth.hero * 0.7);
 
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
+  await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Diagnostics" }).click();
   await page.getByText("Decision-critical calculation audit").click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
@@ -785,7 +796,7 @@ test("runs, templates, trash, and restores local research", async ({
   ).toBeHidden();
 
   await page.getByRole("tab", { name: "Activity" }).click();
-  await expect(page.getByText("Run metrics and diagnostics")).toBeVisible();
+  await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Attempt metrics")).toBeHidden();
   await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(
     "aria-pressed",
@@ -810,11 +821,11 @@ test("runs, templates, trash, and restores local research", async ({
     .poll(() => attemptBody.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   const attemptPanel = page.locator(".activity-attempt").first();
-  await expect(attemptPanel.getByText(/Technical events \(25\)/)).toHaveCount(1);
+  await expect(attemptPanel.getByText(/Technical events \(25\)/)).toHaveCount(0);
   await expect(attemptPanel.getByText("Audit details", { exact: true })).toHaveCount(0);
-  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("run.lifecycle");
+  await expect(attemptPanel.locator(".activity-node-key")).toHaveCount(0);
   await page.getByRole("button", { name: "Earliest first" }).click();
-  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("fixture.stage.0");
+
   expect(
     await page.evaluate(() =>
       localStorage.getItem("tradingagents-timeline-order"),
@@ -854,7 +865,7 @@ test("runs, templates, trash, and restores local research", async ({
   expect(detailGeometry.gap).toBeLessThanOrEqual(10);
   const detailKindBadge = page
     .locator(".run-title")
-    .getByRole("button", { name: "Full research" });
+    .getByText("Full research", { exact: true });
   const badgeGeometry = await detailKindBadge.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -863,45 +874,29 @@ test("runs, templates, trash, and restores local research", async ({
     badgeGeometry.clientHeight,
   );
   await expect(page.locator(".run-heading .subtitle").first()).toHaveText(
-    "2026-07-24 · Attempt 1",
+    "2026-07-24",
   );
 
   await page.goto("/timelines/NVDA");
   await expect(page.getByText("Primary Cycle")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open research detail →" })).toHaveAttribute(
-    "href",
-    "/runs/run-report",
-  );
-  const timelineSummary = page.locator(".timeline-decision-summary").first();
-  const timelineWidth = await timelineSummary.evaluate((element) => ({
-    summary: element.getBoundingClientRect().width,
-    card: element.closest(".research-node-card")?.getBoundingClientRect().width ?? 0,
-  }));
-  expect(timelineWidth.summary).toBeGreaterThan(timelineWidth.card * 0.85);
-
+  await expect(page.locator(".history-node.full")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Executive summary" })).toBeVisible();
   await page.goto("/runs");
   await expect(page.getByRole("columnheader", { name: "Actions" })).toBeVisible();
   const runsTable = page.locator(".runs-table");
   await expect(
     runsTable.getByRole("link", { name: "Research Timeline" }),
   ).toHaveCount(0);
-  const tickerColumnRatio = await runsTable.evaluate((table) => {
-    const tickerHeader = table.querySelectorAll("th")[1];
-    if (!tickerHeader) throw new Error("ticker column not found");
-    return tickerHeader.getBoundingClientRect().width / table.getBoundingClientRect().width;
-  });
-  expect(tickerColumnRatio).toBeGreaterThan(0.25);
-  expect(tickerColumnRatio).toBeLessThan(0.30);
   const openAction = page
     .getByRole("row")
     .filter({ hasText: "NVDA" })
-    .getByRole("link", { name: "Open" });
+    .getByRole("link", { name: "Execution details" });
   await expect(openAction).toHaveClass(/compact-button/);
   expect(
     await openAction.evaluate(
       (element) => element.getBoundingClientRect().height,
     ),
-  ).toBeLessThanOrEqual(34);
+  ).toBeLessThanOrEqual(48);
   const runsSearch = page.locator("#runs-search");
   const runsKind = page.locator("#runs-kind");
   const applyFilters = page.getByRole("button", { name: "Apply", exact: true });
@@ -947,13 +942,9 @@ test("runs, templates, trash, and restores local research", async ({
   const daiichiKindBadge = page
     .getByRole("row")
     .filter({ hasText: "4568.T" })
-    .getByRole("button", { name: "Full research" });
-  await daiichiKindBadge.click();
-  const configuration = page.getByRole("tooltip", { name: "Research configuration" });
-  await expect(configuration).toContainText("gpt-5.4-mini");
-  await expect(configuration).toContainText("gpt-5.5");
-  await page.keyboard.press("Escape");
-  await expect(configuration).toBeHidden();
+    .getByText("Full research", { exact: true });
+  await expect(daiichiKindBadge).toBeVisible();
+  await expect(page.getByRole("tooltip", { name: "Research configuration" })).toHaveCount(0);
 
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
@@ -979,58 +970,24 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/runs/run-report");
   await expect(page.getByText("Run not found")).toBeVisible();
 
-  await page.setViewportSize({ width: 1080, height: 1920 });
   purged.delete("run-report");
   restored.trashed_at = null;
-  await page.goto("/runs/run-report?view=reports&report=market");
-  await expect(
-    page.getByRole("navigation", { name: "Report section navigation" }),
-  ).toBeVisible();
-  const reportScroller = page.locator(".report-panel .analyst-report");
-  const expandedReportWidth = await reportScroller.evaluate(
-    (element) => element.getBoundingClientRect().width,
-  );
-  await page.getByRole("button", { name: "Close navigation" }).click();
-  await expect(
-    page.getByRole("navigation", { name: "Report section navigation" }),
-  ).toBeHidden();
-  const compactNavigation = page.getByRole("button", {
-    name: "Open navigation",
-  });
-  await expect(compactNavigation).toHaveText("☰");
-  expect(
-    await compactNavigation.evaluate(
-      (element) => element.getBoundingClientRect().width,
-    ),
-  ).toBeLessThanOrEqual(36);
-  expect(
-    await reportScroller.evaluate(
-      (element) => element.getBoundingClientRect().width,
-    ),
-  ).toBe(expandedReportWidth);
-  await compactNavigation.click();
-  await page
-    .getByRole("navigation", { name: "Report section navigation" })
-    .getByRole("button", { name: "Risk lens" })
-    .click();
-  const riskOffset = await page
-    .getByRole("heading", { name: "Risk lens" })
-    .evaluate((heading) => {
-      const scroller = heading.closest(".analyst-report");
-      if (!scroller) throw new Error("report scroller not found");
-      return (
-        heading.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top
-      );
-    });
-  expect(riskOffset).toBeGreaterThanOrEqual(12);
-  expect(riskOffset).toBeLessThanOrEqual(24);
-  const reportMaxHeight = await page
-    .locator(".report-panel .analyst-report")
-    .evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).maxHeight),
-    );
-  expect(reportMaxHeight).toBeGreaterThan(660);
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/runs/run-report?view=reports&report=market");
+    await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
+    const body = page.locator(".report-panel .analyst-report");
+    expect(await body.evaluate(element => getComputedStyle(element).overflowY)).toBe("visible");
+    expect(await body.evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(800);
+    if (width === 1440) {
+      const nav = page.getByRole("navigation", { name: "Report section navigation" });
+      await expect(nav).toBeVisible();
+      const boxes = await Promise.all([nav.boundingBox(), body.boundingBox()]);
+      expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
+      await nav.getByRole("button", { name: "Risk lens" }).click();
+      await expect(page).toHaveURL(/#risk/);
+    } else await expect(page.getByLabel("Jump to section")).toBeVisible();
+  }
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/runs/run-report?view=reports&report=market");
@@ -1124,16 +1081,16 @@ test("compares active and explicitly shown Trash nodes without creating research
             lifecycle_state: "trashed", collection_summary: { version: "1", domains: [] },
             research_availability: { version: "1", domains: [] }, reassessment: { entries: [] },
             full_research_required_reasons: [{ code: "attribution.unreliable",
-              message: "Comparison side needs Full research.", origin: "semantic",
+              message: "Comparison side needs Full research. " + "Additional context for reading and comparing retained research. ".repeat(30), origin: "semantic",
               evidence_refs: [] }],
             decision: { rating: "bullish" }, performance: {
               stock: { status: "unavailable", reason: "fixture" }, benchmarks: [],
             } },
         ],
-        decision_sections: [{ key: "rating", values: [
-          { state: "recorded", value: "hold" },
-          { state: "recorded", value: "bullish" },
-        ] }],
+        decision_sections: Array.from({ length: 12 }, (_, index) => ({ key: `rating-${index}`, values: [
+          { state: "recorded", value: "Hold with bounded evidence." },
+          { state: "recorded", value: "Overweight after new evidence." },
+        ] })),
       } });
     }
     if (url.pathname === "/api/v1/runs" && request.method() === "POST") {
@@ -1142,11 +1099,12 @@ test("compares active and explicitly shown Trash nodes without creating research
     return route.fulfill({ status: 404, json: { detail: "not mocked" } });
   });
 
-  await page.goto("/timelines/NVDA");
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.goto("/timelines/NVDA?compare_mode=1");
+  await page.locator(".research-header").getByRole("button", { name: /^(Manage|管理)$/ }).click();
   await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
   await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
+  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
   await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
 
   const comparisonDialog = page.getByRole("dialog", {
@@ -1155,7 +1113,7 @@ test("compares active and explicitly shown Trash nodes without creating research
   await expect(comparisonDialog).toBeVisible();
   await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
   await expect(
-    page.getByText("Comparison side needs Full research.", { exact: true }),
+    page.getByText(/Comparison side needs Full research\./),
   ).toBeVisible();
   expect(comparisonPayload).toEqual({ nodes: [
     { node_id: full.id, lifecycle_state: "active" },
@@ -1164,8 +1122,9 @@ test("compares active and explicitly shown Trash nodes without creating research
   expect(researchCreateCalls).toBe(0);
 
   await comparisonDialog.getByText(/Extended conclusions|扩展结论|拡張結論/).click();
-  await comparisonDialog.getByText(/Update audit|更新审计|更新監査/).click();
-  await comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/).click();
+  await comparisonDialog.getByText(/Update details|更新详情|更新の詳細/).click();
+  await expect(comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/)).toHaveCount(0);
+  await expect(comparisonDialog.getByRole("link", { name: /Run & diagnostics|运行与诊断|実行と診断/ })).toHaveCount(2);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const dialogBox = await comparisonDialog.boundingBox();
@@ -1250,10 +1209,10 @@ test("covers every supported retained-node comparison pair", async ({ page }) =>
 
   for (const [index, pair] of pairs.entries()) {
     currentPair = pair;
-    await page.goto(`/timelines/NVDA?pair=${index}`);
+    await page.goto(`/timelines/NVDA?pair=${index}&compare_mode=1`);
     for (const node of pair) {
       const card = page
-        .locator(`.research-node-card.${node.research_kind}`)
+        .locator(`.history-node.${node.research_kind}`)
         .filter({ hasText: node.analysis_date })
         .first();
       await card.getByRole("button", {
@@ -1315,7 +1274,7 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
 
   for (const [index, message] of rejectionMessages.entries()) {
     rejectionMessage = message;
-    await page.goto(`/timelines/NVDA?rejection=${index}`);
+    await page.goto(`/timelines/NVDA?rejection=${index}&compare_mode=1`);
     const compareButton = page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     });
@@ -1337,6 +1296,7 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
 });
 
 test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
+  let journeyNodes: TimelineNodeFixture[] = [];
   let stage: "none" | "full" | "incremental" = "none";
   let incrementalPayload: Record<string, unknown> | null = null;
 
@@ -1385,7 +1345,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
           analysis_date: "2026-07-20",
           is_primary: true,
           rating: "Hold",
-          confidence: 0.65,
+          confidence: "medium",
           instrument_name: "NVIDIA Corporation",
           instrument_local_name: null,
           thesis: "Evidence is balanced.",
@@ -1441,6 +1401,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
       };
       const nodes = stage === "none" ? [] :
         stage === "full" ? [full] : [full, incremental];
+      journeyNodes = nodes as TimelineNodeFixture[];
       return route.fulfill({ json: cycleTimeline(
         "NVDA",
         nodes as TimelineNodeFixture[],
@@ -1455,7 +1416,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
       const run = makeRun(id, "succeeded", { ticker: "NVDA" });
       run.request = { ...run.request, research_kind: isIncremental ? "incremental" : "full",
         full_baseline_run_id: isIncremental ? "full-journey" : null };
-      return route.fulfill({ json: { run, result: result(id), attempts: [],
+      return route.fulfill({ json: { run: { ...run, research_kind: isIncremental ? "incremental" : "full", is_research_node: true, full_baseline_run_id: isIncremental ? "full-journey" : null }, research_node: journeyNodes.find(node => node.id === id) ?? null, result: result(id), attempts: [],
         evidence_status: { status: "sealed", digest: "fixture-digest", item_count: 1,
           table_count: 0, sealed_attempt: 1, sealed_at: timestamp } } });
     }
@@ -1480,30 +1441,8 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
     full_baseline_run_id: "full-journey" });
 
   await page.goto("/timelines/NVDA");
-  await expect(page.locator(".research-node-card.full")).toBeVisible();
-  await expect(page.locator(".research-node-card.incremental")).toBeVisible();
-  await page.getByText(/Update details|更新详情|更新詳細/).click();
-  await expect(
-    page.getByText(/Research Availability|研究可用性|リサーチ可用性/),
-  ).toBeVisible();
-  await expect(page.getByText("Current complete decision")).toBeVisible();
-  await expect(page.getByText("The bounded update cannot resolve attribution.")).toBeVisible();
-  await expect(
-    page.getByText(/Full research recommended|建议进行完整研究/).first(),
-  ).toBeVisible();
-  const warningGeometry = await page
-    .locator(".research-node-card.incremental .research-warning-block")
-    .evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        borderRadius: Number.parseFloat(style.borderRadius),
-        borderWidth: Number.parseFloat(style.borderTopWidth),
-        paddingLeft: Number.parseFloat(style.paddingLeft),
-        paddingRight: Number.parseFloat(style.paddingRight),
-      };
-    });
-  expect(warningGeometry.borderRadius).toBeGreaterThanOrEqual(9);
-  expect(warningGeometry.borderWidth).toBeGreaterThanOrEqual(1);
-  expect(warningGeometry.paddingLeft).toBeGreaterThanOrEqual(14);
-  expect(warningGeometry.paddingRight).toBeGreaterThanOrEqual(14);
+  await expect(page.locator(".history-node.full")).toBeVisible();
+  await expect(page.locator(".history-node.incremental")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Executive summary|执行摘要|エグゼクティブサマリー/ })).toBeVisible();
+  await expect(page.getByText(/Full research recommended|建议进行完整研究/).first()).toBeVisible();
 });

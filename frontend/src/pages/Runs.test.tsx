@@ -126,18 +126,8 @@ test("filters and atomically trashes eligible runs with instrument names", async
   expect(screen.getByText("英伟达")).toBeVisible();
   expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
   expect(screen.getByText("High confidence")).toBeVisible();
-  const kindBadge = screen.getByRole("button", { name: "Incremental research" });
-  expect(kindBadge).toHaveClass("research-kind-badge");
-  fireEvent.click(kindBadge);
-  const configuration = screen.getByRole("tooltip", {
-    name: "Research configuration",
-  });
-  expect(configuration).toHaveTextContent("1 information domain");
-  expect(configuration).toHaveTextContent("Market");
-  expect(configuration).toHaveTextContent("openai");
-  expect(configuration).toHaveTextContent("deep");
-  expect(configuration).toHaveTextContent("Provider default");
-  expect(configuration).not.toHaveTextContent("Quick model");
+  expect(screen.getByText("Incremental research", { selector: ".research-kind-badge" })).toHaveClass("research-kind-badge");
+  expect(screen.queryByRole("tooltip", { name: "Research configuration" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
   expect(screen.getByText("—")).toHaveClass("research-rating-badge");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();

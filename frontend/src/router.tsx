@@ -38,9 +38,11 @@ export function Router({
 
   useEffect(() => {
     if (!browserBacked) return;
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
     const syncLocation = () => setLocation(parseLocation(browserLocation()));
     window.addEventListener("popstate", syncLocation);
-    return () => window.removeEventListener("popstate", syncLocation);
+    return () => { window.history.scrollRestoration = previousRestoration; window.removeEventListener("popstate", syncLocation); };
   }, [browserBacked]);
 
   const navigate = useCallback(

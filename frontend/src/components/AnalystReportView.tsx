@@ -1,6 +1,6 @@
+import { useReadingPosition } from "../useReadingPosition";
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -192,25 +192,6 @@ function ReportSectionNavigation({
   );
 }
 
-function useReadingPosition(key: string, ref: RefObject<HTMLDivElement | null>) {
-  useLayoutEffect(() => {
-    let frame = requestAnimationFrame(() => {
-      const anchor = decodeURIComponent(window.location.hash.slice(1));
-      const heading = anchor ? document.getElementById(headingDomId(anchor)) : null;
-      if (heading && ref.current?.contains(heading)) heading.scrollIntoView?.({ block: "start" });
-      else {
-        const saved = sessionStorage.getItem(key);
-        if (saved !== null) window.scrollTo?.(0, Math.max(0, Number(saved) || 0));
-      }
-    });
-    const save = () => sessionStorage.setItem(key, String(window.scrollY));
-    window.addEventListener("scroll", save, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", save);
-    };
-  }, [key, ref]);
-}
 
 function headingDomId(anchor: string): string {
   return `user-content-${anchor}`;

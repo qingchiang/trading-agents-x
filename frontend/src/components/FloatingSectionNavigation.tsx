@@ -1,3 +1,4 @@
+import Icon from "./Icon";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -54,7 +55,7 @@ export default function FloatingSectionNavigation({
                   aria-expanded="true"
                   onClick={toggle}
                 >
-                  <span aria-hidden="true">‹</span>
+                  <Icon name="close" />
                 </button>
               </header>
               <div className="floating-navigation-items">
@@ -79,7 +80,7 @@ export default function FloatingSectionNavigation({
               aria-expanded="false"
               onClick={toggle}
             >
-              <span aria-hidden="true">☰</span>
+              <Icon name="menu" />
             </button>
           )}
         </div>

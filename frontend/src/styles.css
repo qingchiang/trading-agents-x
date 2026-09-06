@@ -106,8 +106,7 @@ select:focus-visible {
   overflow-y: auto;
   color: #d7dfeb;
   background:
-    linear-gradient(165deg, rgb(48 104 232 / 12%), transparent 35%),
-    var(--navy-950);
+    var(--surface);
   border-right: 1px solid rgb(255 255 255 / 7%);
 }
 
@@ -134,7 +133,7 @@ select:focus-visible {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.04em;
-  background: linear-gradient(145deg, #4d82f5, #2453c3);
+  background: var(--surface);
   border: 1px solid rgb(255 255 255 / 20%);
   border-radius: 11px;
   box-shadow: 0 8px 20px rgb(12 45 112 / 40%);
@@ -1146,7 +1145,7 @@ label small {
   display: grid;
   gap: 18px;
   padding: 18px 22px 20px;
-  background: linear-gradient(135deg, #f7faff, #fbfcff);
+  background: var(--surface);
   border-block: 1px solid var(--line-soft);
 }
 
@@ -2604,49 +2603,6 @@ button.research-kind-badge {
   flex: 0 0 auto;
 }
 
-.research-kind-tooltip {
-  position: fixed;
-  z-index: 180;
-  padding: 14px 15px;
-  color: var(--ink);
-  background: rgb(255 255 255 / 98%);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 18px 48px rgb(18 38 63 / 22%);
-  backdrop-filter: blur(8px);
-}
-
-.research-kind-tooltip > strong {
-  display: block;
-  margin-bottom: 9px;
-  font-size: 13px;
-}
-
-.research-kind-tooltip dl {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-}
-
-.research-kind-tooltip dl > div {
-  display: grid;
-  grid-template-columns: minmax(86px, 0.4fr) minmax(0, 1fr);
-  gap: 10px;
-}
-
-.research-kind-tooltip dt,
-.research-kind-tooltip dd {
-  min-width: 0;
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.research-kind-tooltip dt {
-  color: var(--muted);
-}
-
 .research-kind-badge.full {
   color: var(--blue-dark);
   background: var(--blue-soft);
@@ -2722,60 +2678,10 @@ button.research-kind-badge {
   gap: 16px;
 }
 
-.timeline-summary-card {
-  display: grid;
-  gap: 17px;
-  min-height: 220px;
-  padding: 20px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  transition: border-color 140ms ease, transform 140ms ease;
-}
-
-.timeline-summary-card:hover {
-  border-color: rgb(48 104 232 / 42%);
-  transform: translateY(-2px);
-}
-
-.timeline-summary-card.warning {
-  border-left: 4px solid var(--amber);
-}
-
 .timeline-summary-decision {
   display: flex;
   gap: 10px;
   align-items: center;
-}
-
-.timeline-summary-card dl {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: auto 0 0;
-}
-
-.timeline-summary-card dl div {
-  padding: 9px;
-  background: var(--surface-soft);
-  border-radius: 8px;
-}
-
-.timeline-summary-card dt,
-.timeline-summary-card dd {
-  margin: 0;
-}
-
-.timeline-summary-card dt {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.timeline-summary-card dd {
-  margin-top: 3px;
-  font-size: 14px;
-  font-weight: 750;
 }
 
 .warning-copy {
@@ -3086,7 +2992,7 @@ button.research-kind-badge {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  background: linear-gradient(90deg, var(--surface), var(--surface-soft));
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
 
@@ -3134,39 +3040,6 @@ button.research-kind-badge {
   background: var(--line);
 }
 
-.research-node-card {
-  position: relative;
-  display: grid;
-  gap: 14px;
-  margin-left: 0;
-  padding: 18px 18px 16px 28px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 5px solid var(--blue);
-  border-radius: 12px;
-  box-shadow: 0 4px 18px rgb(16 24 40 / 5%);
-}
-
-.research-node-card.incremental {
-  margin-left: 38px;
-  background: linear-gradient(110deg, rgb(243 239 255 / 65%), #fff 28%);
-  border-left-color: var(--violet);
-}
-
-.research-node-card.incremental::before {
-  position: absolute;
-  top: 26px;
-  left: -43px;
-  width: 38px;
-  height: 2px;
-  content: "";
-  background: var(--line);
-}
-
-.research-node-card.trashed {
-  opacity: 0.7;
-}
-
 .research-node-header,
 .node-actions {
   display: flex;
@@ -3179,13 +3052,6 @@ button.research-kind-badge {
 .research-node-header h3 {
   margin: 8px 0 0;
   font-size: 18px;
-}
-
-.timeline-decision-summary {
-  padding: 13px 15px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
 }
 
 .timeline-decision-summary p,
@@ -3450,7 +3316,7 @@ button.research-kind-badge {
   gap: 12px;
   margin-top: 12px;
   padding: 15px;
-  background: linear-gradient(115deg, var(--blue-soft), #fff 48%);
+  background: var(--surface);
   border: 1px solid rgb(48 104 232 / 22%);
   border-radius: 11px;
 }
@@ -3851,26 +3717,9 @@ button.research-kind-badge {
     left: 23px;
   }
 
-  .research-node-card {
-    padding: 15px 14px 14px 21px;
-  }
-
-  .research-node-card.incremental {
-    margin-left: 21px;
-  }
-
-  .research-node-card.incremental::before {
-    left: -26px;
-    width: 21px;
-  }
-
   .node-actions .text-link {
     width: 100%;
     margin-left: 0;
-  }
-
-  .timeline-summary-card dl {
-    grid-template-columns: 1fr 1fr;
   }
 
 }

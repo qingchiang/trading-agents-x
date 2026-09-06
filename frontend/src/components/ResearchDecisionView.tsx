@@ -1,14 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
 
-import type {
-  DecisionNumericAuditAppendix,
-  ResearchDecision,
-} from "../api/client";
+import type { DecisionNumericAuditAppendix, ResearchDecision, } from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
 import { formatDecisionNumber } from "../numericDisplay";
-import EvidenceLinks from "./EvidenceLinks";
 import { MarkdownList } from "./AnalystReportView";
+import EvidenceLinks from "./EvidenceLinks";
 import Markdown from "./Markdown";
 
 export default function ResearchDecisionView({
@@ -490,33 +487,6 @@ function formatRange(
   )}${
     currency ? ` ${currency}` : ""
   }`;
-}
-
-
-function decisionCalculationUseLocation(
-  componentPath: string,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  let location = t("calculationUseDecisionClaim");
-  if (componentPath === "executive_summary") {
-    location = t("executiveSummary");
-  } else if (componentPath === "thesis") {
-    location = t("thesis");
-  } else if (componentPath.startsWith("risks.")) {
-    location = t("risks");
-  } else if (componentPath.startsWith("invalidation_conditions.")) {
-    location = t("invalidationConditions");
-  } else if (componentPath.startsWith("risk_review_adjustments.")) {
-    location = t("riskReviewAdjustments");
-  } else {
-    const match = /^scenarios\.(base|bull|bear)\./.exec(componentPath);
-    if (match) {
-      location = t("calculationUseScenario", {
-        scenario: t(scenarioKey(match[1] as "base" | "bull" | "bear")),
-      });
-    }
-  }
-  return location;
 }
 
 function latestEndpointDate(left: string, right: string): string {

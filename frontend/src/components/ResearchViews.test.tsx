@@ -145,7 +145,7 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   const openNavigation = screen.getByRole("button", {
     name: "Open navigation",
   });
-  expect(openNavigation).toHaveTextContent("☰");
+  expect(openNavigation.querySelector("svg")).not.toBeNull();
   expect(openNavigation).not.toHaveTextContent("On this report");
   fireEvent.click(openNavigation);
   expect(

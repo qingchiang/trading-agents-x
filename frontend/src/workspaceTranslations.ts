@@ -1,5 +1,9 @@
 export const workspaceTranslations = {
   en: {
+    recordedDuration: "Recorded elapsed time", recentActivity: "Most recent activity",
+    temporal_point_in_time: "As-of-date evidence", temporal_live_only: "Near-live source; not historical coverage", temporal_unknown: "Time coverage is not established",
+    completeJudgment: "Complete judgment",
+    updateDetails: "Update details", availableAt: "Available from",
     dashboard: "Research workspace", researchTimelines: "Research library", runManagement: "Run tasks", newRun: "New research", clearFilters: "Clear filters",
     diagnostics: "Diagnostics", runDiagnostics: "Run & diagnostics", exportResearch: "Export", researchLimitations: "Research limitations",
     historyNavigation: "Research history", currentPrimary: "Current primary research", selectedResearch: "Selected research", baselineDate: "Full baseline",
@@ -14,6 +18,10 @@ export const workspaceTranslations = {
     filterTasks: "Filter tasks", futureContextUnavailable: "Market date is unavailable. Refresh before updating research.",
   },
   "zh-CN": {
+    recordedDuration: "已记录耗时", recentActivity: "最近活动",
+    temporal_point_in_time: "截至所选日期的资料", temporal_live_only: "近实时来源，不能证明历史覆盖", temporal_unknown: "时间覆盖尚未确认",
+    completeJudgment: "完整判断",
+    updateDetails: "更新详情", availableAt: "可获取时间",
     dashboard: "研究工作台", researchTimelines: "研究库", runManagement: "运行任务", newRun: "新建研究", clearFilters: "清除筛选",
     diagnostics: "诊断", runDiagnostics: "运行与诊断", exportResearch: "导出", researchLimitations: "研究限制",
     historyNavigation: "研究历史", currentPrimary: "当前主研究", selectedResearch: "所选研究", baselineDate: "完整基线",
@@ -28,6 +36,10 @@ export const workspaceTranslations = {
     filterTasks: "筛选任务", futureContextUnavailable: "暂时无法获取市场日期，请刷新后更新研究。",
   },
   ja: {
+    recordedDuration: "記録済みの所要時間", recentActivity: "直近の動作",
+    temporal_point_in_time: "基準日時点の資料", temporal_live_only: "準リアルタイムの情報源。過去の網羅性は保証しません", temporal_unknown: "時間的な範囲は未確認",
+    completeJudgment: "判断の全体",
+    updateDetails: "更新の詳細", availableAt: "取得可能時刻",
     dashboard: "リサーチワークスペース", researchTimelines: "ライブラリ", runManagement: "実行タスク", newRun: "新規リサーチ", clearFilters: "条件をクリア",
     diagnostics: "診断", runDiagnostics: "実行と診断", exportResearch: "エクスポート", researchLimitations: "リサーチの制約",
     historyNavigation: "リサーチ履歴", currentPrimary: "現在の主要リサーチ", selectedResearch: "選択中のリサーチ", baselineDate: "フル基準",
