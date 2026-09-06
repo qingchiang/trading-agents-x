@@ -1,8 +1,9 @@
+import CycleHistory from "../components/CycleHistory";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ResearchNodeComparison, type ResearchNodeComparisonSelection, type ResearchNodeView, type TimelineDetail } from "../api/client";
 import ResearchWorkspace from "../components/ResearchWorkspace";
-import ConfirmDialog from "../components/ConfirmDialog";
+import RunLifecycleDialog, { type LifecycleAction } from "../components/RunLifecycleDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import { ActionMenu } from "../components/Interaction";
 import { Link, useLocation, useNavigate } from "../router";
@@ -37,8 +38,7 @@ export default function Timeline() {
   const [comparison, setComparison] = useState<ResearchNodeComparison | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingNode, setPendingNode] = useState<ResearchNodeView | null>(null);
-  const [lifecycleMode, setLifecycleMode] = useState<"trash" | "purge" | null>(null);
-  const [replacementPrimary, setReplacementPrimary] = useState("");
+  const [lifecycleMode, setLifecycleMode] = useState<LifecycleAction | null>(null);
   const update = (values: Record<string, string | null>, replace = false) => {
     const next = new URLSearchParams(params);
     Object.entries(values).forEach(([key, value]) => { if (value === null) next.delete(key); else next.set(key, value); });
@@ -91,17 +91,6 @@ export default function Timeline() {
     catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (currentInstrument.current === instrument) setBusy(false); }
   };
-  const lifecycle = async () => {
-    if (!pendingNode || !lifecycleMode || busy) return;
-    if (lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some(c => c.id !== pendingNode.id) && !replacementPrimary) { setError(t("selectReplacementCycle")); return; }
-    setBusy(true);
-    try {
-      if (lifecycleMode === "purge") await api.purgeRuns([pendingNode.id]);
-      else await api.trashRuns([pendingNode.id], replacementPrimary ? { [pendingNode.id]: replacementPrimary } : {});
-      setPendingNode(null); setRevision(value => value + 1);
-    } catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { if (currentInstrument.current === instrument) setBusy(false); }
-  };
   const mutate = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
     try { await action(); setRevision(value => value + 1); }
@@ -134,27 +123,7 @@ export default function Timeline() {
       <button className="button primary" disabled={selections.length !== 2 || busy} onClick={() => void compare()}>{t("compareSelectedNodes")}</button>
     </aside>}
     <ResearchWorkspace history={<div className="workspace-history">
-        <nav aria-label={t("historyNavigation")}>
-          {cycles.map(cycle => <details className="history-cycle" open={cycle.is_primary || cycle.id === selected?.cycle_id || comparisonMode} key={cycle.id}>
-            <summary>{cycle.baseline.analysis_date} {cycle.is_primary && <small>{t("primaryCycle")}</small>}{cycle.cycle_warning && <small className="warning">{t("fullResearchRecommended")}</small>}</summary>
-            {[cycle.baseline, ...(cycle.increments ?? [])].map(node => <div className={`history-node ${node.research_kind}`} key={node.id}>
-              <button className="history-select" aria-current={selected?.id === node.id ? "page" : undefined} onClick={() => update({ node: node.id, view: null, report: null, ref: null })}>
-                <time>{node.analysis_date}</time><span>{t(node.research_kind === "full" ? "fullResearch" : "incrementalResearch")}</span>
-                {!node.is_active && <small>{t("retainedInTrash")}</small>}
-              </button>
-              {comparisonMode && <button className="button compact-button" aria-pressed={selections.some(item => item.node_id === node.id)} disabled={selections.length === 2 && !selections.some(item => item.node_id === node.id)} onClick={() => toggleComparison(node)}>{t(selections.some(item => item.node_id === node.id) ? "removeFromComparison" : "selectForComparison")}</button>}
-              <ActionMenu label={t("manageResearch")}>
-                {node.is_active ? <>
-                  {node.research_kind === "full" && !cycle.is_primary && <button className="button" disabled={busy} onClick={() => void mutate(() => api.selectPrimaryCycle(instrument, node.id))}>{t("makePrimary")}</button>}
-                  <button className="button danger" disabled={busy} onClick={() => { setPendingNode(node); setLifecycleMode("trash"); setReplacementPrimary(""); }}>{t(node.research_kind === "full" ? "moveCycleToTrash" : "moveNodeToTrash")}</button>
-                </> : <>
-                  <button className="button" disabled={busy} onClick={() => void mutate(() => api.restoreRuns([node.id]))}>{t("restoreResearchNode")}</button>
-                  <button className="button danger" disabled={busy} onClick={() => { setPendingNode(node); setLifecycleMode("purge"); }}>{t("purgeResearchNode")}</button>
-                </>}
-              </ActionMenu>
-            </div>)}
-          </details>)}
-        </nav>
+        <CycleHistory cycles={cycles} selectedId={selected?.id} selectedCycleId={selected?.cycle_id} comparisonMode={comparisonMode} selections={selections} busy={busy} onSelect={id => update({ node: id, view: null, report: null, ref: null })} onCompare={toggleComparison} onManage={(node, action) => { setPendingNode(node); setLifecycleMode(action); }} onPrimary={id => void mutate(() => api.selectPrimaryCycle(instrument, id))} />
         {detail && (detail.timeline.cycle_total ?? 0) > CYCLE_PAGE_SIZE && <div className="pagination">
           <button className="button" disabled={cycleOffset === 0} onClick={() => update({ cycle_offset: String(Math.max(0, cycleOffset - CYCLE_PAGE_SIZE)), node: null, view: null })}>{t("previous")}</button>
           <button className="button" disabled={cycleOffset + cycles.length >= (detail.timeline.cycle_total ?? 0)} onClick={() => update({ cycle_offset: String(cycleOffset + CYCLE_PAGE_SIZE), node: null, view: null })}>{t("next")}</button>
@@ -163,10 +132,6 @@ export default function Timeline() {
       {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace key={selected.id} /></Suspense>}
     </ResearchWorkspace>
     {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} onClose={closeComparison} /></Suspense>}
-    {pendingNode && lifecycleMode && <ConfirmDialog title={t(lifecycleMode === "purge" ? "purgeResearchTitle" : pendingNode.research_kind === "full" ? "cycleTrashTitle" : "nodeTrashTitle")} confirmLabel={t(lifecycleMode === "purge" ? "confirmPurge" : "confirmTimelineTrash")} cancelLabel={t("cancel")} busy={busy} onCancel={() => setPendingNode(null)} onConfirm={() => void lifecycle()}>
-      <p>{t(lifecycleMode === "purge" ? "purgeResearchImpact" : pendingNode.research_kind === "full" ? "fullOwnsCycle" : "incrementalTrashImpact")}</p>
-      {lifecycleMode === "trash" && pendingNode.research_kind === "full" && pendingNode.is_primary && activeFullCycles.some(cycle => cycle.id !== pendingNode.id) && <label>{t("replacementPrimaryCycle")}<select value={replacementPrimary} onChange={event => setReplacementPrimary(event.target.value)}><option value="">{t("selectReplacementCycle")}</option>{activeFullCycles.filter(cycle => cycle.id !== pendingNode.id).map(cycle => <option value={cycle.id} key={cycle.id}>{cycle.analysis_date} · {cycle.rating}</option>)}</select></label>}
-      {error && <p role="alert">{error}</p>}
-    </ConfirmDialog>}
+    {pendingNode && lifecycleMode && <RunLifecycleDialog runIds={[pendingNode.id]} action={lifecycleMode} onClose={() => setPendingNode(null)} onDone={() => { setPendingNode(null); setRevision(value => value + 1); }} />}
   </section>;
 }

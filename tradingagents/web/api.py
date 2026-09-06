@@ -32,6 +32,8 @@ from tradingagents.application.contracts import (
     ResearchNodeComparison,
     ResearchTimelinePage,
     RunEvent,
+    RunGroupPage,
+    RunLifecyclePreview,
     RunPage,
     RunStatus,
     RunTrashState,
@@ -81,6 +83,7 @@ from .models import (
     RunCreateRequest,
     RunCreationTemplate,
     RunDetail,
+    RunLifecyclePreviewRequest,
     TimelineDetail,
 )
 
@@ -424,10 +427,7 @@ def create_app(
         responses={
             422: {
                 "description": "The instrument path is invalid or names an unsupported product symbol.",
-                "model": (
-                    InstrumentAdmissionErrorResponse
-                    | RequestValidationErrorResponse
-                ),
+                "model": (InstrumentAdmissionErrorResponse | RequestValidationErrorResponse),
                 "content": {
                     "application/json": {
                         "examples": {
@@ -450,9 +450,7 @@ def create_app(
                                     "details": [
                                         {
                                             "location": ["path", "instrument"],
-                                            "message": (
-                                                "String should have at most 64 characters"
-                                            ),
+                                            "message": ("String should have at most 64 characters"),
                                             "type": "string_too_long",
                                         }
                                     ],
@@ -469,14 +467,35 @@ def create_app(
     ):
         return service.analysis_cutoff_context(instrument)
 
+    @app.get(f"{API_PREFIX}/run-groups", response_model=RunGroupPage)
+    def list_run_groups(
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
+        status: RunStatus | None = None,
+        research_kind: Literal["full", "incremental"] | None = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 12,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        return repository.list_run_groups(
+            trash_state=trash_state,
+            status=status,
+            research_kind=research_kind,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+
     @app.get(f"{API_PREFIX}/timelines", response_model=ResearchTimelinePage)
     def list_timelines(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
         q: Annotated[str | None, Query(max_length=200)] = None,
         warning_only: bool = False,
+        sort: Literal["analysis_date", "recent_activity"] = "analysis_date",
     ):
-        return repository.list_timelines(limit=limit, offset=offset, q=q, warning_only=warning_only)
+        return repository.list_timelines(
+            limit=limit, offset=offset, q=q, warning_only=warning_only, sort=sort
+        )
 
     @app.get(
         f"{API_PREFIX}/timelines/{{instrument}}",
@@ -538,6 +557,10 @@ def create_app(
     ):
         return service.compare_research_nodes(instrument, payload.nodes)
 
+    @app.post(f"{API_PREFIX}/runs/lifecycle-preview", response_model=RunLifecyclePreview)
+    def preview_lifecycle(payload: RunLifecyclePreviewRequest):
+        return repository.preview_lifecycle(payload.action, payload.run_ids)
+
     @app.post(
         f"{API_PREFIX}/runs/trash",
         response_model=RunBatchResult,
@@ -546,6 +569,7 @@ def create_app(
         result = repository.trash_runs_detailed(
             payload.run_ids,
             primary_replacements=payload.primary_replacements,
+            expected_affected_run_ids=payload.expected_affected_run_ids,
         )
         return RunBatchResult(**result.model_dump())
 
@@ -554,7 +578,9 @@ def create_app(
         response_model=RunBatchResult,
     )
     def restore_runs(payload: RunBatchRequest):
-        result = repository.restore_runs_detailed(payload.run_ids)
+        result = repository.restore_runs_detailed(
+            payload.run_ids, expected_affected_run_ids=payload.expected_affected_run_ids
+        )
         return RunBatchResult(**result.model_dump())
 
     @app.post(
@@ -562,7 +588,9 @@ def create_app(
         response_model=RunBatchResult,
     )
     def purge_runs(payload: RunBatchRequest):
-        result = repository.purge_runs_detailed(payload.run_ids)
+        result = repository.purge_runs_detailed(
+            payload.run_ids, expected_affected_run_ids=payload.expected_affected_run_ids
+        )
         return RunBatchResult(**result.model_dump())
 
     @app.get(

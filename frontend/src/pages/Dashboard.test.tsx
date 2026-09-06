@@ -1,87 +1,32 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-
-import { api, type Health, type RunPage } from "../api/client";
+import { api } from "../api/client";
 import i18n from "../i18n";
 import { Router } from "../router";
 import Dashboard from "./Dashboard";
-
-vi.mock("../api/client", () => ({
-  api: {
-    health: vi.fn(),
-    runs: vi.fn(),
-    timelines: vi.fn(),
-  },
-}));
-
+vi.mock("../api/client", () => ({ api: { health: vi.fn(), runs: vi.fn(), timelines: vi.fn() } }));
 beforeEach(async () => {
-  vi.resetAllMocks();
-  await i18n.changeLanguage("en");
-  vi.mocked(api.health).mockResolvedValue({
-    status: "ok",
-    database: "ok",
-    queue: { queued: 0, running: 0 },
-    version: "0.5.0",
-  } as Health);
-  vi.mocked(api.timelines).mockResolvedValue({ items: [], total: 0, limit: 6, offset: 0 });
-  vi.mocked(api.runs).mockImplementation(async (query) => query?.includes("succeeded") ? ({
-    items: [
-      {
-        id: "run-1",
-        source_run_id: null,
-        instrument_name: "Toyota Motor Corporation",
-        instrument_local_name: "トヨタ自動車",
-        research_rating: "Hold",
-        research_confidence: "medium",
-        research_kind: "incremental",
-        trashed_at: null,
-        status: "succeeded",
-        request: {
-          ticker: "7203.T",
-          analysis_date: "2026-07-24",
-          asset_type: "stock",
-          profile: "standard",
-          analysts: ["market"],
-          llm_provider: "openai",
-          quick_model: "quick",
-          deep_model: "deep",
-          quick_reasoning_effort: "provider_default",
-          deep_reasoning_effort: "provider_default",
-          output_language: "en",
-        },
-        config_snapshot: {},
-        attempt: 1,
-        cancel_requested: false,
-        metrics: {
-          llm_calls: 0,
-          tool_calls: 0,
-          input_tokens: 0,
-          output_tokens: 0,
-          wall_time_seconds: 0,
-          node_metrics: {},
-        },
-        created_at: "2026-07-24T00:00:00Z",
-        updated_at: "2026-07-24T00:01:00Z",
-      },
-    ],
-    total: 1,
-    limit: 20,
-    offset: 0,
-  } as RunPage) : ({items: [], total: 0, limit: 6, offset: 0}));
+  vi.resetAllMocks(); await i18n.changeLanguage("en");
+  vi.mocked(api.health).mockResolvedValue({ status: "ok", database: "ok", queue: { queued: 0, running: 0 }, version: "test" });
+  vi.mocked(api.runs).mockResolvedValue({ items: [], total: 0, limit: 4, offset: 0 });
+  vi.mocked(api.timelines).mockImplementation(async (_limit, _offset, _q, warnings) => ({ items: warnings ? [] : [{ instrument: "7203.T", instrument_name: "Toyota Motor Corporation", instrument_local_name: "トヨタ自動車", full_cycle_count: 2, latest_analysis_date: "2026-07-24", primary_analysis_date: "2026-07-22", primary_baseline_date: "2026-07-20", primary_rating: "Hold", primary_confidence: "medium", primary_cycle_id: "baseline", primary_head_run_id: "head", primary_thesis: "The current primary assessment remains balanced.", latest_completed_cycle_id: "other", latest_completed_run_id: "other-head", latest_completed_analysis_date: "2026-07-24" }], total: warnings ? 0 : 1, limit: 6, offset: 0 }));
 });
-
-test("shows local identity and final rating with a run-management entry point", async () => {
-  render(
-    <Router initialPath="/">
-      <Dashboard />
-    </Router>,
-  );
-
+test("continues recent instrument work without confusing another cycle with the primary judgment", async () => {
+  render(<Router initialPath="/"><Dashboard /></Router>);
+  const name = await screen.findByText("Toyota Motor Corporation");
+  const card = name.closest("article")!;
+  expect(within(card).getByText("トヨタ自動車")).toBeVisible();
+  expect(within(card).getByText("Hold")).toBeVisible();
+  expect(card).toHaveTextContent("Current judgment as of: 2026-07-22");
+  expect(card).toHaveTextContent("Full baseline: 2026-07-20");
+  expect(card).toHaveTextContent("The current primary assessment remains balanced.");
+  expect(within(card).getByRole("link", { name: /Recently completed in another cycle/ })).toHaveAttribute("href", "/timelines/7203.T?node=other-head");
+  expect(within(card).getByRole("link", { name: "Update this research" })).toHaveAttribute("href", "/runs/new?intent=update&from_run=head&full_baseline_run_id=baseline");
+  expect(api.timelines).toHaveBeenCalledWith(6, 0, "", false, "recent_activity");
+});
+test("keeps the primary summaries readable when the queue request fails", async () => {
+  vi.mocked(api.health).mockRejectedValue(new Error("Queue unavailable"));
+  render(<Router initialPath="/"><Dashboard /></Router>);
   expect(await screen.findByText("Toyota Motor Corporation")).toBeVisible();
-  expect(screen.getByText("トヨタ自動車")).toBeVisible();
-  expect(screen.getByText("7203.T")).toBeVisible();
-  expect(screen.getByText("Hold")).toHaveClass("research-rating-badge");
-  expect(api.runs).toHaveBeenCalledWith("?status=succeeded&limit=6");
-  expect(screen.getByText("No full research reminders.")).toBeVisible();
-  expect(screen.getByText("No running or queued tasks.")).toBeVisible();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Queue unavailable");
 });

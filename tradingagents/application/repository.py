@@ -9,6 +9,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -60,7 +61,10 @@ from .contracts import (
     RiskReview,
     RunAttemptView,
     RunEvent,
+    RunGroupPage,
+    RunGroupView,
     RunLifecycleImpact,
+    RunLifecyclePreview,
     RunLifecycleResult,
     RunMetrics,
     RunPage,
@@ -484,6 +488,222 @@ class RunRepository:
                 offset=offset,
             )
 
+    def list_run_groups(
+        self,
+        *,
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
+        status: RunStatus | None = None,
+        research_kind: Literal["full", "incremental"] | None = None,
+        q: str | None = None,
+        limit: int = 12,
+        offset: int = 0,
+    ) -> RunGroupPage:
+        """Match tasks before paging complete groups, retaining baseline context."""
+        with self.sessions() as session:
+            rows = list(
+                session.execute(
+                    select(RunRecord, DecisionRecord.rating, DecisionRecord.confidence).outerjoin(
+                        DecisionRecord, DecisionRecord.run_id == RunRecord.id
+                    )
+                )
+            )
+            nodes = {node.run_id: node for node in session.scalars(select(ResearchNodeRecord))}
+            primary_ids = set(session.scalars(select(PrimaryResearchCycleRecord.full_run_id)))
+            views = {
+                run.id: self._summary(
+                    run,
+                    rating,
+                    confidence,
+                    run.id in nodes,
+                    instrument_name=run.instrument_name,
+                    instrument_local_name=run.instrument_local_name,
+                )
+                for run, rating, confidence in rows
+            }
+        groups: dict[str, list[RunSummaryView]] = {}
+        query = (q or "").strip().casefold()
+
+        def visible(run: RunSummaryView) -> bool:
+            return trash_state is RunTrashState.ALL or (run.trashed_at is not None) == (
+                trash_state is RunTrashState.TRASHED
+            )
+
+        def matches(run: RunSummaryView) -> bool:
+            return (
+                visible(run)
+                and (status is None or run.status == status)
+                and (research_kind is None or (run.research_kind or "full") == research_kind)
+                and (
+                    not query
+                    or any(
+                        query in value.casefold()
+                        for value in (
+                            run.id,
+                            run.request.ticker,
+                            run.instrument_name or "",
+                            run.instrument_local_name or "",
+                        )
+                    )
+                )
+            )
+
+        for run in views.values():
+            node = nodes.get(run.id)
+            root = run.id if node and node.research_kind == "full" else run.full_baseline_run_id
+            key = root if root in nodes and nodes[root].research_kind == "full" else run.id
+            groups.setdefault(key, []).append(run)
+        items = []
+        for key, members in groups.items():
+            matched = sorted(
+                (run for run in members if matches(run)),
+                key=lambda run: (run.created_at, run.id),
+                reverse=True,
+            )
+            if not matched:
+                continue
+            baseline = (
+                views.get(key) if key in nodes and nodes[key].research_kind == "full" else None
+            )
+            shown = sorted(
+                (run for run in members if visible(run) or run.id == key),
+                key=lambda run: (run.id != key, run.request.analysis_date, run.id),
+            )
+            research = tuple(run for run in shown if run.is_research_node)
+            related = tuple(run for run in shown if not run.is_research_node)
+            items.append(
+                (
+                    max(run.created_at for run in matched),
+                    RunGroupView(
+                        id=key,
+                        kind="cycle" if baseline else "standalone",
+                        instrument=matched[0].request.ticker,
+                        baseline=baseline,
+                        research_runs=research,
+                        related_tasks=related,
+                        matched_run_ids=tuple(run.id for run in matched),
+                        is_primary=key in primary_ids,
+                        cycle_warning=any(
+                            run.trashed_at is None
+                            and bool(
+                                nodes[run.id].incremental_products_json
+                                and nodes[run.id].incremental_products_json.get(
+                                    "full_research_required_reasons"
+                                )
+                            )
+                            for run in research
+                        ),
+                        status_counts={
+                            value.value: sum(run.status == value for run in shown if visible(run))
+                            for value in RunStatus
+                        },
+                    ),
+                )
+            )
+        items.sort(key=lambda pair: (pair[0], pair[1].id), reverse=True)
+        return RunGroupPage(
+            items=tuple(item for _, item in items[offset : offset + limit]),
+            total=len(items),
+            limit=limit,
+            offset=offset,
+        )
+
+    def preview_lifecycle(
+        self,
+        action: Literal["trash", "restore", "purge"],
+        run_ids: tuple[str, ...],
+    ) -> RunLifecyclePreview:
+        """Read lifecycle ownership without changing runs or checkpoints."""
+        with self.sessions() as session:
+            affected = _lifecycle_scope(session.connection(), action, run_ids)
+            records = list(
+                session.scalars(
+                    select(RunRecord).where(RunRecord.id.in_(affected)).order_by(RunRecord.id)
+                )
+            )
+            nodes = {
+                node.run_id: node
+                for node in session.scalars(
+                    select(ResearchNodeRecord).where(ResearchNodeRecord.run_id.in_(affected))
+                )
+            }
+            blocked = []
+            if action != "purge" and not set(run_ids).issubset({record.id for record in records}):
+                blocked.append("Some selected runs no longer exist.")
+            for record in records:
+                if (
+                    action == "trash"
+                    and record.trashed_at is None
+                    and record.status not in _TERMINAL_STATUSES
+                ):
+                    blocked.append(
+                        "Only completed, failed or cancelled tasks can be moved to Trash."
+                    )
+                if action == "purge" and record.trashed_at is None:
+                    blocked.append(
+                        "All affected research must be in Trash before permanent deletion."
+                    )
+                node = nodes.get(record.id)
+                if action == "restore" and record.trashed_at is not None and node:
+                    if node.research_kind == "full" and (
+                        record.status != RunStatus.SUCCEEDED.value
+                        or record.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION
+                    ):
+                        blocked.append(
+                            "The full baseline is no longer compatible with this research version."
+                        )
+                    if (
+                        node.research_kind == "incremental"
+                        and node.full_baseline_run_id not in affected
+                    ):
+                        baseline = session.get(RunRecord, node.full_baseline_run_id)
+                        if baseline is None or baseline.trashed_at is not None:
+                            blocked.append(
+                                "Restore the full baseline before restoring its incremental research."
+                            )
+            replacements = {}
+            if action == "trash":
+                for primary in session.scalars(
+                    select(PrimaryResearchCycleRecord).where(
+                        PrimaryResearchCycleRecord.full_run_id.in_(affected)
+                    )
+                ):
+                    candidates = list(
+                        session.execute(
+                            select(RunRecord, DecisionRecord.rating, DecisionRecord.confidence)
+                            .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                            .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
+                            .where(
+                                ResearchNodeRecord.research_kind == "full",
+                                RunRecord.trashed_at.is_(None),
+                                RunRecord.id.not_in(affected),
+                                func.json_extract(RunRecord.request_json, "$.ticker")
+                                == primary.instrument,
+                            )
+                            .order_by(RunRecord.created_at.desc())
+                        )
+                    )
+                    if candidates:
+                        replacements[primary.full_run_id] = tuple(
+                            PrimaryCycleCandidate(
+                                id=run.id,
+                                analysis_date=RunRequestSnapshot.model_validate(
+                                    run.request_json
+                                ).analysis_date,
+                                rating=rating,
+                                confidence=confidence,
+                            )
+                            for run, rating, confidence in candidates
+                        )
+            return RunLifecyclePreview(
+                action=action,
+                affected_run_ids=affected,
+                affected_runs=tuple(
+                    self._view(record, is_research_node=record.id in nodes) for record in records
+                ),
+                blocked_reasons=tuple(dict.fromkeys(blocked)),
+                primary_replacements=replacements,
+            )
+
     def trash_runs(
         self,
         run_ids: tuple[str, ...],
@@ -502,12 +722,16 @@ class RunRepository:
         run_ids: tuple[str, ...],
         *,
         primary_replacements: dict[str, str] | None = None,
+        expected_affected_run_ids: tuple[str, ...] | None = None,
     ) -> RunLifecycleResult:
         """Atomically Trash requested Runs and any Full-owned active Cycle."""
         now = _utc_naive()
         replacements = primary_replacements or {}
         with self.sessions.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            _check_lifecycle_scope(
+                session.connection(), "trash", run_ids, expected_affected_run_ids
+            )
             records = {
                 record.id: record
                 for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
@@ -663,11 +887,16 @@ class RunRepository:
     def restore_runs_detailed(
         self,
         run_ids: tuple[str, ...],
+        *,
+        expected_affected_run_ids: tuple[str, ...] | None = None,
     ) -> RunLifecycleResult:
         """Restore requested Nodes without violating Full-Cycle invariants."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            _check_lifecycle_scope(
+                session.connection(), "restore", run_ids, expected_affected_run_ids
+            )
             records = {
                 record.id: record
                 for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
@@ -1074,6 +1303,8 @@ class RunRepository:
     def purge_runs_detailed(
         self,
         run_ids: tuple[str, ...],
+        *,
+        expected_affected_run_ids: tuple[str, ...] | None = None,
     ) -> RunLifecycleResult:
         """Permanently purge trashed Runs at their Node-owned boundaries."""
         runs_table = RunRecord.__table__
@@ -1082,6 +1313,7 @@ class RunRepository:
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
             try:
+                _check_lifecycle_scope(connection, "purge", run_ids, expected_affected_run_ids)
                 requested = {
                     str(row["id"]): row
                     for row in connection.execute(
@@ -2216,13 +2448,23 @@ class RunRepository:
         if focus_node_id is not None:
             focused = next((row for row in all_rows if row[0].id == focus_node_id), None)
             if focused is None:
-                raise RunNotFoundError("Requested research node is not available for this instrument")
+                raise RunNotFoundError(
+                    "Requested research node is not available for this instrument"
+                )
             focus_run, focus_node = focused
             if trash_state is RunTrashState.ACTIVE and focus_run.trashed_at is not None:
-                raise InvalidRunTransitionError("Requested research is in Trash; explicitly include Trash to read it")
+                raise InvalidRunTransitionError(
+                    "Requested research is in Trash; explicitly include Trash to read it"
+                )
             if trash_state is RunTrashState.TRASHED and focus_run.trashed_at is None:
-                raise InvalidRunTransitionError("Requested research is active; select the active research view")
-            cycle_id = focus_run.id if focus_node.research_kind == "full" else focus_node.full_baseline_run_id
+                raise InvalidRunTransitionError(
+                    "Requested research is active; select the active research view"
+                )
+            cycle_id = (
+                focus_run.id
+                if focus_node.research_kind == "full"
+                else focus_node.full_baseline_run_id
+            )
             index = next((i for i, row in enumerate(visible_cycles) if row[0].id == cycle_id), None)
             if index is None:
                 raise RunNotFoundError("Requested research cycle is unavailable")
@@ -2709,8 +2951,13 @@ class RunRepository:
             return products, baseline_run, baseline_decision, baseline_evidence
 
     def list_timelines(
-        self, *, limit: int = 50, offset: int = 0, q: str | None = None,
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        q: str | None = None,
         warning_only: bool = False,
+        sort: Literal["analysis_date", "recent_activity"] = "analysis_date",
     ) -> ResearchTimelinePage:
         """List derived Timelines without introducing a second product store."""
         with self.sessions() as session:
@@ -2778,6 +3025,15 @@ class RunRepository:
                 )
                 for _run, node in instrument_rows
             )
+            baseline = next((run for run, _ in instrument_rows if run.id == primary_id), None)
+            completed = [
+                (run, node) for run, node in instrument_rows if run.finished_at is not None
+            ]
+            recent = (
+                max(completed, key=lambda row: (row[0].finished_at, row[0].id))
+                if completed
+                else None
+            )
             summaries.append(
                 ResearchTimelineSummary(
                     instrument=instrument,
@@ -2808,10 +3064,31 @@ class RunRepository:
                         RunRequestSnapshot.model_validate(run.request_json).analysis_date
                         for run, _node in instrument_rows
                     ),
+                    primary_baseline_date=RunRequestSnapshot.model_validate(
+                        baseline.request_json
+                    ).analysis_date
+                    if baseline
+                    else None,
+                    primary_thesis=primary_decision.thesis if primary_decision else None,
+                    latest_research_completed_at=_aware(recent[0].finished_at) if recent else None,
+                    latest_completed_run_id=recent[0].id if recent else None,
+                    latest_completed_cycle_id=(
+                        recent[0].id
+                        if recent[1].research_kind == "full"
+                        else recent[1].full_baseline_run_id
+                    )
+                    if recent
+                    else None,
+                    latest_completed_analysis_date=RunRequestSnapshot.model_validate(
+                        recent[0].request_json
+                    ).analysis_date
+                    if recent
+                    else None,
                     primary_head_run_id=primary_head.id if primary_head else None,
                     primary_analysis_date=(
                         RunRequestSnapshot.model_validate(primary_head.request_json).analysis_date
-                        if primary_head else None
+                        if primary_head
+                        else None
                     ),
                     primary_rating=primary_decision.rating if primary_decision else None,
                     primary_confidence=(primary_decision.confidence if primary_decision else None),
@@ -2820,13 +3097,30 @@ class RunRepository:
             )
         query = (q or "").strip().casefold()
         summaries = [
-            item for item in summaries
+            item
+            for item in summaries
             if (not warning_only or item.timeline_warning)
-            and (not query or any(query in value.casefold() for value in (
-                item.instrument, item.instrument_name or "", item.instrument_local_name or "",
-            )))
+            and (
+                not query
+                or any(
+                    query in value.casefold()
+                    for value in (
+                        item.instrument,
+                        item.instrument_name or "",
+                        item.instrument_local_name or "",
+                    )
+                )
+            )
         ]
         summaries.sort(key=lambda item: (-item.latest_analysis_date.toordinal(), item.instrument))
+        if sort == "recent_activity":
+            summaries.sort(
+                key=lambda item: (
+                    item.latest_research_completed_at or datetime.min.replace(tzinfo=UTC),
+                    item.instrument,
+                ),
+                reverse=True,
+            )
         total = len(summaries)
         return ResearchTimelinePage(
             items=tuple(summaries[offset : offset + limit]),
@@ -3261,4 +3555,50 @@ class RunRepository:
             .model_dump(),
             research_rating=ResearchRating(rating) if rating else None,
             research_confidence=(ResearchConfidenceLevel(confidence) if confidence else None),
+        )
+
+
+def _lifecycle_scope(
+    connection: Connection, action: str, run_ids: tuple[str, ...]
+) -> tuple[str, ...]:
+    runs = RunRecord.__table__
+    nodes = ResearchNodeRecord.__table__
+    records = {
+        row["id"]: row
+        for row in connection.execute(
+            select(runs.c.id, runs.c.trashed_at).where(runs.c.id.in_(run_ids))
+        ).mappings()
+    }
+    full_ids = tuple(
+        connection.scalars(
+            select(nodes.c.run_id).where(
+                nodes.c.run_id.in_(run_ids), nodes.c.research_kind == "full"
+            )
+        )
+    )
+    affected = set(records)
+    if action == "restore":
+        roots = tuple(key for key in full_ids if records[key]["trashed_at"] is not None)
+        affected.update(
+            connection.scalars(select(runs.c.id).where(runs.c.trash_cascade_full_run_id.in_(roots)))
+        )
+    else:
+        query = (
+            select(nodes.c.run_id)
+            .join(runs, runs.c.id == nodes.c.run_id)
+            .where(nodes.c.full_baseline_run_id.in_(full_ids))
+        )
+        if action == "trash":
+            query = query.where(runs.c.trashed_at.is_(None))
+        affected.update(connection.scalars(query))
+    return tuple(sorted(affected))
+
+
+def _check_lifecycle_scope(
+    connection: Connection, action: str, run_ids: tuple[str, ...], expected: tuple[str, ...] | None
+) -> None:
+    actual = _lifecycle_scope(connection, action, run_ids)
+    if expected is not None and set(actual) != set(expected):
+        raise InvalidRunTransitionError(
+            "The affected research changed. Refresh the preview and confirm again."
         )

@@ -8,6 +8,7 @@ export default function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -16,6 +17,7 @@ export default function ConfirmDialog({
   confirmLabel: string;
   cancelLabel: string;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -58,7 +60,7 @@ export default function ConfirmDialog({
           <button
             type="button"
             className="button danger"
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

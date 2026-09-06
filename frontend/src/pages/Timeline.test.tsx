@@ -28,6 +28,7 @@ vi.mock("../api/client", () => ({
     compareResearchNodes: vi.fn(),
     selectPrimaryCycle: vi.fn(),
     trashRuns: vi.fn(),
+    previewLifecycle: vi.fn(),
     restoreRuns: vi.fn(),
     purgeRuns: vi.fn(),
   },
@@ -173,6 +174,7 @@ beforeEach(async () => {
   vi.resetAllMocks();
   Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
   await i18n.changeLanguage("en");
+  vi.mocked(api.previewLifecycle).mockImplementation(async (ids, action) => ({ action, affected_run_ids: ids, affected_runs: [], blocked_reasons: [], primary_replacements: { "full-primary": [{ id: "full-secondary", analysis_date: "2026-07-10", rating: "Hold" }, { id: "full-off-page", analysis_date: "2026-06-30", rating: "Hold" }] } }));
   vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", observed_at: "2026-07-26T00:00:00Z", valid_until: "2999-01-01T00:00:00Z" } as never);
   vi.mocked(api.evidence).mockRejectedValue(new Error("Unavailable"));
   vi.mocked(api.run).mockImplementation(async id => ({
@@ -445,10 +447,10 @@ test("requires an explicit Primary replacement when trashing the primary Full cy
   const target = (await screen.findByRole("button", { name: /2026-07-20/ })).closest(".history-node")!;
   fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
   fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
-  fireEvent.change(screen.getByLabelText("Replacement Primary Cycle"), { target: { value: "full-secondary" } });
+  fireEvent.change(await screen.findByLabelText("Replacement Primary Cycle"), { target: { value: "full-secondary" } });
   fireEvent.click(screen.getByRole("button", { name: "Confirm Trash" }));
 
-  await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(["full-primary"], { "full-primary": "full-secondary" }));
+  await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(["full-primary"], { "full-primary": "full-secondary" }, ["full-primary"]));
 });
 
 test("offers Primary replacement cycles outside the current Timeline page", async () => {
@@ -471,7 +473,7 @@ test("offers Primary replacement cycles outside the current Timeline page", asyn
   fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
   fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
   expect(
-    screen.getByRole("option", { name: "2026-06-30 · Hold" }),
+    await screen.findByRole("option", { name: "2026-06-30 · Hold" }),
   ).toBeVisible();
 });
 

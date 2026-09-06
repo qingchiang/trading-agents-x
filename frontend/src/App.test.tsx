@@ -11,6 +11,7 @@ vi.mock("./api/client", () => ({
     capabilities: vi.fn(),
     health: vi.fn(),
     runs: vi.fn(),
+    runGroups: vi.fn(),
   },
 }));
 
@@ -46,6 +47,7 @@ beforeEach(async () => {
     version: "0.5.0",
   } as Health);
   vi.mocked(api.runs).mockResolvedValue(emptyRunPage);
+  vi.mocked(api.runGroups).mockResolvedValue({ items: [], total: 0, limit: 12, offset: 0 });
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
 });
 

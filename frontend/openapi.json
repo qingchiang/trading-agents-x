@@ -4707,6 +4707,52 @@
             "title": "Latest Analysis Date",
             "type": "string"
           },
+          "latest_completed_analysis_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Completed Analysis Date"
+          },
+          "latest_completed_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Completed Cycle Id"
+          },
+          "latest_completed_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Completed Run Id"
+          },
+          "latest_research_completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Research Completed At"
+          },
           "primary_analysis_date": {
             "anyOf": [
               {
@@ -4718,6 +4764,18 @@
               }
             ],
             "title": "Primary Analysis Date"
+          },
+          "primary_baseline_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Baseline Date"
           },
           "primary_confidence": {
             "anyOf": [
@@ -4760,6 +4818,17 @@
                 "type": "null"
               }
             ]
+          },
+          "primary_thesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Thesis"
           },
           "timeline_warning": {
             "default": false,
@@ -4985,6 +5054,20 @@
       "RunBatchRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_affected_run_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Affected Run Ids"
+          },
           "primary_replacements": {
             "additionalProperties": {
               "type": "string"
@@ -5395,6 +5478,121 @@
         "title": "RunEvent",
         "type": "object"
       },
+      "RunGroupPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunGroupView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "RunGroupPage",
+        "type": "object"
+      },
+      "RunGroupView": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSummaryView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cycle_warning": {
+            "default": false,
+            "title": "Cycle Warning",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "is_primary": {
+            "default": false,
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "cycle",
+              "standalone"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "matched_run_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Matched Run Ids",
+            "type": "array"
+          },
+          "related_tasks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunSummaryView"
+            },
+            "title": "Related Tasks",
+            "type": "array"
+          },
+          "research_runs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunSummaryView"
+            },
+            "title": "Research Runs",
+            "type": "array"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Counts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "instrument"
+        ],
+        "title": "RunGroupView",
+        "type": "object"
+      },
       "RunLifecycleImpact": {
         "additionalProperties": false,
         "description": "The exact Run and Cycle scope affected by one lifecycle request.",
@@ -5461,6 +5659,88 @@
           "requested_run_id"
         ],
         "title": "RunLifecycleImpact",
+        "type": "object"
+      },
+      "RunLifecyclePreview": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "trash",
+              "restore",
+              "purge"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "affected_run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Run Ids",
+            "type": "array"
+          },
+          "affected_runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Affected Runs",
+            "type": "array"
+          },
+          "blocked_reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Reasons",
+            "type": "array"
+          },
+          "primary_replacements": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/PrimaryCycleCandidate"
+              },
+              "type": "array"
+            },
+            "title": "Primary Replacements",
+            "type": "object"
+          }
+        },
+        "required": [
+          "action",
+          "affected_run_ids",
+          "affected_runs"
+        ],
+        "title": "RunLifecyclePreview",
+        "type": "object"
+      },
+      "RunLifecyclePreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "trash",
+              "restore",
+              "purge"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Run Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_ids",
+          "action"
+        ],
+        "title": "RunLifecyclePreviewRequest",
         "type": "object"
       },
       "RunMetrics": {
@@ -6717,6 +6997,121 @@
         "summary": "Provider Models"
       }
     },
+    "/api/v1/run-groups": {
+      "get": {
+        "operationId": "list_run_groups_api_v1_run_groups_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trash_state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunTrashState",
+              "default": "active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "research_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "full",
+                    "incremental"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Research Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunGroupPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Run Groups"
+      }
+    },
     "/api/v1/runs": {
       "get": {
         "operationId": "list_runs_api_v1_runs_get",
@@ -6960,6 +7355,44 @@
           }
         },
         "summary": "Create Run"
+      }
+    },
+    "/api/v1/runs/lifecycle-preview": {
+      "post": {
+        "operationId": "preview_lifecycle_api_v1_runs_lifecycle_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunLifecyclePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunLifecyclePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Lifecycle"
       }
     },
     "/api/v1/runs/purge": {
@@ -7494,6 +7927,20 @@
               "default": false,
               "title": "Warning Only",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "analysis_date",
+              "enum": [
+                "analysis_date",
+                "recent_activity"
+              ],
+              "title": "Sort",
+              "type": "string"
             }
           }
         ],

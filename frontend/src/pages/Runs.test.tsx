@@ -1,30 +1,10 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-
-import {
-  api,
-  type Capabilities,
-  type RunPage,
-  type RunSummaryView,
-} from "../api/client";
+import { api, type RunGroupPage, type RunSummaryView } from "../api/client";
 import i18n from "../i18n";
-import { Router, useLocation } from "../router";
+import { Router } from "../router";
 import Runs from "./Runs";
-
-vi.mock("../api/client", () => ({
-  api: {
-    runs: vi.fn(),
-    capabilities: vi.fn(),
-    trashRuns: vi.fn(),
-    restoreRuns: vi.fn(),
-  },
-}));
-
+vi.mock("../api/client", () => ({ api: { runGroups: vi.fn(), capabilities: vi.fn(), previewLifecycle: vi.fn(), trashRuns: vi.fn(), restoreRuns: vi.fn(), purgeRuns: vi.fn(), action: vi.fn() } }));
 function run(
   id: string,
   ticker: string,
@@ -73,175 +53,56 @@ function run(
   };
 }
 
-const capabilities = {
-  defaults: { trash_retention_days: 30 },
-} as Capabilities;
-
-function page(items: RunSummaryView[], offset = 0, total = items.length): RunPage {
-  return { items, limit: 20, offset, total };
+function groups(items: RunSummaryView[], offset = 0): RunGroupPage {
+  return { items: items.map(item => ({ id: item.id, instrument: item.request.ticker, kind: "standalone", related_tasks: [item], research_runs: [], matched_run_ids: [item.id], status_counts: { [item.status]: 1 } })), total: offset + items.length, limit: 12, offset };
 }
-
-function LocationProbe() {
-  const location = useLocation();
-  return (
-    <output data-testid="location">
-      {location.pathname}
-      {location.search}
-    </output>
-  );
-}
-
 beforeEach(async () => {
-  vi.resetAllMocks();
-  await i18n.changeLanguage("en");
-  vi.mocked(api.capabilities).mockResolvedValue(capabilities);
-  vi.mocked(api.trashRuns).mockResolvedValue({
-    runs: [],
-    changed: 1,
-  });
-  vi.mocked(api.restoreRuns).mockResolvedValue({
-    runs: [],
-    changed: 1,
-  });
+  vi.resetAllMocks(); await i18n.changeLanguage("en");
+  vi.mocked(api.capabilities).mockResolvedValue({ defaults: { trash_retention_days: 30 } } as never);
+  vi.mocked(api.trashRuns).mockResolvedValue({ runs: [], changed: 1 });
+  vi.mocked(api.restoreRuns).mockResolvedValue({ runs: [], changed: 1 });
+  vi.mocked(api.previewLifecycle).mockImplementation(async (ids, action) => ({ action, affected_run_ids: ids, affected_runs: ids.map(id => run(id, "NVDA", "succeeded")), blocked_reasons: [], primary_replacements: {} }));
 });
-
-test("filters and atomically trashes eligible runs with instrument names", async () => {
-  const incremental = run("run-1", "NVDA", "succeeded");
-  incremental.research_kind = "incremental";
-  incremental.research_confidence = "high";
-  vi.mocked(api.runs).mockResolvedValue(
-    page([
-      incremental,
-      run("run-2", "AAPL", "running"),
-    ]),
-  );
-  render(
-    <Router initialPath="/runs">
-      <Runs />
-      <LocationProbe />
-    </Router>,
-  );
-
-  expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
-  expect(screen.getByText("英伟达")).toBeVisible();
-  expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
-  expect(screen.getByText("High confidence")).toBeVisible();
-  expect(screen.getByText("Incremental research", { selector: ".research-kind-badge" })).toHaveClass("research-kind-badge");
-  expect(screen.queryByRole("tooltip", { name: "Research configuration" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
-  expect(screen.getByText("—")).toHaveClass("research-rating-badge");
+test("previews terminal task deletion and filters groups on the server", async () => {
+  vi.mocked(api.runGroups).mockResolvedValue(groups([run("one", "NVDA", "succeeded"), run("two", "AAPL", "running")]));
+  render(<Router initialPath="/runs"><Runs /></Router>);
+  await screen.findByText("NVIDIA Corporation");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Move to Trash (1)" }),
-  );
-
-  const dialog = screen.getByRole("alertdialog", {
-    name: "Move 1 selected run(s) to Trash?",
-  });
-  expect(dialog).toHaveTextContent(
-    "They will immediately leave the Dashboard and instrument suggestions.",
-  );
-  expect(dialog).toHaveTextContent(/scheduled for permanent deletion/);
+  fireEvent.click(screen.getByRole("button", { name: "Move to Trash (1)" }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(await within(dialog).findByText("Affected records: 1")).toBeVisible();
   expect(api.trashRuns).not.toHaveBeenCalled();
-  fireEvent.keyDown(document, { key: "Escape" });
-  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Move to Trash (1)" }),
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: /^Move to Trash$/ }),
-  );
-
-  await waitFor(() =>
-    expect(api.trashRuns).toHaveBeenCalledWith(["run-1"]),
-  );
-
-  fireEvent.change(screen.getByLabelText("Search runs"), {
-    target: { value: "nvidia" },
-  });
-  fireEvent.change(screen.getByLabelText("Status"), {
-    target: { value: "succeeded" },
-  });
-  fireEvent.change(screen.getByLabelText("Research kind"), {
-    target: { value: "incremental" },
-  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Trash" }));
+  await waitFor(() => expect(api.trashRuns).toHaveBeenCalledWith(["one"], {}, ["one"]));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText("Search runs"), { target: { value: "nvidia" } });
+  fireEvent.change(screen.getByLabelText("Status"), { target: { value: "failed" } });
   fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-
-  await waitFor(() =>
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/runs?q=nvidia&status=succeeded&research_kind=incremental",
-    ),
-  );
-  await waitFor(() => {
-    const lastQuery = vi.mocked(api.runs).mock.calls.at(-1)?.[0] ?? "";
-    const params = new URLSearchParams(lastQuery.replace(/^\?/, ""));
-    expect(Object.fromEntries(params)).toMatchObject({
-      trash_state: "active",
-      q: "nvidia",
-      status: "succeeded",
-      research_kind: "incremental",
-      limit: "20",
-      offset: "0",
-    });
-  });
+  await waitFor(() => expect(Object.fromEntries(new URLSearchParams(vi.mocked(api.runGroups).mock.calls.at(-1)![0]))).toMatchObject({ q: "nvidia", status: "failed" }));
 });
-
-test("restores trashed runs and returns from an emptied page", async () => {
-  const trashed = run(
-    "run-trashed",
-    "NVDA",
-    "failed",
-    "2026-07-01T00:00:00Z",
-  );
-  trashed.research_schema_version = "1";
-  trashed.is_research_node = false;
-  vi.mocked(api.runs).mockResolvedValue(page([trashed], 20, 41));
-
-  render(
-    <Router initialPath="/runs?trash_state=trashed&offset=20">
-      <Runs />
-      <LocationProbe />
-    </Router>,
-  );
-
+test("restores a trashed task after preview and resets an emptied page", async () => {
+  vi.mocked(api.runGroups).mockResolvedValue(groups([run("one", "NVDA", "failed", "2026-07-01T00:00:00Z")], 12));
+  render(<Router initialPath="/runs?trash_state=trashed&offset=12"><Runs /></Router>);
   await screen.findByText("NVIDIA Corporation");
-  expect(screen.getByText("Trash retention")).toBeVisible();
-  expect(
-    screen.getByText(/Runs are permanently deleted 30 days/),
-  ).toBeVisible();
   expect(screen.getByText("July 31, 2026")).toBeVisible();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Restore selected (1)" }),
-  );
-  await waitFor(() =>
-    expect(api.restoreRuns).toHaveBeenCalledWith(["run-trashed"]),
-  );
-  await waitFor(() =>
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/runs?trash_state=trashed&offset=0",
-    ),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Restore selected (1)" }));
+  const dialog = await screen.findByRole("alertdialog");
+  await within(dialog).findByText("Affected records: 1");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }));
+  await waitFor(() => expect(api.restoreRuns).toHaveBeenCalledWith(["one"], ["one"]));
+  await waitFor(() => expect(api.runGroups).toHaveBeenLastCalledWith(expect.stringContaining("offset=0")));
 });
-
-test("separates execution details from completed research", async () => {
-  const node = run("full-node", "NVDA", "succeeded");
-  node.research_schema_version = "1";
-  node.is_research_node = true;
-  vi.mocked(api.runs).mockResolvedValue(page([node]));
-
-  render(
-    <Router initialPath="/runs">
-      <Runs />
-    </Router>,
-  );
-
-  expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
-  expect(screen.getByRole("columnheader", { name: "Actions" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Research Timeline" })).toBeNull();
-  const open = screen.getByRole("link", { name: "Execution details" });
-  expect(open).toHaveAttribute("href", "/runs/full-node?view=timeline");
-  expect(open).toHaveClass("compact-button");
-  expect(screen.getByRole("link", { name: "Read research" })).toHaveAttribute("href", "/timelines/NVDA?node=full-node");
+test("shows a baseline, its research and related unfinished tasks as separate ownership", async () => {
+  const baseline = { ...run("full", "NVDA", "succeeded"), is_research_node: true, research_kind: "full" as const };
+  const child = { ...run("child", "NVDA", "running"), research_kind: "incremental" as const, full_baseline_run_id: "full" };
+  vi.mocked(api.runGroups).mockResolvedValue({ limit: 12, offset: 0, total: 1, items: [{ id: "full", kind: "cycle", instrument: "NVDA", baseline, is_primary: true, research_runs: [baseline], related_tasks: [child], matched_run_ids: [child.id] }] });
+  render(<Router initialPath="/runs?status=running"><Runs /></Router>);
+  await screen.findByText("NVIDIA Corporation");
+  expect(screen.getByText("Primary Cycle")).toBeVisible();
+  expect(screen.getByText(/Related tasks — not yet committed/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Read research" })).toHaveAttribute("href", "/timelines/NVDA?node=full");
+  expect(screen.getByLabelText("Select run NVDA")).toBeDisabled();
+  expect(screen.getAllByRole("link", { name: "Execution details" })).toHaveLength(2);
 });

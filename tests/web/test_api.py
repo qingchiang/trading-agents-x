@@ -246,8 +246,12 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: "")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: ""
+    )
     service = AnalysisService(
         web_settings,
         repository=web_repository,
@@ -412,7 +416,9 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+    )
     synthesis_inputs = []
 
     def synthesize(input_):
@@ -454,8 +460,12 @@ Date,Open,High,Low,Close,Volume
     assert node["performance"]["stock"]["status"] == "calculated"
     assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
     assert domains["news"]["state"] == "empty"
-    assert domains["news"]["diagnostic"] == {"code": "bounded_feed_no_observed_records.news_context_partial"}
-    assert domains["fundamentals"]["diagnostic"] == {"code": "near_live_snapshot.financial_inputs_partial"}
+    assert domains["news"]["diagnostic"] == {
+        "code": "bounded_feed_no_observed_records.news_context_partial"
+    }
+    assert domains["fundamentals"]["diagnostic"] == {
+        "code": "near_live_snapshot.financial_inputs_partial"
+    }
     assert {
         domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     } == {
@@ -599,9 +609,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     detail = await web_client.get(f"/api/v1/runs/{result.run_id}")
     evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
     exported = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=json")
-    exported_markdown = await web_client.get(
-        f"/api/v1/runs/{result.run_id}/export?format=markdown"
-    )
+    exported_markdown = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=markdown")
 
     assert (
         timeline.status_code
@@ -1159,6 +1167,14 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
                 "instrument_local_name": None,
                 "primary_cycle_id": run.id,
                 "primary_head_run_id": run.id,
+                "primary_baseline_date": "2026-07-24",
+                "primary_thesis": research_decision().thesis,
+                "latest_completed_run_id": run.id,
+                "latest_completed_cycle_id": run.id,
+                "latest_completed_analysis_date": "2026-07-24",
+                "latest_research_completed_at": web_repository.get_run(run.id).model_dump(
+                    mode="json"
+                )["finished_at"],
                 "primary_analysis_date": "2026-07-24",
                 "full_cycle_count": 1,
                 "incremental_node_count": 0,
@@ -1719,9 +1735,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
     )
     transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get(
-            "/api/v1/instruments/600519/analysis-cutoff-context"
-        )
+        response = await client.get("/api/v1/instruments/600519/analysis-cutoff-context")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -1738,9 +1752,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
 async def test_analysis_cutoff_context_rejects_a_known_unsupported_instrument(
     web_client: httpx.AsyncClient,
 ) -> None:
-    response = await web_client.get(
-        "/api/v1/instruments/SPX500/analysis-cutoff-context"
-    )
+    response = await web_client.get("/api/v1/instruments/SPX500/analysis-cutoff-context")
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "unsupported_instrument"
@@ -1859,13 +1871,12 @@ async def test_openapi_documents_analysis_cutoff_context_errors(
     web_client: httpx.AsyncClient,
 ) -> None:
     schema = (await web_client.get("/openapi.json")).json()
-    response = schema["paths"][
-        "/api/v1/instruments/{instrument}/analysis-cutoff-context"
-    ]["get"]["responses"]["422"]
+    response = schema["paths"]["/api/v1/instruments/{instrument}/analysis-cutoff-context"]["get"][
+        "responses"
+    ]["422"]
 
     assert {
-        member["$ref"]
-        for member in response["content"]["application/json"]["schema"]["anyOf"]
+        member["$ref"] for member in response["content"]["application/json"]["schema"]["anyOf"]
     } == {
         "#/components/schemas/InstrumentAdmissionErrorResponse",
         "#/components/schemas/RequestValidationErrorResponse",
@@ -2267,9 +2278,13 @@ async def test_validation_error_does_not_echo_request_values(
 
 @pytest.mark.anyio
 async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
-    web_client: httpx.AsyncClient, web_repository, web_settings,
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
 ) -> None:
-    def commit_full(analysis_date: date, *, make_primary: bool | None, confidence: str, ticker: str = "NVDA") -> str:
+    def commit_full(
+        analysis_date: date, *, make_primary: bool | None, confidence: str, ticker: str = "NVDA"
+    ) -> str:
         request = AnalysisRequest(
             ticker=ticker,
             analysis_date=analysis_date,

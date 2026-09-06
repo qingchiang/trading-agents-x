@@ -817,7 +817,7 @@ function IncrementalBriefPanel({
           sections={brief.report_sections}
           runId={runId}
           reportKey="incremental-brief"
-          extraSections={node?.performance ? [{ id: "performance", anchor: "performance", title: t("performance"), source_refs: [] }] : []}
+          extraSections={node?.performance ? [{ id: "workspace-period-performance", anchor: "workspace-period-performance", title: t("performance"), source_refs: [] }] : []}
           after={node && <PerformanceSection node={node} baselineDate={baselineDate} />}
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}

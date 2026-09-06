@@ -137,9 +137,15 @@ class RunCreateRequest(AnalysisRequest):
         return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}))
 
 
+class RunLifecyclePreviewRequest(ApiModel):
+    run_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+    action: Literal["trash", "restore", "purge"]
+
+
 class RunBatchRequest(ApiModel):
     run_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
     primary_replacements: dict[str, str] = Field(default_factory=dict)
+    expected_affected_run_ids: tuple[str, ...] | None = None
 
     @field_validator("run_ids")
     @classmethod

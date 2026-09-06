@@ -1,3 +1,4 @@
+import WorkspaceOutline from "./WorkspaceOutline";
 import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { tabsKeyDown, useModal } from "./Interaction";
@@ -35,6 +36,7 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
         <div hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
       </aside>
       {children}
+      <WorkspaceOutline container={container} target={target} />
     </div>
   </WorkspaceNavigationTarget.Provider>;
 }

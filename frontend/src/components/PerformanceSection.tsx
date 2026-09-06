@@ -9,8 +9,8 @@ export default function PerformanceSection({ node, baselineDate }: { node: Resea
   const percent = (value: number) => new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 2, signDisplay: "exceptZero" }).format(value);
   const number = (value: number) => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 4 }).format(value);
   const rows = [{ name: t("currentInstrument"), component: performance.stock, difference: null as number | null }, ...(performance.benchmarks ?? []).map(item => ({ name: item.name, component: item.component, difference: item.reported_difference ?? null }))];
-  return <section className="performance-section" aria-labelledby="user-content-performance">
-    <h2 id="user-content-performance" tabIndex={-1}>{t("performance")}</h2>
+  return <section className="performance-section" aria-labelledby="user-content-workspace-period-performance">
+    <h2 id="user-content-workspace-period-performance" tabIndex={-1}>{t("performance")}</h2>
     <p className="secondary-line">{t("baselineDate")}: {baselineDate ?? "—"} → {t("selectedCutoff")}: {node.analysis_date}</p>
     <div className="performance-rows">
       {rows.map(({ name, component, difference }) => <article className="performance-row" key={name}>

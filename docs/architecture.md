@@ -809,3 +809,26 @@ raw events are available under `view=diagnostics`; evidence and consequential
 limitations stay reachable from research reading. Presentation never rewrites
 stored reports or export products. The dashboard uses bounded summary and Run
 list requests, without loading individual reports.
+
+### Workspace summaries and cycle task groups
+
+Timeline summaries include the Primary baseline date and current thesis from the
+same Primary head used for its rating. `sort=recent_activity` orders instruments
+by the latest recorded completion time of active research; the default analysis-date
+ordering is unchanged. Latest completed run/cycle/date metadata remains separate
+from the Primary assessment, including when another cycle completed more recently.
+
+`GET /api/v1/run-groups` matches the existing task filters before paging complete
+groups. A committed Full baseline supplies the parent context even when only an
+Incremental task matches. Committed children and related uncommitted tasks occupy
+separate arrays. Independent Full tasks and Legacy runs are standalone groups.
+These reads do not load reports, Evidence or artifacts and create no new tables.
+
+`POST /api/v1/runs/lifecycle-preview` is a read-only ownership preview. It returns
+all affected records, immediate blockers and replacement Primary candidates.
+Trash/restore/purge accept optional `expected_affected_run_ids`; under the existing
+write transaction lock the repository recomputes ownership and rejects changed
+scope before any mutation. Existing callers may omit the field. Actual transition,
+compatibility and uniqueness validations remain authoritative at submission.
+Related uncommitted tasks never become owned nodes merely because they are grouped
+under a baseline in the UI. Restore retains the existing cascade provenance rules.

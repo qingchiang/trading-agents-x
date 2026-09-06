@@ -798,7 +798,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   );
 
   expect(await screen.findByRole("heading", { name: "Analysis brief" })).toBeVisible();
-  expect(screen.queryByRole("heading", { name: "Reassessment", exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Reassessment" })).not.toBeInTheDocument();
   expect(screen.queryByText("Complete judgment")).not.toBeInTheDocument();
   expect(screen.getByText("Overall assessment updated.")).toBeVisible();
   expect(screen.getByText("The filing requires a new Decision thesis.")).toBeVisible();
