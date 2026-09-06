@@ -6,11 +6,10 @@ import { Link, usePathname } from "../router";
 
 const sidebarPreferenceKey = "tradingagents-sidebar-collapsed";
 const nav = [
-  { to: "/", key: "dashboard", icon: "⌁" },
-  { to: "/runs/new", key: "newRun", icon: "+" },
-  { to: "/runs", key: "runManagement", icon: "≡" },
-  { to: "/timelines", key: "researchTimelines", icon: "⌘" },
-  { to: "/settings", key: "settings", icon: "◇" },
+  { to: "/", key: "dashboard" },
+  { to: "/timelines", key: "researchTimelines" },
+  { to: "/runs", key: "runManagement" },
+  { to: "/settings", key: "settings" },
 ];
 
 export default function Layout({ children }: PropsWithChildren) {
@@ -30,6 +29,11 @@ export default function Layout({ children }: PropsWithChildren) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [drawerOpen]);
 
+  useEffect(() => {
+    const refresh = () => setCollapsed(localStorage.getItem(sidebarPreferenceKey) === "true");
+    window.addEventListener("tradingagents:preferences", refresh);
+    return () => window.removeEventListener("tradingagents:preferences", refresh);
+  }, []);
   const changeLocale = (locale: string) => {
     localStorage.setItem("tradingagents-locale", locale);
     void i18n.changeLanguage(locale);
@@ -75,6 +79,7 @@ export default function Layout({ children }: PropsWithChildren) {
             <small>{t("brandTagline")}</small>
           </div>
         </div>
+        <Link className="button primary global-new-research" to="/runs/new" onClick={() => setDrawerOpen(false)}><Icon name="newRun" /><span className="nav-label">{t("newRun")}</span></Link>
         <nav aria-label={t("primaryNavigation")}>
           {nav.map((item) => (
             <Link

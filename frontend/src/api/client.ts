@@ -188,9 +188,9 @@ export const api = {
       `/api/v1/timelines/${encodeURIComponent(instrument)}/compare`,
       { method: "POST", body: JSON.stringify({ nodes }) },
     ),
-  timelines: (limit = 50, offset = 0) =>
+  timelines: (limit = 50, offset = 0, q = "", warningOnly = false) =>
     request<ResearchTimelinePage>(
-      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&q=${encodeURIComponent(q)}&warning_only=${warningOnly}`,
     ),
   selectPrimaryCycle: (instrument: string, fullRunId: string) =>
     request<TimelineDetail>(

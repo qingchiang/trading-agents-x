@@ -2708,7 +2708,10 @@ class RunRepository:
             )
             return products, baseline_run, baseline_decision, baseline_evidence
 
-    def list_timelines(self, *, limit: int = 50, offset: int = 0) -> ResearchTimelinePage:
+    def list_timelines(
+        self, *, limit: int = 50, offset: int = 0, q: str | None = None,
+        warning_only: bool = False,
+    ) -> ResearchTimelinePage:
         """List derived Timelines without introducing a second product store."""
         with self.sessions() as session:
             rows = list(
@@ -2805,11 +2808,24 @@ class RunRepository:
                         RunRequestSnapshot.model_validate(run.request_json).analysis_date
                         for run, _node in instrument_rows
                     ),
+                    primary_head_run_id=primary_head.id if primary_head else None,
+                    primary_analysis_date=(
+                        RunRequestSnapshot.model_validate(primary_head.request_json).analysis_date
+                        if primary_head else None
+                    ),
                     primary_rating=primary_decision.rating if primary_decision else None,
                     primary_confidence=(primary_decision.confidence if primary_decision else None),
                     timeline_warning=timeline_warning,
                 )
             )
+        query = (q or "").strip().casefold()
+        summaries = [
+            item for item in summaries
+            if (not warning_only or item.timeline_warning)
+            and (not query or any(query in value.casefold() for value in (
+                item.instrument, item.instrument_name or "", item.instrument_local_name or "",
+            )))
+        ]
         summaries.sort(key=lambda item: (-item.latest_analysis_date.toordinal(), item.instrument))
         total = len(summaries)
         return ResearchTimelinePage(

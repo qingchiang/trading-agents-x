@@ -473,8 +473,10 @@ def create_app(
     def list_timelines(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        warning_only: bool = False,
     ):
-        return repository.list_timelines(limit=limit, offset=offset)
+        return repository.list_timelines(limit=limit, offset=offset, q=q, warning_only=warning_only)
 
     @app.get(
         f"{API_PREFIX}/timelines/{{instrument}}",

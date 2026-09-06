@@ -56,18 +56,18 @@ test("retired Memory route and navigation are unavailable while Runs remains usa
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Page not found" })).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Memory" })).not.toBeInTheDocument();
 
   const runsNavigation = screen.getByRole("link", {
-    name: /^Runs$/,
+    name: /^Run tasks$/,
   });
   expect(runsNavigation).toHaveAttribute("href", "/runs");
   fireEvent.click(runsNavigation);
 
-  expect(await screen.findByRole("heading", { name: "Runs" })).toBeVisible();
-  expect(screen.getByRole("link", { name: /^Runs$/ })).toHaveClass(
+  expect(await screen.findByRole("heading", { name: "Run tasks" })).toBeVisible();
+  expect(screen.getByRole("link", { name: /^Run tasks$/ })).toHaveClass(
     "active",
   );
   expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();

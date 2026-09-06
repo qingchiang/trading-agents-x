@@ -8,6 +8,7 @@ import ResearchKindBadge from "../components/ResearchKindBadge";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { ActionMenu } from "../components/Interaction";
 import { researchConfidenceLabel } from "../i18n";
+const ResearchLibrary = lazy(() => import("./ResearchLibrary"));
 const RunDetail = lazy(() => import("./RunDetail"));
 const NodeComparison = lazy(() => import("../components/NodeComparison"));
 const CYCLE_PAGE_SIZE = 12;
@@ -40,16 +41,10 @@ export default function Timeline() {
     Object.entries(values).forEach(([key, value]) => { if (value === null) next.delete(key); else next.set(key, value); });
     navigate(`${location.pathname}${next.size ? `?${next}` : ""}`, { replace });
   };
-  const [timelines, setTimelines] = useState<ResearchTimelinePage | null>(null);
-  const [listOffset, setListOffset] = useState(0);
-  const [query, setQuery] = useState("");
-  const filteredTimelines = (timelines?.items ?? []).filter(item => `${item.instrument} ${item.instrument_name ?? ""} ${item.instrument_local_name ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   useEffect(() => {
     let active = true;
     setError(""); setDetail(null); setComparison(null);
-    if (isList) {
-      void api.timelines(50, listOffset).then(value => { if (active) setTimelines(value); }, cause => { if (active) setError(String(cause)); });
-    } else {
+    if (!isList) {
       void api.timeline(instrument, CYCLE_PAGE_SIZE, cycleOffset, showRetainedTrash ? "all" : "active", requestedNode || undefined)
         .then(value => {
           if (!active) return;
@@ -63,7 +58,7 @@ export default function Timeline() {
         }, cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
     }
     return () => { active = false; };
-  }, [isList, instrument, cycleOffset, requestedNode, showRetainedTrash, listOffset, revision]);
+  }, [isList, instrument, cycleOffset, requestedNode, showRetainedTrash, revision]);
   const cycles = detail?.timeline.cycles ?? [];
   const nodes = cycles.flatMap(cycle => [cycle.baseline, ...(cycle.increments ?? [])]);
   const primaryCycle = cycles.find(cycle => cycle.is_primary);
@@ -105,35 +100,7 @@ export default function Timeline() {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
-  if (isList) {
-    return (
-      <section>
-        <header className="page-header">
-          <div><p className="eyebrow">{t("researchTimeline")}</p><h1>{t("researchTimelines")}</h1><p className="subtitle">{t("researchTimelinesHint")}</p></div>
-          <Link className="button primary" to="/runs/new">+ {t("newRun")}</Link>
-        </header>
-        <div className="workbench-toolbar">
-          <label><span>{t("searchResearch")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <Link className="button" to="/runs">{t("executionHistory")}</Link>
-        </div>
-        {error && <div className="alert">{error}</div>}
-        {!timelines && !error && <div className="loading">{t("loading")}</div>}
-        <div className="timeline-list-grid">
-          {filteredTimelines.map((item) => (
-            <Link className={`timeline-summary-card ${item.timeline_warning ? "warning" : ""}`} to={`/timelines/${encodeURIComponent(item.instrument)}`} key={item.instrument}>
-              <InstrumentIdentity ticker={item.instrument} instrumentName={item.instrument_name} instrumentLocalName={item.instrument_local_name} />
-              <div className="timeline-summary-decision"><ResearchRatingBadge rating={item.primary_rating} /><Confidence value={item.primary_confidence} /></div>
-              <dl><div><dt>{t("fullResearch")}</dt><dd>{item.full_cycle_count}</dd></div><div><dt>{t("incrementalResearch")}</dt><dd>{item.incremental_node_count ?? 0}</dd></div><div><dt>{t("latestResearch")}</dt><dd>{item.latest_analysis_date}</dd></div></dl>
-              {item.timeline_warning && <span className="warning-copy">{t("fullResearchRecommended")}</span>}
-            </Link>
-          ))}
-        </div>
-        {timelines && timelines.total > timelines.limit && (
-          <div className="pagination"><button className="button" disabled={listOffset === 0} onClick={() => setListOffset((value) => Math.max(0, value - timelines.limit))}>← {t("previous")}</button><span>{t("runRange", { start: listOffset + 1, end: Math.min(listOffset + filteredTimelines.length, timelines.total), total: timelines.total })}</span><button className="button" disabled={listOffset + (timelines.items?.length ?? 0) >= timelines.total} onClick={() => setListOffset((value) => value + timelines.limit)}>{t("next")} →</button></div>
-        )}
-      </section>
-    );
-  }
+  if (isList) return <Suspense fallback={<div className="loading">{t("loading")}</div>}><ResearchLibrary /></Suspense>;
   return <section>
     <header className="page-header research-header">
       <div><Link className="back-link" to="/timelines">{t("backToResearch")}</Link>

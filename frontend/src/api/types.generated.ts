@@ -683,8 +683,10 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       latest_analysis_date: string;
+      primary_analysis_date?: string | null;
       primary_confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       primary_cycle_id?: string | null;
+      primary_head_run_id?: string | null;
       primary_rating?: components["schemas"]["ResearchRating"] | null;
       timeline_warning?: boolean;
     };

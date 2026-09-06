@@ -22,20 +22,20 @@ function renderLayout(initialPath = "/") {
 
 test("distinguishes new-run and run-management navigation", () => {
   const newRun = renderLayout("/runs/new");
-  expect(screen.getByRole("link", { name: "New run" })).toHaveClass("active");
-  expect(screen.getByRole("link", { name: "Runs" })).not.toHaveClass("active");
+  expect(screen.getByRole("link", { name: "New research" })).toHaveAttribute("href", "/runs/new");
+  expect(screen.getByRole("link", { name: "Run tasks" })).not.toHaveClass("active");
   newRun.unmount();
 
   const runDetail = renderLayout("/runs/run-1");
-  expect(screen.getByRole("link", { name: "Runs" })).toHaveClass("active");
-  expect(screen.getByRole("link", { name: "New run" })).not.toHaveClass(
+  expect(screen.getByRole("link", { name: "Run tasks" })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: "New research" })).not.toHaveClass(
     "active",
   );
   runDetail.unmount();
 
   renderLayout("/timelines/7203.T");
   expect(
-    screen.getByRole("link", { name: "Research Timelines" }),
+    screen.getByRole("link", { name: "Research library" }),
   ).toHaveClass("active");
 });
 

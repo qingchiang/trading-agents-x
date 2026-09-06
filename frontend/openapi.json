@@ -4707,6 +4707,18 @@
             "title": "Latest Analysis Date",
             "type": "string"
           },
+          "primary_analysis_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Analysis Date"
+          },
           "primary_confidence": {
             "anyOf": [
               {
@@ -4727,6 +4739,17 @@
               }
             ],
             "title": "Primary Cycle Id"
+          },
+          "primary_head_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Head Run Id"
           },
           "primary_rating": {
             "anyOf": [
@@ -7444,6 +7467,33 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "warning_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Warning Only",
+              "type": "boolean"
             }
           }
         ],

@@ -235,7 +235,7 @@ test("restores trashed runs and returns from an emptied page", async () => {
   );
 });
 
-test("keeps a single Open action for Research Nodes", async () => {
+test("separates execution details from completed research", async () => {
   const node = run("full-node", "NVDA", "succeeded");
   node.research_schema_version = "1";
   node.is_research_node = true;
@@ -250,7 +250,8 @@ test("keeps a single Open action for Research Nodes", async () => {
   expect(await screen.findByLabelText("Select run NVDA")).toBeDisabled();
   expect(screen.getByRole("columnheader", { name: "Actions" })).toBeVisible();
   expect(screen.queryByRole("link", { name: "Research Timeline" })).toBeNull();
-  const open = screen.getByRole("link", { name: "Open" });
-  expect(open).toHaveAttribute("href", "/runs/full-node");
+  const open = screen.getByRole("link", { name: "Execution details" });
+  expect(open).toHaveAttribute("href", "/runs/full-node?view=timeline");
   expect(open).toHaveClass("compact-button");
+  expect(screen.getByRole("link", { name: "Read research" })).toHaveAttribute("href", "/timelines/NVDA?node=full-node");
 });

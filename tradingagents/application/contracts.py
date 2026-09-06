@@ -1809,6 +1809,8 @@ class ResearchTimelineSummary(FrozenModel):
     full_cycle_count: int = Field(ge=1)
     incremental_node_count: int = Field(default=0, ge=0)
     latest_analysis_date: date
+    primary_head_run_id: str | None = None
+    primary_analysis_date: date | None = None
     primary_rating: ResearchRating | None = None
     primary_confidence: ResearchConfidenceLevel | None = None
     timeline_warning: bool = False

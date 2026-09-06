@@ -1158,6 +1158,8 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
                 "instrument_name": None,
                 "instrument_local_name": None,
                 "primary_cycle_id": run.id,
+                "primary_head_run_id": run.id,
+                "primary_analysis_date": "2026-07-24",
                 "full_cycle_count": 1,
                 "incremental_node_count": 0,
                 "latest_analysis_date": "2026-07-24",
@@ -1170,6 +1172,15 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
         "limit": 50,
         "offset": 0,
     }
+
+    web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
+    matching = await web_client.get("/api/v1/timelines?q=vidi&limit=1")
+    assert matching.json()["total"] == 1
+    assert matching.json()["items"][0]["instrument"] == "NVDA"
+    for query in ("q=unknown", "q=NVDA&offset=1", "warning_only=true"):
+        empty = await web_client.get(f"/api/v1/timelines?{query}")
+        assert empty.json()["items"] == []
+    assert (await web_client.get("/api/v1/timelines?q=unknown")).json()["total"] == 0
 
 
 @pytest.mark.anyio

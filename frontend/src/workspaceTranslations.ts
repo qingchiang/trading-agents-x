@@ -1,5 +1,6 @@
 export const workspaceTranslations = {
   en: {
+    dashboard: "Research workspace", researchTimelines: "Research library", runManagement: "Run tasks", newRun: "New research", clearFilters: "Clear filters",
     diagnostics: "Diagnostics", runDiagnostics: "Run & diagnostics", exportResearch: "Export", researchLimitations: "Research limitations",
     historyNavigation: "Research history", currentPrimary: "Current primary research", selectedResearch: "Selected research", baselineDate: "Full baseline",
     comparisonMode: "Compare research", closeComparisonMode: "Close comparison", manageResearch: "Manage", unavailableResearch: "This research is unavailable in the selected view. Check the instrument or explicitly include Trash.",
@@ -13,6 +14,7 @@ export const workspaceTranslations = {
     filterTasks: "Filter tasks", futureContextUnavailable: "Market date is unavailable. Refresh before updating research.",
   },
   "zh-CN": {
+    dashboard: "研究工作台", researchTimelines: "研究库", runManagement: "运行任务", newRun: "新建研究", clearFilters: "清除筛选",
     diagnostics: "诊断", runDiagnostics: "运行与诊断", exportResearch: "导出", researchLimitations: "研究限制",
     historyNavigation: "研究历史", currentPrimary: "当前主研究", selectedResearch: "所选研究", baselineDate: "完整基线",
     comparisonMode: "比较研究", closeComparisonMode: "退出比较", manageResearch: "管理", unavailableResearch: "所选视图中无法读取这份研究，请核对标的，或明确开启回收站查看。",
@@ -26,6 +28,7 @@ export const workspaceTranslations = {
     filterTasks: "筛选任务", futureContextUnavailable: "暂时无法获取市场日期，请刷新后更新研究。",
   },
   ja: {
+    dashboard: "リサーチワークスペース", researchTimelines: "ライブラリ", runManagement: "実行タスク", newRun: "新規リサーチ", clearFilters: "条件をクリア",
     diagnostics: "診断", runDiagnostics: "実行と診断", exportResearch: "エクスポート", researchLimitations: "リサーチの制約",
     historyNavigation: "リサーチ履歴", currentPrimary: "現在の主要リサーチ", selectedResearch: "選択中のリサーチ", baselineDate: "フル基準",
     comparisonMode: "リサーチを比較", closeComparisonMode: "比較を終了", manageResearch: "管理", unavailableResearch: "この表示ではリサーチを参照できません。銘柄を確認するか、ゴミ箱を明示的に表示してください。",

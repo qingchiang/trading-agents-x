@@ -129,3 +129,32 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
   .workspace-history { position: static; max-height: 300px; margin-bottom: 18px; background: var(--surface-soft); padding: 0 12px; }
   .workspace-history nav { max-height: 230px; overflow-y: auto; }
 }
+
+.global-new-research { margin-bottom: 20px; justify-content: center; }
+.secondary-line { display: block; color: var(--muted); margin-top: 5px; }
+.research-library-table td { padding: 18px 16px; }
+.research-library-table td:first-child { width: 36%; min-width: 210px; }
+.research-library-table .instrument-identity { max-width: none; }
+.workbench-region { margin-bottom: 30px; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
+.workbench-region:first-of-type .panel-header { display: none; }
+.queue-strip { display: flex; flex-wrap: wrap; gap: 24px; color: var(--muted); font-size: 13px; }
+.workbench-list { padding: 0; margin: 0; list-style: none; }
+.workbench-list li { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(100px, auto); align-items: center; gap: 20px; padding: 18px 0; border-top: 1px solid var(--border); }
+.workbench-list li:first-child { border-top: 0; }
+.workbench-list .instrument-identity { max-width: none; }
+.advanced-configuration { padding: 24px 0; border-block: 1px solid var(--border); }
+.advanced-configuration > summary { cursor: pointer; font-weight: 600; }
+.advanced-configuration[open] > summary { margin-bottom: 24px; }
+.advanced-configuration .form-section-body { display: block; }
+.advanced-configuration .check-grid { margin-bottom: 28px; }
+.request-summary { padding: 24px 0; }
+.interface-preferences { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 0 0 32px; }
+.interface-preferences h2 { flex-basis: 100%; }
+.interface-preferences label { display: flex; gap: 12px; align-items: center; }
+@media (max-width: 700px) {
+  .workbench-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
+  .workbench-list li > a { grid-column: 1 / -1; }
+  .research-library-table { min-width: 640px; }
+  .form-grid.three, .form-grid.two, .profile-grid { grid-template-columns: 1fr; }
+  .workbench-toolbar { align-items: stretch; flex-direction: column; }
+}

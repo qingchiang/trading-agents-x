@@ -10,6 +10,7 @@ vi.mock("../api/client", () => ({
   api: {
     health: vi.fn(),
     runs: vi.fn(),
+    timelines: vi.fn(),
   },
 }));
 
@@ -22,7 +23,8 @@ beforeEach(async () => {
     queue: { queued: 0, running: 0 },
     version: "0.5.0",
   } as Health);
-  vi.mocked(api.runs).mockResolvedValue({
+  vi.mocked(api.timelines).mockResolvedValue({ items: [], total: 0, limit: 6, offset: 0 });
+  vi.mocked(api.runs).mockImplementation(async (query) => query?.includes("succeeded") ? ({
     items: [
       {
         id: "run-1",
@@ -65,7 +67,7 @@ beforeEach(async () => {
     total: 1,
     limit: 20,
     offset: 0,
-  } as RunPage);
+  } as RunPage) : ({items: [], total: 0, limit: 6, offset: 0}));
 });
 
 test("shows local identity and final rating with a run-management entry point", async () => {
@@ -79,12 +81,7 @@ test("shows local identity and final rating with a run-management entry point", 
   expect(screen.getByText("トヨタ自動車")).toBeVisible();
   expect(screen.getByText("7203.T")).toBeVisible();
   expect(screen.getByText("Hold")).toHaveClass("research-rating-badge");
-  expect(screen.getByText("Medium confidence")).toBeVisible();
-  expect(screen.getByText("Incremental research")).toHaveClass(
-    "research-kind-badge",
-  );
-  expect(screen.getByRole("link", { name: "Manage runs" })).toHaveAttribute(
-    "href",
-    "/runs",
-  );
+  expect(api.runs).toHaveBeenCalledWith("?status=succeeded&limit=6");
+  expect(screen.getByText("No full research reminders.")).toBeVisible();
+  expect(screen.getByText("No running or queued tasks.")).toBeVisible();
 });

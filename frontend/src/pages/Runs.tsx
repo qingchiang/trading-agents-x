@@ -234,6 +234,7 @@ export default function Runs() {
         </div>
       )}
 
+      <details className="task-filters" open={window.innerWidth > 700 || undefined}><summary>{t("filterTasks")}</summary>
       <form className="panel filter-bar run-filter-bar" onSubmit={applyFilters}>
         <label htmlFor="runs-search">
           {t("runSearch")}
@@ -276,7 +277,7 @@ export default function Runs() {
           </select>
         </label>
         <button className="button primary">{t("apply")}</button>
-      </form>
+      </form></details>
 
       {error && <div className="alert">{error}</div>}
       {notice && <div className="notice">{notice}</div>}
@@ -409,10 +410,11 @@ export default function Runs() {
                       <td className="run-actions-cell">
                         <Link
                           className="button compact-button"
-                          to={`/runs/${run.id}`}
+                          to={`/runs/${run.id}?view=timeline`}
                         >
-                          {t("open")}
+                          {t("executionDetails")}
                         </Link>
+                        {run.status === "succeeded" && <Link className="text-link" to={run.is_research_node ? `/timelines/${encodeURIComponent(run.request.ticker)}?node=${encodeURIComponent(run.id)}${run.trashed_at ? "&trash_state=all" : ""}` : `/runs/${run.id}?view=decision`}>{t("openResearch")}</Link>}
                       </td>
                     </tr>
                   );

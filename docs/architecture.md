@@ -792,3 +792,20 @@ modules.
 - Routing: `tradingagents/dataflows/interface.py`
 - Japan/China: `tradingagents/dataflows/jp/`,
   `tradingagents/dataflows/cn/`
+
+### Research workspace presentation
+
+The Web library filters active Timeline summaries by optional `q` (instrument
+code or stored display names, case-insensitive) and `warning_only` before
+pagination. `total` counts the filtered set. `primary_head_run_id`,
+`primary_analysis_date`, rating, and confidence derive from the same Primary
+Cycle head; `latest_analysis_date` still describes the latest active research
+across cycles. These are derived reads and introduce no persistence migration.
+
+The instrument route `/timelines/:instrument?node=:id` shares the Run reader
+with legacy `/runs/:id` links. Selecting history does not select a Primary
+Cycle. Technical snapshots, recovery records, numeric audit appendices, and
+raw events are available under `view=diagnostics`; evidence and consequential
+limitations stay reachable from research reading. Presentation never rewrites
+stored reports or export products. The dashboard uses bounded summary and Run
+list requests, without loading individual reports.

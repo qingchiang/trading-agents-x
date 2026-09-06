@@ -1,164 +1,56 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type Health, type RunSummaryView } from "../api/client";
+import { api, type RunSummaryView } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
-import ResearchKindBadge from "../components/ResearchKindBadge";
 import StatusBadge from "../components/StatusBadge";
-import { researchConfidenceLabel } from "../i18n";
 import { Link } from "../router";
 
-export default function Dashboard() {
-  const { t } = useTranslation();
-  const [health, setHealth] = useState<Health | null>(null);
-  const [runs, setRuns] = useState<RunSummaryView[]>([]);
-  const [error, setError] = useState("");
+const loadHealth = () => api.health();
+const loadRecent = () => api.runs("?status=succeeded&limit=6");
+const loadWarnings = () => api.timelines(6, 0, "", true);
+const loadTasks = async () => {
+  const pages = await Promise.all(["running", "queued"].map(status => api.runs(`?status=${status}&limit=6`)));
+  return pages.flatMap(page => page.items);
+};
 
+function Region<T>({ title, to, load, children }: { title: string; to: string; load: () => Promise<T>; children: (data: T) => ReactNode }) {
+  const { t } = useTranslation();
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
-    let mounted = true;
+    let active = true;
     const refresh = async () => {
-      try {
-        const [nextHealth, nextRuns] = await Promise.all([
-          api.health(),
-          api.runs("?limit=20"),
-        ]);
-        if (mounted) {
-          setHealth(nextHealth);
-          setRuns(nextRuns.items);
-          setError("");
-        }
-      } catch (cause) {
-        if (mounted) {
-          setError(cause instanceof Error ? cause.message : t("error"));
-        }
-      }
+      try { const next = await load(); if (active) { setData(next); setError(""); } }
+      catch (cause) { if (active) setError(String(cause)); }
     };
     void refresh();
-    const timer = window.setInterval(refresh, 5000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, [t]);
-
-  const cards = [
-    {
-      label: t("queue"),
-      value: health?.queue.queued ?? "—",
-      tone: "amber",
-    },
-    {
-      label: t("running"),
-      value: health?.queue.running ?? "—",
-      tone: "blue",
-    },
-  ];
-
-  return (
-    <section>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">{t("controlPlane")}</p>
-          <h1>{t("dashboard")}</h1>
-          <p className="subtitle">{t("brandTagline")}</p>
-        </div>
-        <div className={`health ${health?.status === "ok" ? "ok" : ""}`}>
-          <i />
-          {health?.status === "ok" ? t("healthy") : t("disconnected")}
-        </div>
-      </header>
-      {error && <div className="alert">{error}</div>}
-      <div className="metric-grid">
-        {cards.map((card) => (
-          <article className={`metric-card ${card.tone}`} key={card.label}>
-            <span>{card.label}</span>
-            <strong>{card.value}</strong>
-            <div className="metric-line" />
-          </article>
-        ))}
-      </div>
-      <article className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">{t("runHistory")}</p>
-            <h2>{t("recentRuns")}</h2>
-          </div>
-          <div className="action-row">
-            <Link className="button" to="/runs">
-              {t("manageRuns")}
-            </Link>
-            <Link className="button primary" to="/runs/new">
-              + {t("newRun")}
-            </Link>
-          </div>
-        </div>
-        {runs.length === 0 ? (
-          <div className="empty-state">{t("noRuns")}</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("ticker")}</th>
-                  <th>{t("researchRating")}</th>
-                  <th>{t("researchKind")}</th>
-                  <th>{t("analysisDate")}</th>
-                  <th>{t("status")}</th>
-                  <th>{t("updated")}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      <InstrumentIdentity
-                        ticker={run.request.ticker}
-                        instrumentName={run.instrument_name}
-                        instrumentLocalName={run.instrument_local_name}
-                      />
-                    </td>
-                    <td>
-                      <div className="decision-cell">
-                        <ResearchRatingBadge rating={run.research_rating} />
-                        {run.research_confidence != null && (
-                          <small>{researchConfidenceLabel(t, run.research_confidence)}</small>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <ResearchKindBadge
-                        kind={run.research_kind}
-                        request={run.request}
-                        methodSnapshot={run.method_snapshot}
-                      />
-                    </td>
-                    <td>{run.request.analysis_date}</td>
-                    <td>
-                      <StatusBadge status={run.status} />
-                    </td>
-                    <td>{formatDate(run.updated_at)}</td>
-                    <td className="right">
-                      <Link className="text-link" to={`/runs/${run.id}`}>
-                        {t("open")} →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </article>
-    </section>
-  );
+    const timer = window.setInterval(refresh, 15000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [load, revision]);
+  return <section className="workbench-region" aria-label={title}>
+    <div className="panel-header"><h2>{title}</h2><Link to={to}>{t("viewAll")}</Link></div>
+    {error && <div className="alert" role="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></div>}
+    {data ? children(data) : !error && <p role="status">{t("loading")}</p>}
+  </section>;
 }
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+function RunRows({ runs, completed = false }: { runs: RunSummaryView[]; completed?: boolean }) {
+  const { t } = useTranslation();
+  if (!runs.length) return <p className="empty-state">{t(completed ? "libraryEmpty" : "noActiveTasks")}</p>;
+  return <ul className="workbench-list">{runs.map(run => <li key={run.id}>
+    <Link to={completed && run.is_research_node ? `/timelines/${encodeURIComponent(run.request.ticker)}?node=${encodeURIComponent(run.id)}` : `/runs/${run.id}?view=timeline`}>
+      <InstrumentIdentity ticker={run.request.ticker} instrumentName={run.instrument_name} instrumentLocalName={run.instrument_local_name} />
+    </Link><span>{run.request.analysis_date}</span>{completed ? <ResearchRatingBadge rating={run.research_rating} /> : <StatusBadge status={run.status} />}
+  </li>)}</ul>;
+}
+export default function Dashboard() {
+  const { t } = useTranslation();
+  return <section>
+    <header className="page-header"><h1>{t("dashboard")}</h1></header>
+    <Region title={t("queue")} to="/runs" load={loadHealth}>{health => <div className="queue-strip"><span>{t("queue")}: {health.queue.queued}</span><span>{t("running")}: {health.queue.running}</span><span>{t(health.status === "ok" ? "healthy" : "disconnected")}</span></div>}</Region>
+    <Region title={t("workbenchRecent")} to="/timelines" load={loadRecent}>{page => <RunRows runs={page.items} completed />}</Region>
+    <Region title={t("workbenchWarnings")} to="/timelines?warning_only=true" load={loadWarnings}>{page => page.items?.length ? <ul className="workbench-list">{page.items.map(item => <li key={item.instrument}><Link to={`/timelines/${encodeURIComponent(item.instrument)}`}><InstrumentIdentity ticker={item.instrument} instrumentName={item.instrument_name} instrumentLocalName={item.instrument_local_name} /></Link><span>{item.primary_analysis_date ?? "—"}</span><span className="warning-copy">{t("fullResearchRecommended")}</span></li>)}</ul> : <p className="empty-state">{t("noResearchWarnings")}</p>}</Region>
+    <Region title={t("workbenchTasks")} to="/runs?status=running" load={loadTasks}>{runs => <RunRows runs={runs} />}</Region>
+  </section>;
 }

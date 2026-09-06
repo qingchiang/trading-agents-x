@@ -222,7 +222,7 @@ export default function NewRun() {
       if (lockedKind) {
         setResearchKind(lockedKind);
       } else if (!researchKindSelectedByUser.current) {
-        setResearchKind(baselines.length > 0 && !primaryWarning ? "incremental" : "full");
+        setResearchKind("full");
       }
     };
     void loadBaselines()
@@ -560,23 +560,21 @@ export default function NewRun() {
     <section>
       <header className="page-header">
         <div>
-          <p className="eyebrow">{t("requestEyebrow")}</p>
           <h1>{t("newRun")}</h1>
-          <p className="subtitle">{t("evidenceSnapshotHint")}</p>
+          <p className="subtitle">{t("newResearchHint")}</p>
         </div>
       </header>
       {sourceRunId && (
         <div className="panel template-source">
           {t("templateFromRun")}{" "}
           <Link to={`/runs/${encodeURIComponent(sourceRunId)}`}>
-            {sourceRunId}
+            {t("executionDetails")}
           </Link>
         </div>
       )}
       {templateWarning && <div className="alert">{templateWarning}</div>}
-      <form className="run-form" onSubmit={submit}>
+      <form className="run-form" onSubmit={submit} onInvalidCapture={event => { const details = (event.target as HTMLElement).closest("details"); if (details) details.open = true; }}>
         <article className="panel form-section">
-          <span className="step">01</span>
           <div className="form-section-body">
             <h2>{t("instrumentCutoff")}</h2>
             <div className="form-grid two">
@@ -638,7 +636,6 @@ export default function NewRun() {
         </article>
 
         <article className="panel form-section">
-          <span className="step">02</span>
           <div className="form-section-body">
             <h2>{t("researchKind")}</h2>
             {lockedKind ? (
@@ -736,7 +733,6 @@ export default function NewRun() {
         </article>
 
         <article className="panel form-section">
-          <span className="step">03</span>
           <div className="form-section-body">
             {researchKind === "full" && (
               <>
@@ -762,6 +758,36 @@ export default function NewRun() {
                 </div>
               </>
             )}
+              <label>
+                {t("reportLanguage")}
+                <select
+                  value={outputLanguage}
+                  onChange={(event) => setOutputLanguage(event.target.value)}
+                >
+                  {customOutputLanguage && (
+                    <option value={customOutputLanguage}>
+                      {customOutputLanguage === configuredOutputLanguage
+                        ? t("configuredOutputLanguage", {
+                            value: customOutputLanguage,
+                          })
+                        : t("sourceOutputLanguage", {
+                            value: customOutputLanguage,
+                          })}
+                    </option>
+                  )}
+                  {reportLanguageOptions.map((language) => (
+                    <option key={language} value={language}>
+                      {reportLanguageLabel(language)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+          </div>
+        </article>
+
+        <details className="advanced-configuration">
+          <summary>{t("advancedConfiguration")}</summary>
+          <div className="form-section-body">
             <h2>{t(researchKind === "incremental" ? "updateScope" : "analysts")}</h2>
             {researchKind === "incremental" && (
               <p className="section-hint">{t("updateScopeHint")}</p>
@@ -776,17 +802,10 @@ export default function NewRun() {
                   />
                   <span>
                     <strong>{t(`${key}Analyst`)}</strong>
-                    <small>{key}</small>
                   </span>
                 </label>
               ))}
             </div>
-          </div>
-        </article>
-
-        <article className="panel form-section">
-          <span className="step">04</span>
-          <div className="form-section-body">
             <h2>{t("modelsOutput")}</h2>
             <div className={`form-grid ${researchKind === "full" ? "three" : "two"}`}>
               <label>
@@ -880,30 +899,7 @@ export default function NewRun() {
                 onChange={setDeepReasoning}
                 providerDefault={t("providerDefault")}
               />
-              <label>
-                {t("reportLanguage")}
-                <select
-                  value={outputLanguage}
-                  onChange={(event) => setOutputLanguage(event.target.value)}
-                >
-                  {customOutputLanguage && (
-                    <option value={customOutputLanguage}>
-                      {customOutputLanguage === configuredOutputLanguage
-                        ? t("configuredOutputLanguage", {
-                            value: customOutputLanguage,
-                          })
-                        : t("sourceOutputLanguage", {
-                            value: customOutputLanguage,
-                          })}
-                    </option>
-                  )}
-                  {reportLanguageOptions.map((language) => (
-                    <option key={language} value={language}>
-                      {reportLanguageLabel(language)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+
             </div>
             {(modelsLoading || modelWarning) && (
               <p
@@ -915,9 +911,8 @@ export default function NewRun() {
               </p>
             )}
           </div>
-        </article>
+        </details>
         {researchKind === "full" && <article className="panel form-section">
-          <span className="step">05</span>
           <div className="form-section-body">
             <h2>{t("primaryResearch")}</h2>
             <label className="check-card">
@@ -933,6 +928,17 @@ export default function NewRun() {
             </label>
           </div>
         </article>}
+        <section className="request-summary" aria-label={t("requestSummary")}>
+          <h2>{t("requestSummary")}</h2>
+          <dl className="definition-list">
+            <div><dt>{t("ticker")}</dt><dd>{ticker || "—"}</dd></div>
+            <div><dt>{t("analysisDate")}</dt><dd>{analysisDate || "—"}</dd></div>
+            <div><dt>{t("researchKind")}</dt><dd>{t(researchKind === "full" ? "newCycle" : "incrementalResearch")}{researchKind === "full" ? ` · ${t(profile)}` : ` · ${t("baselineDate")}: ${fullBaselines.find(item => item.id === fullBaselineRunId)?.analysis_date ?? "—"}`}</dd></div>
+            <div><dt>{t("analysts")}</dt><dd>{analysts.map(key => t(`${key}Analyst`)).join(" · ") || "—"}</dd></div>
+            <div><dt>{t("reportLanguage")}</dt><dd>{reportLanguageLabel(outputLanguage)}</dd></div>
+            {researchKind === "full" && <div><dt>{t("makePrimary")}</dt><dd>{t(makePrimary ? "enabled" : "disabled")}</dd></div>}
+          </dl>
+        </section>
         {error && <div className="alert">{error}</div>}
         <div className="form-actions">
           <button
