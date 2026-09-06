@@ -38,7 +38,6 @@ export default function AnalystReportView({
       />
     );
   }
-  const claims = report.key_claims ?? [];
   const sections = report.report_sections ?? [];
 
   return (
@@ -51,16 +50,6 @@ export default function AnalystReportView({
       onEvidence={onEvidence}
       before={
         <>
-          <div className="report-audit-summary">
-            {report.confidence !== null && report.confidence !== undefined && (
-              <span>
-                {t("confidence")} {Math.round(report.confidence * 100)}%
-              </span>
-            )}
-            <span>
-              {t("keyClaimsCount", { count: claims.length })}
-            </span>
-          </div>
           {report.audit_status === "incomplete" && (
             <div className="audit-incomplete-notice" role="status">
               {t("auditIncomplete")}
@@ -68,21 +57,7 @@ export default function AnalystReportView({
           )}
         </>
       }
-      after={
-        claims.length > 0 ? (
-          <details className="claim-audit-details">
-            <summary>{t("keyClaimsAudit")}</summary>
-            <ol>
-              {claims.map((claim) => (
-                <li key={claim.id}>
-                  <strong>{claim.statement}</strong>
-                  {claim.implication && <p>{claim.implication}</p>}
-                </li>
-              ))}
-            </ol>
-          </details>
-        ) : null
-      }
+
     />
   );
 }

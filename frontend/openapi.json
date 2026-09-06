@@ -7510,6 +7510,24 @@
           },
           {
             "in": "query",
+            "name": "focus_node_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 160,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Focus Node Id"
+            }
+          },
+          {
+            "in": "query",
             "name": "trash_state",
             "required": false,
             "schema": {

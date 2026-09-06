@@ -484,6 +484,7 @@ def create_app(
         instrument: str,
         cycle_limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cycle_offset: Annotated[int, Query(ge=0)] = 0,
+        focus_node_id: Annotated[str | None, Query(min_length=1, max_length=160)] = None,
         trash_state: RunTrashState = RunTrashState.ACTIVE,
     ):
         return TimelineDetail(
@@ -491,6 +492,7 @@ def create_app(
                 instrument,
                 cycle_limit=cycle_limit,
                 cycle_offset=cycle_offset,
+                focus_node_id=focus_node_id,
                 trash_state=trash_state,
             )
         )

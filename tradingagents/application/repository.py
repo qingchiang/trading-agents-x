@@ -2164,6 +2164,7 @@ class RunRepository:
         *,
         cycle_limit: int = 50,
         cycle_offset: int = 0,
+        focus_node_id: str | None = None,
         trash_state: RunTrashState | str = RunTrashState.ACTIVE,
     ) -> ResearchTimeline:
         """Return derived Cycles without copying Run products into a Timeline."""
@@ -2212,6 +2213,20 @@ class RunRepository:
                 row[0].id,
             )
         )
+        if focus_node_id is not None:
+            focused = next((row for row in all_rows if row[0].id == focus_node_id), None)
+            if focused is None:
+                raise RunNotFoundError("Requested research node is not available for this instrument")
+            focus_run, focus_node = focused
+            if trash_state is RunTrashState.ACTIVE and focus_run.trashed_at is not None:
+                raise InvalidRunTransitionError("Requested research is in Trash; explicitly include Trash to read it")
+            if trash_state is RunTrashState.TRASHED and focus_run.trashed_at is None:
+                raise InvalidRunTransitionError("Requested research is active; select the active research view")
+            cycle_id = focus_run.id if focus_node.research_kind == "full" else focus_node.full_baseline_run_id
+            index = next((i for i, row in enumerate(visible_cycles) if row[0].id == cycle_id), None)
+            if index is None:
+                raise RunNotFoundError("Requested research cycle is unavailable")
+            cycle_offset = index // cycle_limit * cycle_limit
         cycle_total = len(visible_cycles)
         page_full_rows = visible_cycles[cycle_offset : cycle_offset + cycle_limit]
         products_by_id = {

@@ -95,3 +95,37 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 }
 .brand { gap: 8px; padding-inline: 0; }
 .brand strong { font-size: 14px; }
+.workspace-context { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; color: var(--muted); font-size: 13px; }
+.research-workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; align-items: start; }
+.workspace-history { position: sticky; top: 20px; max-height: calc(100dvh - 40px); overflow-y: auto; }
+.workspace-history > summary { padding: 12px 0; font-size: 14px; font-weight: 650; cursor: pointer; }
+.history-cycle { padding: 12px 0; border-top: 1px solid var(--line); }
+.history-cycle > summary { font-size: 13px; cursor: pointer; }
+.history-cycle summary small { display: block; margin-top: 4px; color: var(--muted); }
+.history-node { position: relative; margin-top: 8px; padding: 6px; border-left: 2px solid var(--line); }
+.history-node.incremental { margin-left: 10px; }
+.history-select { display: grid; gap: 4px; width: 100%; padding: 8px; background: transparent; color: var(--ink); border: 0; text-align: left; cursor: pointer; }
+.history-select span, .history-select small { font-size: 12px; color: var(--muted); }
+.history-select[aria-current] { background: var(--blue-soft); color: var(--blue-dark); border-radius: 5px; }
+.history-node .action-menu > button { font-size: 11px; padding: 3px 8px; min-height: 26px; border: 0; background: transparent; color: var(--muted); }
+.workspace-history .action-menu-content { position: fixed; right: auto; top: auto; }
+.workspace-reader { min-width: 0; }
+.workspace-reader > .run-heading { display: flex; flex-direction: column; gap: 8px; }
+.workspace-reader .run-heading .subtitle { margin: 0; }
+.workspace-reader .report-reading-layout { grid-template-columns: 140px minmax(0, 800px); gap: 16px; padding: 20px; }
+.research-limitations { padding: 14px 18px; margin: 12px 0; background: #fff8e9; border-left: 3px solid #bc8b30; font-size: 14px; }
+.research-limitations ul { margin: 8px 0 0; padding-left: 20px; }
+.diagnostics-view { min-width: 0; }
+.diagnostic-section { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.diagnostic-section summary { cursor: pointer; }
+.diagnostic-section pre { max-height: 560px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f0f2f5; padding: 16px; font-size: 12px; }
+@media (max-width: 1280px) {
+  .workspace-reader .report-reading-layout { display: block; }
+  .workspace-reader .floating-navigation-slot { display: none; }
+  .workspace-reader .floating-section-select { display: flex; padding-bottom: 16px; gap: 8px; flex-wrap: wrap; }
+}
+@media (max-width: 1024px) {
+  .research-workspace { display: block; }
+  .workspace-history { position: static; max-height: 300px; margin-bottom: 18px; background: var(--surface-soft); padding: 0 12px; }
+  .workspace-history nav { max-height: 230px; overflow-y: auto; }
+}

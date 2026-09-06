@@ -13,11 +13,11 @@ import {
   type ResearchNodeView,
   type RunDetail as RunDetailType,
   type RunEvent,
-  type StructuredRecoveryNotice,
 } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
 import EvidenceLinks from "../components/EvidenceLinks";
-import RunMetricsPanel from "../components/RunMetricsPanel";
+import { ActionMenu, tabsKeyDown, useModal } from "../components/Interaction";
+import { useMarketDate } from "../useMarketDate";
 import ResearchKindBadge from "../components/ResearchKindBadge";
 import {
   buildEvidenceReferenceIndex,
@@ -48,6 +48,7 @@ import {
 } from "../reassessment";
 import { localizePerformanceReason } from "../i18n";
 
+const RunDiagnostics = lazy(() => import("../components/RunDiagnostics"));
 const AnalystReportView = lazy(() => import("../components/AnalystReportView"));
 const ResearchMarkdownReader = lazy(() =>
   import("../components/AnalystReportView").then((module) => ({
@@ -97,6 +98,7 @@ const eventNames = [
   "incremental.synthesis_completed",
 ];
 const viewNames = [
+  "diagnostics",
   "incremental",
   "brief",
   "reassessment",
@@ -117,11 +119,25 @@ type VisibleWarning =
   | string
   | NonNullable<AnalystReport["warnings"]>[number];
 
-export default function RunDetail() {
+export default function RunDetail({ selectedRunId, workspace = false }: { selectedRunId?: string; workspace?: boolean } = {}) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const routerNavigate = useNavigate();
   const location = useLocation();
-  const { runId = "" } = useParams();
+  const { runId: routeRunId = "" } = useParams();
+  const runId = selectedRunId ?? routeRunId;
+  const navigate = useCallback((to: string, options?: { replace?: boolean }) => {
+    if (workspace && to.startsWith(`/runs/${encodeURIComponent(runId)}?`)) {
+      const next = new URL(to, "http://local");
+      const params = new URLSearchParams(location.search);
+      for (const key of ["view", "report", "ref", "return_view", "return_report"]) params.delete(key);
+      next.searchParams.forEach((value, key) => params.set(key, value));
+      params.set("node", runId);
+      routerNavigate(`${location.pathname}?${params}`, options);
+    } else routerNavigate(to, options);
+  }, [workspace, runId, location.pathname, location.search, routerNavigate]);
+  const currentRun = useRef(runId);
+  currentRun.current = runId;
+  const [actionBusy, setActionBusy] = useState(false);
   const [detail, setDetail] = useState<RunDetailType | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [evidence, setEvidence] = useState<EvidenceBundle | null>(null);
@@ -140,8 +156,8 @@ export default function RunDetail() {
   const requestedView = searchParams.get("view");
   const isIncremental = detail?.run.research_kind === "incremental";
   const availableViews: ViewName[] = isIncremental
-    ? ["brief", "reassessment", "decision", "evidence", "timeline"]
-    : ["decision", "reports", "deliberation", "evidence", "timeline"];
+    ? ["brief", "reassessment", "decision", "evidence", "timeline", "diagnostics"]
+    : ["decision", "reports", "deliberation", "evidence", "timeline", "diagnostics"];
   const defaultView: ViewName =
     detail?.run.status === "succeeded"
       ? isIncremental
@@ -160,16 +176,17 @@ export default function RunDetail() {
   const refresh = useCallback(async () => {
     try {
       const nextDetail = await api.run(runId);
+      if (currentRun.current !== runId) return;
       setDetail(nextDetail);
       setEvidence(nextDetail.result?.evidence ?? null);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
+      if (currentRun.current === runId) setError(cause instanceof Error ? cause.message : t("error"));
     }
   }, [runId, t]);
 
   useEffect(() => {
-    if (activeView !== "deliberation") return;
+    if (!["deliberation", "diagnostics"].includes(activeView)) return;
     let active = true;
     void api.artifacts(runId).then(
       (items) => active && setArtifacts(items),
@@ -185,11 +202,14 @@ export default function RunDetail() {
     latestEventSequence.current = 0;
     setEvents([]);
     setDetail(null);
+    setArtifacts([]);
+    setEvidence(null);
+    setSourceDrawerRef(null);
     void refresh();
   }, [refresh, runId]);
 
   useEffect(() => {
-    if (!detail || detail.run.id !== runId) return;
+    if (!detail || detail.run.id !== runId || (terminal.has(detail.run.status) && activeView !== "timeline" && activeView !== "diagnostics" && activeView !== "deliberation")) return;
     const currentAttempt = detail.run.attempt;
     const source = new EventSource(
       `/api/v1/runs/${runId}/events?after=${latestEventSequence.current}`,
@@ -238,7 +258,7 @@ export default function RunDetail() {
       void refresh();
     };
     return () => source.close();
-  }, [detail?.run.attempt, detail?.run.id, refresh, runId]);
+  }, [detail?.run.attempt, detail?.run.id, detail?.run.status, activeView, refresh, runId]);
 
   useEffect(() => {
     if (!detail?.run.trashed_at) return;
@@ -431,12 +451,14 @@ export default function RunDetail() {
   }, [navigate, returnReport, returnView, runId]);
 
   const act = async (action: "cancel" | "retry") => {
+    if (actionBusy) return;
+    setActionBusy(true);
     try {
       await api.action(runId, action);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
-    }
+    } finally { setActionBusy(false); }
   };
 
   const restore = async () => {
@@ -448,7 +470,9 @@ export default function RunDetail() {
     }
   };
 
-  if (!detail) {
+  const marketDate = useMarketDate(detail?.run.request.ticker);
+
+  if (!detail || detail.run.id !== runId) {
     return <div className="loading">{error || t("loading")}</div>;
   }
   const { run, result } = detail;
@@ -456,7 +480,7 @@ export default function RunDetail() {
     run.is_research_node &&
     run.status === "succeeded" &&
     !run.trashed_at &&
-    run.request.analysis_date < localDateToday();
+    marketDate.date !== null && run.request.analysis_date < marketDate.date;
   const hasPartialResearch =
     run.status !== "succeeded" &&
     (evidence !== null ||
@@ -465,13 +489,13 @@ export default function RunDetail() {
       decision !== null);
 
   return (
-    <section>
+    <section className={workspace ? "workspace-reader" : "run-reader"}>
       <header className="page-header run-heading">
         <div>
-          <Link className="back-link" to="/">
+          {!workspace && <Link className="back-link" to="/">
             ← {t("dashboard")}
-          </Link>
-          <div className="run-title">
+          </Link>}
+          {!workspace && <div className="run-title">
             <InstrumentIdentity
               ticker={run.request.ticker}
               instrumentName={run.instrument_name}
@@ -484,16 +508,16 @@ export default function RunDetail() {
               methodSnapshot={run.method_snapshot}
             />
             <StatusBadge status={run.status} />
-          </div>
+          </div>}
           <p className="subtitle">
             {run.request.analysis_date}
-            {" · " + t("attempt") + " " + run.attempt}
+            {(activeView === "timeline" || activeView === "diagnostics") && " · " + t("attempt") + " " + run.attempt}
           </p>
           {run.source_run_id && (
             <p className="subtitle">
               {t("sourceRun")}:{" "}
               <Link to={`/runs/${encodeURIComponent(run.source_run_id)}`}>
-                {run.source_run_id}
+                {t("sourceRun")}
               </Link>
             </p>
           )}
@@ -501,12 +525,12 @@ export default function RunDetail() {
         <div className="action-row">
           {!run.trashed_at &&
             (run.status === "queued" || run.status === "running") && (
-            <button className="button danger" onClick={() => void act("cancel")}>
+            <button className="button danger" disabled={actionBusy || run.cancel_requested} onClick={() => void act("cancel")}>
               {t("cancel")}
             </button>
           )}
           {!run.trashed_at && run.status === "failed" && (
-            <button className="button" onClick={() => void act("retry")}>
+            <button className="button" disabled={actionBusy} onClick={() => void act("retry")}>
               {t("retry")}
             </button>
           )}
@@ -515,7 +539,7 @@ export default function RunDetail() {
               {t("restore")}
             </button>
           )}
-          {run.is_research_node && (
+          {!workspace && run.is_research_node && (
             <Link
               className="button"
               to={`/timelines/${encodeURIComponent(run.request.ticker)}`}
@@ -523,6 +547,7 @@ export default function RunDetail() {
               {t("researchTimeline")}
             </Link>
           )}
+          {marketDate.error && <span className="warning" role="status">{marketDate.error}</span>}
           {canUpdateResearch && (
             <Link
               className="button primary"
@@ -535,7 +560,7 @@ export default function RunDetail() {
             run.status === "succeeded" &&
             !run.trashed_at &&
             !canUpdateResearch && (
-              <span className="button disabled" title={t("sameDayUpdateUnavailable")}>
+              <span className="button disabled" title={t(marketDate.date ? "sameDayUpdateUnavailable" : "loading")}>
                 {t("updateThisResearch")}
               </span>
             )}
@@ -547,6 +572,7 @@ export default function RunDetail() {
               {t("cloneAsFullResearch")}
             </Link>
           )}
+          <ActionMenu label={t("exportResearch")}>
           <a
             className="button"
             href={`/api/v1/runs/${runId}/export?format=package`}
@@ -565,6 +591,9 @@ export default function RunDetail() {
           >
             {t("exportJson")}
           </a>
+          </ActionMenu>
+          {!workspace && activeView === "diagnostics" && <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=timeline`}>{t("activity")}</Link>}
+          <Link className="text-link" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
         </div>
       </header>
       {error && <div className="alert">{error}</div>}
@@ -586,7 +615,6 @@ export default function RunDetail() {
           {t("partialResearchAvailable")}
         </div>
       )}
-      <RecoveryNotices notices={result?.recoveries ?? []} key={`recovery-${runId}`} />
       <RunWarnings
         warnings={runWarnings}
         openRequest={warningOpenRequest}
@@ -597,12 +625,14 @@ export default function RunDetail() {
         className="panel view-tabs"
         aria-label={t("researchViews")}
         role="tablist"
+        onKeyDown={tabsKeyDown}
       >
-        {availableViews.map((view) => (
+        {availableViews.filter(view => !["timeline", "diagnostics"].includes(view) || !workspace).map((view) => (
           <button
             type="button"
             role="tab"
             aria-selected={activeView === view}
+            tabIndex={activeView === view ? 0 : -1}
             aria-controls={`run-view-${view}`}
             className={activeView === view ? "active" : ""}
             onClick={() => selectView(view)}
@@ -626,6 +656,7 @@ export default function RunDetail() {
         )}
 
         {activeView === "brief" && isIncremental && (
+          <>
           <IncrementalBriefPanel
             brief={detail.incremental_context?.analysis_brief ?? null}
             node={detail.research_node ?? null}
@@ -634,6 +665,11 @@ export default function RunDetail() {
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
           />
+          {detail.research_node && <>
+            <ReassessmentPanel node={detail.research_node} baselineDecision={detail.incremental_context?.full_baseline.decision ?? null} currentDecision={decision} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} />
+            <PerformanceSection node={detail.research_node} />
+          </>}
+          </>
         )}
 
         {activeView === "reassessment" && detail.research_node && (
@@ -698,14 +734,10 @@ export default function RunDetail() {
         )}
       </Suspense>
 
-      {activeView === "timeline" && (
-        <RunMetricsPanel
-          metrics={run.metrics}
-          attempts={detail.attempts ?? []}
-          events={events}
-          artifacts={artifacts}
-        />
-      )}
+      {activeView === "diagnostics" && <Suspense fallback={<div role="status">{t("loading")}</div>}>
+        <RunDiagnostics detail={detail} events={events} artifacts={artifacts} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} />
+      </Suspense>}
+
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         <EvidenceSourceDrawer
           evidenceRef={sourceDrawerRef}
@@ -788,7 +820,6 @@ function IncrementalBriefPanel({
         </div>
       </div>
       {node && <IncrementalOutcomeSummary node={node} />}
-      {node && <PerformanceSection node={node} />}
       {!brief ? (
         <div className="empty-state">
           {t(briefUnavailableLabel(runStatus))}
@@ -801,13 +832,7 @@ function IncrementalBriefPanel({
           reportKey="incremental-brief"
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}
-          after={
-            <BriefAuditMetadata
-              brief={brief}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-          }
+
         />
       )}
     </article>
@@ -846,53 +871,6 @@ function IncrementalOutcomeSummary({ node }: { node: ResearchNodeView }) {
         </section>
       )}
     </section>
-  );
-}
-
-function BriefAuditMetadata({
-  brief,
-  evidenceIndex,
-  onEvidence,
-}: {
-  brief: IncrementalAnalysisBrief;
-  evidenceIndex: EvidenceReferenceIndex;
-  onEvidence: (ref: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <details className="report-metadata audit-details">
-      <summary>
-        <strong>{t("auditDetails")}</strong>
-        <span className="details-chevron" aria-hidden="true" />
-      </summary>
-      <div className="audit-details-body">
-        <dl className="definition-list compact-definition-list">
-          <div>
-            <dt>{t("promptVersion")}</dt>
-            <dd>{brief.prompt_version ?? t("notRecorded")}</dd>
-          </div>
-          <div>
-            <dt>{t("generationMethod")}</dt>
-            <dd>{brief.generation_method ?? t("notRecorded")}</dd>
-          </div>
-        </dl>
-        {(brief.warnings?.length ?? 0) > 0 && (
-          <div>
-            <strong>{t("warnings")}</strong>
-            <ul>
-              {brief.warnings?.map((warning) => (
-                <li key={warningKey(warning)}>{warning.message}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <EvidenceLinks
-          refs={brief.evidence_refs ?? []}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-      </div>
-    </details>
   );
 }
 
@@ -1017,19 +995,7 @@ function ReassessmentPanel({
           })}
         </div>
       )}
-      {entries.length > 0 && (
-        <details className="audit-disclosure reassessment-technical-mapping">
-          <summary>{t("technicalMapping")}</summary>
-          <dl className="definition-list compact-definition-list">
-            {entries.map((entry) => (
-              <div key={entry.component_id}>
-                <dt>{t(`reassessment_${entry.disposition}`)}</dt>
-                <dd><code>{entry.component_id}</code></dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
+
     </article>
   );
 }
@@ -1104,39 +1070,7 @@ function PerformanceSection({ node }: { node: ResearchNodeView }) {
         ))}
       </div>
       {auditRows.length > 0 && (
-        <details className="audit-disclosure performance-data-audit">
-          <summary>{t("performanceDataAudit")}</summary>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("instrument")}</th>
-                  <th>{t("provider")}</th>
-                  <th>{t("fallback")}</th>
-                  <th>{t("informationCutoff")}</th>
-                  <th>{t("retrievedAt")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditRows.map(({ label, component }) => {
-                  const calculation = component.calculation!;
-                  return (
-                    <tr key={label}>
-                      <th>{label}</th>
-                      <td>{calculation.provider}</td>
-                      <td>{calculation.fallback ? t("yes") : t("no")}</td>
-                      <td>
-                        {calculation.baseline_information_cutoff_at} →{" "}
-                        {calculation.target_information_cutoff_at}
-                      </td>
-                      <td>{calculation.retrieved_at}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </details>
+        <></>
       )}
     </section>
   );
@@ -1358,21 +1292,7 @@ function TimelinePanel({
                   })}
               </div>
               {attempt.events.length > 0 && (
-                <details className="audit-disclosure attempt-technical-events">
-                  <summary>
-                    {t("technicalEvents", { count: attempt.events.length })}
-                  </summary>
-                  <ul className="activity-raw-events">
-                    {[...attempt.events]
-                      .sort((left, right) => left.sequence - right.sequence)
-                      .map((event) => (
-                        <li key={event.sequence}>
-                          <strong>{eventLabel(t, event)}</strong>
-                          <code>{JSON.stringify({ sequence: event.sequence, event_type: event.event_type, node: event.node, payload: event.payload ?? {} })}</code>
-                        </li>
-                      ))}
-                  </ul>
-                </details>
+                <></>
               )}
             </div>
           </details>
@@ -1535,19 +1455,7 @@ function EvidencePanel({
               ))}
             </div>
             {diagnostics.length > 0 && (
-              <details className="audit-disclosure collection-diagnostics">
-                <summary>{t("collectionDiagnostics")}</summary>
-                <ul className="compact-list">
-                  {diagnostics.map((diagnostic) => (
-                    <li key={diagnostic.key}>
-                      <strong>{t(`${diagnostic.domain}Analyst`)}</strong>
-                      {diagnostic.source && <span> · {diagnostic.source}</span>}
-                      {diagnostic.retrievedAt && <span> · {diagnostic.retrievedAt}</span>}
-                      <code> · {diagnostic.code}</code>
-                    </li>
-                  ))}
-                </ul>
-              </details>
+              <></>
             )}
           </section>
         </div>
@@ -1568,17 +1476,7 @@ function EvidencePanel({
                 evidenceIndex={evidenceIndex}
                 mode="readable"
               />
-              <details className="audit-details evidence-bundle-audit">
-                <summary>
-                  <strong>{t("evidenceBundleAudit")}</strong>
-                  <span>{t("auditDetails")}</span>
-                </summary>
-                <EvidenceBundleSummary
-                  evidence={evidence}
-                  evidenceIndex={evidenceIndex}
-                  mode="technical"
-                />
-              </details>
+              <></>
             </>
           ) : (
             <EvidenceBundleSummary
@@ -1643,7 +1541,7 @@ function collectionDiagnostics(node: ResearchNodeView) {
 function EvidenceBundleSummary({
   evidence,
   evidenceIndex,
-  mode = "all",
+  mode = "readable",
 }: {
   evidence: EvidenceBundle;
   evidenceIndex: EvidenceReferenceIndex;
@@ -1784,14 +1682,7 @@ function EvidenceSourceDrawer({
       )
     : undefined;
 
-  useEffect(() => {
-    if (!evidenceRef) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [evidenceRef, onClose]);
+  const drawerRef = useModal<HTMLElement>(Boolean(evidenceRef), onClose);
 
   if (!evidenceRef) return null;
   return (
@@ -1804,6 +1695,8 @@ function EvidenceSourceDrawer({
       />
       <aside
         className="source-drawer"
+        ref={drawerRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={t("sourceDetails")}
@@ -1856,32 +1749,7 @@ function EvidenceSourceDrawer({
                   {group.canonical.unit ?? ""}
                 </p>
               )}
-            <details className="provenance-details">
-              <summary>{t("canonicalEvidenceAndProvenance")}</summary>
-              <div className="canonical-ref-list">
-                {group.refs.map((ref) => (
-                  <div key={ref}>
-                    <code>{ref}</code>
-                    <button
-                      type="button"
-                      className="copy-ref-button"
-                      title={ref}
-                      aria-label={t("copyEvidenceId", { ref })}
-                      onClick={() => void copyEvidenceRef(ref)}
-                    >
-                      {t("copy")}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <pre>
-                {JSON.stringify(
-                  group.items.map(({ content: _content, ...item }) => item),
-                  null,
-                  2,
-                )}
-              </pre>
-            </details>
+
           </>
         )}
       </aside>
@@ -1941,12 +1809,7 @@ function ReportsPanel({
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
-          <ReportMetadata
-            report={reports[activeReport]}
-            onEvidence={onEvidence}
-            evidenceIndex={evidenceIndex}
-            key={activeReport}
-          />
+          <ResearchLimitations warnings={reportWarnings(reports[activeReport])} />
         </>
       )}
     </article>
@@ -1977,187 +1840,18 @@ function DecisionPanel({
   );
 }
 
-function ReportMetadata({
-  report,
-  onEvidence,
-  evidenceIndex,
-}: {
-  report: unknown;
-  onEvidence: (ref: string) => void;
-  evidenceIndex: EvidenceReferenceIndex;
-}) {
+function ResearchLimitations({ warnings }: { warnings: VisibleWarning[] }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  if (!report || typeof report !== "object") return null;
-  const typed = report as {
-    warnings?: VisibleWarning[];
-    source_refs?: string[];
-  };
-  const warnings = dedupeWarnings(typed.warnings ?? []);
-  const refs = typed.source_refs ?? [];
-  const groups = groupEvidenceRefs(refs, evidenceIndex)
-    .map((refGroup) =>
-      evidenceIndex.groups.find(
-        (group) => group.alias === refGroup.alias,
-      ),
-    )
-    .filter((group): group is EvidenceDisplayGroup => Boolean(group));
-  if (!warnings.length && !groups.length) return null;
-  return (
-    <details
-      className="report-metadata audit-details"
-      open={open}
-    >
-      <summary
-        onClick={(event) => {
-          event.preventDefault();
-          const next = !open;
-          setOpen(next);
-        }}
-      >
-        <strong>{t("auditDetails")}</strong>
-        <span className="details-summary-meta">
-          <span>
-            {t("auditSummary", {
-              warnings: warnings.length,
-              evidence: groups.length,
-            })}
-          </span>
-          <span className="details-chevron" aria-hidden="true" />
-        </span>
-      </summary>
-      <div className="audit-details-body">
-        {warnings.length > 0 && (
-          <div>
-            <strong>{t("warnings")}</strong>
-            <ul>
-              {warnings.map((warning) => (
-                <li key={warningKey(warning)}>
-                  {warningMessage(warning)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {groups.length > 0 && (
-          <div>
-            <strong>{t("evidenceRefs")}</strong>
-            <ul className="audit-evidence-grid">
-              {groups.map((group) => (
-                <li key={group.alias}>
-                  <button
-                    type="button"
-                    className="open-evidence-button"
-                    onClick={() => onEvidence(group.canonical.ref)}
-                    title={group.refs.join("\n")}
-                    aria-label={`${t("openEvidence")} ${group.canonical.ref}`}
-                  >
-                    {group.alias}
-                  </button>
-                  <span className="audit-source-name">
-                    {group.sources.join(", ")}
-                  </span>
-                  <span className={`quality quality-${group.quality}`}>
-                    {t(`quality_${group.quality}`)}
-                  </span>
-                  {group.fallback && (
-                    <span className="audit-fallback-chip">{t("fallback")}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </details>
-  );
+  const items = dedupeWarnings(warnings);
+  if (!items.length) return null;
+  return <section className="research-limitations" role="status"><strong>{t("researchLimitations")}</strong>
+    <ul>{items.map(warning => <li key={warningKey(warning)}>{warningMessage(warning)}</li>)}</ul></section>;
 }
 
-function RunWarnings({
-  warnings,
-  openRequest,
-}: {
-  warnings: VisibleWarning[];
-  openRequest: number;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (openRequest === 0) return;
-    setOpen(true);
-    requestAnimationFrame(() => {
-      document.getElementById("run-warnings")?.scrollIntoView?.({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    });
-  }, [openRequest]);
-  if (!warnings.length) return null;
-  return (
-    <details
-      id="run-warnings"
-      className="run-warning-details audit-details"
-      open={open}
-    >
-      <summary
-        onClick={(event) => {
-          event.preventDefault();
-          const next = !open;
-          setOpen(next);
-        }}
-      >
-        <strong>{t("runWarnings")}</strong>
-        <span>
-          {t("warningCount", { count: warnings.length })}
-        </span>
-      </summary>
-      <ul>
-        {warnings.map((warning) => (
-          <li key={warningKey(warning)}>{warningMessage(warning)}</li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
-function RecoveryNotices({
-  notices,
-}: {
-  notices: StructuredRecoveryNotice[];
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  if (notices.length === 0) return null;
-  return (
-    <details className="run-recovery-details audit-details" open={open}>
-      <summary
-        onClick={(event) => {
-          event.preventDefault();
-          setOpen(!open);
-        }}
-      >
-        <strong>{t("structuredRecoveries")}</strong>
-        <span>{t("recoveryCount", { count: notices.length })}</span>
-      </summary>
-      <div className="recovery-notice-list">
-        {notices.map((notice, index) => (
-          <article key={`${notice.attempt}:${notice.node}:${index}`}>
-            <strong>{notice.node}</strong>
-            <span>
-              {t("recoveryNoticeSummary", {
-                reason: notice.initial_reason_code,
-                method: notice.recovery_method,
-                calls: notice.retry_count,
-              })}
-            </span>
-            {(notice.validation_issue_codes ?? []).length > 0 && (
-              <code>{(notice.validation_issue_codes ?? []).join(", ")}</code>
-            )}
-          </article>
-        ))}
-      </div>
-    </details>
-  );
+function RunWarnings({ warnings, openRequest }: { warnings: VisibleWarning[]; openRequest: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (openRequest) ref.current?.scrollIntoView?.({ block: "center" }); }, [openRequest]);
+  return <div ref={ref} id="run-warnings"><ResearchLimitations warnings={warnings} /></div>;
 }
 
 function reportWarnings(report: AnalystReport | string): VisibleWarning[] {
@@ -2280,6 +1974,7 @@ function reportLabel(t: TFunction, name: string): string {
 
 function returnViewLabel(t: TFunction, view: ReturnViewName): string {
   const labels: Record<ReturnViewName, string> = {
+    diagnostics: "diagnostics",
     incremental: "returnToIncrementalSummary",
     brief: "returnToAnalysisBrief",
     reassessment: "returnToReassessment",
@@ -2408,10 +2103,4 @@ function formatTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
-}
-
-function localDateToday(): string {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
 }

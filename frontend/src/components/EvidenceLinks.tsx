@@ -47,32 +47,10 @@ export default function EvidenceLinks({
             >
               <code>{group.alias}</code>
             </button>
-            {!compact && (
-              <button
-                type="button"
-                className="copy-chip-button"
-                onClick={() => void copyEvidenceRef(group.targetRef)}
-                aria-label={t("copyEvidenceId", {
-                  ref: group.targetRef,
-                })}
-                title={group.targetRef}
-              >
-                ⧉
-              </button>
-            )}
+
           </span>
         ))}
       </div>
     </div>
   );
-}
-
-async function copyEvidenceRef(ref: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(ref);
-    }
-  } catch {
-    // Clipboard permission failures do not affect evidence navigation.
-  }
 }

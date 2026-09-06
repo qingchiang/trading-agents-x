@@ -270,7 +270,10 @@ The Timeline Web API is cycle-shaped rather than a flat Node feed. A
 `ResearchTimeline` contains whole `cycles`; every cycle carries one Full
 `baseline` followed by its chronological `increments`. Pagination uses
 `cycle_limit` and `cycle_offset`, so a Full-rooted cycle is never divided
-between pages. The Primary cycle is returned first and other cycles are ordered
+between pages. Optional `focus_node_id` resolves a retained same-instrument Node
+to its complete cycle page and returns the resolved `cycle_offset`; missing or
+foreign Nodes return 404, and an explicitly focused Node excluded by the requested
+Trash state returns 409. The Primary cycle is returned first and other cycles are ordered
 by Full analysis date descending. This contract intentionally replaces the
 pre-redesign `nodes` envelope without a compatibility layer.
 `active_full_cycles` remains unpaginated and contains the compact decision

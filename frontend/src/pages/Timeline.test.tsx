@@ -19,6 +19,10 @@ import Timeline from "./Timeline";
 
 vi.mock("../api/client", () => ({
   api: {
+    run: vi.fn(),
+    analysisCutoffContext: vi.fn(),
+    evidence: vi.fn(),
+    artifacts: vi.fn(),
     timeline: vi.fn(),
     timelines: vi.fn(),
     compareResearchNodes: vi.fn(),
@@ -167,6 +171,13 @@ function detail(): TimelineDetail {
 beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
+  vi.mocked(api.analysisCutoffContext).mockResolvedValue({ max_analysis_date: "2026-07-26", valid_until: "2999-01-01T00:00:00Z" } as never);
+  vi.mocked(api.evidence).mockRejectedValue(new Error("Unavailable"));
+  vi.mocked(api.run).mockImplementation(async id => ({
+    run: { id, research_kind: id.startsWith("increment") ? "incremental" : "full", status: "succeeded", attempt: 1,
+      request: { ticker: "NVDA", analysis_date: "2026-07-25", analysts: [] }, metrics: {} },
+    result: null, attempts: [], evidence_status: { status: "pending" },
+  }) as never);
   vi.mocked(api.timeline).mockResolvedValue(detail());
   vi.mocked(api.timelines).mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
   vi.mocked(api.trashRuns).mockResolvedValue({ runs: [], changed: 1 });
@@ -200,79 +211,22 @@ test("renders name-first timeline cards with research counts and decision contex
   expect(screen.getByRole("link", { name: /トヨタ自動車/ })).toHaveAttribute("href", "/timelines/7203.T");
 });
 
-test("renders a Full root and a structurally distinct Incremental child", async () => {
+test("selects the primary head and switches research inside the instrument workspace", async () => {
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
-
   expect(await screen.findByRole("heading", { name: "英伟达" })).toBeVisible();
-  expect(screen.getByText("NVIDIA Corporation")).toBeVisible();
-  expect(screen.getByText("Full baseline thesis")).toBeVisible();
-  expect(screen.getByText("Incremental thesis changed")).toBeVisible();
-  expect(screen.getByText("The full Decision was regenerated.")).toBeVisible();
-  expect(screen.getByText("New admissible observation")).toBeVisible();
-  expect(screen.getByText("Stock return: 5%")).toBeVisible();
-  expect(screen.getByText("1 non-reaffirmed item")).toBeVisible();
-  fireEvent.click(screen.getByText("Update details"));
-  expect(screen.getByText("Collection Summary")).toBeVisible();
-  expect(screen.getByText("News")).toBeVisible();
-  expect(screen.getByText("Partial")).toBeVisible();
-  expect(screen.getByText("sec")).toBeVisible();
-  const incrementalCard = document.querySelector<HTMLElement>(
-    ".research-node-card.incremental",
-  );
-  expect(incrementalCard).not.toBeNull();
-  expect(within(incrementalCard!).getAllByText("Audit details")).toHaveLength(1);
-  expect(within(incrementalCard!).getByText(/coverage\.partial/)).not.toBeVisible();
-  fireEvent.click(within(incrementalCard!).getAllByText("Audit details")[0]);
-  expect(screen.getByText(/coverage\.partial/)).toBeVisible();
-  expect(document.querySelector(".research-node-card.full")).toBeInTheDocument();
-  expect(document.querySelector(".research-node-card.incremental")).toBeInTheDocument();
+  await waitFor(() => expect(api.run).toHaveBeenCalledWith("increment-1"));
+  const history = screen.getByRole("navigation", { name: "Research history" });
+  fireEvent.click(within(history).getByRole("button", { name: /2026-07-20/ }));
+  await waitFor(() => expect(api.run).toHaveBeenCalledWith("full-primary"));
+  expect(api.selectPrimaryCycle).not.toHaveBeenCalled();
+  expect(screen.queryByText("Audit details")).not.toBeInTheDocument();
 });
 
-test.each([
-  [
-    "en",
-    "Stock return: Not yet observable · Both cutoffs resolve to the same completed session.",
-    "S&P 500: Unavailable · Benchmark market data is unavailable.",
-  ],
-  [
-    "zh-CN",
-    "股票回报: 尚不可观察 · 两个截止点对应同一个已完成交易日。",
-    "S&P 500: 不可用 · 基准市场数据不可用。",
-  ],
-  [
-    "ja",
-    "株価リターン: まだ観測不可 · 両方のカットオフは同じ完了済みセッションに対応しています。",
-    "S&P 500: 利用不可 · ベンチマークの市場データを利用できません。",
-  ],
-])(
-  "localizes stock and benchmark performance reasons in %s",
-  async (language, knownReason, fallback) => {
-    const current = detail();
-    current.timeline.cycles![0].increments![0].performance = {
-      stock: {
-        status: "not_yet_observable",
-        reason: "Both cutoffs resolve to the same completed session.",
-      },
-      benchmarks: [
-        {
-          name: "S&P 500",
-          component: {
-            status: "unavailable",
-            reason: "Benchmark unavailable: calendar.unavailable.",
-          },
-        },
-      ],
-    } as never;
-    await i18n.changeLanguage(language);
-    vi.mocked(api.timeline).mockResolvedValue(current);
-
-    render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
-
-    expect(await screen.findByText(knownReason)).toBeVisible();
-    expect(screen.getByText(fallback)).toBeVisible();
-    expect(screen.queryByText("calendar.unavailable")).not.toBeInTheDocument();
-  },
-);
+test("does not substitute the primary head for an unavailable explicit node", async () => {
+  render(<Router initialPath="/timelines/NVDA?node=missing"><Timeline /></Router>);
+  expect(await screen.findByText(/This research is unavailable/)).toBeVisible();
+  expect(api.run).not.toHaveBeenCalled();
+});
 
 test("selects human-readable nodes and renders a structured comparison", async () => {
   const comparison: ResearchNodeComparison = {
@@ -403,10 +357,11 @@ test("selects human-readable nodes and renders a structured comparison", async (
   vi.mocked(api.compareResearchNodes).mockResolvedValue(comparison);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
+  fireEvent.click(await screen.findByRole("button", { name: "Compare research" }));
   const selectors = await screen.findAllByRole("button", { name: "Select for comparison" });
   fireEvent.click(selectors[0]);
   fireEvent.click(selectors[1]);
-  expect(screen.getByText(/2026-07-25 · Hold/)).toBeVisible();
+  expect(screen.getAllByText("2026-07-25").length).toBeGreaterThan(0);
   const compareButton = screen.getByRole("button", {
     name: "Compare selected nodes",
   });
@@ -468,7 +423,10 @@ test("changes Primary Research using a human-readable cycle", async () => {
   vi.mocked(api.selectPrimaryCycle).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Make primary" }));
+  const target = (await screen.findByRole("button", { name: /2026-07-10/ })).closest(".history-node")!;
+  fireEvent.click(target.closest("details")!.querySelector("summary")!);
+  fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Make primary" }));
   await waitFor(() => expect(api.selectPrimaryCycle).toHaveBeenCalledWith("NVDA", "full-secondary"));
 });
 
@@ -481,7 +439,9 @@ test("requires an explicit Primary replacement when trashing the primary Full cy
   vi.mocked(api.timeline).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  fireEvent.click((await screen.findAllByRole("button", { name: "Move Cycle to Trash" }))[0]);
+  const target = (await screen.findByRole("button", { name: /2026-07-20/ })).closest(".history-node")!;
+  fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
   fireEvent.change(screen.getByLabelText("Replacement Primary Cycle"), { target: { value: "full-secondary" } });
   fireEvent.click(screen.getByRole("button", { name: "Confirm Trash" }));
 
@@ -504,18 +464,20 @@ test("offers Primary replacement cycles outside the current Timeline page", asyn
   vi.mocked(api.timeline).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Move Cycle to Trash" }));
+  const target = (await screen.findByRole("button", { name: /2026-07-20/ })).closest(".history-node")!;
+  fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
   expect(
-    screen.getByRole("option", { name: "2026-06-30 · Hold · Medium confidence" }),
+    screen.getByRole("option", { name: "2026-06-30 · Hold" }),
   ).toBeVisible();
 });
 
 test("paginates complete cycles without using the retired node contract", async () => {
   const current = detail();
   current.timeline.cycle_total = 24;
-  vi.mocked(api.timeline).mockResolvedValue(current);
+  vi.mocked(api.timeline).mockImplementation(async (_instrument, _limit, offset) => ({ timeline: { ...current.timeline, cycle_offset: offset } }));
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  fireEvent.click(await screen.findByRole("button", { name: "Next →" }));
-  await waitFor(() => expect(api.timeline).toHaveBeenLastCalledWith("NVDA", 12, 12, "active"));
+  fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  await waitFor(() => expect(api.timeline).toHaveBeenLastCalledWith("NVDA", 12, 12, "active", undefined));
 });

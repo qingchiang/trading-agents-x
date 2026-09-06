@@ -171,9 +171,10 @@ export const api = {
     cycleLimit = 20,
     cycleOffset = 0,
     trashState: "active" | "trashed" | "all" = "active",
+    focusNodeId?: string,
   ) =>
     request<TimelineDetail>(
-      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}`,
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}${focusNodeId ? `&focus_node_id=${encodeURIComponent(focusNodeId)}` : ""}`,
     ),
   baselineCandidates: (instrument: string, before: string) =>
     request<FullBaselineCandidates>(

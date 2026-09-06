@@ -1,3 +1,4 @@
+import { workspaceTranslations } from "./workspaceTranslations";
 import i18n from "i18next";
 import type { TFunction } from "i18next";
 import { initReactI18next } from "react-i18next";
@@ -2404,6 +2405,10 @@ const ja = {
     statusCancelled: "キャンセル済み",
   },
 };
+
+Object.assign(en.translation, workspaceTranslations.en);
+Object.assign(zhCN.translation, workspaceTranslations["zh-CN"]);
+Object.assign(ja.translation, workspaceTranslations.ja);
 
 const saved = localStorage.getItem("tradingagents-locale") || "zh-CN";
 

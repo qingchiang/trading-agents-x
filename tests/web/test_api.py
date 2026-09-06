@@ -1057,6 +1057,15 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         commit_full(date(2026, 7, 24), make_primary=False),
     ]
 
+    focused = await web_client.get(
+        f"/api/v1/timelines/NVDA?cycle_limit=2&focus_node_id={sorted(same_cutoff)[1]}"
+    )
+    assert focused.status_code == 200
+    assert focused.json()["timeline"]["cycle_offset"] == 2
+    assert focused.json()["timeline"]["cycles"][0]["id"] == sorted(same_cutoff)[1]
+    missing = await web_client.get("/api/v1/timelines/NVDA?focus_node_id=missing")
+    assert missing.status_code == 404
+
     first_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2")
     second_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2&cycle_offset=2")
 
@@ -1066,6 +1075,18 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
     assert first_page.json()["timeline"]["cycle_limit"] == 2
     assert first_page.json()["timeline"]["cycle_offset"] == 0
     assert second_page.json()["timeline"]["cycle_offset"] == 2
+    hidden_id = sorted(same_cutoff)[1]
+    web_repository.trash_runs((hidden_id,))
+    hidden = await web_client.get(f"/api/v1/timelines/NVDA?focus_node_id={hidden_id}")
+    assert hidden.status_code == 409
+    retained = await web_client.get(
+        f"/api/v1/timelines/NVDA?focus_node_id={hidden_id}&trash_state=all"
+    )
+    assert retained.status_code == 200
+    assert hidden_id in [node["id"] for node in _timeline_nodes(retained.json()["timeline"])]
+    wrong_instrument = await web_client.get(f"/api/v1/timelines/7203.T?focus_node_id={oldest}")
+    assert wrong_instrument.status_code == 404
+
     assert len(first_page.json()["timeline"]["active_full_cycles"]) == 3
     assert (
         first_page.json()["timeline"]["active_full_cycles"]

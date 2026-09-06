@@ -10,7 +10,6 @@ import { formatDecisionNumber } from "../numericDisplay";
 import EvidenceLinks from "./EvidenceLinks";
 import { MarkdownList } from "./AnalystReportView";
 import Markdown from "./Markdown";
-import NumericAuditAppendixView from "./NumericAuditAppendixView";
 
 export default function ResearchDecisionView({
   decision,
@@ -76,7 +75,6 @@ export function ResearchDecisionContent({
     (left, right) =>
       scenarioOrder.indexOf(left.kind) - scenarioOrder.indexOf(right.kind),
   );
-  const calculationUses = buildCalculationUses(decision, t);
 
   return (
     <div className={embedded ? "decision-content embedded" : "decision-content"}>
@@ -121,12 +119,12 @@ export function ResearchDecisionContent({
         </div>
       </header>
 
-      {(decision.numeric_audit_status === "partial" ||
+      {((decision.numeric_audit_status === "partial" || numericAudit?.status === "partial") ||
         decision.numeric_audit_status === "incomplete") && (
         <div className="numeric-audit-notice" role="status">
           <span>
             {t(
-              decision.numeric_audit_status === "partial"
+              (decision.numeric_audit_status === "partial" || numericAudit?.status === "partial")
                 ? "numericAuditPartial"
                 : "numericAuditIncomplete",
             )}
@@ -138,6 +136,35 @@ export function ResearchDecisionContent({
           )}
         </div>
       )}
+
+      <section className="decision-section decision-lists-grid">
+        <MarkdownList
+          title={t("catalysts")}
+          items={decision.catalysts ?? []}
+          empty={t("noCatalystsIdentified")}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          title={t("risks")}
+          items={decision.risks}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          title={t("invalidation")}
+          items={decision.invalidation_conditions}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          title={t("unresolvedQuestions")}
+          items={decision.unresolved_questions ?? []}
+          empty={t("noneRecorded")}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+      </section>
 
       <section className="decision-section">
         <div className="decision-section-heading">
@@ -385,34 +412,7 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      <section className="decision-section decision-lists-grid">
-        <MarkdownList
-          title={t("catalysts")}
-          items={decision.catalysts ?? []}
-          empty={t("noCatalystsIdentified")}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("risks")}
-          items={decision.risks}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("invalidation")}
-          items={decision.invalidation_conditions}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("unresolvedQuestions")}
-          items={decision.unresolved_questions ?? []}
-          empty={t("noneRecorded")}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-      </section>
+
 
       {(decision.risk_review_adjustments ?? []).length > 0 && (
         <section className="decision-section">
@@ -449,18 +449,7 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      {!embedded &&
-        (numericAudit || (decision.calculation_records ?? []).length > 0) && (
-        <section className="decision-section numeric-audit-section">
-          <NumericAuditAppendixView
-            appendix={numericAudit}
-            calculationRecords={decision.calculation_records ?? []}
-            calculationUses={calculationUses}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        </section>
-      )}
+
 
     </div>
   );
@@ -503,51 +492,6 @@ function formatRange(
   }`;
 }
 
-function buildCalculationUses(
-  decision: ResearchDecision,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): Map<string, string[]> {
-  const uses = new Map<string, string[]>();
-  const add = (ids: string[] | undefined, label: string) => {
-    (ids ?? []).forEach((id) => {
-      const labels = uses.get(id) ?? [];
-      if (!labels.includes(label)) labels.push(label);
-      uses.set(id, labels);
-    });
-  };
-  (decision.calculation_records ?? []).forEach((calculation) =>
-    (calculation.decision_uses ?? []).forEach((use) =>
-      add([calculation.id], decisionCalculationUseLocation(use.component_path, t)),
-    ),
-  );
-  decision.scenarios.forEach((scenario) =>
-    add(
-      (scenario.reference_ranges ?? []).flatMap((referenceRange) =>
-        [
-          referenceRange.low.calculation_id,
-          referenceRange.high.calculation_id,
-        ].filter((value): value is string => Boolean(value)),
-      ),
-      t("calculationUseScenario", { scenario: t(scenarioKey(scenario.kind)) }),
-    ),
-  );
-  if (decision.valuation_assessment) {
-    add(
-      [
-        decision.valuation_assessment.low.calculation_id,
-        decision.valuation_assessment.high.calculation_id,
-      ].filter((value): value is string => Boolean(value)),
-      t("valuationAssessment"),
-    );
-  }
-  (decision.market_reference_levels ?? []).forEach((level) =>
-    add(
-      level.calculation_ids,
-      t("calculationUseMarketReference", { label: level.label }),
-    ),
-  );
-  return uses;
-}
 
 function decisionCalculationUseLocation(
   componentPath: string,
