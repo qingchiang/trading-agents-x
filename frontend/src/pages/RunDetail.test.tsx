@@ -1800,3 +1800,11 @@ test("localizes canonical report labels for zh-CN", async () => {
     ).not.toBe(0);
   });
 });
+
+test("returns from the evidence tab to the report the reader was viewing", async () => {
+  render(<Router initialPath="/runs/run-1?view=reports&report=market"><RunDetail /><LocationProbe /></Router>);
+  await screen.findByRole("heading", { name: "Market report" });
+  fireEvent.click(screen.getByRole("tab", { name: "Evidence" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Return to reports/ }));
+  expect(screen.getByTestId("router-location")).toHaveTextContent("view=reports&report=market");
+});

@@ -83,7 +83,7 @@ export default function Runs() {
   </div>;
   return <section>
     <header className="page-header"><div><h1>{t("runManagement")}</h1><p className="subtitle">{t("cycleTasksHint")}</p></div></header>
-    <div className="view-tabs" role="tablist" onKeyDown={tabsKeyDown}>{[false, true].map(value => <button role="tab" aria-selected={trash === value} tabIndex={trash === value ? 0 : -1} key={String(value)} onClick={() => update({ trash_state: value ? "trashed" : null, offset: null })}>{t(value ? "trashedRuns" : "activeRuns")}</button>)}</div>
+    <div className="view-tabs" role="tablist" onKeyDown={tabsKeyDown}>{[false, true].map(value => <button role="tab" id={value ? "trash-tab" : "active-tab"} aria-controls="task-results" aria-selected={trash === value} tabIndex={trash === value ? 0 : -1} key={String(value)} onClick={() => update({ trash_state: value ? "trashed" : null, offset: null })}>{t(value ? "trashedRuns" : "activeRuns")}</button>)}</div>
     {trash && <p className="research-limitations"><strong>{t("trashRetentionTitle")}</strong> · {t(retention ? "trashRetentionPolicy" : "trashRetentionDisabled", { count: retention })}</p>}
     <form className="task-filter-bar" onSubmit={filter}>
       <label>{t("runSearch")}<input id="runs-search" type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
@@ -92,6 +92,7 @@ export default function Runs() {
       <button className="button" type="submit">{t("apply")}</button>
     </form>
     {selected.length > 0 && <button className="button" onClick={() => setOperation({ ids: selected, action: trash ? "restore" : "trash" })}>{t(trash ? "restoreSelected" : "trashSelected", { count: selected.length })}</button>}
+    <div id="task-results" role="tabpanel" aria-labelledby={trash ? "trash-tab" : "active-tab"}>
     {notice && <p className="notice" role="status">{notice}</p>}
     {error && <p className="alert" role="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></p>}
     {!page && !error && <p role="status">{t("loading")}</p>}
@@ -105,6 +106,7 @@ export default function Runs() {
       {(group.related_tasks ?? []).length > 0 && <div className={group.baseline ? "related-tasks" : "standalone-tasks"}>{group.baseline && <p>{t("relatedTasksHint")}</p>}{(group.related_tasks ?? []).map(run => row(run, (group.matched_run_ids ?? []).includes(run.id)))}</div>}
     </article>)}
     {page && (page.total > page.limit || offset > 0) && <div className="pagination"><button className="button" disabled={!offset} onClick={() => update({ offset: String(Math.max(0, offset - page.limit)) })}>{t("previous")}</button><span>{t("groupRange", { start: page.total ? offset + 1 : 0, end: Math.min(offset + page.items.length, page.total), total: page.total })}</span><button className="button" disabled={offset + page.limit >= page.total} onClick={() => update({ offset: String(offset + page.limit) })}>{t("next")}</button></div>}
+    </div>
     {operation && <RunLifecycleDialog runIds={operation.ids} action={operation.action} onClose={() => setOperation(null)} onDone={changed => { setNotice(t(operation.action === "trash" ? "runsTrashed" : operation.action === "restore" ? "runsRestored" : "researchRemoved", { count: changed })); setOperation(null); setSelected([]); if (offset) update({ offset: "0" }); else setRevision(value => value + 1); }} />}
   </section>;
 }

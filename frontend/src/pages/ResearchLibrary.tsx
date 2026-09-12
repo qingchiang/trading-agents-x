@@ -1,3 +1,4 @@
+import { useReadingPosition } from "../useReadingPosition";
 import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ResearchTimelinePage } from "../api/client";
@@ -18,17 +19,19 @@ export default function ResearchLibrary() {
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const [page, setPage] = useState<ResearchTimelinePage | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let active = true;
-    setPage(null); setError("");
+    setLoading(true); setError("");
     const timer = window.setTimeout(() => {
       void api.timelines(25, offset, q, warningOnly).then(value => {
-        if (active) setPage(value);
-      }, cause => { if (active) setError(String(cause)); });
+        if (active) { setPage(value); setLoading(false); }
+      }, cause => { if (active) { setError(String(cause)); setLoading(false); } });
     }, 180);
     return () => { active = false; window.clearTimeout(timer); };
   }, [q, warningOnly, offset, revision]);
+  useReadingPosition(`tradingagents-library:${location.search}`, undefined, Boolean(page) && !loading);
   function update(values: Record<string, string | null>, replace = false) {
     const next = new URLSearchParams(location.search);
     Object.entries(values).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key));
@@ -40,8 +43,9 @@ export default function ResearchLibrary() {
       <label><span>{t("searchResearch")}</span><input type="search" value={q} maxLength={200} onChange={event => update({ q: event.target.value, offset: null }, true)} /></label>
       <label className="checkbox-label"><input type="checkbox" checked={warningOnly} onChange={event => update({ warning_only: event.target.checked ? "true" : null, offset: null })} />{t("warningOnly")}</label>
     </div>
-    {error ? <div role="alert" className="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></div>
-      : !page ? <div className="loading" role="status">{t("loading")}</div>
+    {page && loading && <p role="status">{t("updatingResults")}</p>}
+    {error && <div role="alert" className="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></div>}
+    {!page ? (!error && <div className="loading" role="status">{t("loading")}</div>)
       : page.items?.length ? <div className="table-wrap"><table className="research-library-table">
         <thead><tr><th>{t("ticker")}</th><th>{t("researchRating")}</th><th>{t("primaryCutoff")}</th><th>{t("historyNavigation")}</th></tr></thead>
         <tbody>{page.items.map(item => <Fragment key={item.instrument}><tr>

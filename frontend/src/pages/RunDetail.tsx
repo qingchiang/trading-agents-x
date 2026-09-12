@@ -356,12 +356,13 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
       navigate(
         runDetailPath(runId, {
           view,
-          report:
-            view === "reports" && activeReport ? activeReport : undefined,
+          report: view === "reports" && activeReport ? activeReport : undefined,
+          return_view: view === "evidence" && activeView !== "evidence" ? activeView : undefined,
+          return_report: view === "evidence" && activeView === "reports" ? activeReport : undefined,
         }),
       );
     },
-    [activeReport, navigate, runId],
+    [activeReport, activeView, navigate, runId],
   );
 
   const selectReport = useCallback(
@@ -414,7 +415,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
   const requestedReturnView = searchParams.get("return_view");
   const returnView: ReturnViewName = isReturnViewName(requestedReturnView)
     ? requestedReturnView
-    : "timeline";
+    : isIncremental ? "brief" : "decision";
   const requestedReturnReport = searchParams.get("return_report") ?? "";
   const returnReport =
     returnView === "reports" && reportNames.includes(requestedReturnReport)
@@ -618,6 +619,7 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
             role="tab"
             aria-selected={activeView === view}
             tabIndex={activeView === view ? 0 : -1}
+            id={`run-tab-${view}`}
             aria-controls={`run-view-${view}`}
             className={activeView === view ? "active" : ""}
             onClick={() => selectView(view)}
@@ -761,7 +763,7 @@ function IncrementalDecisionPanel({
   return (
     <article
       className="panel audit-panel decision-panel-v2 incremental-decision-panel"
-      id="run-view-decision"
+      id="run-view-decision" aria-labelledby="run-tab-decision"
       role="tabpanel"
     >
       <IncrementalOutcomeSummary node={node} />
@@ -799,7 +801,7 @@ function IncrementalBriefPanel({
   return (
     <article
       className="panel audit-panel report-panel reader-panel"
-      id="run-view-brief"
+      id="run-view-brief" aria-labelledby="run-tab-brief"
       role="tabpanel"
     >
       <div className="panel-header">
@@ -890,7 +892,7 @@ function ReassessmentPanel({
   return (
     <article
       className="panel audit-panel incremental-reassessment-panel"
-      id="run-view-reassessment"
+      id="run-view-reassessment" aria-labelledby="run-tab-reassessment"
       role="tabpanel"
     >
       <div className="panel-header">
@@ -1062,7 +1064,7 @@ function DeliberationPanel({
   return (
     <article
       className="panel audit-panel reader-panel"
-      id="run-view-deliberation"
+      id="run-view-deliberation" aria-labelledby="run-tab-deliberation"
       role="tabpanel"
     >
       <div className="panel-header">
@@ -1110,7 +1112,7 @@ function EvidencePanel({
   return (
     <article
       className="panel audit-panel"
-      id="run-view-evidence"
+      id="run-view-evidence" aria-labelledby="run-tab-evidence"
       role="tabpanel"
     >
       <div className="panel-header">
@@ -1378,7 +1380,7 @@ function ReportsPanel({
   return (
     <article
       className="panel audit-panel report-panel reader-panel"
-      id="run-view-reports"
+      id="run-view-reports" aria-labelledby="run-tab-reports"
       role="tabpanel"
     >
       <div className="panel-header">
@@ -1403,6 +1405,7 @@ function ReportsPanel({
               </button>
             ))}
           </div>
+          <ResearchLimitations warnings={reportWarnings(reports[activeReport])} sections={typeof reports[activeReport] === "string" ? [] : (reports[activeReport] as AnalystReport).report_sections} />
           <AnalystReportView
             report={reports[activeReport]}
             runId={runId}
@@ -1410,7 +1413,6 @@ function ReportsPanel({
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
-          <ResearchLimitations warnings={reportWarnings(reports[activeReport])} />
         </>
       )}
     </article>
@@ -1441,12 +1443,26 @@ function DecisionPanel({
   );
 }
 
-function ResearchLimitations({ warnings }: { warnings: VisibleWarning[] }) {
+function ResearchLimitations({ warnings, sections = [] }: { warnings: VisibleWarning[]; sections?: AnalystReport["report_sections"] }) {
   const { t } = useTranslation();
   const items = dedupeWarnings(warnings);
   if (!items.length) return null;
-  return <section className="research-limitations" role="status"><strong>{t("researchLimitations")}</strong>
-    <ul>{items.map(warning => <li key={warningKey(warning)}>{warningMessage(warning)}</li>)}</ul></section>;
+  return <section className="research-limitations" role="status">
+    <strong>{t("researchLimitations")}</strong>
+    <ul>{items.map(warning => {
+      const reference = typeof warning === "string" ? undefined : warning.evidence_ref;
+      const related = reference ? sections.filter(section => section.source_refs?.includes(reference)) : [];
+      return <li key={warningKey(warning)}>{warningMessage(warning)}
+        {related.map(section => <a className="text-link limitation-section-link" key={section.id} href={`#${section.anchor}`} onClick={event => {
+          event.preventDefault();
+          const target = document.getElementById(`user-content-${section.anchor}`);
+          target?.scrollIntoView({ block: "start" });
+          target?.focus({ preventScroll: true });
+          window.history.replaceState(window.history.state, "", `#${section.anchor}`);
+        }}>{section.title}</a>)}
+      </li>;
+    })}</ul>
+  </section>;
 }
 
 function RunWarnings({ warnings, openRequest }: { warnings: VisibleWarning[]; openRequest: number }) {

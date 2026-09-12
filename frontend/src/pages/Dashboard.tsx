@@ -1,3 +1,4 @@
+import ExpandableText from "../components/ExpandableText";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type RunSummaryView } from "../api/client";
@@ -50,11 +51,6 @@ function RunRows({ runs }: { runs: RunSummaryView[] }) {
     {run.research_kind === "incremental" && <small className="task-cycle-link"><Link to={`/timelines/${encodeURIComponent(run.request.ticker)}?node=${run.full_baseline_run_id}`}>{t("baselineDate")}</Link></small>}
   </li>)}</ul>;
 }
-function Thesis({ text }: { text: string }) {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  return <div className="thesis-excerpt"><p className={expanded ? "expanded" : "clamped"}>{text}</p>{text.length > 120 && <button className="text-button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{t(expanded ? "collapseText" : "readMore")}</button>}</div>;
-}
 export default function Dashboard() {
   const { t } = useTranslation();
   return <section>
@@ -64,7 +60,7 @@ export default function Dashboard() {
       <Region title={t("continueResearch")} to="/timelines" load={loadRecent}>{page => page.items?.length ? <div className="research-summary-list">{page.items.map(item => <article className="research-summary" key={item.instrument}>
         <header><Link to={`/timelines/${encodeURIComponent(item.instrument)}`}><InstrumentIdentity ticker={item.instrument} instrumentName={item.instrument_name} instrumentLocalName={item.instrument_local_name} /></Link><div><ResearchRatingBadge rating={item.primary_rating} />{item.primary_confidence && <small>{researchConfidenceLabel(t, item.primary_confidence)}</small>}</div></header>
         <p className="summary-cycle">{t("primaryCycle")} · {t("baselineDate")}: {item.primary_baseline_date ?? "—"} · {t("primaryCutoff")}: {item.primary_analysis_date ?? "—"}</p>
-        {item.primary_thesis && <Thesis text={item.primary_thesis} />}
+        {item.primary_thesis && <ExpandableText text={item.primary_thesis} />}
         {item.timeline_warning && <p className="warning-copy">{t("fullResearchRecommended")}</p>}
         {item.latest_completed_cycle_id && item.latest_completed_cycle_id !== item.primary_cycle_id && <p className="other-cycle-notice"><Link to={`/timelines/${encodeURIComponent(item.instrument)}?node=${item.latest_completed_run_id}`}>{t("otherCycleCompleted")}: {item.latest_completed_analysis_date}</Link></p>}
         <footer><Link className="text-link" to={`/timelines/${encodeURIComponent(item.instrument)}`}>{t("openResearch")}</Link>{item.primary_cycle_id && item.primary_head_run_id && <Link className="text-link" to={`/runs/new?intent=update&from_run=${item.primary_head_run_id}&full_baseline_run_id=${item.primary_cycle_id}`}>{t("updateThisResearch")}</Link>}</footer>

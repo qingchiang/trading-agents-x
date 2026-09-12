@@ -69,7 +69,7 @@ h2, .panel-header h2 { font-size: 20px; }
 .action-menu-content .button, .action-menu-content a { text-align: left; justify-content: flex-start; width: 100%; border: 0; }
 .view-tabs { box-shadow: none; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; }
 .view-tabs button { border-radius: 0; border-bottom: 2px solid transparent; }
-.view-tabs button.active { border-bottom-color: var(--blue); background: transparent; }
+.view-tabs button[aria-selected="true"] { border-bottom-color: var(--blue); background: transparent; }
 button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .source-drawer, .comparison-modal, .confirm-card { box-shadow: 0 12px 40px #16283d24; }
 @media (max-width: 1120px) {
@@ -173,7 +173,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .workspace-reader .view-tabs { background: #fff; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; }
 .view-tabs { overflow-x: auto; flex-wrap: nowrap; }
 .view-tabs button { flex-shrink: 0; }
-.view-tabs button.active { color: #234f99; background: #e8f0fc; }
+.view-tabs button[aria-selected="true"] { color: #234f99; background: #e8f0fc; }
 .workspace-reader .report-reading-layout { display: block; padding: 24px; }
 .workspace-reader .floating-navigation-slot { display: none; }
 .workspace-reader .floating-section-select { display: none; }
@@ -291,3 +291,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
   .workspace-reader .incremental-outcome-summary { padding: 16px; }
   .research-header { margin-bottom: 16px; padding-bottom: 14px; }
 }
+
+/* Native choice controls do not inherit text-input geometry. */
+input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; padding: 0; margin: 0; accent-color: var(--blue); }
+.checkbox-label, .workbench-toolbar .checkbox-label { display: flex; flex: 0 1 auto; align-items: center; gap: 10px; min-height: 42px; }
+
+.limitation-section-link { display: inline-block; margin-inline-start: 12px; }

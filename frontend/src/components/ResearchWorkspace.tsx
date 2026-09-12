@@ -1,5 +1,5 @@
 import WorkspaceOutline from "./WorkspaceOutline";
-import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { tabsKeyDown, useModal } from "./Interaction";
 
@@ -7,6 +7,7 @@ export const WorkspaceNavigationTarget = createContext<HTMLElement | null | unde
 
 export default function ResearchWorkspace({ history, children }: { history: ReactNode; children: ReactNode }) {
   const { t } = useTranslation();
+  const tabsId = useId();
   const container = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(false);
   const [open, setOpen] = useState(false);
@@ -26,6 +27,19 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
     observer.observe(container.current);
     return () => observer.disconnect();
   }, []);
+  useLayoutEffect(() => {
+    if (!wide && !open || tab !== "history") return;
+    const frame = requestAnimationFrame(() => {
+      const rail = panel.current;
+      const selected = rail?.querySelector<HTMLElement>(".history-select[aria-current]");
+      if (!rail || !selected) return;
+      const area = rail.getBoundingClientRect();
+      const row = selected.getBoundingClientRect();
+      if (row.top < area.top + 70) rail.scrollTop += row.top - area.top - 70;
+      else if (row.bottom > area.bottom - 16) rail.scrollTop += row.bottom - area.bottom + 16;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [wide, open, tab, history, panel]);
   return <WorkspaceNavigationTarget.Provider value={target}>
     <div className={`research-workspace ${wide ? "wide" : "compact"}`} ref={container}>
       {!wide && <button className="button workspace-navigation-trigger" aria-expanded={open} onClick={() => setOpen(true)}>{t("historyNavigation")} / {t("onThisReport")}</button>}
@@ -33,10 +47,10 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
       <aside className="workspace-auxiliary" hidden={!wide && !open} ref={panel} role={!wide && open ? "dialog" : undefined} aria-modal={!wide && open || undefined} aria-label={t("historyNavigation")}>
         {!wide && <button className="button" onClick={() => setOpen(false)}>{t("closeNavigation")}</button>}
         <div className="auxiliary-tabs" role="tablist" onKeyDown={tabsKeyDown}>
-          {["history", "contents"].map(value => <button role="tab" aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
+          {["history", "contents"].map(value => <button role="tab" id={`${tabsId}-${value}`} aria-controls={`${tabsId}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
         </div>
-        <div hidden={tab !== "history"} onClick={event => { if ((event.target as HTMLElement).closest(".history-select")) setOpen(false); }}>{history}</div>
-        <div hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
+        <div role="tabpanel" id={`${tabsId}-history-panel`} aria-labelledby={`${tabsId}-history`} hidden={tab !== "history"} onClick={event => { if ((event.target as HTMLElement).closest(".history-select")) setOpen(false); }}>{history}</div>
+        <div role="tabpanel" id={`${tabsId}-contents-panel`} aria-labelledby={`${tabsId}-contents`} hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
       </aside>
       {children}
       <WorkspaceOutline container={container} target={target} />

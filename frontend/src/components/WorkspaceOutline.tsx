@@ -31,6 +31,6 @@ export default function WorkspaceOutline({ container, target }: { container: Ref
   return createPortal(<nav aria-label={t("onThisReport")} className="structured-outline floating-navigation-items">{headings.map(heading => <button key={heading.id} onClick={() => {
     const element = document.getElementById(heading.id);
     element?.scrollIntoView({ block: "start" }); element?.focus({ preventScroll: true });
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${heading.id}`);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${heading.id}`);
   }}>{heading.label}</button>)}</nav>, target);
 }

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import i18n from "../i18n";
 import { Router } from "../router";
@@ -98,4 +98,21 @@ test("closes the mobile drawer after navigation, backdrop, or Escape", () => {
   open();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(shell).not.toHaveClass("sidebar-open");
+});
+
+
+test("removes closed mobile navigation from accessibility and releases its modal on desktop resize", () => {
+  let changed!: (event: { matches: boolean }) => void;
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: (_: string, fn: typeof changed) => { changed = fn; }, removeEventListener() {} }));
+  try {
+    renderLayout();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(document.body.style.overflow).toBe("hidden");
+    act(() => changed({ matches: false }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  } finally { vi.unstubAllGlobals(); }
 });

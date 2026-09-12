@@ -26,7 +26,7 @@ export default function ResearchDecisionView({
     return (
       <article
         className="panel audit-panel"
-        id="run-view-decision"
+        id="run-view-decision" aria-labelledby="run-tab-decision"
         role="tabpanel"
       >
         <div className="empty-state">{t("noDecision")}</div>
@@ -36,7 +36,7 @@ export default function ResearchDecisionView({
   return (
     <article
       className="panel audit-panel decision-panel-v2"
-      id="run-view-decision"
+      id="run-view-decision" aria-labelledby="run-tab-decision"
       role="tabpanel"
     >
       <ResearchDecisionContent

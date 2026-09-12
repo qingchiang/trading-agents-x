@@ -100,7 +100,7 @@ export default function Timeline() {
   if (isList) return <Suspense fallback={<div className="loading">{t("loading")}</div>}><ResearchLibrary /></Suspense>;
   return <section>
     <header className="page-header research-header">
-      <div><Link className="back-link" to="/timelines">{t("backToResearch")}</Link>
+      <div><Link className="back-link" to={location.sourceLibrary?.url ?? "/timelines"}>{t("backToResearch")}</Link>
         <InstrumentIdentity ticker={instrument} instrumentName={detail?.timeline.instrument_name} instrumentLocalName={detail?.timeline.instrument_local_name} prominent />
         {selected && <div className="workspace-context"><span>{t("selectedCutoff")}: {selected.analysis_date}</span><span>{t("baselineDate")}: {selectedCycle?.baseline.analysis_date}</span>
           <span>{t(selectedCycle?.is_primary && selected.is_cycle_head ? "currentPrimary" : "selectedResearch")}</span></div>}

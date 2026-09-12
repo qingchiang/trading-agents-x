@@ -19,8 +19,17 @@ export default function Layout({ children }: PropsWithChildren) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(sidebarPreferenceKey) === "true",
   );
+  const [compact, setCompact] = useState(() => window.matchMedia?.("(max-width: 820px)").matches ?? false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const sidebarRef = useModal<HTMLElement>(drawerOpen, () => setDrawerOpen(false));
+
+  useEffect(() => {
+    const query = window.matchMedia?.("(max-width: 820px)");
+    if (!query) return;
+    const resize = (event: MediaQueryListEvent) => { setCompact(event.matches); if (!event.matches) setDrawerOpen(false); };
+    query.addEventListener("change", resize);
+    return () => query.removeEventListener("change", resize);
+  }, []);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -65,7 +74,7 @@ export default function Layout({ children }: PropsWithChildren) {
       >
         <Icon name="menu" />
       </button>
-      <aside className="sidebar" id="primary-sidebar" ref={sidebarRef} role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen || undefined} aria-label={t("primaryNavigation")}>
+      <aside className="sidebar" inert={compact && !drawerOpen} aria-hidden={compact && !drawerOpen || undefined} id="primary-sidebar" ref={sidebarRef} role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen || undefined} aria-label={t("primaryNavigation")}>
         <button
           type="button"
           className="mobile-sidebar-close"
@@ -81,7 +90,7 @@ export default function Layout({ children }: PropsWithChildren) {
             <small>{t("brandTagline")}</small>
           </div>
         </div>
-        <Link className="button primary global-new-research" to="/runs/new" onClick={() => setDrawerOpen(false)}><Icon name="newRun" /><span className="nav-label">{t("newRun")}</span></Link>
+        <Link className="button primary global-new-research" aria-label={t("newRun")} to="/runs/new" onClick={() => setDrawerOpen(false)}><Icon name="newRun" /><span className="nav-label">{t("newRun")}</span></Link>
         <nav aria-label={t("primaryNavigation")}>
           {nav.map((item) => (
             <Link

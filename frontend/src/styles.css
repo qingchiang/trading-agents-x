@@ -1033,7 +1033,7 @@ label small {
   background: var(--surface-soft);
 }
 
-.view-tabs button.active {
+.view-tabs button[aria-selected="true"] {
   color: var(--blue);
   background: var(--blue-soft);
 }
@@ -2662,7 +2662,7 @@ button.research-kind-badge {
   font-weight: 700;
 }
 
-.workbench-toolbar input {
+.workbench-toolbar input:not([type="checkbox"]) {
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -3416,12 +3416,13 @@ button.research-kind-badge {
     width: min(320px, 86vw);
     height: 100dvh;
     padding: 24px 18px 20px;
-    box-shadow: 20px 0 50px rgb(0 0 0 / 28%);
+    box-shadow: none;
     transform: translateX(-105%);
     transition: transform 180ms ease;
   }
 
   .sidebar-open .sidebar {
+    box-shadow: 20px 0 50px rgb(0 0 0 / 28%);
     transform: translateX(0);
   }
 

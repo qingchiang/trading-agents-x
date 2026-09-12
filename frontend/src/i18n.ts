@@ -37,6 +37,7 @@ export function localizePerformanceReason(
 const en = {
   translation: {
     brandTagline: "Evidence-first research",
+    updatingResults: "Updating results…",
     dashboard: "Research workspace",
     newRun: "New research",
     runManagement: "Run tasks",
@@ -917,6 +918,7 @@ const en = {
 const zhCN = {
   translation: {
     brandTagline: "证据优先的投资研究",
+    updatingResults: "正在更新结果…",
     dashboard: "研究工作台",
     newRun: "新建研究",
     runManagement: "运行任务",
@@ -1770,6 +1772,7 @@ const zhCN = {
 const ja = {
   translation: {
     brandTagline: "エビデンス重視の投資リサーチ",
+    updatingResults: "検索結果を更新中…",
     dashboard: "リサーチワークスペース",
     newRun: "新規リサーチ",
     runManagement: "実行タスク",

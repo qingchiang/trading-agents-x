@@ -179,7 +179,7 @@ function ReportSectionNavigation({
       container && candidate && container.contains(candidate) ? candidate : null;
     if (!container || !heading) return;
     heading.scrollIntoView?.({ block: "start" });
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${encodeURIComponent(anchor)}`);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${encodeURIComponent(anchor)}`);
     heading.focus({ preventScroll: true });
     setActive(anchor);
   };

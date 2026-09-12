@@ -1,0 +1,58 @@
+import { makeRun, result, artifacts, cycleTimeline } from "./research";
+
+/** Mock-only research environment shared by browser checks and the local visual preview. */
+export function workspaceFixture(locale = "en") {
+  const language = locale === "zh-CN" ? "zh" : locale === "ja" ? "ja" : "en";
+  const copy = {
+    en: { summary: "Demand supports an Overweight assessment, with medium confidence. Execution and valuation remain the main constraints.", thesis: "Research assumptions weaken significantly. Missing information prevents independently evaluating interpretations.", brief: "The overall assessment is unchanged", reason: "New order information supports the baseline thesis. A missing quarterly filing limits verification of profitability.", sections: ["Demand and capacity", "Valuation and expectations", "Risks and open questions"], warning: "The latest quarterly filing is unavailable; margin assumptions could not be checked against a new filing.", paragraph: "Order visibility has improved, while capacity expansion takes time to translate into deliveries. This observation supports the demand thesis but does not establish the timing of revenue recognition. The assessment remains conditional on customer concentration and the reliability of available disclosures.", risk: "Customer spending slows before additional capacity becomes productive.", unresolved: "Can higher deliveries offset the cost of capacity expansion?" },
+    zh: { summary: "需求支撑偏积极的研究判断，置信度中等。产能兑现和估值预期仍是主要约束。", thesis: "订单可见度改善，有助于支撑需求判断；但产能扩张能否及时转化为交付仍需验证，最新季度报告缺失限制了对利润率的进一步判断。", brief: "整体判断未变", reason: "新增订单资料支持完整基线的核心论点。最新季度报告缺失，对盈利能力的核查仍有限。", sections: ["需求与产能", "估值与预期", "风险与未解决问题"], warning: "缺少最新季度报告，利润率假设尚未通过新的财务披露核查。", paragraph: "订单的可见度有所改善，但新增产能转化为实际交付仍需要时间。现有资料支持需求韧性的论点，却不能证明收入确认的具体节奏。判断仍取决于客户集中度、供应约束和已公开资料的可靠性；后续需观察订单结构与交付进度是否一致。", risk: "新增产能释放前，主要客户的支出放缓。", unresolved: "交付增长能否抵消产能扩张带来的成本？" },
+    ja: { summary: "需要は強気寄りの判断を支えています。確信度は中程度で、生産能力の拡大と評価水準が主な制約です。", thesis: "受注の見通しは改善していますが、生産能力の拡大が出荷に結び付く時期は不確かです。最新の四半期報告がなく、利益率の確認には制約があります。", brief: "総合判断に変更はありません", reason: "新しい受注資料は基準リサーチの論点を支持しています。最新の四半期報告がなく、収益性の確認は限定的です。", sections: ["需要と生産能力", "評価水準と期待", "リスクと未解決の課題"], warning: "最新の四半期報告がないため、利益率の前提を新しい財務開示で確認できません。", paragraph: "受注の見通しは改善していますが、生産能力の拡大が実際の出荷に結び付くには時間がかかります。この観察は需要の底堅さを支持する一方、売上計上の時期を確定するものではありません。顧客集中、供給制約、公開資料の信頼性を引き続き確認する必要があります。", risk: "追加の生産能力が稼働する前に、主要顧客の支出が鈍化する。", unresolved: "出荷の増加は生産能力拡大の費用を補えるか。" },
+  }[language];
+  const companies = [
+    ["NVDA", "NVIDIA Corporation", "英伟达", "Overweight"],
+    ["7203.T", "Toyota Motor Corporation", "トヨタ自動車", "Hold"],
+    ["600309.SS", "Wanhua Chemical Group", "万华化学", "Buy"],
+    ["GOOG", "Alphabet Inc.", "Alphabet", "Overweight"],
+    ["4568.T", "DAIICHI SANKYO COMPANY LIMITED", "第一三共", "Underweight"],
+    ["MSFT", "Microsoft Corporation", "微软", "Hold"],
+  ];
+  const full = { ...makeRun("full", "succeeded", { instrumentName: companies[0][1], instrumentLocalName: companies[0][2] }), is_research_node: true, research_kind: "full", research_confidence: "medium" };
+  full.request.analysis_date = "2026-07-01";
+  full.research_rating = "Overweight";
+  const report = result("full");
+  Object.assign(report.decision, { rating: "Overweight", executive_summary: copy.summary, thesis: copy.thesis, risks: [copy.risk], unresolved_questions: [copy.unresolved], catalysts: [copy.sections[0]], invalidation_conditions: [copy.sections[2]] });
+  report.decision.scenarios.forEach(scenario => { scenario.outcome = copy.paragraph; scenario.core_assumptions = [copy.sections[0]]; });
+  const sections = copy.sections.map((title, index) => ({ id: `section-${index}`, title, anchor: `section-${index}`, source_refs: ["ev_0123456789ab"] }));
+  report.reports.market.markdown = sections.map((section, index) => `## ${section.title}\n\n${copy.paragraph}[^ev_0123456789ab]\n\n${Array.from({ length: index + 2 }, () => copy.paragraph).join("\n\n")}`).join("\n\n");
+  report.reports.market.report_sections = sections;
+  report.reports.market.warnings = [{ code: "source.filing_missing", message: copy.warning, evidence_ref: "ev_0123456789ab", source: "fixture-feed" }];
+  report.evidence.items[0].content = copy.paragraph;
+  const baseline = { id: "full", cycle_id: "full", research_kind: "full" as const, instrument: "NVDA", analysis_date: "2026-07-01", decision: report.decision, is_active: true, is_primary: true, is_cycle_head: false, information_cutoff_at: "2026-07-01T20:00:00Z", method_snapshot: {}, is_baseline_compatible: true };
+  const calculation = { provider: "fixture-feed", adjustment_basis: "split-adjusted close", retrieved_at: "2026-07-25T20:05:00Z", baseline_information_cutoff_at: baseline.information_cutoff_at, target_information_cutoff_at: "2026-07-25T20:00:00Z", start_session: "2026-07-01", end_session: "2026-07-24", start_value: 100, end_value: 112, unrounded_return: 0.12 };
+  const increment = { ...full, id: "increment", research_kind: "incremental", full_baseline_run_id: "full", request: { ...full.request, analysis_date: "2026-07-25", research_kind: "incremental", full_baseline_run_id: "full" } };
+  const increments = Array.from({ length: 24 }, (_, index) => ({ ...baseline, id: index === 23 ? "increment" : `increment-${index}`, research_kind: "incremental" as const, full_baseline_run_id: "full", analysis_date: `2026-07-${String(index + 2).padStart(2, "0")}`, is_cycle_head: index === 23, decision_outcome: "unchanged", decision_outcome_reason: copy.reason, reassessment: { entries: [{ component_id: "thesis", disposition: "strengthened", reason: copy.reason, evidence_refs: ["ev_0123456789ab"] }, { component_id: "risks.0", disposition: "unresolved", reason: copy.warning, evidence_refs: [] }, { component_id: "invalidation_conditions.0", disposition: "reaffirmed", reason: copy.risk, evidence_refs: [] }] }, performance: { stock: { status: "calculated", calculation }, benchmarks: [{ name: "S&P 500", component: { status: "calculated", calculation: { ...calculation, unrounded_return: 0.04, end_value: 104 } }, reported_difference: 0.08 }] } }));
+  const timeline = cycleTimeline("NVDA", [baseline, ...increments, { ...baseline, id: "older", cycle_id: "older", analysis_date: "2026-06-01", is_primary: false, is_cycle_head: true }], "full");
+  const pending = { ...increment, id: "pending", status: "running", is_research_node: false, research_rating: null, research_confidence: null, finished_at: null };
+  const summaries = companies.map(([instrument, instrument_name, instrument_local_name, rating], index) => ({ instrument, instrument_name, instrument_local_name, primary_cycle_id: "full", primary_head_run_id: "increment", primary_rating: rating, primary_confidence: "medium", primary_analysis_date: "2026-07-25", primary_baseline_date: "2026-07-01", primary_thesis: copy.thesis, full_cycle_count: 2, incremental_node_count: 24, latest_analysis_date: "2026-07-25", latest_research_completed_at: `2026-07-${25-index}T20:00:00Z`, timeline_warning: index === 4 }));
+  const capabilities = { defaults: { trash_retention_days: 30, profile: "standard", llm_provider: "openai", quick_model: "mock-quick", deep_model: "mock-deep", quick_reasoning_effort: "provider_default", deep_reasoning_effort: "provider_default", output_language: locale, lan_enabled: false }, profiles: ["fast", "standard", "deep"], analysts: ["market", "news", "fundamentals", "social"], output_languages: ["en", "zh-CN", "ja"], providers: { openai: { label: "OpenAI", configured: true, selectable: true, api_key_configured: true, model_discovery_supported: false } } };
+  return function respond(url: URL, method = "GET") {
+    const path = url.pathname;
+    if (path.includes("analysis-cutoff")) return { instrument: url.searchParams.get("instrument") ?? "NVDA", market_date: "2026-07-28", max_analysis_date: "2026-07-28", market_timezone: "America/New_York", observed_at: new Date().toISOString(), valid_until: new Date(Date.now() + 3600000).toISOString() };
+    if (path === "/api/v1/capabilities") return capabilities;
+    if (path === "/api/v1/health") return { status: "ok", queue: { queued: 0, running: 1 } };
+    if (path === "/api/v1/instruments/recent") return summaries;
+    if (path.includes("/models")) return { models: ["mock-quick", "mock-deep"], source: "configured", fetched_at: new Date().toISOString() };
+    if (path === "/api/v1/timelines") { const items = url.searchParams.get("warning_only") === "true" ? summaries.filter(item => item.timeline_warning) : summaries; return { items, total: 51, offset: Number(url.searchParams.get("offset")), limit: Number(url.searchParams.get("limit")) || 25 }; }
+    if (path.startsWith("/api/v1/timelines/")) { const instrument = decodeURIComponent(path.split("/").at(-1)!); const identity = summaries.find(item => item.instrument === instrument) ?? summaries[0]; return { ...timeline, timeline: { ...timeline.timeline, instrument, instrument_name: identity.instrument_name, instrument_local_name: identity.instrument_local_name } }; }
+    if (path === "/api/v1/runs/lifecycle-preview") return { action: "trash", affected_run_ids: ["full", ...increments.map(node => node.id)], affected_runs: [full, ...increments.map(node => ({ ...increment, id: node.id, request: { ...increment.request, analysis_date: node.analysis_date } }))], blocked_reasons: [], primary_replacements: { full: [{ id: "older", analysis_date: "2026-06-01", rating: "Hold" }] } };
+    if (method !== "GET") return { detail: "This visual preview does not submit research or modify stored records." };
+    if (path === "/api/v1/run-groups") return { items: [{ id: "full", kind: "cycle", instrument: "NVDA", baseline: full, is_primary: true, research_runs: [full, ...increments.map(node => ({ ...increment, id: node.id, request: { ...increment.request, analysis_date: node.analysis_date } }))], related_tasks: [pending], matched_run_ids: ["full", ...increments.map(node => node.id), "pending"], status_counts: { succeeded: 25, running: 1 } }], total: 1, limit: 12, offset: 0 };
+    if (path === "/api/v1/runs") return { items: url.searchParams.get("status") === "running" ? [pending] : [], total: url.searchParams.get("status") === "running" ? 1 : 0, limit: 4, offset: 0 };
+    if (path.endsWith("/evidence")) return report.evidence;
+    if (path.endsWith("/artifacts")) return artifacts("full");
+    if (path.endsWith("/events")) return [];
+    if (path.includes("baseline-candidates")) return [];
+    if (path.startsWith("/api/v1/runs/")) { const id = path.split("/").at(-1)!; const node = increments.find(item => item.id === id) ?? baseline; const isIncremental = node.research_kind === "incremental"; const run = isIncremental ? { ...increment, id, request: { ...increment.request, analysis_date: node.analysis_date } } : full; return { run, result: { ...report, run_id: run.id, reports: isIncremental ? {} : report.reports }, research_node: node, evidence_status: { status: "sealed" }, incremental_context: isIncremental ? { analysis_brief: { markdown: `# ${copy.brief}\n\n${copy.reason}\n\n## ${copy.sections[0]}\n\n${copy.paragraph}\n\n## ${copy.sections[2]}\n\n${copy.risk}`, report_sections: [], evidence_refs: ["ev_0123456789ab"], warnings: [] }, full_baseline: { run_id: "full", analysis_date: baseline.analysis_date, decision: report.decision } } : null }; }
+    return {};
+  };
+}
