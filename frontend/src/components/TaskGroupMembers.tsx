@@ -5,9 +5,11 @@ import type { RunGroupPage, RunSummaryView } from "../api/client";
 type Group = RunGroupPage["items"][number];
 
 /** Keep current activity visible while retaining the entire cycle's history. */
-export default function TaskGroupMembers({ group, filtered, renderRow }: {
+export default function TaskGroupMembers({ group, filtered, renderRow, expanded, onExpanded }: {
   group: Group;
   filtered: boolean;
+  expanded?: boolean;
+  onExpanded?: (value: boolean) => void;
   renderRow: (run: RunSummaryView, matched: boolean, baseline?: boolean) => ReactNode;
 }) {
   const { t } = useTranslation();
@@ -25,7 +27,7 @@ export default function TaskGroupMembers({ group, filtered, renderRow }: {
       {group.baseline && <p>{t("relatedTasksHint")}</p>}
       {(group.related_tasks ?? []).map(run => renderRow(run, matching.has(run.id)))}
     </div>}
-    {history.length > 0 && <details className="task-history">
+    {history.length > 0 && <details className="task-history" open={expanded} onToggle={event => { if (event.currentTarget.open !== expanded) onExpanded?.(event.currentTarget.open); }}>
       <summary>{t("historicalTasks", { count: history.length })}</summary>
       {history.map(row)}
     </details>}

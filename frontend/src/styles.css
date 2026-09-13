@@ -957,7 +957,7 @@ label small {
 .check-card small {
   margin-top: 2px;
   color: var(--muted-2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 500;
 }

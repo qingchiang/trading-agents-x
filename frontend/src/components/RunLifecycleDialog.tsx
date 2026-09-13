@@ -42,7 +42,7 @@ export default function RunLifecycleDialog({ runIds, action, onClose, onDone }: 
         : action === "restore" ? await api.restoreRuns(runIds, preview.affected_run_ids)
         : await api.purgeRuns(runIds, preview.affected_run_ids);
       onDone(result.changed);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setRevision(value => value + 1); }
+    } catch (cause) { setPreview(null); setError(cause instanceof Error ? cause.message : String(cause)); setRevision(value => value + 1); }
     finally { lock.current = false; setBusy(false); }
   };
   return <ConfirmDialog title={t(`lifecycleTitle_${action}`)} confirmLabel={t(action === "trash" ? "confirmTimelineTrash" : action === "restore" ? "restore" : "confirmPurge")} cancelLabel={t("cancel")} busy={busy} confirmDisabled={!preview || missingChoice || Boolean(preview.blocked_reasons?.length)} onCancel={onClose} onConfirm={() => void submit()}>

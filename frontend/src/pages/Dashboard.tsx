@@ -1,3 +1,4 @@
+import { formatResearchDate } from "../researchDate";
 import ExpandableText from "../components/ExpandableText";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,14 +53,14 @@ function RunRows({ runs }: { runs: RunSummaryView[] }) {
   </li>)}</ul>;
 }
 export default function Dashboard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return <section className="dashboard-page">
     <header className="page-header"><div><h1>{t("dashboard")}</h1><p className="subtitle">{t("workbenchPurpose")}</p></div></header>
-    <Region title={t("queue")} to="/runs" load={loadHealth}>{health => <div className="queue-strip"><span>{t("queue")}: {health.queue.queued}</span><span>{t("running")}: {health.queue.running}</span><span>{t(health.status === "ok" ? "healthy" : "disconnected")}</span></div>}</Region>
+    <Region title={t("queue")} to="/runs" load={loadHealth}>{health => <div className="queue-strip"><span>{t("queue")}: {health.queue.queued}</span><span>{t("running")}: {health.queue.running}</span><span>{t(health.status === "ok" ? "healthy" : "disconnected")}</span><Link to="/runs?status=failed">{t("failedTasks")}</Link><Link to="/timelines?warning_only=true">{t("workbenchWarnings")}</Link></div>}</Region>
     <div className="workbench-columns">
       <Region title={t("continueResearch")} to="/timelines" load={loadRecent}>{page => page.items?.length ? <div className="research-summary-list">{page.items.map(item => <article className="research-summary" key={item.instrument}>
         <header><Link to={`/timelines/${encodeURIComponent(item.instrument)}`}><InstrumentIdentity ticker={item.instrument} instrumentName={item.instrument_name} instrumentLocalName={item.instrument_local_name} /></Link><div><ResearchRatingBadge rating={item.primary_rating} />{item.primary_confidence && <small>{researchConfidenceLabel(t, item.primary_confidence)}</small>}<time className="summary-cutoff">{t("primaryCutoff")}: {item.primary_analysis_date ?? "—"}</time></div></header>
-        <p className="summary-cycle">{t("primaryCycle")} · {t("baselineDate")}: {item.primary_baseline_date ?? "—"}</p>
+        <p className="summary-cycle">{t("primaryCycle")} · {t("baselineDate")}: {item.primary_baseline_date ?? "—"}{item.latest_research_completed_at && <span> · {t("recentlyCompleted")}: {formatResearchDate(item.latest_research_completed_at, i18n.language)}</span>}</p>
         {item.primary_thesis && <ExpandableText text={item.primary_thesis} />}
         {item.timeline_warning && <p className="warning-copy">{t("fullResearchRecommended")}</p>}
         {item.latest_completed_cycle_id && item.latest_completed_cycle_id !== item.primary_cycle_id && <p className="other-cycle-notice"><Link to={`/timelines/${encodeURIComponent(item.instrument)}?node=${item.latest_completed_run_id}`}>{t("otherCycleCompleted")}: {item.latest_completed_analysis_date}</Link></p>}

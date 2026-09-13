@@ -143,8 +143,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .advanced-configuration[open] > summary { margin-bottom: 24px; }
 .advanced-configuration .form-section-body { display: block; }
 .advanced-configuration .check-grid { margin-bottom: 28px; }
-.request-summary { padding: 24px 0; }
-.interface-preferences { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 0 0 32px; }
+.request-summary { padding: 24px; }
+.interface-preferences { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 20px 24px; margin-bottom: 24px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
 .interface-preferences h2 { flex-basis: 100%; }
 .interface-preferences label { display: flex; gap: 12px; align-items: center; max-width: 100%; }
 .interface-preferences select { width: auto; max-width: 100%; }
@@ -152,7 +152,15 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 @media (max-width: 700px) {
   .workbench-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
   .workbench-list li > a { grid-column: 1 / -1; }
-  .research-library-table { min-width: 640px; }
+  .research-library-table, .research-library-table tbody { display: block; width: 100%; min-width: 0; }
+  .research-library-table thead { display: none; }
+  .research-library-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; border-bottom: 1px solid var(--line); padding: 12px; }
+  .research-library-table td, .research-library-table td:first-child { display: block; width: auto; min-width: 0; border: 0; padding: 6px 0; }
+  .research-library-table td:first-child, .research-library-table td:last-child { grid-column: 1 / -1; }
+  .research-library-table td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .research-library-table .instrument-identity { flex-wrap: wrap; }
+  .research-library-table .instrument-primary-name { white-space: normal; overflow-wrap: anywhere; }
+  .research-library-table .history-node { flex-wrap: wrap; }
   .form-grid.three, .form-grid.two, .profile-grid { grid-template-columns: 1fr; }
   .workbench-toolbar { align-items: stretch; flex-direction: column; }
 }
@@ -275,7 +283,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .task-filter-bar input, .task-filter-bar select { height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: white; width: 100%; }
 .task-group { border: 1px solid var(--line); border-radius: 8px; background: #fff; margin: 18px 0; }
 .task-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 20px 10px; background: #f2f6fb; }
-.task-group-heading > div:last-child { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.task-group-heading > div:not(.action-menu) { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .task-group-heading small { color: var(--muted); }
 .cycle-primary { color: var(--blue-dark); }
 .task-group-counts { display: flex; flex-wrap: wrap; gap: 8px 20px; background: #f2f6fb; padding: 0 20px 12px; font-size: 12px; color: var(--muted); }
@@ -340,3 +348,20 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 
 }
 .task-history { border-top: 1px solid var(--line-soft); }
 .task-history > summary { cursor: pointer; color: var(--blue-dark); padding: 12px 20px; font-size: 13px; background: #f8fafd; }
+
+.run-form { max-width: 1000px; }
+.run-form .form-section-body { min-width: 0; }
+.run-form .advanced-configuration { margin: 0 24px 24px; padding: 20px 0 0; border-bottom: 0; }
+.primary-cycle-choice { margin-top: 16px; }
+.primary-cycle-choice .check-card { background: #f5f8fc; }
+.submit-unavailable { font-size: 14px; }
+.task-group-heading > .action-menu { flex: 0 0 auto; }
+.task-group-heading > .instrument-identity { flex: 1 1 240px; }
+.task-group-heading > .action-menu > button { white-space: nowrap; }
+@media (max-width: 700px) {
+  .research-library-table td { padding: 6px 0; }
+  .task-group-heading > .instrument-identity { flex-basis: auto; }
+  .request-summary { padding: 16px; }
+  .run-form .advanced-configuration { margin-inline: 16px; }
+  .queue-strip { gap: 8px 16px; }
+}

@@ -556,6 +556,16 @@ export default function NewRun() {
     }
   };
 
+  const submitUnavailable = submitting ? t("loading")
+    : !ticker.trim() ? t("enterInstrumentFirst")
+    : analysisContextLoading ? t("marketDateLoading")
+    : !analysisContext ? analysisContextError || t("marketDateLoading")
+    : !analysisDate ? t("selectAnalysisDate")
+    : !capabilities || modelsLoading ? t("loading")
+    : !provider || researchKind === "full" && !quickModel || !deepModel ? t("chooseResearchModels")
+    : researchKind === "incremental" && !fullBaselineRunId ? t("selectResearchBaseline")
+    : "";
+
   return (
     <section>
       <header className="page-header">
@@ -628,7 +638,7 @@ export default function NewRun() {
                       })
                     : t("cutoffHint")}
                 </small>
-                {analysisContextError && <small className="warning" role="alert">{analysisContextError}</small>}
+                {analysisContextError && <small id="cutoff-context-error" className="warning" role="alert">{analysisContextError} <button type="button" className="text-button" disabled={submitting} onClick={() => setAnalysisContextRefresh(value => value + 1)}>{t("retryLoad")}</button></small>}
                 {analysisDateNotice && <small className="warning" role="status">{analysisDateNotice}</small>}
               </label>
             </div>
@@ -637,7 +647,7 @@ export default function NewRun() {
 
         <article className="panel form-section">
           <div className="form-section-body">
-            <h2>{t("researchKind")}</h2>
+            <h2>{t("researchConfiguration")}</h2>
             {lockedKind ? (
               <div className={`research-kind-lock ${lockedKind}`}>
                 <strong>
@@ -680,6 +690,20 @@ export default function NewRun() {
                 </span>
               </label>
             </div>}
+        {researchKind === "full" && <div className="primary-cycle-choice">
+            <label className="check-card">
+              <input
+                type="checkbox"
+                checked={makePrimary}
+                onChange={(event) => setMakePrimary(event.target.checked)}
+              />
+              <span>
+                <strong>{t("makePrimary")}</strong>
+                <small>{t("makePrimaryHint")}</small>
+              </span>
+            </label>
+        </div>}
+
             {researchKind === "incremental" && (
               <div className="baseline-picker">
                 <label>
@@ -730,17 +754,16 @@ export default function NewRun() {
               </p>
             )}
           </div>
-        </article>
 
-        <article className="panel form-section">
           <div className="form-section-body">
             {researchKind === "full" && (
               <>
-                <h2>{t("profile")}</h2>
+                <h3>{t("profile")}</h3>
                 <div className="profile-grid">
                   {(["fast", "standard", "deep"] as const).map((key) => (
                     <button
                       type="button"
+                      aria-pressed={profile === key}
                       className={`profile-card ${profile === key ? "selected" : ""}`}
                       onClick={() => setProfile(key)}
                       key={key}
@@ -783,8 +806,6 @@ export default function NewRun() {
                 </select>
               </label>
           </div>
-        </article>
-
         <details className="advanced-configuration">
           <summary>{t("advancedConfiguration")}</summary>
           <div className="form-section-body">
@@ -912,23 +933,8 @@ export default function NewRun() {
             )}
           </div>
         </details>
-        {researchKind === "full" && <article className="panel form-section">
-          <div className="form-section-body">
-            <h2>{t("primaryResearch")}</h2>
-            <label className="check-card">
-              <input
-                type="checkbox"
-                checked={makePrimary}
-                onChange={(event) => setMakePrimary(event.target.checked)}
-              />
-              <span>
-                <strong>{t("makePrimary")}</strong>
-                <small>{t("makePrimaryHint")}</small>
-              </span>
-            </label>
-          </div>
-        </article>}
-        <section className="request-summary" aria-label={t("requestSummary")}>
+        </article>
+        <section className="request-summary panel" aria-label={t("requestSummary")}>
           <h2>{t("requestSummary")}</h2>
           <dl className="definition-list">
             <div><dt>{t("ticker")}</dt><dd>{ticker || "—"}</dd></div>
@@ -940,21 +946,12 @@ export default function NewRun() {
           </dl>
         </section>
         {error && <div className="alert">{error}</div>}
+        {submitUnavailable && !analysisContextError && <p id="submit-unavailable" role="status">{submitUnavailable}</p>}
         <div className="form-actions">
           <button
             className="button primary large"
-            disabled={
-              submitting ||
-              analysisContextLoading ||
-              analysisContext === null ||
-              !analysisDate ||
-              capabilities === null ||
-              modelsLoading ||
-              !provider ||
-              (researchKind === "full" && !quickModel) ||
-              !deepModel ||
-              (researchKind === "incremental" && !fullBaselineRunId)
-            }
+            disabled={Boolean(submitUnavailable)}
+            aria-describedby={analysisContextError ? "cutoff-context-error" : submitUnavailable ? "submit-unavailable" : undefined}
           >
             {submitting ? t("loading") : t("startResearch")} →
           </button>

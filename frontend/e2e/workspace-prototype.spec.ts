@@ -56,3 +56,41 @@ test("puts current tasks before expandable cycle history without dropping member
   await page.goto('/runs?q=NVDA');
   await expect(page.locator('.task-group').first().locator('.task-row:visible')).toHaveCount(26);
 });
+
+test("restores cycle history from the URL and previews the whole cycle", async ({ page }) => {
+  await page.goto('/runs?expanded_group=full');
+  const group = page.locator('.task-group').first();
+  await expect(group.locator('.task-row:visible')).toHaveCount(26);
+  await group.getByText('Historical tasks (23)', { exact: true }).click();
+  await expect(page).not.toHaveURL(/expanded_group=full/);
+  await page.goBack();
+  await expect(group.locator('.task-row:visible')).toHaveCount(26);
+  await group.getByRole('button', { name: 'Manage cycle', exact: true }).click();
+  await group.getByRole('button', { name: 'Move Cycle to Trash' }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Affected records: 25');
+  await expect(dialog.getByRole('button', { name: 'Confirm Trash' })).toBeDisabled();
+  await expect(dialog).not.toContainText('pending');
+});
+
+test("shows library fields and the three-part research form on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/timelines');
+  const row = page.locator('.research-library-table tbody tr').first();
+  await expect(row.locator('td').nth(2)).toContainText('2026-07-25');
+  await expect(row.getByRole('button', { name: 'Research history' })).toBeVisible();
+  expect(await page.locator('.table-wrap').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: '../.scratch/research-workspace-v3/phase4-screenshots/390-library.png' });
+  await page.goto('/runs/new');
+  await page.locator('#new-run-ticker').fill('NVDA');
+  await expect(page.locator('#new-run-analysis-date')).toBeEnabled();
+  const form = page.locator('.run-form');
+  await expect(form.locator(':scope > .panel')).toHaveCount(3);
+  await expect(form.getByRole('button', { name: /Standard/ })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: '../.scratch/research-workspace-v3/phase4-screenshots/390-new-research.png' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/runs');
+  await expect(page.getByRole('button', { name: 'Manage cycle' })).toHaveCount(2);
+  await page.screenshot({ path: '../.scratch/research-workspace-v3/phase4-screenshots/1440-tasks.png' });
+});
