@@ -71,7 +71,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
             await expect(page.locator(".incremental-reassessment")).toHaveCount(0);
           }
           if (label === "full" && available < 1100) {
-            const trigger = page.locator(".workspace-navigation-trigger");
+            const trigger = page.locator(".reading-navigation-actions button").first();
             await trigger.click();
             await expect(page.locator(".workspace-auxiliary")).toBeVisible();
             await page.keyboard.press("Escape");
@@ -104,7 +104,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
     await page.locator(".auxiliary-tabs [role=tab]").last().click();
     await page.locator(".workspace-contents .floating-navigation-items button").last().click();
     await expect(page).toHaveURL(/#market-risk-lens|#risk-lens/);
-    await page.locator(".workspace-reader > .view-tabs [role=tab]").first().click();
+    await page.locator(".workspace-reader .reading-toolbar [role=tab]").first().click();
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Risk lens", exact: true })).toBeInViewport();
     await page.goto("/timelines/NVDA?node=full");

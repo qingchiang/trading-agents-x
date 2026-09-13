@@ -5,6 +5,7 @@ const paths: Record<string, string> = {
   researchTimelines: 'M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4z M13 7a3 3 0 0 1 3-3h5v15h-4a4 4 0 0 0-4 2',
   settings: 'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6',
   menu: 'M4 6h16 M4 12h16 M4 18h16',
+  history: 'M3 11a9 9 0 1 1 2 7 M3 4v7h7 M12 7v5l3 2',
   close: 'M6 6l12 12 M18 6 6 18',
 };
 export default function Icon({ name }: { name: string }) {

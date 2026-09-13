@@ -64,6 +64,7 @@ export default function Layout({ children }: PropsWithChildren) {
         .filter(Boolean)
         .join(" ")}
     >
+      <header className="mobile-topbar">
       <button
         type="button"
         className="mobile-menu-button"
@@ -74,6 +75,8 @@ export default function Layout({ children }: PropsWithChildren) {
       >
         <Icon name="menu" />
       </button>
+      <strong>TradingAgentsX</strong>
+      </header>
       <aside className="sidebar" inert={compact && !drawerOpen} aria-hidden={compact && !drawerOpen || undefined} id="primary-sidebar" ref={sidebarRef} role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen || undefined} aria-label={t("primaryNavigation")}>
         <button
           type="button"

@@ -974,7 +974,7 @@ label small {
 }
 
 .run-heading > div:first-child {
-  flex: 1 1 640px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -3438,18 +3438,14 @@ button.research-kind-badge {
   }
 
   .mobile-menu-button {
-    position: fixed;
-    z-index: 60;
-    top: 14px;
-    left: 14px;
-    width: 42px;
-    height: 42px;
-    color: var(--ink);
-    font-size: 20px;
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    box-shadow: var(--shadow);
+    position: static;
+    width: 36px;
+    height: 40px;
+    padding: 8px;
+    color: #fff;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
     cursor: pointer;
   }
 

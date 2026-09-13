@@ -1,3 +1,4 @@
+import TaskGroupMembers from "../components/TaskGroupMembers";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type RunGroupPage, type RunSummaryView } from "../api/client";
@@ -102,8 +103,7 @@ export default function Runs() {
         <div>{group.baseline ? <span>{t("baselineDate")}: {group.baseline.request.analysis_date}</span> : <span>{t("standaloneTask")}</span>}{group.is_primary && <strong className="cycle-primary">{t("primaryCycle")}</strong>}<small>{t("matchingTasks", { count: (group.matched_run_ids ?? []).length })}</small></div>
       </header>
       <div className="task-group-counts">{Object.entries(group.status_counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => <span key={state}>{t(`status${state[0].toUpperCase()}${state.slice(1)}`)} {count}</span>)}{group.cycle_warning && <span className="warning-copy">{t("fullResearchRecommended")}</span>}</div>
-      {(group.research_runs ?? []).map(run => row(run, (group.matched_run_ids ?? []).includes(run.id), run.id === group.baseline?.id))}
-      {(group.related_tasks ?? []).length > 0 && <div className={group.baseline ? "related-tasks" : "standalone-tasks"}>{group.baseline && <p>{t("relatedTasksHint")}</p>}{(group.related_tasks ?? []).map(run => row(run, (group.matched_run_ids ?? []).includes(run.id)))}</div>}
+      <TaskGroupMembers group={group} filtered={Boolean(params.get("q") || params.get("status") || params.get("research_kind"))} renderRow={row} />
     </article>)}
     {page && (page.total > page.limit || offset > 0) && <div className="pagination"><button className="button" disabled={!offset} onClick={() => update({ offset: String(Math.max(0, offset - page.limit)) })}>{t("previous")}</button><span>{t("groupRange", { start: page.total ? offset + 1 : 0, end: Math.min(offset + page.items.length, page.total), total: page.total })}</span><button className="button" disabled={offset + page.limit >= page.total} onClick={() => update({ offset: String(offset + page.limit) })}>{t("next")}</button></div>}
     </div>

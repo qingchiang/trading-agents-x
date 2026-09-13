@@ -1,3 +1,5 @@
+import ResearchRatingBadge from "../components/ResearchRatingBadge";
+import { researchConfidenceLabel } from "../i18n";
 import CycleHistory from "../components/CycleHistory";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -31,6 +33,7 @@ export default function Timeline() {
     const split = value.indexOf(":");
     return { node_id: value.slice(split + 1), lifecycle_state: value.slice(0, split) === "trashed" ? "trashed" : "active" } as ResearchNodeComparisonSelection;
   });
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const [loadedDetail, setDetail] = useState<TimelineDetail | null>(null);
   const detail = loadedDetail?.timeline.instrument === instrument ? loadedDetail : null;
   const [error, setError] = useState("");
@@ -98,15 +101,27 @@ export default function Timeline() {
     finally { if (currentInstrument.current === instrument) setBusy(false); }
   };
   if (isList) return <Suspense fallback={<div className="loading">{t("loading")}</div>}><ResearchLibrary /></Suspense>;
-  return <section>
+  const secondaryActions = <>
+    <button className="button" onClick={() => update({ compare_mode: comparisonMode ? null : "1", compare: null })}>{t(comparisonMode ? "closeComparisonMode" : "comparisonMode")}</button>
+    <button className="button" onClick={() => update({ trash_state: showRetainedTrash ? null : "all", compare: null, cycle_offset: null })}>{t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}</button>
+  </>;
+  return <section className="timeline-page">
     <header className="page-header research-header">
       <div><Link className="back-link" to={location.sourceLibrary?.url ?? "/timelines"}>{t("backToResearch")}</Link>
         <InstrumentIdentity ticker={instrument} instrumentName={detail?.timeline.instrument_name} instrumentLocalName={detail?.timeline.instrument_local_name} prominent />
+        {selected?.decision && <div className="workspace-judgment"><ResearchRatingBadge rating={selected.decision.rating} /><span>{researchConfidenceLabel(t, selected.decision.confidence)}</span></div>}
         {selected && <div className="workspace-context"><span>{t("selectedCutoff")}: {selected.analysis_date}</span><span>{t("baselineDate")}: {selectedCycle?.baseline.analysis_date}</span>
           <span>{t(selectedCycle?.is_primary && selected.is_cycle_head ? "currentPrimary" : "selectedResearch")}</span></div>}
       </div>
-      <div className="action-row"><button className="button" onClick={() => update({ compare_mode: comparisonMode ? null : "1", compare: null })}>{t(comparisonMode ? "closeComparisonMode" : "comparisonMode")}</button>
-        <ActionMenu label={t("manageResearch")}><button className="button" onClick={() => update({ trash_state: showRetainedTrash ? null : "all", compare: null, cycle_offset: null })}>{t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}</button></ActionMenu>
+      <div className="workspace-actions-container">
+        <div className="workspace-header-actions" ref={setActionsTarget} />
+        <ActionMenu label={t("moreResearchActions")}>
+          {secondaryActions}
+          {selected && <>
+            <Link className="button" to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(selected.id)}`}>{t("cloneAsFullResearch")}</Link>
+            <Link className="button" to={`/runs/${encodeURIComponent(selected.id)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
+          </>}
+        </ActionMenu>
       </div>
     </header>
     {error && <div className="alert" role="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></div>}
@@ -129,7 +144,7 @@ export default function Timeline() {
           <button className="button" disabled={cycleOffset + cycles.length >= (detail.timeline.cycle_total ?? 0)} onClick={() => update({ cycle_offset: String(cycleOffset + CYCLE_PAGE_SIZE), node: null, view: null })}>{t("next")}</button>
         </div>}
       </div>}>
-      {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace key={selected.id} /></Suspense>}
+      {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace actionsTarget={actionsTarget} key={selected.id} /></Suspense>}
     </ResearchWorkspace>
     {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} onClose={closeComparison} /></Suspense>}
     {pendingNode && lifecycleMode && <RunLifecycleDialog runIds={[pendingNode.id]} action={lifecycleMode} onClose={() => setPendingNode(null)} onDone={() => { setPendingNode(null); setRevision(value => value + 1); }} />}

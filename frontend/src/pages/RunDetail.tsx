@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { WorkspaceNavigationButtons } from "../components/ResearchWorkspace";
 import PerformanceSection from "../components/PerformanceSection";
 import { useReadingPosition } from "../useReadingPosition";
 import type { TFunction } from "i18next";
@@ -86,7 +88,7 @@ type VisibleWarning =
   | string
   | NonNullable<AnalystReport["warnings"]>[number];
 
-export default function RunDetail({ selectedRunId, workspace = false }: { selectedRunId?: string; workspace?: boolean } = {}) {
+export default function RunDetail({ selectedRunId, workspace = false, actionsTarget }: { selectedRunId?: string; workspace?: boolean; actionsTarget?: HTMLElement | null } = {}) {
   const { t } = useTranslation();
   const routerNavigate = useNavigate();
   const location = useLocation();
@@ -471,40 +473,8 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
       Object.keys(reports).length > 0 ||
       decision !== null);
 
-  return (
-    <section className={workspace ? "workspace-reader" : "run-reader"}>
-      <header className="page-header run-heading">
-        <div>
-          {!workspace && <Link className="back-link" to="/">
-            ← {t("dashboard")}
-          </Link>}
-          {!workspace && <div className="run-title">
-            <InstrumentIdentity
-              ticker={run.request.ticker}
-              instrumentName={run.instrument_name}
-              instrumentLocalName={run.instrument_local_name}
-              prominent
-            />
-            <ResearchKindBadge
-              kind={run.research_kind}
-              request={run.request}
-              methodSnapshot={run.method_snapshot}
-            />
-            <StatusBadge status={run.status} />
-          </div>}
-          <p className="subtitle">
-            {run.request.analysis_date}
-            {(activeView === "timeline" || activeView === "diagnostics") && " · " + t("attempt") + " " + run.attempt}
-          </p>
-          {run.source_run_id && (
-            <p className="subtitle">
-              {t("sourceRun")}:{" "}
-              <Link to={`/runs/${encodeURIComponent(run.source_run_id)}`}>
-                {t("sourceRun")}
-              </Link>
-            </p>
-          )}
-        </div>
+  const readingViews = availableViews.filter(view => !["timeline", "diagnostics"].includes(view) || !workspace);
+  const actions = (
         <div className="action-row">
           {!run.trashed_at &&
             (run.status === "queued" || run.status === "running") && (
@@ -576,11 +546,48 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           </a>
           </ActionMenu>
           {!workspace && activeView === "diagnostics" && <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=timeline`}>{t("activity")}</Link>}
-          {workspace ? <ActionMenu label={t("moreResearchActions")}>
+          {workspace ? !actionsTarget && <ActionMenu label={t("moreResearchActions")}>
             {terminal.has(run.status) && <Link className="button" to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}>{t("cloneAsFullResearch")}</Link>}
             <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
           </ActionMenu> : <Link className="text-link" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>}
         </div>
+  );
+
+  return (
+    <section className={workspace ? "workspace-reader" : "run-reader"}>
+      <header className={`page-header run-heading ${actionsTarget ? "actions-relocated" : ""}`}>
+        <div>
+          {!workspace && <Link className="back-link" to="/">
+            ← {t("dashboard")}
+          </Link>}
+          {!workspace && <div className="run-title">
+            <InstrumentIdentity
+              ticker={run.request.ticker}
+              instrumentName={run.instrument_name}
+              instrumentLocalName={run.instrument_local_name}
+              prominent
+            />
+            <ResearchKindBadge
+              kind={run.research_kind}
+              request={run.request}
+              methodSnapshot={run.method_snapshot}
+            />
+            <StatusBadge status={run.status} />
+          </div>}
+          <p className="subtitle">
+            {run.request.analysis_date}
+            {(activeView === "timeline" || activeView === "diagnostics") && " · " + t("attempt") + " " + run.attempt}
+          </p>
+          {run.source_run_id && (
+            <p className="subtitle">
+              {t("sourceRun")}:{" "}
+              <Link to={`/runs/${encodeURIComponent(run.source_run_id)}`}>
+                {t("sourceRun")}
+              </Link>
+            </p>
+          )}
+        </div>
+        {actionsTarget ? createPortal(actions, actionsTarget) : actions}
       </header>
       {error && <div className="alert">{error}</div>}
       {run.trashed_at && (
@@ -607,13 +614,17 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
         key={runId}
       />
 
+      <div className="reading-toolbar">
+        <select className="mobile-reading-view" aria-label={t("researchViews")} value={activeView} onChange={event => selectView(event.target.value as ViewName)}>
+          {readingViews.map(view => <option value={view} key={view}>{t(viewLabel(view, isIncremental))}</option>)}
+        </select>
       <nav
         className="panel view-tabs"
         aria-label={t("researchViews")}
         role="tablist"
         onKeyDown={tabsKeyDown}
       >
-        {availableViews.filter(view => !["timeline", "diagnostics"].includes(view) || !workspace).map((view) => (
+        {readingViews.map((view) => (
           <button
             type="button"
             role="tab"
@@ -629,6 +640,8 @@ export default function RunDetail({ selectedRunId, workspace = false }: { select
           </button>
         ))}
       </nav>
+        <WorkspaceNavigationButtons />
+      </div>
 
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         {activeView === "decision" && isIncremental && detail.research_node && (

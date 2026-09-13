@@ -62,7 +62,7 @@ test("expands a truncated short thesis and shows report limitations before its n
   await expect(warning).toBeVisible();
   const prose = page.locator('#run-view-reports .markdown').first();
   expect((await warning.boundingBox())!.y).toBeLessThan((await prose.boundingBox())!.y);
-  await page.getByRole('tab', { name: 'Evidence', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Research run views' }).selectOption('evidence');
   await page.getByRole('button', { name: /Return to reports/ }).click();
   await expect(page).toHaveURL(/view=reports&report=market/);
 });

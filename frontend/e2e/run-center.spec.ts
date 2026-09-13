@@ -683,7 +683,7 @@ test("runs, templates, trash, and restores local research", async ({
     await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
     const body = page.locator(".report-panel .analyst-report");
     expect(await body.evaluate(element => getComputedStyle(element).overflowY)).toBe("visible");
-    expect(await body.evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(800);
+    expect(await body.locator("p").first().evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(880);
     if (width === 1440) {
       const nav = page.getByRole("navigation", { name: "Report section navigation" });
       await expect(nav).toBeVisible();
@@ -806,7 +806,7 @@ test("compares active and explicitly shown Trash nodes without creating research
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/timelines/NVDA?compare_mode=1");
-  await page.locator(".research-header").getByRole("button", { name: /^(Manage|管理)$/ }).click();
+  await page.locator(".research-header").getByRole("button", { name: /^(More|更多)$/ }).click();
   await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
   await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
   await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();

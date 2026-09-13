@@ -38,6 +38,7 @@ const en = {
   translation: {
     brandTagline: "Evidence-first research",
     updatingResults: "Updating results…",
+      historicalTasks: "Historical tasks ({{count}})",
     dashboard: "Research workspace",
     newRun: "New research",
     runManagement: "Run tasks",
@@ -919,6 +920,7 @@ const zhCN = {
   translation: {
     brandTagline: "证据优先的投资研究",
     updatingResults: "正在更新结果…",
+      historicalTasks: "历史任务（{{count}}）",
     dashboard: "研究工作台",
     newRun: "新建研究",
     runManagement: "运行任务",
@@ -1773,6 +1775,7 @@ const ja = {
   translation: {
     brandTagline: "エビデンス重視の投資リサーチ",
     updatingResults: "検索結果を更新中…",
+      historicalTasks: "過去のタスク（{{count}}）",
     dashboard: "リサーチワークスペース",
     newRun: "新規リサーチ",
     runManagement: "実行タスク",

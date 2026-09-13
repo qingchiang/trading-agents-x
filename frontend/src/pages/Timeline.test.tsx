@@ -361,6 +361,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
   vi.mocked(api.compareResearchNodes).mockResolvedValue(comparison);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
+  fireEvent.click(await screen.findByRole("button", { name: "More" }));
   fireEvent.click(await screen.findByRole("button", { name: "Compare research" }));
   const selectors = await screen.findAllByRole("button", { name: "Select for comparison" });
   fireEvent.click(selectors[0]);
