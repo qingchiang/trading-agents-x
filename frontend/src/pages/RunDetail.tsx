@@ -1,6 +1,8 @@
+import { NumericNoticeHandled, numericWarningLabel } from "../researchWarnings";
 import { formatResearchDate } from "../researchDate";
 import { createPortal } from "react-dom";
 import { WorkspaceNavigationButtons } from "../components/ResearchWorkspace";
+import EvidenceCoverage from "../components/EvidenceCoverage";
 import PerformanceSection from "../components/PerformanceSection";
 import { useReadingPosition } from "../useReadingPosition";
 import type { TFunction } from "i18next";
@@ -640,7 +642,7 @@ export default function RunDetail({ selectedRunId, workspace = false, actionsTar
         <WorkspaceNavigationButtons />
       </div>
 
-      <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
+      <NumericNoticeHandled.Provider value={runWarnings.some(warning => numericWarningLabel(warning) !== null)}><Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         {activeView === "decision" && isIncremental && detail.research_node && (
           <IncrementalDecisionPanel
             decision={decision}
@@ -729,7 +731,7 @@ export default function RunDetail({ selectedRunId, workspace = false, actionsTar
             onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
           />
         )}
-      </Suspense>
+      </Suspense></NumericNoticeHandled.Provider>
 
       {activeView === "diagnostics" && <Suspense fallback={<div role="status">{t("loading")}</div>}>
         <RunDiagnostics detail={detail} events={events} artifacts={artifacts} evidenceIndex={evidenceIndex} onEvidence={openSourceDrawer} />
@@ -1109,10 +1111,12 @@ function EvidencePanel({
   incrementalNode: ResearchNodeView | null;
 }) {
   const { t } = useTranslation();
+  const location = useLocation();
+  const [domainFilter, setDomainFilter] = useState<{ domain: string; refs: string[] } | null>(null);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const sources = [...new Set(evidenceIndex.groups.flatMap(group => group.sources))].sort();
-  const groups = evidenceIndex.groups.filter(group => (!source || group.sources.includes(source)) &&
+  const groups = evidenceIndex.groups.filter(group => (!domainFilter || group.refs.some(ref => domainFilter.refs.includes(ref))) && (!source || group.sources.includes(source)) &&
     [group.canonical.content, group.canonical.value, ...group.sources, ...group.items.map(item => item.effective_date)].join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
     <article
@@ -1136,54 +1140,11 @@ function EvidencePanel({
           <span className="event-count">{evidenceIndex.groups.length}</span>
         </div>
       </div>
-      {incremental && incrementalNode && (
-        <div className="evidence-update-overview" id="evidence-coverage" data-outline={t("researchAvailability")}>
-          <section>
-            <h3>{t("informationAdvancement")}</h3>
-            <p>
-              {advancementLabel(
-                t,
-                incrementalNode.information_advancement?.reasons ?? [],
-              )}
-            </p>
-          </section>
-          <section>
-            <h3>{t("researchAvailability")}</h3>
-            <div className="availability-row">
-              {(incrementalNode.research_availability?.domains ?? []).map((domain) => (
-                <span
-                  className={`availability-chip ${domain.status}`}
-                  key={domain.domain}
-                >
-                  {t(`${domain.domain}Analyst`)} · {t(`availability_${domain.status}`)}
-                </span>
-              ))}
-            </div>
-          </section>
-          <section>
-            <h3>{t("collectionSummary")}</h3>
-            <div className="collection-coverage-list">
-              {(incrementalNode.collection_summary?.domains ?? []).map((domain) => (
-                <div key={domain.domain}>
-                  <span className={`availability-chip ${domain.state}`}>
-                    {t(`${domain.domain}Analyst`)} · {t(`collection_${domain.state}`)}
-                  </span>
-                  {(domain.sources?.length ?? 0) > 0 && (
-                    <span className="collection-source-summary">
-                      {domain.sources?.map((source, index) => (
-                        <span key={`${source.source}-${source.retrieved_at}-${index}`}>
-                          <strong>{source.source}</strong>
-                          {source.fallback && <span> · {t("fallback")}</span>}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
+      {location.returnEvidence && <p className="evidence-domain-filter"><Link to={location.returnEvidence.url}>{t("returnToUpdateEvidence")}</Link></p>}
+      {incremental && incrementalNode && <EvidenceCoverage node={incrementalNode} evidenceIndex={evidenceIndex} onDomain={(domain, refs) => {
+        setDomainFilter({ domain, refs }); setQuery(""); setSource("");
+        requestAnimationFrame(() => { const target = document.getElementById("evidence-list"); target?.scrollIntoView?.({ block: "start" }); target?.focus({ preventScroll: true }); });
+      }} />}
       {!evidence ? (
         <div className="empty-state">
           {evidenceStatus === "pending" &&
@@ -1207,10 +1168,11 @@ function EvidencePanel({
               evidenceIndex={evidenceIndex}
             />
           )}
-          <div className="evidence-filters" id="evidence-list" data-outline={t("evidence")}>
+          <div className="evidence-filters" tabIndex={-1} id="evidence-list" data-outline={t("evidence")}>
             <label>{t("searchEvidence")}<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
             <label>{t("evidenceSourceFilter")}<select value={source} onChange={event => setSource(event.target.value)}><option value="">{t("all")}</option>{sources.map(value => <option key={value}>{value}</option>)}</select></label>
           </div>
+          {domainFilter && <p className="evidence-domain-filter">{t(`${domainFilter.domain}Analyst`)} <button type="button" className="text-button" onClick={() => setDomainFilter(null)}>{t("clearDomainFilter")}</button></p>}
           {!groups.length && <p role="status">{t("noEvidenceMatches")}</p>}
           <div className="evidence-list">
             {groups.map((group) => (
@@ -1250,7 +1212,7 @@ function EvidenceBundleSummary({
   evidenceIndex: EvidenceReferenceIndex;
   mode?: "all" | "readable" | "technical";
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <dl className="bundle-summary">
       {mode !== "readable" && (
@@ -1269,15 +1231,12 @@ function EvidenceBundleSummary({
         <>
           <div>
             <dt>{t("analysisDate")}</dt>
-            <dd>{evidence.analysis_date}</dd>
+            <dd>{formatResearchDate(evidence.analysis_date, i18n.language)}</dd>
           </div>
           <div>
             <dt>{t("displayedEvidence")}</dt>
             <dd>
-              {t("evidenceBodiesSummary", {
-                groups: evidenceIndex.groups.length,
-                items: evidence.items.length,
-              })}
+              {t("evidenceCount", { count: evidenceIndex.groups.length })}
             </dd>
           </div>
         </>
@@ -1464,7 +1423,7 @@ function ResearchLimitations({ warnings, sections = [] }: { warnings: VisibleWar
     <ul>{items.map(warning => {
       const reference = typeof warning === "string" ? undefined : warning.evidence_ref;
       const related = reference ? sections.filter(section => section.source_refs?.includes(reference)) : [];
-      return <li key={warningKey(warning)}>{warningMessage(warning)}
+      return <li key={warningKey(warning)}>{numericWarningLabel(warning) ? t(numericWarningLabel(warning)!) : warningMessage(warning)}
         {related.map(section => <a className="text-link limitation-section-link" key={section.id} href={`#${section.anchor}`} onClick={event => {
           event.preventDefault();
           const target = document.getElementById(`user-content-${section.anchor}`);

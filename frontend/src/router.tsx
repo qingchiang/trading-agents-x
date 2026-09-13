@@ -21,6 +21,7 @@ export type RouterLocation = {
   hash: string;
   key: string;
   sourceLibrary?: { url: string; key: string };
+  returnEvidence?: { url: string; key: string };
   returnResearch?: { url: string; key: string };
 };
 
@@ -65,6 +66,15 @@ export function Router({
       }
       if (next.pathname === "/timelines" && locationPath(next) === current.sourceLibrary?.url) {
         const saved = sessionStorage.getItem(`tradingagents-position:${current.sourceLibrary.key}`);
+        if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
+      }
+      const currentParams = new URLSearchParams(current.search);
+      const nextParams = new URLSearchParams(next.search);
+      if (next.pathname === current.pathname && currentParams.get("view") === "evidence" && nextParams.get("view") === "evidence" && nextParams.get("node") !== currentParams.get("node") && current.returnEvidence?.url !== locationPath(next)) {
+        next.returnEvidence = { url: browserBacked ? browserLocation() : locationPath(current), key: current.key };
+      }
+      if (current.returnEvidence?.url === locationPath(next)) {
+        const saved = sessionStorage.getItem(`tradingagents-position:${current.returnEvidence.key}`);
         if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
       }
       const comparing = (value: RouterLocation) => new URLSearchParams(value.search).get("view") === "compare";

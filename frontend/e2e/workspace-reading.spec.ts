@@ -45,3 +45,20 @@ test("builds a navigable outline for historical briefs without recorded sections
   await expect(page.locator('.workspace-auxiliary')).toBeHidden();
   await expect(page).toHaveURL(/#legacy-/);
 });
+
+
+test("returns from baseline evidence to the exact update and reads performance without disclosure", async ({ page }) => {
+  const respond = workspaceFixture();
+  await page.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
+  await page.route("**/api/v1/**", route => route.fulfill({ json: respond(new URL(route.request().url()), route.request().method(), route.request().postData()) }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/timelines/NVDA?node=increment&view=evidence");
+  await page.getByRole("link", { name: "View full baseline evidence" }).click();
+  await expect(page).toHaveURL(/node=full&view=evidence/);
+  await page.getByRole("link", { name: "Return to update evidence" }).click();
+  await expect(page).toHaveURL(/node=increment&view=evidence/);
+  await page.goto("/timelines/NVDA?node=increment&view=brief");
+  await expect(page.locator(".performance-endpoints").first()).toContainText("100 → 112");
+  await expect(page.locator(".performance-retrieved").first()).toContainText("UTC");
+  await expect(page.locator(".performance-section details")).toHaveCount(0);
+});

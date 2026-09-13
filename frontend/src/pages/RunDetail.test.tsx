@@ -809,10 +809,10 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getAllByText("Current instrument")[0]).toBeVisible();
   expect(screen.getAllByText("S&P 500")[0]).toBeVisible();
   expect(screen.getAllByText("NASDAQ 100")[0]).toBeVisible();
-  expect(screen.getAllByText("Instrument minus benchmark")).toHaveLength(3);
+  expect(screen.getAllByText("Instrument minus benchmark")).toHaveLength(2);
   expect(screen.getByText("+8 pp")).toBeVisible();
   expect(screen.getByText("+6 pp")).toBeVisible();
-  expect(screen.getAllByText("2026-07-20 → 2026-07-24")).toHaveLength(3);
+  expect(screen.getAllByText("Jul 20, 2026 → Jul 24, 2026")).toHaveLength(3);
   expect(screen.getAllByText(/split-adjusted close/)).toHaveLength(3);
   expect(screen.getByRole("tab", { name: "Analysis brief" })).toHaveAttribute(
     "aria-selected",
@@ -938,13 +938,13 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "Collection Summary" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Materials and limitations" })).toBeVisible();
   expect(api.evidence).not.toHaveBeenCalled();
   expect(screen.getByRole("heading", { name: "fixture · alternate-fixture" })).toBeVisible();
-  expect(screen.getByText("fixture.news")).toBeVisible();
+  expect(screen.queryByText("fixture.news")).toBeNull();
   expect(screen.getAllByText("Fallback").length).toBeGreaterThan(0);
   const collectionSummary = screen
-    .getByRole("heading", { name: "Collection Summary" })
+    .getByRole("heading", { name: "Materials and limitations" })
     .closest("section");
   expect(within(collectionSummary!).queryByText("Collection diagnostics")).not.toBeInTheDocument();
 
@@ -1165,7 +1165,7 @@ test("explains when an Incremental Decision is inherited unchanged", async () =>
   expect(
     await screen.findByText("Overall assessment unchanged; baseline assessment retained."),
   ).toBeInTheDocument();
-  expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
+  await waitFor(() => expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible());
 });
 
 test("shows when an earlier Incremental node keeps the Cycle Warning active", async () => {

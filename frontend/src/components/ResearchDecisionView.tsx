@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { NumericNoticeHandled } from "../researchWarnings";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
 
@@ -66,6 +68,7 @@ export function ResearchDecisionContent({
   embedded?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const noticeHandled = useContext(NumericNoticeHandled);
   const numberLanguage = i18n.resolvedLanguage ?? i18n.language;
   const visibleRefs = (refs: string[]) => (embedded ? [] : refs);
   const scenarios = [...decision.scenarios].sort(
@@ -116,7 +119,7 @@ export function ResearchDecisionContent({
         </div>
       </header>
 
-      {((decision.numeric_audit_status === "partial" || numericAudit?.status === "partial") ||
+      {!noticeHandled && ((decision.numeric_audit_status === "partial" || numericAudit?.status === "partial") ||
         decision.numeric_audit_status === "incomplete") && (
         <div className="numeric-audit-notice" role="status">
           <span>

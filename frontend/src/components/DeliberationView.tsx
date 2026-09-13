@@ -89,7 +89,7 @@ export default function DeliberationView({
         label: numberedLabel(t("finalResearchOpinion"), index, decisions.length),
       }),
     );
-    const reportEntries = (items: ResearchArtifact[]) => items.map(artifact => ({ id: `deliberation-report-${artifact.id}`, label: `${roleLabel(t, artifact.role)}${artifact.round > 0 ? ` · ${t("round")} ${artifact.round}` : ""}`, level: 3 }));
+    const reportEntries = (items: ResearchArtifact[]) => items.map(artifact => ({ id: `deliberation-report-${artifact.id}`, label: `${roleLabel(t, artifact.role)}${(artifact.round ?? 0) > 0 ? ` · ${t("round")} ${artifact.round}` : ""}`, level: 3 }));
     return entries.flatMap(entry => {
       const items = entry.id === "deliberation-case" ? cases : entry.id === "deliberation-risk" ? risks : entry.id.startsWith("deliberation-rebuttal-") ? (rebuttalsByRound.find(([round]) => entry.id === `deliberation-rebuttal-${round}`)?.[1] ?? []) : [];
       return [entry, ...(items.length > 1 ? reportEntries(items) : [])];
@@ -342,7 +342,7 @@ function ArtifactFrame({
           <h3>{roleLabel(t, artifact.role)}</h3>
         </div>
         <small>
-          {artifact.round > 0 ? `${t("round")} ${artifact.round}` : ""}
+          {(artifact.round ?? 0) > 0 ? `${t("round")} ${artifact.round}` : ""}
         </small>
       </header>
       <div className="artifact-body">{children}</div>
