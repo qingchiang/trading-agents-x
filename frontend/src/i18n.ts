@@ -36,6 +36,7 @@ export function localizePerformanceReason(
 
 const en = {
   translation: {
+    openExistingResearch: "View existing research",
     materialsAndLimits: "Materials and limitations",
     currentUpdateMaterials: "These materials were included in this update. Baseline evidence is separate.",
     openBaselineEvidence: "View full baseline evidence",
@@ -951,6 +952,7 @@ const en = {
 
 const zhCN = {
   translation: {
+    openExistingResearch: "查看已有研究内容",
     materialsAndLimits: "资料与限制",
     currentUpdateMaterials: "以下为本次更新纳入的资料，完整基线证据单独查看。",
     openBaselineEvidence: "查看完整基线证据",
@@ -1839,6 +1841,7 @@ const zhCN = {
 
 const ja = {
   translation: {
+    openExistingResearch: "記録済みのリサーチを読む",
     materialsAndLimits: "資料と制約",
     currentUpdateMaterials: "今回の更新に採用された資料です。完全ベースラインの資料は別に確認できます。",
     openBaselineEvidence: "完全ベースラインの資料を見る",

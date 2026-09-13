@@ -18,7 +18,12 @@ import {
 } from "../api/client";
 import i18n from "../i18n";
 import { Router, useLocation } from "../router";
-import RunDetail from "./RunDetail";
+import ResearchReader from "../components/ResearchReader";
+
+function RunDetail() {
+  const location = useLocation();
+  return <ResearchReader selectedRunId={new URLSearchParams(location.search).get("node") ?? undefined} />;
+}
 
 vi.mock("../api/client", () => ({
   api: {
@@ -472,7 +477,7 @@ test("keeps research readable and exposes technical records only in diagnostics"
   expect(screen.queryByText("Decision-critical calculation audit")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Export" }));
   expect(screen.getByRole("link", { name: "Export research package" })).toHaveAttribute("href", "/api/v1/runs/run-1/export?format=package");
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   fireEvent.click(await screen.findByText("Structured recoveries"));
   expect(screen.getByText(/debate.agenda.serialize/)).toBeVisible();
   expect(screen.getByText("Decision-critical calculation audit")).toBeVisible();
@@ -536,7 +541,7 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   ).toBeVisible();
   expect(screen.getByText("Optional numeric conclusions were omitted.")).toBeVisible();
   expect(screen.queryByText("Decision-critical calculation audit")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   fireEvent.click(await screen.findByText("Decision-critical calculation audit"));
   expect(screen.getByText(/repair-value/)).not.toBeVisible();
   fireEvent.click(screen.getByText("Raw candidate"));
@@ -823,7 +828,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByRole("tab", { name: "Analysis brief" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Run progress" })).toBeVisible();
+  expect(screen.queryByRole("tab", { name: "Run progress" })).toBeNull();
   expect(
     screen.getAllByRole("tab").map((tab) => tab.textContent),
   ).toEqual([
@@ -831,8 +836,6 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "Reassessment",
     "Full assessment",
     "Evidence updates",
-    "Run progress",
-    "Diagnostics",
   ]);
   fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
   await waitFor(() =>
@@ -859,13 +862,14 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
   expect(screen.getByText("Balanced research summary.")).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   await screen.findByText("Decision-critical calculation audit");
   fireEvent.click(screen.getByText("Decision-critical calculation audit"));
   expect(screen.getByText("Observed market anchor")).toBeVisible();
   expect(screen.getByText("calc_market_reference")).not.toBeVisible();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Reassessment" }));
+  fireEvent.click(screen.getByRole("link", { name: "Read research" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Reassessment" }));
   expect(await screen.findByText("The new filing adds uncertainty.")).toBeVisible();
   expect(screen.getByText("1 changed · 1 total")).toBeVisible();
   const reaffirmedSummary = screen.getByText("Show 1 reaffirmed item");
@@ -1272,7 +1276,7 @@ test("localizes Incremental activity and keeps one technical event log per attem
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("tab", { name: "Run progress" });
+  await screen.findByRole("heading", { name: "Run progress" });
 
   act(() =>
     FakeEventSource.instance.emit("incremental.collection_completed", {
@@ -1305,7 +1309,7 @@ test("localizes Incremental activity and keeps one technical event log per attem
   const attempt = screen.getByText("Attempt 1").closest("details");
   expect(within(attempt!).queryByText("Audit details")).not.toBeInTheDocument();
   expect(within(attempt!).queryByText("Technical events (2)")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Diagnostics" }));
   fireEvent.click(await screen.findByText("Live events"));
   expect(screen.getByText(/incremental.collection_completed/)).toBeVisible();
 
@@ -1318,7 +1322,7 @@ test("orders work units within each attempt and restores the activity preference
       <RunDetail />
     </Router>,
   );
-  await screen.findByRole("tab", { name: "Run progress" });
+  await screen.findByRole("heading", { name: "Run progress" });
 
   act(() => {
     FakeEventSource.instance.emit("node.completed", {
@@ -1369,7 +1373,7 @@ test("shows run metrics only in the Diagnostics view", async () => {
   await screen.findByRole("tab", { name: "Overview" });
   expect(screen.queryByText("Attempt metrics")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   const metricsSummary = await screen.findByText("Run metrics and diagnostics");
   expect(screen.getByText("4 LLM calls · 1,200 input · 400 output · 12.4s")).toBeVisible();
   expect(screen.getByText("Attempt metrics")).not.toBeVisible();
@@ -1455,7 +1459,7 @@ test("groups metrics by role and expands phase observations", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   fireEvent.click(await screen.findByText("Run metrics and diagnostics"));
   const roleMetricsTitle = screen.getByText("Metrics by role");
   const roleMetrics = roleMetricsTitle.closest("details");

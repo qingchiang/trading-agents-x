@@ -10,7 +10,7 @@ import { InstrumentIdentity } from "../components/Instruments";
 import { ActionMenu } from "../components/Interaction";
 import { Link, useLocation, useNavigate } from "../router";
 const ResearchLibrary = lazy(() => import("./ResearchLibrary"));
-const RunDetail = lazy(() => import("./RunDetail"));
+const ResearchReader = lazy(() => import("../components/ResearchReader"));
 const NodeComparison = lazy(() => import("../components/NodeComparison"));
 const CYCLE_PAGE_SIZE = 12;
 
@@ -156,7 +156,7 @@ export default function Timeline() {
           <button className="button" disabled={cycleOffset + cycles.length >= (detail.timeline.cycle_total ?? 0)} onClick={() => update({ cycle_offset: String(cycleOffset + CYCLE_PAGE_SIZE), node: null, view: null })}>{t("next")}</button>
         </div>}
       </div>}>
-      {selected && !comparisonView && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace actionsTarget={actionsTarget} key={selected.id} /></Suspense>}
+      {selected && !comparisonView && <Suspense fallback={<div role="status">{t("loading")}</div>}><ResearchReader selectedRunId={selected.id} workspace actionsTarget={actionsTarget} key={selected.id} /></Suspense>}
       {comparisonView && busy && <p role="status">{t("loading")}</p>}
       {comparisonView && comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} primaryCycleId={detail?.timeline.primary_cycle_id} changedOnly={params.get("changed_only") !== "0"} onChangedOnly={value => update({ changed_only: value ? "1" : "0" }, true)} onSwap={swapComparison} onClose={closeComparison} /></Suspense>}
     </ResearchWorkspace>

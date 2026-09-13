@@ -59,7 +59,7 @@ export function Router({
       const current = locationRef.current;
       const next = parseLocation(to);
       if (options?.replace) next.key = current.key;
-      if (next.pathname.startsWith("/timelines/")) {
+      if (next.pathname.startsWith("/timelines/") || next.pathname.startsWith("/runs/")) {
         next.sourceLibrary = current.pathname === "/timelines"
           ? { url: locationPath(current), key: current.key }
           : current.sourceLibrary;
@@ -68,6 +68,7 @@ export function Router({
         const saved = sessionStorage.getItem(`tradingagents-position:${current.sourceLibrary.key}`);
         if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
       }
+      if (options?.replace) { next.returnEvidence = current.returnEvidence; next.returnResearch = current.returnResearch; }
       const currentParams = new URLSearchParams(current.search);
       const nextParams = new URLSearchParams(next.search);
       if (next.pathname === current.pathname && currentParams.get("view") === "evidence" && nextParams.get("view") === "evidence" && nextParams.get("node") !== currentParams.get("node") && current.returnEvidence?.url !== locationPath(next)) {

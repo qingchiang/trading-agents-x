@@ -380,3 +380,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 
 .evidence-domain-filter { padding-inline: var(--reading-padding); }
 .performance-endpoints { grid-column: 1 / -1; }
 .performance-retrieved { color: var(--muted); }
+
+.execution-page > .view-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+.execution-page > .view-tabs a { padding: 12px 16px; border-bottom: 2px solid transparent; }
+.execution-page > .view-tabs a[aria-current] { color: var(--blue-dark); border-color: var(--blue); background: var(--blue-soft); }

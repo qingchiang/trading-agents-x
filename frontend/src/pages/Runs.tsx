@@ -1,3 +1,4 @@
+import { researchLocation } from "../researchLinks";
 import TaskGroupMembers from "../components/TaskGroupMembers";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,9 +7,7 @@ import { InstrumentIdentity } from "../components/Instruments";
 import { ActionMenu, tabsKeyDown } from "../components/Interaction";
 import RunLifecycleDialog, { type LifecycleAction } from "../components/RunLifecycleDialog";
 import ResearchKindBadge from "../components/ResearchKindBadge";
-import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import StatusBadge from "../components/StatusBadge";
-import { researchConfidenceLabel } from "../i18n";
 import { Link, useLocation, useNavigate } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
 
@@ -76,16 +75,14 @@ export default function Runs() {
     catch (cause) { setError(String(cause)); }
     finally { lock.current = false; setBusy(false); }
   };
-  const researchLink = (run: RunSummaryView) => run.is_research_node ? `/timelines/${encodeURIComponent(run.request.ticker)}?node=${encodeURIComponent(run.id)}${run.trashed_at ? "&trash_state=all" : ""}` : `/runs/${run.id}?view=decision`;
   const row = (run: RunSummaryView, matched: boolean, baseline = false) => <div className={`task-row ${baseline ? "baseline" : ""} ${matched ? "matched" : "context"}`} key={run.id}>
     {!run.is_research_node && <input type="checkbox" aria-label={t("selectRun", { ticker: run.request.ticker })} disabled={!trash && ["queued", "running"].includes(run.status)} checked={selected.includes(run.id)} onChange={() => setSelected(value => value.includes(run.id) ? value.filter(id => id !== run.id) : [...value, run.id])} />}
     <div><time>{run.request.analysis_date}</time><ResearchKindBadge kind={run.research_kind} /></div>
-    <div className="decision-cell"><ResearchRatingBadge rating={run.research_rating} />{run.research_confidence && <small>{researchConfidenceLabel(t, run.research_confidence)}</small>}</div>
     <StatusBadge status={run.status} />
     {run.trashed_at && <small>{retention ? formatUtcDate(trashDeadline(run.trashed_at, retention)!.deletionAt) : t("trashRetentionDisabled")}</small>}
     <div className="task-actions">
       <Link className="text-link" to={`/runs/${run.id}?view=timeline`}>{t("executionDetails")}</Link>
-      {run.status === "succeeded" && <Link className="text-link" to={researchLink(run)}>{t("openResearch")}</Link>}
+      {run.status === "succeeded" && <Link className="text-link" to={researchLocation(run)}>{t("openResearch")}</Link>}
       {!run.trashed_at && ["queued", "running"].includes(run.status) && <button className="button" disabled={busy || run.cancel_requested} onClick={() => void act(run, "cancel")}>{t(run.cancel_requested ? "taskCancelSent" : "cancel")}</button>}
       {!run.trashed_at && run.status === "failed" && <button className="button" disabled={busy} onClick={() => void act(run, "retry")}>{t("retry")}</button>}
       {!baseline && !["queued", "running"].includes(run.status) && <ActionMenu label={t("manageTask")}>
@@ -114,6 +111,7 @@ export default function Runs() {
       <header className="task-group-heading"><InstrumentIdentity ticker={group.instrument} instrumentName={group.baseline?.instrument_name ?? (group.related_tasks ?? [])[0]?.instrument_name} instrumentLocalName={group.baseline?.instrument_local_name ?? (group.related_tasks ?? [])[0]?.instrument_local_name} />
         <div>{group.baseline ? <span>{t("baselineDate")}: {group.baseline.request.analysis_date}</span> : <span>{t("standaloneTask")}</span>}{group.is_primary && <strong className="cycle-primary">{t("primaryCycle")}</strong>}{filtered && <small>{t("matchingTasks", { count: (group.matched_run_ids ?? []).length })}</small>}</div>
         {group.baseline && <ActionMenu label={t("manageCycle")}>
+          <Link className="button" to={researchLocation(group.baseline)}>{t("researchTimeline")}</Link>
           {!group.baseline.trashed_at ? <button className="button danger" onClick={() => setOperation({ ids: [group.baseline!.id], action: "trash" })}>{t("moveCycleToTrash")}</button> : <>
             <button className="button" onClick={() => setOperation({ ids: [group.baseline!.id], action: "restore" })}>{t("restore")}</button>
             <button className="button danger" onClick={() => setOperation({ ids: [group.baseline!.id], action: "purge" })}>{t("confirmPurge")}</button>
