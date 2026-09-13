@@ -13,11 +13,11 @@ export default function WorkspaceOutline({ container, target, onNavigate }: { on
     let signature = "";
     const update = () => {
       const reader = root.querySelector(".workspace-reader");
-      const elements = reader && !reader.querySelector(".report-reading-layout[data-report-outline]") ? [...reader.querySelectorAll<HTMLElement>("h1, h2, h3")].filter(element => !element.closest("details:not([open]), .reading-toolbar, .source-drawer-layer")) : [];
-      const next = elements.map((element, index) => {
-        if (!element.id) element.id = `research-section-${index}`;
+      const elements = reader && !reader.querySelector("[data-report-outline], [data-process-outline]")
+        ? [...reader.querySelectorAll<HTMLElement>("[data-outline][id]")].filter(element => !element.closest(".source-drawer-layer")) : [];
+      const next = elements.map(element => {
         element.tabIndex = -1;
-        return { id: element.id, label: element.textContent ?? "", level: Number(element.tagName.slice(1)) };
+        return { id: element.id, label: element.dataset.outline ?? "", level: Number(element.dataset.outlineLevel ?? 2) };
       });
       const value = JSON.stringify(next);
       if (value !== signature) { signature = value; setHeadings(next); }
@@ -41,7 +41,8 @@ export default function WorkspaceOutline({ container, target, onNavigate }: { on
   return createPortal(<nav aria-label={t("onThisReport")} className="structured-outline floating-navigation-items">{headings.map(heading => <button key={heading.id} data-level={heading.level} aria-current={active === heading.id ? "location" : undefined} onClick={() => {
     onNavigate();
     const element = document.getElementById(heading.id);
-    element?.scrollIntoView({ block: "start" }); element?.focus({ preventScroll: true });
+    if (element instanceof HTMLDetailsElement) element.open = true;
+    element?.scrollIntoView?.({ block: "start" }); element?.focus({ preventScroll: true });
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${heading.id}`);
   }}>{heading.label}</button>)}</nav>, target);
 }

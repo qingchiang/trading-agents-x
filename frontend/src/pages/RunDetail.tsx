@@ -945,6 +945,7 @@ function ReassessmentPanel({
             return (
               <details
                 className="reassessment-group"
+                id={`reassessment-${group.key}`} data-outline={t(reassessmentGroupLabel(group.key))}
                 open={changed.length > 0}
                 key={group.key}
               >
@@ -1136,7 +1137,7 @@ function EvidencePanel({
         </div>
       </div>
       {incremental && incrementalNode && (
-        <div className="evidence-update-overview">
+        <div className="evidence-update-overview" id="evidence-coverage" data-outline={t("researchAvailability")}>
           <section>
             <h3>{t("informationAdvancement")}</h3>
             <p>
@@ -1206,7 +1207,7 @@ function EvidencePanel({
               evidenceIndex={evidenceIndex}
             />
           )}
-          <div className="evidence-filters">
+          <div className="evidence-filters" id="evidence-list" data-outline={t("evidence")}>
             <label>{t("searchEvidence")}<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
             <label>{t("evidenceSourceFilter")}<select value={source} onChange={event => setSource(event.target.value)}><option value="">{t("all")}</option>{sources.map(value => <option key={value}>{value}</option>)}</select></label>
           </div>
@@ -1223,7 +1224,7 @@ function EvidencePanel({
           </div>
           {(evidence.tables ?? []).length > 0 && (
             <section className="evidence-table-list">
-              <h3>{t("rawEvidenceTables")}</h3>
+              <h3 id="evidence-tables" data-outline={t("rawEvidenceTables")}>{t("rawEvidenceTables")}</h3>
               {(evidence.tables ?? []).map((table) => (
                 <EvidenceTableView
                   table={table}

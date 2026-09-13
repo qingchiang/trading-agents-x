@@ -257,7 +257,8 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "40–50 x" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Valuation assessment" })).toBeVisible();
+  expect(screen.getByText("40–50 x")).toBeVisible();
   expect(screen.getByText("7.25")).toBeVisible();
   expect(screen.queryByText("Unit unspecified")).not.toBeInTheDocument();
   const horizon = container.querySelector(".decision-horizon-summary");
@@ -410,6 +411,7 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
 
   expect(screen.getByRole("heading", { name: "Bull and bear cases" })).toBeVisible();
   expect(screen.getByText("Bull thesis.")).toBeVisible();
+  expect(screen.getAllByText("Demand concerns are addressable.")).toHaveLength(1);
   expect(screen.getByText("Bear thesis.")).toBeVisible();
   expect(screen.getAllByText("Is demand durable?")[0]).toBeVisible();
   expect(screen.getByText(/material · unresolved/)).toBeVisible();

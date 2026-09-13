@@ -31,13 +31,13 @@ export default function NodeComparison({ comparison, baselineDates = {}, primary
   useReadingPosition(`comparison:${comparison.instrument}`);
   const knownSections = comparison.decision_sections.filter(section => comparisonLabels[section.key]);
   const sections = knownSections.flatMap(section => {
-    if (section.key !== "scenarios") return [{ ...section, label: t(comparisonLabels[section.key]) }];
+    if (section.key !== "scenarios") return [{ ...section, outlineId: `comparison-${section.key}`, label: t(comparisonLabels[section.key]) }];
     const kinds = [...new Set(section.values.flatMap(value => Array.isArray(value.value) ? value.value.map(item => item?.kind).filter((kind): kind is string => typeof kind === "string") : []))];
-    return kinds.length ? kinds.map(kind => ({ ...section, label: `${t("scenarios")} · ${["base", "bull", "bear"].includes(kind) ? t(`${kind}Scenario`) : t("comparisonContentUnsupported")}`, values: section.values.map(value => {
+    return kinds.length ? kinds.map(kind => ({ ...section, outlineId: `comparison-scenarios-${kind}`, label: `${t("scenarios")} · ${["base", "bull", "bear"].includes(kind) ? t(`${kind}Scenario`) : t("comparisonContentUnsupported")}`, values: section.values.map(value => {
       if (value.state !== "recorded" || !Array.isArray(value.value)) return value;
       const items = value.value.filter(item => item?.kind === kind);
       return { state: items.length ? "recorded" as const : "empty" as const, value: items };
-    }) })) : [{ ...section, label: t("scenarios") }];
+    }) })) : [{ ...section, outlineId: "comparison-scenarios", label: t("scenarios") }];
   }).filter(section => !changedOnly || stableJson(section.values[0]) !== stableJson(section.values[1]));
   const technicalFields = comparison.decision_sections.some(section => !comparisonLabels[section.key] || section.values.some(value => hasAdditionalComparisonFields(section.key, value.value)));
   const products = filterProductRows([
@@ -68,12 +68,12 @@ export default function NodeComparison({ comparison, baselineDates = {}, primary
     {comparison.method_changed && <p className="notice">{t("methodChanged")}</p>}
     {!!comparison.warnings?.length && <div className="research-limitations">{comparison.warnings.map(warning => <p key={`${warning.code}:${warning.message}`}>{warning.message}</p>)}</div>}
     {sections.map(section => <section className="comparison-section" key={`${section.key}:${section.label}`}>
-      <h3>{section.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={comparison.sides[index].node_id}>
+      <h3 id={section.outlineId} data-outline={section.label}>{section.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={comparison.sides[index].node_id}>
         <time className="comparison-side-date">{comparison.sides[index].analysis_date}</time>
         <ComparisonValue field={section.key} value={section.values[index]} index={evidence[index].index} onEvidence={ref => setSource({ side: index, ref })} />
       </div>)}</div>
     </section>)}
-    {products.map(row => <section className="comparison-section" key={row.key}><h3>{row.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={index}>
+    {products.map(row => <section className="comparison-section" key={row.key}><h3 id={`comparison-product-${row.key}`} data-outline={row.label}>{row.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={index}>
       <time className="comparison-side-date">{comparison.sides[index].analysis_date}</time>
       <ComparisonValue field="thesis" value={row.values[index] == null ? { state: "not_recorded_under_this_schema" } : { state: "recorded", value: row.values[index] }} index={evidence[index].index} onEvidence={ref => setSource({ side: index, ref })} />
     </div>)}</div></section>)}

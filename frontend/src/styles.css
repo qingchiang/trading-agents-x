@@ -1378,17 +1378,16 @@ label small {
 }
 
 .markdown {
-  max-height: 660px;
-  padding: 22px 26px;
-  overflow-y: auto;
+  min-width: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
   color: #3e495b;
   font-size: 16px;
-  line-height: 1.7;
+  line-height: 1.75;
 }
 
-.report-panel > .markdown {
-  max-height: clamp(660px, 75dvh, 1200px);
-}
+.markdown p { margin-block: 0.8em; }
+.markdown table { display: block; max-width: 100%; overflow-x: auto; }
 
 .markdown > :first-child {
   margin-top: 0;
@@ -1739,7 +1738,7 @@ label small {
 
 .bundle-summary {
   display: grid;
-  grid-template-columns: 1.2fr 0.7fr 0.4fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin: 0;
   padding: 18px 22px;
@@ -2696,7 +2695,7 @@ button.research-kind-badge {
 .comparison-side-date { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .comparison-range { display: flex; gap: 12px; flex-wrap: wrap; }
 .comparison-scenario h4 { margin: 12px 0 4px; }
-.evidence-filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 0; }
+.evidence-filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; }
 .evidence-filters label { flex: 1 1 180px; }
 .history-select .research-rating-badge { justify-self: start; }
 .cycle-head-label { color: #215ba6; }

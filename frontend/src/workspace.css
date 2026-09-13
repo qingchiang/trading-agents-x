@@ -9,6 +9,8 @@
   --blue: #2863b6;
   --blue-dark: #254e86;
   --blue-soft: #edf3fa;
+  --reading-width: 960px;
+  --reading-padding: 24px;
   --radius: 8px;
   --shadow: none;
 }
@@ -47,8 +49,8 @@ h2, .panel-header h2 { font-size: 20px; }
 .decision-rating-v2 { flex-direction: row; flex-wrap: wrap; gap: 12px; justify-content: flex-start; min-height: 0; padding: 16px 26px; color: var(--ink); background: #f4f7fb; border-bottom: 1px solid var(--line); text-align: left; }
 .decision-rating-v2 strong { color: var(--ink); font-size: 20px; margin: 0; }
 .decision-rating-v2 span, .decision-rating-v2 small { color: var(--muted); }
-.decision-summary, .decision-section { padding: 22px 26px; }
-.decision-summary h2 { margin-top: 12px; }
+.decision-summary, .decision-section { padding: var(--reading-padding); }
+.decision-summary > h2 { margin-top: 24px; }
 .decision-horizon-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; background: transparent; border: 0; padding: 0; margin: 12px 0; }
 .research-opinion-notice { padding: 0; background: transparent; font-size: 12px; font-weight: 400; text-transform: none; }
 .scenario-card, .valuation-card, .research-list, .adjustment-card { background: transparent; border-radius: 0; box-shadow: none; }
@@ -56,8 +58,7 @@ h2, .panel-header h2 { font-size: 20px; }
 .scenario-grid { gap: 24px; }
 .decision-content, .incremental-outcome-summary, .reassessment-groups { max-width: 100%; }
 .decision-content .markdown, .research-list .markdown, .analyst-report .markdown, .deliberation-flow .markdown { font-size: 16px; line-height: 1.75; }
-.decision-summary > .markdown, .decision-section > .markdown { max-width: 880px; }
-.report-reading-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: start; gap: 24px; padding: 28px 32px; }
+.report-reading-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); align-items: start; gap: 24px; padding: var(--reading-padding); }
 .analyst-report { max-height: none; overflow: visible; padding: 0; min-width: 0; width: 100%; max-width: none; margin: 0; }
 .analyst-report .markdown :is(h1,h2,h3,h4,h5,h6) { scroll-margin-top: 24px; }
 .floating-navigation-slot { position: sticky; top: 24px; width: auto; pointer-events: auto; }
@@ -94,7 +95,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
   .analyst-report { padding: 0; }
   .page-header h1, .instrument-identity.prominent .instrument-primary-name { font-size: 24px; }
   .page-header { gap: 12px; }
-  .decision-summary, .decision-section { padding: 18px 16px; }
+  .decision-summary, .decision-section { padding: var(--reading-padding); }
   .decision-rating-v2 { padding: 18px 16px 0; }
   .action-menu-content { max-width: calc(100vw - 32px); }
 }
@@ -169,7 +170,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .decision-content { max-width: none; margin: 0; }
 .research-list { border: 0; padding: 0; }
 .decision-summary { padding-bottom: 24px; }
-.research-list h3, .decision-summary h3 { text-transform: none; letter-spacing: 0; font-size: 18px; }
+.research-list > h3, .scenario-card > h3 { text-transform: none; letter-spacing: 0; font-size: 18px; color: var(--ink); }
+.research-list > h2 { margin: 0 0 12px; font-size: 20px; }
+.valuation-value { font-size: 24px; font-weight: 650; }
 .decision-rating-v2 > span { text-transform: none; letter-spacing: 0; }
 .research-opinion-notice { margin-bottom: 16px; }
 .run-actions-cell { min-width: 128px; }
@@ -193,8 +196,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .view-tabs { overflow-x: auto; flex-wrap: nowrap; }
 .view-tabs button { flex-shrink: 0; }
 
-.workspace-reader .report-reading-layout { display: block; padding: 26px 32px; }
-.workspace-reader > .report-panel { max-width: 960px; }
+.workspace-reader .report-reading-layout { display: block; }
+.workspace-reader:not(.comparison-reader), .run-reader > :is(.reading-toolbar, .report-panel, .decision-panel-v2, .reader-panel, .incremental-reassessment-panel) { max-width: var(--reading-width); width: 100%; }
 .timeline-page:has(.workspace-judgment) .workspace-reader .decision-hero > .decision-rating-v2 { display: none; }
 .workspace-judgment { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .workspace-actions-container { display: flex; flex-wrap: wrap; gap: 8px; align-self: end; align-items: center; }
@@ -202,7 +205,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .workspace-reader .floating-navigation-slot { display: none; }
 .workspace-reader .floating-section-select { display: none; }
 
-.markdown > :is(p,ul,ol,blockquote), .decision-summary > .markdown { max-width: 880px; }
 .decision-content .decision-lists-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .scenario-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
 @media (max-width: 1200px) { .decision-content .decision-lists-grid { grid-template-columns: 1fr; } }
@@ -221,7 +223,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .form-section-body { background: #fff; }
 .interface-preferences { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-bottom: 24px; }
 @media (max-width: 640px) {
-  .workspace-reader .report-reading-layout { padding: 16px; }
+  :root { --reading-padding: 16px; }
+  .workspace-reader .report-reading-layout { padding: var(--reading-padding); }
   .workspace-reader > .run-heading .action-row { justify-content: flex-start; }
   .workbench-region { padding: 16px; }
   .page-header .action-row { flex-wrap: wrap; }
@@ -330,10 +333,10 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 
 .limitation-section-link { display: inline-block; margin-inline-start: 12px; }
 
 /* Reading tools remain reachable during page scrolling. */
-.workspace-reader :is(h1,h2,h3,h4,h5,h6)[id] { scroll-margin-top: 90px; }
+.workspace-reader :is(h1,h2,h3,h4,h5,h6,[data-outline],.deliberation-stage,.typed-artifact-card)[id] { scroll-margin-top: 90px; }
 @media (max-width: 820px) {
   .reading-toolbar { top: 56px; }
-  .workspace-reader :is(h1,h2,h3,h4,h5,h6)[id] { scroll-margin-top: 130px; }
+  .workspace-reader :is(h1,h2,h3,h4,h5,h6,[data-outline],.deliberation-stage,.typed-artifact-card)[id] { scroll-margin-top: 130px; }
   .workspace-actions-container { width: 100%; }
   .workspace-context { gap: 4px 12px; font-size: 12px; }
 }

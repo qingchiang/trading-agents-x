@@ -85,14 +85,14 @@ export function ResearchDecisionContent({
           <span className="research-opinion-notice">
             {t("nonPersonalizedResearchOpinion")}
           </span>
-          <h2>{t("executiveSummary")}</h2>
+          <h2 id={embedded ? undefined : "assessment-summary"} data-outline={embedded ? undefined : t("executiveSummary")}>{t("executiveSummary")}</h2>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
           >
             {decision.executive_summary}
           </Markdown>
-          <h3>{t("thesis")}</h3>
+          <h2 id={embedded ? undefined : "assessment-thesis"} data-outline={embedded ? undefined : t("thesis")}>{t("thesis")}</h2>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
@@ -136,6 +136,7 @@ export function ResearchDecisionContent({
 
       <section className="decision-section decision-lists-grid">
         <MarkdownList
+          outlineId={embedded ? undefined : "assessment-catalysts"}
           title={t("catalysts")}
           items={decision.catalysts ?? []}
           empty={t("noCatalystsIdentified")}
@@ -143,18 +144,21 @@ export function ResearchDecisionContent({
           onEvidence={onEvidence}
         />
         <MarkdownList
+          outlineId={embedded ? undefined : "assessment-risks"}
           title={t("risks")}
           items={decision.risks}
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}
         />
         <MarkdownList
+          outlineId={embedded ? undefined : "assessment-invalidation"}
           title={t("invalidation")}
           items={decision.invalidation_conditions}
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}
         />
         <MarkdownList
+          outlineId={embedded ? undefined : "assessment-unresolvedQuestions"}
           title={t("unresolvedQuestions")}
           items={decision.unresolved_questions ?? []}
           empty={t("noneRecorded")}
@@ -167,7 +171,7 @@ export function ResearchDecisionContent({
         <div className="decision-section-heading">
           <div>
             <p className="eyebrow">{t("conditionalAnalysis")}</p>
-            <h2>{t("scenarios")}</h2>
+            <h2 id={embedded ? undefined : "assessment-scenarios"} data-outline={embedded ? undefined : t("scenarios")}>{t("scenarios")}</h2>
           </div>
         </div>
         <div className="scenario-grid">
@@ -279,10 +283,8 @@ export function ResearchDecisionContent({
       {decision.valuation_assessment && (
         <section className="decision-section valuation-section">
           <article className="valuation-card">
-              <span className="decision-section-label">
-                {t("valuationAssessment")}
-              </span>
-              <h2
+              <h2 id={embedded ? undefined : "assessment-valuation"} data-outline={embedded ? undefined : t("valuationAssessment")}>{t("valuationAssessment")}</h2>
+              <p className="valuation-value"
                 title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.unit}`}
               >
                 {formatRange(
@@ -291,7 +293,7 @@ export function ResearchDecisionContent({
                   decision.valuation_assessment.unit,
                   numberLanguage,
                 )}
-              </h2>
+              </p>
               <dl>
                 <div>
                   <dt>{t("method")}</dt>
@@ -334,9 +336,7 @@ export function ResearchDecisionContent({
 
       {(decision.market_reference_levels ?? []).length > 0 && (
         <section className="decision-section market-reference-section">
-          <span className="decision-section-label">
-            {t("marketReferenceLevels")}
-          </span>
+          <h2 id={embedded ? undefined : "assessment-market"} data-outline={embedded ? undefined : t("marketReferenceLevels")}>{t("marketReferenceLevels")}</h2>
           <p className="reference-level-notice">
             {t("marketReferenceNotice")}
           </p>
@@ -413,7 +413,7 @@ export function ResearchDecisionContent({
 
       {(decision.risk_review_adjustments ?? []).length > 0 && (
         <section className="decision-section">
-          <h2>{t("riskReviewAdjustments")}</h2>
+          <h2 id={embedded ? undefined : "assessment-riskReviewAdjustments"} data-outline={embedded ? undefined : t("riskReviewAdjustments")}>{t("riskReviewAdjustments")}</h2>
           <div className="adjustment-list">
             {(decision.risk_review_adjustments ?? []).map(
               (adjustment, index) => (

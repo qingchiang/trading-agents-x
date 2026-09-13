@@ -267,7 +267,7 @@
   text-transform: uppercase;
 }
 
-.research-list ul {
+.research-list > ul {
   margin: 0;
   padding-left: 19px;
 }
@@ -283,9 +283,6 @@
   margin-top: 0;
 }
 
-.research-list .markdown p {
-  margin: 0;
-}
 
 .research-table-card {
   margin-top: 20px;
@@ -436,7 +433,7 @@
 .deliberation-flow {
   display: grid;
   gap: 30px;
-  padding: 22px;
+  padding: var(--reading-padding);
 }
 
 .deliberation-reading-layout {
@@ -455,10 +452,11 @@
 }
 
 .case-comparison,
-.rebuttal-round {
+.rebuttal-round,
+.risk-review-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
   align-items: start;
 }
 
@@ -471,8 +469,10 @@
 }
 
 .typed-artifact-card .artifact-body {
-  padding: 20px;
+  padding: 16px 0;
 }
+.typed-artifact-card { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.typed-artifact-card .artifact-header.compact { padding-inline: 0; background: transparent; }
 
 .case-role {
   color: var(--case-accent);
@@ -483,15 +483,8 @@
   gap: 12px;
 }
 
-.risk-review-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-
 .decision-panel-v2 {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .incremental-outcome-summary {
@@ -749,18 +742,10 @@
   border-radius: 8px;
 }
 
-.decision-summary h2 {
+.decision-summary > h2 {
   margin: 18px 0 7px;
   color: var(--ink);
   font-size: 20px;
-}
-
-.decision-summary h3 {
-  margin: 20px 0 7px;
-  color: var(--muted);
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .numeric-audit-notice {

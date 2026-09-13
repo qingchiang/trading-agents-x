@@ -2,6 +2,7 @@ import { useReadingPosition } from "../useReadingPosition";
 import {
   useEffect,
   useRef,
+  useLayoutEffect,
   useState,
   type ReactNode,
   type RefObject,
@@ -84,12 +85,28 @@ export function ResearchMarkdownReader({
   extraSections?: AnalystReport["report_sections"];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [fallback, setFallback] = useState<AnalystReport["report_sections"]>([]);
+  useLayoutEffect(() => {
+    if (sections.length) { setFallback([]); return; }
+    const headings = [...(scrollRef.current?.querySelectorAll<HTMLElement>(".markdown:first-of-type :is(h1,h2,h3)") ?? [])];
+    const occurrences = new Map<string, number>();
+    setFallback(headings.map(heading => {
+      const title = heading.textContent ?? "";
+      let hash = 2166136261;
+      for (const char of `${reportKey}:${title}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+      const identity = `legacy-${(hash >>> 0).toString(36)}`;
+      const count = occurrences.get(identity) ?? 0; occurrences.set(identity, count + 1);
+      const anchor = `${identity}${count ? `-${count}` : ""}`;
+      heading.id = `user-content-${anchor}`;
+      return { id: anchor, anchor, title, source_refs: [] };
+    }));
+  }, [markdown, reportKey, sections.length]);
   const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
   useReadingPosition(scrollStorageKey, scrollRef);
 
   return (
-    <div className="report-reading-layout" data-report-outline={sections.length > 0 || undefined}>
-      <ReportSectionNavigation sections={sections.length ? [...sections, ...extraSections] : []} containerRef={scrollRef} />
+    <div className="report-reading-layout" data-report-outline>
+      <ReportSectionNavigation sections={[...(sections.length ? sections : fallback), ...extraSections]} containerRef={scrollRef} />
       <div className="analyst-report" ref={scrollRef}>
         {before}
         <Markdown
@@ -118,21 +135,9 @@ function LegacyMarkdownReader({
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
-  useReadingPosition(scrollStorageKey, scrollRef);
-
-  return (
-    <div className="analyst-report" ref={scrollRef}>
-      <Markdown
-        evidenceAliases={evidenceIndex.aliases}
-        onEvidence={onEvidence}
-      >
-        {markdown}
-      </Markdown>
-    </div>
-  );
+  return <ResearchMarkdownReader markdown={markdown} sections={emptySections} runId={runId} reportKey={reportKey} evidenceIndex={evidenceIndex} onEvidence={onEvidence} />;
 }
+const emptySections: AnalystReport["report_sections"] = [];
 
 function ReportSectionNavigation({
   sections,
@@ -211,12 +216,14 @@ function headingDomId(anchor: string): string {
 
 export function MarkdownList({
   title,
+  outlineId,
   items,
   empty = "—",
   evidenceIndex,
   onEvidence,
 }: {
   title: string;
+  outlineId?: string;
   items: string[];
   empty?: string;
   evidenceIndex: EvidenceReferenceIndex;
@@ -224,7 +231,7 @@ export function MarkdownList({
 }) {
   return (
     <section className="research-list">
-      <h3>{title}</h3>
+      {outlineId ? <h2 id={outlineId} data-outline={title}>{title}</h2> : <h3>{title}</h3>}
       {items.length > 0 ? (
         <ul>
           {items.map((item, index) => (

@@ -44,7 +44,7 @@ export function useModal<T extends HTMLElement>(open: boolean, onClose: () => vo
     return () => {
       document.removeEventListener('keydown', keyDown);
       document.body.style.overflow = overflow;
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      if (previous?.isConnected && (container.contains(document.activeElement) || document.activeElement === document.body)) previous.focus({ preventScroll: true });
     };
   }, [open]);
   return ref;

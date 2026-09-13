@@ -43,5 +43,5 @@ test("builds a navigable outline for historical briefs without recorded sections
   await page.locator('.workspace-contents').getByRole('button', { name: 'Demand and capacity', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Demand and capacity', exact: true })).toBeInViewport();
   await expect(page.locator('.workspace-auxiliary')).toBeHidden();
-  await expect(page).toHaveURL(/#research-section-/);
+  await expect(page).toHaveURL(/#legacy-/);
 });
