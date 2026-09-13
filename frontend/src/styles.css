@@ -293,67 +293,6 @@ select:focus-visible {
   color: var(--muted);
 }
 
-.comparison-selection {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.comparison-panel {
-  border-top: 4px solid var(--blue);
-}
-
-.comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.comparison-side {
-  min-width: 0;
-  padding: 18px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.comparison-side h3,
-.comparison-context h4 {
-  margin: 4px 0 8px;
-}
-
-.comparison-context {
-  margin-top: 16px;
-}
-
-.comparison-context pre {
-  max-height: 260px;
-  padding: 12px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #fff;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-}
-
-.comparison-decision-table {
-  margin-top: 20px;
-}
-
-.comparison-decision-table caption {
-  padding: 10px;
-  font-weight: 750;
-  text-align: left;
-}
-
-@media (max-width: 860px) {
-  .comparison-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .eyebrow {
   margin: 0;
   color: var(--blue);
@@ -2783,34 +2722,6 @@ button.research-kind-badge {
   font-size: 11px;
 }
 
-.comparison-raw-sides {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.comparison-raw-sides > div {
-  min-width: 0;
-}
-
-.comparison-raw-sides h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
-
-.comparison-raw-sides pre {
-  max-height: 360px;
-  margin: 10px 0 0;
-  padding: 12px;
-  overflow: auto;
-  color: #d9e2ef;
-  background: var(--navy-900);
-  border-radius: 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .research-cycle-list {
   display: grid;
   gap: 24px;
@@ -3001,33 +2912,11 @@ button.research-kind-badge {
   align-items: center;
 }
 
-.collection-source-list,
-.comparison-value-list {
+.collection-source-list {
   display: grid;
   gap: 4px;
   margin: 3px 0 0;
   padding-left: 18px;
-}
-
-.comparison-value-fields {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-}
-
-.comparison-value-fields > div {
-  display: grid;
-  gap: 2px;
-}
-
-.comparison-value-fields dt {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.comparison-value-fields dd {
-  margin: 0;
 }
 
 .compact-list {
@@ -3134,18 +3023,6 @@ button.research-kind-badge {
 
 .node-actions .text-link {
   margin-left: auto;
-}
-
-.comparison-decision-table th:not(:first-child),
-.comparison-decision-table td:not(:first-child) {
-  min-width: 240px;
-  vertical-align: top;
-}
-
-.comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .baseline-picker {
@@ -3348,9 +3225,7 @@ button.research-kind-badge {
 
   .incremental-product-grid,
   .incremental-detail-grid,
-  .incremental-update-detail-grid,
-  .comparison-raw-sides,
-  .comparison-grid {
+  .incremental-update-detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3361,63 +3236,9 @@ button.research-kind-badge {
 }
 
 @media (max-width: 640px) {
-  .comparison-modal-backdrop {
-    display: block;
-    padding: 0;
-  }
-
-  .comparison-modal {
-    width: 100%;
-    height: 100dvh;
-    border: 0;
-    border-radius: 0;
-  }
-
-  .comparison-modal-header {
-    display: grid;
-    gap: 9px;
-    padding: 12px 14px;
-  }
-
-  .comparison-modal-actions {
-    justify-content: space-between;
-  }
-
-  .comparison-modal-scroll {
-    padding: 14px 16px 22px;
-  }
 
   .comparison-side-by-side {
     grid-template-columns: 1fr;
-  }
-
-  .comparison-modal .comparison-decision-table table,
-  .comparison-modal .comparison-decision-table thead,
-  .comparison-modal .comparison-decision-table tbody {
-    display: block;
-    width: 100%;
-  }
-
-  .comparison-modal .comparison-decision-table tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-  }
-
-  .comparison-modal .comparison-decision-table th:first-child {
-    grid-column: 1 / -1;
-  }
-
-  .comparison-modal .comparison-decision-table th,
-  .comparison-modal .comparison-decision-table td {
-    display: block;
-    min-width: 0;
-    width: auto;
-  }
-
-  .comparison-modal .comparison-decision-table tbody th {
-    background: #f7f9fc;
-    border-top: 1px solid var(--line);
   }
 
   .page-header,

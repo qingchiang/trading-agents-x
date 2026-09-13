@@ -44,3 +44,16 @@ test("keeps partial evidence readable and retries only the failed direct baselin
   expect(vi.mocked(api.evidence).mock.calls.filter(([id]) => id === "right")).toHaveLength(1);
   expect(vi.mocked(api.evidence).mock.calls.filter(([id]) => id === "baseline")).toHaveLength(2);
 });
+
+test("does not call unknown scenario content unchanged or expose its raw fields", async () => {
+  vi.mocked(api.evidence).mockResolvedValue({ version: "8", instrument: "NVDA", analysis_date: "2026-07-20", items: [] });
+  const fixture = structuredClone(comparison);
+  fixture.decision_sections = [{ key: "scenarios", values: [
+    { state: "recorded", value: [{ kind: "base", outcome: "Same", core_assumptions: [], private_marker: "before" }] },
+    { state: "recorded", value: [{ kind: "base", outcome: "Same", core_assumptions: [], private_marker: "after" }] },
+  ] }];
+  render(<Router initialPath="/timelines/NVDA?view=compare"><NodeComparison comparison={fixture} onClose={() => {}} /></Router>);
+  expect(await screen.findByText("Additional recorded fields are available in run diagnostics.")).toBeVisible();
+  expect(screen.queryByText("private_marker")).toBeNull();
+  expect(screen.queryByText("No changed sections in this group.")).toBeNull();
+});

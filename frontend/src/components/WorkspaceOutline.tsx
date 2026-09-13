@@ -3,7 +3,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 /** Outline for structured views; Markdown readers supply their own stable anchors. */
-export default function WorkspaceOutline({ container, target }: { container: RefObject<HTMLDivElement | null>; target: HTMLElement | null }) {
+export default function WorkspaceOutline({ container, target, onNavigate }: { onNavigate: () => void; container: RefObject<HTMLDivElement | null>; target: HTMLElement | null }) {
   const { t } = useTranslation();
   const [headings, setHeadings] = useState<{ id: string; label: string; level: number }[]>([]);
   const [active, setActive] = useState("");
@@ -13,7 +13,7 @@ export default function WorkspaceOutline({ container, target }: { container: Ref
     let signature = "";
     const update = () => {
       const reader = root.querySelector(".workspace-reader");
-      const elements = reader && !reader.querySelector(".report-reading-layout") ? [...reader.querySelectorAll<HTMLElement>("h2, h3")].filter(element => !element.closest("details:not([open]), .reading-toolbar, .source-drawer-layer")) : [];
+      const elements = reader && !reader.querySelector(".report-reading-layout[data-report-outline]") ? [...reader.querySelectorAll<HTMLElement>("h1, h2, h3")].filter(element => !element.closest("details:not([open]), .reading-toolbar, .source-drawer-layer")) : [];
       const next = elements.map((element, index) => {
         if (!element.id) element.id = `research-section-${index}`;
         element.tabIndex = -1;
@@ -39,6 +39,7 @@ export default function WorkspaceOutline({ container, target }: { container: Ref
   }, [headings]);
   if (!target || !headings.length) return null;
   return createPortal(<nav aria-label={t("onThisReport")} className="structured-outline floating-navigation-items">{headings.map(heading => <button key={heading.id} data-level={heading.level} aria-current={active === heading.id ? "location" : undefined} onClick={() => {
+    onNavigate();
     const element = document.getElementById(heading.id);
     element?.scrollIntoView({ block: "start" }); element?.focus({ preventScroll: true });
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${heading.id}`);

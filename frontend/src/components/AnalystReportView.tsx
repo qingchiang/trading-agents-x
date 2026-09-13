@@ -88,8 +88,8 @@ export function ResearchMarkdownReader({
   useReadingPosition(scrollStorageKey, scrollRef);
 
   return (
-    <div className="report-reading-layout">
-      <ReportSectionNavigation sections={[...sections, ...extraSections]} containerRef={scrollRef} />
+    <div className="report-reading-layout" data-report-outline={sections.length > 0 || undefined}>
+      <ReportSectionNavigation sections={sections.length ? [...sections, ...extraSections] : []} containerRef={scrollRef} />
       <div className="analyst-report" ref={scrollRef}>
         {before}
         <Markdown
@@ -143,6 +143,7 @@ function ReportSectionNavigation({
 }) {
   const { t } = useTranslation();
   const [active, setActive] = useState(sections[0]?.anchor ?? "");
+  const [levels, setLevels] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const container = containerRef.current;
@@ -166,6 +167,8 @@ function ReportSectionNavigation({
       }
       setActive(next);
     };
+    const nextLevels = Object.fromEntries(sections.map(section => [section.anchor, Number(document.getElementById(headingDomId(section.anchor))?.tagName.slice(1)) || 2]));
+    setLevels(current => JSON.stringify(current) === JSON.stringify(nextLevels) ? current : nextLevels);
     update();
     window.addEventListener("scroll", update, { passive: true });
     return () => window.removeEventListener("scroll", update);
@@ -189,7 +192,7 @@ function ReportSectionNavigation({
       entries={sections.map((section) => ({
         id: section.anchor,
         label: section.title,
-        level: Number(document.getElementById(headingDomId(section.anchor))?.tagName.slice(1)) || 2,
+        level: levels[section.anchor] ?? 2,
       }))}
       active={active}
       title={t("onThisReport")}

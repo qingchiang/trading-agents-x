@@ -1,6 +1,6 @@
 import Icon from "./Icon";
 import { createPortal } from "react-dom";
-import { WorkspaceNavigationTarget } from "./ResearchWorkspace";
+import { WorkspaceNavigationActions, WorkspaceNavigationTarget } from "./ResearchWorkspace";
 import { useContext, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -30,6 +30,7 @@ export default function FloatingSectionNavigation({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const navigation = useContext(WorkspaceNavigationActions);
   const workspaceTarget = useContext(WorkspaceNavigationTarget);
   const slotRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => readOpenState(storageKey));
@@ -46,7 +47,7 @@ export default function FloatingSectionNavigation({
     <nav aria-label={ariaLabel} className="floating-navigation-items">{entries.map(entry => <button
       type="button" key={entry.id} className={active === entry.id ? "active" : ""}
       data-level={entry.level ?? 2} aria-current={active === entry.id ? ariaCurrent : undefined}
-      onClick={() => onSelect(entry.id)}>{entry.label}</button>)}</nav>, workspaceTarget) : null;
+      onClick={() => { onSelect(entry.id); navigation?.close(); }}>{entry.label}</button>)}</nav>, workspaceTarget) : null;
 
   const content = (
     <>
@@ -74,7 +75,7 @@ export default function FloatingSectionNavigation({
                     type="button"
                     className={active === entry.id ? "active" : ""}
                     aria-current={active === entry.id ? ariaCurrent : undefined}
-                    onClick={() => onSelect(entry.id)}
+                    onClick={() => { onSelect(entry.id); navigation?.close(); }}
                     key={entry.id}
                   >
                     {entry.label}

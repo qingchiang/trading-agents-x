@@ -4,7 +4,7 @@ import { createContext, useContext, useCallback, useEffect, useLayoutEffect, use
 import { useTranslation } from "react-i18next";
 import { tabsKeyDown, useModal } from "./Interaction";
 
-export const WorkspaceNavigationActions = createContext<{ open: (tab: string) => void; compact: boolean; registerToolbar: (present: boolean) => void } | null>(null);
+export const WorkspaceNavigationActions = createContext<{ open: (tab: string) => void; close: () => void; compact: boolean; registerToolbar: (present: boolean) => void } | null>(null);
 
 export const WorkspaceNavigationTarget = createContext<HTMLElement | null | undefined>(undefined);
 
@@ -44,7 +44,7 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
     });
     return () => cancelAnimationFrame(frame);
   }, [wide, open, tab, history, panel]);
-  return <WorkspaceNavigationActions.Provider value={{ open: value => { setTab(value); setOpen(true); }, compact: !wide, registerToolbar: setHasToolbar }}>
+  return <WorkspaceNavigationActions.Provider value={{ open: value => { setTab(value); setOpen(true); }, close: () => setOpen(false), compact: !wide, registerToolbar: setHasToolbar }}>
     <WorkspaceNavigationTarget.Provider value={target}>
     <div className={`research-workspace ${wide ? "wide" : "compact"}`} ref={container}>
       {!wide && open && <div className="workspace-scrim" onClick={() => setOpen(false)} />}
@@ -58,7 +58,7 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
       </aside>
       {!wide && !hasToolbar && <div className="workspace-fallback-navigation"><button className="button" aria-expanded={open} onClick={() => { setTab("history"); setOpen(true); }}>{t("historyNavigation")}</button></div>}
       {children}
-      <WorkspaceOutline container={container} target={target} />
+      <WorkspaceOutline container={container} target={target} onNavigate={() => setOpen(false)} />
     </div>
   </WorkspaceNavigationTarget.Provider></WorkspaceNavigationActions.Provider>;
 }

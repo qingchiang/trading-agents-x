@@ -898,7 +898,7 @@ function ReassessmentPanel({
   const counts = reassessmentDispositionCounts(entries);
   const groups =
     baselineDecision && currentDecision
-      ? groupReassessment(entries, currentDecision)
+      ? groupReassessment(entries)
       : [];
   return (
     <article

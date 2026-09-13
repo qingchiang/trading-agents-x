@@ -88,7 +88,7 @@ export function ActionMenu({ label, children }: { label: string; children: React
     }
   }}>
     <button type="button" className="button" aria-expanded={open} onClick={() => setOpen(!open)}>{label}</button>
-    {open && <div className="action-menu-content" onClick={() => setOpen(false)}>{children}</div>}
+    {open && <div className="action-menu-content" onClick={() => { ref.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); setOpen(false); }}>{children}</div>}
   </div>;
 }
 

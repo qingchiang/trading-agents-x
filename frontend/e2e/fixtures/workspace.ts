@@ -38,7 +38,7 @@ export function workspaceFixture(locale = "en") {
   const failed = { ...pending, id: "failed", status: "failed", finished_at: "2026-07-26T20:10:00Z", error_message: "Mock provider unavailable", full_baseline_run_id: "older", request: { ...pending.request, analysis_date: "2026-07-26", full_baseline_run_id: "older" } };
   const standalone = { ...full, id: "standalone", is_research_node: false, status: "queued", research_rating: null, instrument_name: companies[4][1], instrument_local_name: companies[4][2], request: { ...full.request, ticker: "4568.T", analysis_date: "2026-07-27" } };
   const capabilities = { defaults: { trash_retention_days: 30, profile: "standard", llm_provider: "openai", quick_model: "mock-quick", deep_model: "mock-deep", quick_reasoning_effort: "provider_default", deep_reasoning_effort: "provider_default", output_language: locale, lan_enabled: false }, profiles: ["fast", "standard", "deep"], analysts: ["market", "news", "fundamentals", "social"], output_languages: ["en", "zh-CN", "ja"], providers: { openai: { label: "OpenAI", configured: true, selectable: true, api_key_configured: true, model_discovery_supported: false } } };
-  return function respond(url: URL, method = "GET") {
+  return function respond(url: URL, method = "GET", body?: string | null) {
     const path = url.pathname;
     if (path.includes("analysis-cutoff")) return { instrument: url.searchParams.get("instrument") ?? "NVDA", market_date: "2026-07-28", max_analysis_date: "2026-07-28", market_timezone: "America/New_York", observed_at: new Date().toISOString(), valid_until: new Date(Date.now() + 3600000).toISOString() };
     if (path === "/api/v1/capabilities") return capabilities;
@@ -46,7 +46,13 @@ export function workspaceFixture(locale = "en") {
     if (path === "/api/v1/instruments/recent") return summaries;
     if (path.includes("/models")) return { models: ["mock-quick", "mock-deep"], source: "configured", fetched_at: new Date().toISOString() };
     if (path === "/api/v1/timelines") { const items = url.searchParams.get("warning_only") === "true" ? summaries.filter(item => item.timeline_warning) : summaries; return { items, total: 51, offset: Number(url.searchParams.get("offset")), limit: Number(url.searchParams.get("limit")) || 25 }; }
-    if (path.endsWith("/compare")) return { instrument: "NVDA", cross_cycle: false, method_changed: false, sides: [baseline, increments.at(-1)!].map(node => ({ ...node, node_id: node.id, lifecycle_state: "active" })), decision_sections: [{ key: "thesis", values: [{ state: "recorded", value: `${copy.thesis}[^ev_0123456789ab]` }, { state: "recorded", value: `${copy.reason}[^ev_0123456789ab]` }] }, { key: "scenarios", values: [{ state: "recorded", value: report.decision.scenarios }, { state: "recorded", value: report.decision.scenarios.map(item => ({ ...item, outcome: copy.reason })) }] }] };
+    if (path.endsWith("/compare")) { const response = { instrument: "NVDA", cross_cycle: false, method_changed: false, sides: [baseline, increments.at(-1)!].map(node => ({ ...node, node_id: node.id, lifecycle_state: "active" })), decision_sections: [{ key: "thesis", values: [{ state: "recorded", value: `${copy.thesis}[^ev_0123456789ab]` }, { state: "recorded", value: `${copy.reason}[^ev_0123456789ab]` }] }, { key: "scenarios", values: [{ state: "recorded", value: report.decision.scenarios }, { state: "recorded", value: report.decision.scenarios.map(item => ({ ...item, outcome: copy.reason })) }] }] };
+      const selected = body ? (JSON.parse(body) as { nodes?: { node_id: string }[] }).nodes : undefined;
+      if (selected?.[0]?.node_id === "increment") {
+        response.sides.reverse(); response.decision_sections.forEach(section => section.values.reverse());
+      }
+      return response;
+    }
     if (path.startsWith("/api/v1/timelines/")) { const instrument = decodeURIComponent(path.split("/").at(-1)!); const identity = summaries.find(item => item.instrument === instrument) ?? summaries[0]; return { ...timeline, timeline: { ...timeline.timeline, instrument, instrument_name: identity.instrument_name, instrument_local_name: identity.instrument_local_name } }; }
     if (path === "/api/v1/runs/lifecycle-preview") return { action: "trash", affected_run_ids: ["full", ...increments.map(node => node.id)], affected_runs: [full, ...increments.map(node => ({ ...increment, id: node.id, request: { ...increment.request, analysis_date: node.analysis_date } }))], blocked_reasons: [], primary_replacements: { full: [{ id: "older", analysis_date: "2026-06-01", rating: "Hold" }] } };
     if (method !== "GET") return { detail: "This visual preview does not submit research or modify stored records." };

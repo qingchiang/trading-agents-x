@@ -621,22 +621,6 @@
   font-weight: 500;
 }
 
-.reassessment-current-snapshot {
-  padding: 15px 17px;
-  background: #f7faff;
-  border-block: 1px solid var(--line-soft);
-}
-
-.reassessment-current-snapshot h3 {
-  margin: 0 0 8px;
-  font-size: 13px;
-}
-
-.reassessment-current-snapshot ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
 .reassessment-entry-list {
   display: grid;
   gap: 12px;

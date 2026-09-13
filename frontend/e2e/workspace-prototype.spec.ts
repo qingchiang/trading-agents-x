@@ -4,7 +4,7 @@ import { workspaceFixture } from "./fixtures/workspace";
 test.beforeEach(async ({ page }) => {
   const respond = workspaceFixture();
   await page.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
-  await page.route("**/api/v1/**", route => route.fulfill({ json: respond(new URL(route.request().url()), route.request().method()) }));
+  await page.route("**/api/v1/**", route => route.fulfill({ json: respond(new URL(route.request().url()), route.request().method(), route.request().postData()) }));
 });
 
 test("keeps reading and history reachable as the viewport changes", async ({ page }) => {

@@ -15,3 +15,9 @@ Incremental research opens the analysis brief, followed by a separate period-per
 Period changes use the recorded vendor adjustment basis and actual trading sessions. Instrument-minus-benchmark differences are percentage points, never Alpha or total return. Missing and not-yet-observable values are not zero.
 
 Cycle management describes the Full baseline and its owned Incremental research. Related uncommitted tasks are visibly distinct and do not extend lifecycle ownership.
+
+Comparison is a reading mode inside the instrument workspace. Each side retains its research date, direct Full baseline, and Evidence scope. Unknown schema fields belong in diagnostics; their presence must not be presented as unchanged research content. Historical missing, null, and empty values remain distinct.
+
+Cycle menus apply to the Full baseline and its owned research. Task menus apply to the selected run. Lifecycle confirmation uses the server preview and invalidates that preview immediately when a write is rejected.
+
+Shareable reading state uses `node`, `view=compare`, ordered repeated `compare` values, `compare_mode`, and `changed_only`. Run history expansion uses repeated `expanded_group` values. The router keeps library and research return context per history entry; session storage keeps temporary reading positions. Direct links without return context use the library or the selected research's default reading view.

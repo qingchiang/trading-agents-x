@@ -6,6 +6,8 @@ const paths: Record<string, string> = {
   settings: 'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6',
   menu: 'M4 6h16 M4 12h16 M4 18h16',
   history: 'M3 11a9 9 0 1 1 2 7 M3 4v7h7 M12 7v5l3 2',
+  check: 'M5 12l4 4L19 6',
+  compare: 'M3 5h7v14H3z M14 5h7v14h-7z',
   close: 'M6 6l12 12 M18 6 6 18',
 };
 export default function Icon({ name }: { name: string }) {

@@ -5,7 +5,7 @@ import { type ResearchNodeComparison, type ResearchNodeView } from "../api/clien
 import { localizePerformanceReason } from "../i18n";
 import { Link } from "../router";
 import { useReadingPosition } from "../useReadingPosition";
-import ComparisonValue, { comparisonLabels } from "./ComparisonValue";
+import ComparisonValue, { comparisonLabels, hasAdditionalComparisonFields } from "./ComparisonValue";
 import EvidenceSourceDrawer from "./EvidenceSourceDrawer";
 import { useComparisonEvidence } from "./useComparisonEvidence";
 import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
@@ -32,14 +32,14 @@ export default function NodeComparison({ comparison, baselineDates = {}, primary
   const knownSections = comparison.decision_sections.filter(section => comparisonLabels[section.key]);
   const sections = knownSections.flatMap(section => {
     if (section.key !== "scenarios") return [{ ...section, label: t(comparisonLabels[section.key]) }];
-    const kinds = ["base", "bull", "bear"].filter(kind => section.values.some(value => Array.isArray(value.value) && value.value.some(item => item?.kind === kind)));
-    return kinds.length ? kinds.map(kind => ({ ...section, label: `${t("scenarios")} · ${t(`${kind}Scenario`)}`, values: section.values.map(value => {
+    const kinds = [...new Set(section.values.flatMap(value => Array.isArray(value.value) ? value.value.map(item => item?.kind).filter((kind): kind is string => typeof kind === "string") : []))];
+    return kinds.length ? kinds.map(kind => ({ ...section, label: `${t("scenarios")} · ${["base", "bull", "bear"].includes(kind) ? t(`${kind}Scenario`) : t("comparisonContentUnsupported")}`, values: section.values.map(value => {
       if (value.state !== "recorded" || !Array.isArray(value.value)) return value;
       const items = value.value.filter(item => item?.kind === kind);
       return { state: items.length ? "recorded" as const : "empty" as const, value: items };
     }) })) : [{ ...section, label: t("scenarios") }];
   }).filter(section => !changedOnly || stableJson(section.values[0]) !== stableJson(section.values[1]));
-  const technicalFields = comparison.decision_sections.some(section => !comparisonLabels[section.key]);
+  const technicalFields = comparison.decision_sections.some(section => !comparisonLabels[section.key] || section.values.some(value => hasAdditionalComparisonFields(section.key, value.value)));
   const products = filterProductRows([
     productRow("decision-outcome", t("decisionOutcome"), comparison.sides, side => side.decision_outcome ? `${t(`decisionOutcome_${side.decision_outcome}`)}${side.decision_outcome_reason ? `\n${side.decision_outcome_reason}` : ""}` : null),
     productRow("performance", t("performance"), comparison.sides, side => performanceComparisonText(t, side)),
@@ -77,7 +77,7 @@ export default function NodeComparison({ comparison, baselineDates = {}, primary
       <time className="comparison-side-date">{comparison.sides[index].analysis_date}</time>
       <ComparisonValue field="thesis" value={row.values[index] == null ? { state: "not_recorded_under_this_schema" } : { state: "recorded", value: row.values[index] }} index={evidence[index].index} onEvidence={ref => setSource({ side: index, ref })} />
     </div>)}</div></section>)}
-    {!sections.length && !products.length && <p>{t("comparisonNoChangedSections")}</p>}
+    {!sections.length && !products.length && !technicalFields && <p>{t("comparisonNoChangedSections")}</p>}
     {technicalFields && <p className="notice">{t("comparisonTechnicalFields")}</p>}
     <div className="action-row">{order.map(index => { const side = comparison.sides[index]; return <Link key={side.node_id} to={`/runs/${encodeURIComponent(side.node_id)}?view=diagnostics`}>{side.analysis_date} · {t("runDiagnostics")}</Link>; })}</div>
     <EvidenceSourceDrawer evidenceRef={source?.ref ?? null} evidenceIndex={source ? evidence[source.side].index : left.index} onClose={() => setSource(null)} />
