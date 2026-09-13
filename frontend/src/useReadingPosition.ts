@@ -1,3 +1,4 @@
+import { resolveReadingAnchor } from "./readingAnchors";
 import { useHistoryEntryKey } from "./router";
 import { useLayoutEffect, type RefObject } from "react";
 
@@ -13,8 +14,11 @@ export function useReadingPosition(key: string, ref?: RefObject<HTMLElement | nu
       frame = requestAnimationFrame(() => {
         let anchor = "";
         try { anchor = decodeURIComponent(window.location.hash.slice(1)); } catch { /* Invalid fragments have no matching section. */ }
-        const heading = anchor ? document.getElementById(`user-content-${anchor}`) ?? document.getElementById(anchor) : null;
-        if (heading && (!ref || ref.current?.contains(heading))) heading.scrollIntoView?.({ block: "start" });
+        const heading = anchor ? resolveReadingAnchor(ref?.current ?? document, anchor) : null;
+        if (heading && (!ref || ref.current?.contains(heading))) {
+          if (heading instanceof HTMLDetailsElement) heading.open = true;
+          heading.scrollIntoView?.({ block: "start" });
+        }
         else {
           const saved = sessionStorage.getItem(positionKey) ?? sessionStorage.getItem(key);
           window.scrollTo?.(0, Math.max(0, Number(saved) || 0));

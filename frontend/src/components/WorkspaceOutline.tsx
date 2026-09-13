@@ -44,5 +44,6 @@ export default function WorkspaceOutline({ container, target, onNavigate }: { on
     if (element instanceof HTMLDetailsElement) element.open = true;
     element?.scrollIntoView?.({ block: "start" }); element?.focus({ preventScroll: true });
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${heading.id}`);
+    window.dispatchEvent(new Event("hashchange"));
   }}>{heading.label}</button>)}</nav>, target);
 }

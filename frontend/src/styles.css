@@ -1310,24 +1310,6 @@ label small {
   white-space: pre-wrap;
 }
 
-.collection-coverage-list {
-  display: grid;
-  gap: 8px;
-}
-
-.collection-source-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.collection-diagnostics {
-  margin-top: 10px;
-}
-
 .timeline-item strong {
   color: #39465a;
   font-size: 14px;

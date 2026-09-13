@@ -427,6 +427,7 @@ test("runs, templates, trash, and restores local research", async ({
     page.locator("header").getByText("Cancelled", { exact: true }),
   ).toBeVisible();
 
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("link", { name: "Reuse configuration for Full Research" }).click();
   await expect(ticker).toHaveValue("7203.T");
   await ticker.fill("MSFT");
@@ -466,7 +467,7 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Overview", exact: true }).click();
   await page.goBack();
   await expect(page).toHaveURL(/view=reports.*#risk/);
-  await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(24);
+  await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(90);
 
   await page.goto("/runs/run-report?view=decision");
   await expect(
@@ -487,7 +488,7 @@ test("runs, templates, trash, and restores local research", async ({
 
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
-  await page.getByRole("tab", { name: "Diagnostics" }).click();
+  await page.getByRole("link", { name: "Run & diagnostics" }).click();
   await page.getByText("Decision-critical calculation audit").click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
@@ -499,7 +500,7 @@ test("runs, templates, trash, and restores local research", async ({
       .first(),
   ).toBeHidden();
 
-  await page.getByRole("tab", { name: "Run progress" }).click();
+  await page.getByRole("link", { name: "Run progress" }).click();
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Attempt metrics")).toBeHidden();
   await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(

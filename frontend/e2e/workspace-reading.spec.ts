@@ -62,3 +62,43 @@ test("returns from baseline evidence to the exact update and reads performance w
   await expect(page.locator(".performance-retrieved").first()).toContainText("UTC");
   await expect(page.locator(".performance-section details")).toHaveCount(0);
 });
+
+test("keeps long tokens, paragraphs and table endpoints readable and resolves old section links", async ({ page }) => {
+  const respond = workspaceFixture();
+  const token = "LONGTOKEN".repeat(150) + "ENDTOKEN";
+  await page.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
+  await page.route("**/api/v1/**", route => {
+    const url = new URL(route.request().url());
+    const value = respond(url, route.request().method(), route.request().postData()) as Record<string, any>;
+    if (url.pathname === "/api/v1/runs/full") {
+      value.result.decision.executive_summary = `Opening paragraph.\n\n${token}\n\nLast paragraph.`;
+      value.result.decision.thesis = "| First column | Last column |\n| --- | --- |\n| " + "WIDE ".repeat(60) + " | Endpoint |";
+    }
+    return route.fulfill({ json: value });
+  });
+  for (const width of [390, 1080, 2560]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/timelines/NVDA?node=full#research-section-1");
+    const thesis = page.locator("#assessment-thesis");
+    await expect(thesis, `Historical thesis link at ${width}px`).toBeInViewport();
+    const paragraph = page.getByText(token, { exact: true });
+    const geometry = await paragraph.evaluate(element => {
+      const parent = element.parentElement!;
+      const range = document.createRange(); range.selectNodeContents(element); range.setStart(element.firstChild!, element.textContent!.length - 8);
+      const tail = range.getBoundingClientRect(); const rect = parent.getBoundingClientRect();
+      return { client: element.clientWidth, scroll: element.scrollWidth, tailRight: tail.right, right: rect.right, margin: parseFloat(getComputedStyle(element).marginTop) };
+    });
+    expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
+    expect(geometry.tailRight).toBeLessThanOrEqual(geometry.right + 1);
+    expect(geometry.margin).toBeGreaterThan(8);
+    const table = page.locator(".decision-summary table");
+    await table.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+    const end = page.getByRole("cell", { name: "Endpoint", exact: true });
+    const right = (await table.boundingBox())!;
+    expect((await end.boundingBox())!.x).toBeLessThan(right.x + right.width);
+  }
+  await page.goto("/timelines/NVDA?node=full#research-section-999");
+  await expect(page.getByText("This chapter could not be located. Choose a section from Contents.")).toBeVisible();
+  await page.goto("/timelines/NVDA?view=compare&compare=active:full&compare=active:increment#research-section-999");
+  await expect(page.getByText("This chapter could not be located. Choose a section from Contents.")).toBeVisible();
+});

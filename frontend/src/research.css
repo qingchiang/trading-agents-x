@@ -178,24 +178,6 @@
   border-radius: 8px;
 }
 
-.claim-audit-details,
-.artifact-navigation-fields {
-  margin-top: 20px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.claim-audit-details summary,
-.artifact-navigation-fields summary {
-  cursor: pointer;
-  font-weight: 750;
-}
-
-.claim-audit-details p,
-.artifact-navigation-fields p {
-  margin: 4px 0;
-}
-
 .agenda-list {
   display: grid;
   gap: 10px;
@@ -312,8 +294,7 @@
 }
 
 .research-table-kind,
-.decision-section-label,
-.case-role {
+.decision-section-label {
   display: inline-flex;
   color: var(--muted);
   font-size: 11px;
@@ -474,9 +455,6 @@
 .typed-artifact-card { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .typed-artifact-card .artifact-header.compact { padding-inline: 0; background: transparent; }
 
-.case-role {
-  color: var(--case-accent);
-}
 
 .adjustment-list {
   display: grid;

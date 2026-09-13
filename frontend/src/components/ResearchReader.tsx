@@ -1,3 +1,4 @@
+import ReadingAnchorNotice from "./ReadingAnchorNotice";
 import { researchLocation } from "../researchLinks";
 import { useRunRecord, type RunRecord } from "../useRunRecord";
 import { NumericNoticeHandled, numericWarningLabel } from "../researchWarnings";
@@ -339,7 +340,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
   const marketDate = useMarketDate(detail?.run.request.ticker);
 
   if (!detail || detail.run.id !== runId) {
-    return <div className="loading">{error || t("loading")}</div>;
+    return <div className="loading" role={error ? "alert" : "status"}>{error || t("loading")}{error && <button className="button" onClick={() => void refresh()}>{t("retryLoad")}</button>}</div>;
   }
   if (["timeline", "diagnostics"].includes(activeView)) return <RunExecutionView record={record} diagnostics={activeView === "diagnostics"} />;
   const { run } = detail;
@@ -437,6 +438,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
 
   return (
     <section className={workspace ? "workspace-reader" : "run-reader"}>
+      <ReadingAnchorNotice identity={`${runId}:${activeView}:${activeReport}`} />
       <header className={`page-header run-heading ${actionsTarget ? "actions-relocated" : ""}`}>
         <div>
           {!workspace && <Link className="back-link" to="/">
@@ -901,19 +903,6 @@ function ReassessmentEntryCard({
       />
     </article>
   );
-}
-
-function advancementLabel(t: TFunction, reasons: string[]): string {
-  if (reasons.length === 0) return t("notRecorded");
-  const labels: Record<string, string> = {
-    admissible_observation: "advancementAdmissibleObservation",
-    completed_stock_session: "advancementCompletedMarketSession",
-    newly_completed_market_session: "advancementCompletedMarketSession",
-    near_live_advisory: "advancementNearLiveAdvisory",
-  };
-  return reasons
-    .map((reason) => t(labels[reason] ?? "advancementOther", { reason }))
-    .join(", ");
 }
 
 function reassessmentGroupLabel(group: ReassessmentGroupKey): string {

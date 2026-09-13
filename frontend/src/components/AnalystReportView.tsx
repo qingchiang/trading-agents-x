@@ -105,7 +105,7 @@ export function ResearchMarkdownReader({
   useReadingPosition(scrollStorageKey, scrollRef);
 
   return (
-    <div className="report-reading-layout" data-report-outline>
+    <div className="report-reading-layout" data-report-outline data-historical-outline={!sections.length || undefined}>
       <ReportSectionNavigation sections={[...(sections.length ? sections : fallback), ...extraSections]} containerRef={scrollRef} />
       <div className="analyst-report" ref={scrollRef}>
         {before}
@@ -188,6 +188,7 @@ function ReportSectionNavigation({
     if (!container || !heading) return;
     heading.scrollIntoView?.({ block: "start" });
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${encodeURIComponent(anchor)}`);
+    window.dispatchEvent(new Event("hashchange"));
     heading.focus({ preventScroll: true });
     setActive(anchor);
   };

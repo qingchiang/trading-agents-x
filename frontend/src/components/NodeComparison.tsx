@@ -10,6 +10,7 @@ import EvidenceSourceDrawer from "./EvidenceSourceDrawer";
 import { useComparisonEvidence } from "./useComparisonEvidence";
 import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
 import ResearchKindBadge from "./ResearchKindBadge";
+import ReadingAnchorNotice from "./ReadingAnchorNotice";
 
 type ComparisonSide = ResearchNodeComparison["sides"][number];
 type ProductComparisonRow = { key: string; label: string; values: [unknown, unknown] };
@@ -49,6 +50,7 @@ export default function NodeComparison({ comparison, baselineDates = {}, primary
     productRow("reassessment", t("reassessment"), comparison.sides, side => reassessmentComparisonText(t, side)),
   ], changedOnly);
   return <section className="workspace-reader comparison-reader" role="region" aria-labelledby={titleId}>
+    <ReadingAnchorNotice identity={`${comparison.sides.map(side => side.node_id).join(":")}:${changedOnly}`} />
     <header className="reading-toolbar comparison-toolbar">
       <WorkspaceNavigationButtons />
       <h2 id={titleId}>{t("nodeComparison")}</h2>

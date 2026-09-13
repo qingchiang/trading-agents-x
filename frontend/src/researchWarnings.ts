@@ -3,7 +3,7 @@ import { createContext } from "react";
 export const NumericNoticeHandled = createContext(false);
 
 /** Only recognized aggregate warnings may replace the numeric status notice. */
-export function numericWarningLabel(warning: string | { code: string; message: string; evidence_ref?: string | null }): string | null {
+export function numericWarningLabel(warning: string | { code?: string; message: string; evidence_ref?: string | null }): string | null {
   if (typeof warning === "string" || warning.evidence_ref) return null;
   const messages = new Set([
     "Optional numeric components were omitted because their audit failed. The qualitative decision remains audited.",

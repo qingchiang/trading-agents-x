@@ -64,7 +64,11 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           const available = (await workspace.boundingBox())!.width;
           await expect(workspace).toHaveClass(available >= 1100 ? /wide/ : /compact/);
           const reader = (await page.locator(".workspace-reader").boundingBox())!;
-          expect(reader.width).toBeGreaterThan(available - (available >= 1100 ? 270 : 2));
+          expect(reader.width).toBeGreaterThanOrEqual(Math.min(960, available - (available >= 1100 ? 270 : 2)));
+          expect(reader.width).toBeLessThanOrEqual(960);
+          const toolbar = (await page.locator(".reading-toolbar").boundingBox())!;
+          expect(Math.abs(toolbar.x - reader.x)).toBeLessThan(2);
+          expect(Math.abs(toolbar.width - reader.width)).toBeLessThan(2);
           if (label === "brief") {
             await expect(page.getByRole("heading", { name: "Brief opening", exact: true })).toBeVisible();
             expect((await page.getByRole("heading", { name: "Brief opening", exact: true }).boundingBox())!.y).toBeLessThan(height);

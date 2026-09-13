@@ -4,7 +4,7 @@ import { createContext, useContext, useCallback, useEffect, useLayoutEffect, use
 import { useTranslation } from "react-i18next";
 import { tabsKeyDown, useModal } from "./Interaction";
 
-export const WorkspaceNavigationActions = createContext<{ open: (tab: string) => void; close: () => void; compact: boolean; registerToolbar: (present: boolean) => void } | null>(null);
+export const WorkspaceNavigationActions = createContext<{ open: (tab: string) => void; close: () => void; compact: boolean; hasContents: boolean; registerToolbar: (present: boolean) => void } | null>(null);
 
 export const WorkspaceNavigationTarget = createContext<HTMLElement | null | undefined>(undefined);
 
@@ -12,12 +12,21 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
   const { t } = useTranslation();
   const tabsId = useId();
   const container = useRef<HTMLDivElement>(null);
+  const [hasContents, setHasContents] = useState(false);
   const [hasToolbar, setHasToolbar] = useState(false);
   const [wide, setWide] = useState(false);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState("history");
   const [target, setTarget] = useState<HTMLDivElement | null>(null);
   const targetRef = useCallback((element: HTMLDivElement | null) => setTarget(element), []);
+  useEffect(() => {
+    if (!target) return;
+    const update = () => setHasContents(!!target.querySelector("nav button"));
+    update(); const observer = new MutationObserver(update);
+    observer.observe(target, { subtree: true, childList: true });
+    return () => observer.disconnect();
+  }, [target]);
+  useEffect(() => { if (!hasContents) setTab("history"); }, [hasContents]);
   const panel = useModal<HTMLElement>(open && !wide, () => setOpen(false));
   useEffect(() => {
     if (!container.current || typeof ResizeObserver === "undefined") return;
@@ -44,14 +53,14 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
     });
     return () => cancelAnimationFrame(frame);
   }, [wide, open, tab, history, panel]);
-  return <WorkspaceNavigationActions.Provider value={{ open: value => { setTab(value); setOpen(true); }, close: () => setOpen(false), compact: !wide, registerToolbar: setHasToolbar }}>
+  return <WorkspaceNavigationActions.Provider value={{ open: value => { setTab(value); setOpen(true); }, close: () => setOpen(false), compact: !wide, hasContents, registerToolbar: setHasToolbar }}>
     <WorkspaceNavigationTarget.Provider value={target}>
     <div className={`research-workspace ${wide ? "wide" : "compact"}`} ref={container}>
       {!wide && open && <div className="workspace-scrim" onClick={() => setOpen(false)} />}
       <aside className="workspace-auxiliary" hidden={!wide && !open} ref={panel} role={!wide && open ? "dialog" : undefined} aria-modal={!wide && open || undefined} aria-label={t("historyNavigation")}>
         {!wide && <button className="button" onClick={() => setOpen(false)}>{t("closeNavigation")}</button>}
         <div className="auxiliary-tabs" role="tablist" onKeyDown={tabsKeyDown}>
-          {["history", "contents"].map(value => <button role="tab" id={`${tabsId}-${value}`} aria-controls={`${tabsId}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
+          {(hasContents ? ["history", "contents"] : ["history"]).map(value => <button role="tab" id={`${tabsId}-${value}`} aria-controls={`${tabsId}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
         </div>
         <div role="tabpanel" id={`${tabsId}-history-panel`} aria-labelledby={`${tabsId}-history`} hidden={tab !== "history"} onClick={event => { if ((event.target as HTMLElement).closest(".history-select")) setOpen(false); }}>{history}</div>
         <div role="tabpanel" id={`${tabsId}-contents-panel`} aria-labelledby={`${tabsId}-contents`} hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
@@ -71,6 +80,6 @@ export function WorkspaceNavigationButtons() {
   if (!navigation?.compact) return null;
   return <div className="reading-navigation-actions">
     <button className="button" aria-label={t("historyNavigation")} title={t("historyNavigation")} onClick={() => navigation.open("history")}><Icon name="history" /><span>{t("historyNavigation")}</span></button>
-    <button className="button" aria-label={t("onThisReport")} title={t("onThisReport")} onClick={() => navigation.open("contents")}><Icon name="menu" /><span>{t("onThisReport")}</span></button>
+    {navigation.hasContents && <button className="button" aria-label={t("onThisReport")} title={t("onThisReport")} onClick={() => navigation.open("contents")}><Icon name="menu" /><span>{t("onThisReport")}</span></button>}
   </div>;
 }

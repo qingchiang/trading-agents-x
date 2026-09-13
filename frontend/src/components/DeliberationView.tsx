@@ -129,13 +129,6 @@ export default function DeliberationView({
           <div className="case-comparison">
             {cases.map((artifact) => (
               <ArtifactFrame artifact={artifact} key={artifact.id}>
-                <span className={`case-role case-role-${artifact.content.role}`}>
-                  {t(
-                    artifact.content.role === "bull"
-                      ? "bullCase"
-                      : "bearCase",
-                  )}
-                </span>
                 {markdown(artifact.content.markdown)}
               </ArtifactFrame>
             ))}
@@ -306,6 +299,7 @@ function DeliberationNavigation({
     target.scrollIntoView?.({ behavior: "auto", block: "start" });
     target.focus({ preventScroll: true });
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
+    window.dispatchEvent(new Event("hashchange"));
     setActive(id);
   };
 
