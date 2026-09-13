@@ -1,7 +1,10 @@
+import i18n from "../i18n";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import Markdown from "./Markdown";
+
+beforeEach(async () => { await i18n.changeLanguage("en"); });
 
 test("renders markdown while dropping raw HTML and script content", () => {
   const { container } = render(

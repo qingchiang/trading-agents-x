@@ -151,7 +151,7 @@ function ReportSectionNavigation({
       const threshold = 96;
       let next = sections[0].anchor;
       for (const section of sections) {
-        const candidate = document.getElementById(headingDomId(section.anchor));
+        const candidate = document.getElementById(headingDomId(section.anchor)) ?? document.getElementById(section.anchor);
         const heading =
           candidate && container.contains(candidate) ? candidate : null;
         if (heading && heading.getBoundingClientRect().top <= threshold) {
@@ -161,7 +161,7 @@ function ReportSectionNavigation({
       // The final section may be too short to reach the top of the viewport.
       if (window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2) {
         const last = sections.at(-1)!;
-        const heading = document.getElementById(headingDomId(last.anchor));
+        const heading = document.getElementById(headingDomId(last.anchor)) ?? document.getElementById(last.anchor);
         if (heading && container.contains(heading) && heading.getBoundingClientRect().top < window.innerHeight) next = last.anchor;
       }
       setActive(next);
@@ -174,7 +174,7 @@ function ReportSectionNavigation({
   if (sections.length === 0) return null;
   const jump = (anchor: string) => {
     const container = containerRef.current;
-    const candidate = document.getElementById(headingDomId(anchor));
+    const candidate = document.getElementById(headingDomId(anchor)) ?? document.getElementById(anchor);
     const heading =
       container && candidate && container.contains(candidate) ? candidate : null;
     if (!container || !heading) return;
@@ -189,6 +189,7 @@ function ReportSectionNavigation({
       entries={sections.map((section) => ({
         id: section.anchor,
         label: section.title,
+        level: Number(document.getElementById(headingDomId(section.anchor))?.tagName.slice(1)) || 2,
       }))}
       active={active}
       title={t("onThisReport")}

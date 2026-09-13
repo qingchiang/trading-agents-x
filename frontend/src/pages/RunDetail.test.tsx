@@ -940,7 +940,7 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
 
   expect(await screen.findByRole("heading", { name: "Collection Summary" })).toBeVisible();
   expect(api.evidence).not.toHaveBeenCalled();
-  expect(screen.getByText("Price snapshot · Composite snapshot")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "fixture · alternate-fixture" })).toBeVisible();
   expect(screen.getByText("fixture.news")).toBeVisible();
   expect(screen.getAllByText("Fallback").length).toBeGreaterThan(0);
   const collectionSummary = screen
@@ -1685,7 +1685,7 @@ test("loads sealed evidence immediately when the SSE seal event arrives", async 
 
   expect(
     await screen.findByRole("heading", {
-      name: "Price snapshot · Composite snapshot",
+      name: "fixture · alternate-fixture",
     }),
   ).toBeVisible();
   expect(api.evidence).not.toHaveBeenCalled();
@@ -1807,4 +1807,17 @@ test("returns from the evidence tab to the report the reader was viewing", async
   fireEvent.click(screen.getByRole("tab", { name: "Evidence" }));
   fireEvent.click(await screen.findByRole("button", { name: /Return to reports/ }));
   expect(screen.getByTestId("router-location")).toHaveTextContent("view=reports&report=market");
+});
+
+
+test("filters evidence locally by text and source without changing research", async () => {
+  render(<Router initialPath="/runs/run-1?view=evidence"><RunDetail /></Router>);
+  const search = await screen.findByRole("searchbox", { name: "Search evidence" });
+  expect(document.querySelectorAll(".evidence-card").length).toBeGreaterThan(0);
+  fireEvent.change(search, { target: { value: "no matching evidence body" } });
+  expect(document.querySelectorAll(".evidence-card")).toHaveLength(0);
+  expect(screen.getByText("No evidence matches these filters.")).toBeVisible();
+  fireEvent.change(search, { target: { value: "" } });
+  expect(document.querySelectorAll(".evidence-card").length).toBeGreaterThan(0);
+  expect(screen.getByRole("combobox", { name: "Source filter" })).toBeVisible();
 });

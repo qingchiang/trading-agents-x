@@ -165,8 +165,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .run-actions-cell { min-width: 128px; }
 .run-actions-cell .button { white-space: normal; }
 .task-filters > summary { cursor: pointer; padding-bottom: 12px; }
-.comparison-baselines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.comparison-baselines p { margin: 0; font-size: 14px; line-height: 1.8; }
 .activity-timing { padding: 0 24px 18px; }
 
 /* A single outer alignment boundary keeps the reader and its header aligned. */

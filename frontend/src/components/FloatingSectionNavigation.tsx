@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 export type SectionNavigationEntry = {
   id: string;
   label: string;
+  level?: number;
 };
 
 export default function FloatingSectionNavigation({
@@ -40,6 +41,12 @@ export default function FloatingSectionNavigation({
     setOpen(next);
     sessionStorage.setItem(storageKey, next ? "open" : "closed");
   };
+
+  if (workspaceTarget !== undefined) return workspaceTarget ? createPortal(
+    <nav aria-label={ariaLabel} className="floating-navigation-items">{entries.map(entry => <button
+      type="button" key={entry.id} className={active === entry.id ? "active" : ""}
+      data-level={entry.level ?? 2} aria-current={active === entry.id ? ariaCurrent : undefined}
+      onClick={() => onSelect(entry.id)}>{entry.label}</button>)}</nav>, workspaceTarget) : null;
 
   const content = (
     <>
@@ -100,7 +107,7 @@ export default function FloatingSectionNavigation({
       </label>
     </>
   );
-  return workspaceTarget === undefined ? content : workspaceTarget ? createPortal(content, workspaceTarget) : null;
+  return content;
 }
 
 function readOpenState(storageKey: string): boolean {

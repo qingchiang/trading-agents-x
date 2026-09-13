@@ -813,7 +813,7 @@ test("compares active and explicitly shown Trash nodes without creating research
   await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
   await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
 
-  const comparisonDialog = page.getByRole("dialog", {
+  const comparisonDialog = page.getByRole("region", {
     name: /Node Comparison|节点对照|ノード比較/,
   });
   await expect(comparisonDialog).toBeVisible();
@@ -827,39 +827,20 @@ test("compares active and explicitly shown Trash nodes without creating research
   ] });
   expect(researchCreateCalls).toBe(0);
 
-  await comparisonDialog.getByText(/Extended conclusions|扩展结论|拡張結論/).click();
-  await comparisonDialog.getByText(/Update details|更新详情|更新の詳細/).click();
   await expect(comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/)).toHaveCount(0);
   await expect(comparisonDialog.getByRole("link", { name: /Run & diagnostics|运行与诊断|実行と診断/ })).toHaveCount(2);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const dialogBox = await comparisonDialog.boundingBox();
-  expect(dialogBox).not.toBeNull();
-  expect(dialogBox?.x).toBe(0);
-  expect(dialogBox?.y).toBe(0);
-  expect(dialogBox?.width).toBe(390);
-  expect(dialogBox?.height).toBe(844);
-  const comparisonValues = comparisonDialog.locator(
-    ".comparison-decision-table tbody tr",
-  ).first().locator("td");
-  const leftValueBox = await comparisonValues.nth(0).boundingBox();
-  const rightValueBox = await comparisonValues.nth(1).boundingBox();
-  expect(leftValueBox).not.toBeNull();
-  expect(rightValueBox).not.toBeNull();
-  expect(rightValueBox!.y).toBeGreaterThanOrEqual(
-    leftValueBox!.y + leftValueBox!.height,
-  );
-  const comparisonScroll = comparisonDialog.locator(".comparison-modal-scroll");
-  await comparisonScroll.focus();
-  await page.keyboard.press("PageDown");
-  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await comparisonScroll.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await comparisonScroll.hover();
-  await page.mouse.wheel(0, 400);
-  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  const values = comparisonDialog.locator(".comparison-side-by-side").first().locator(":scope > div");
+  const left = (await values.nth(0).boundingBox())!;
+  const right = (await values.nth(1).boundingBox())!;
+  expect(right.y).toBeGreaterThanOrEqual(left.y + left.height);
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await expect(page.getByRole("button", { name: /Research history|研究历史|リサーチ履歴/, exact: true })).toBeVisible();
+
 });
 
 test("covers every supported retained-node comparison pair", async ({ page }) => {
@@ -928,7 +909,7 @@ test("covers every supported retained-node comparison pair", async ({ page }) =>
     await page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     }).click();
-    await expect(page.getByRole("dialog", {
+    await expect(page.getByRole("region", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeVisible();
     expect(comparisonPayloads.at(-1)).toEqual({ nodes: pair.map((node) => ({
@@ -995,7 +976,7 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
     await expect(selectButtons.nth(0)).toBeDisabled();
     await compareButton.click();
     await expect(page.getByText(message)).toBeVisible();
-    await expect(page.getByRole("dialog", {
+    await expect(page.getByRole("region", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeHidden();
   }

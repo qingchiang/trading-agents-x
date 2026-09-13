@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { ResearchCycleView, ResearchNodeView, ResearchNodeComparisonSelection } from "../api/client";
+import ResearchRatingBadge from "./ResearchRatingBadge";
 import { ActionMenu } from "./Interaction";
 import type { LifecycleAction } from "./RunLifecycleDialog";
 
@@ -17,6 +18,9 @@ export default function CycleHistory({ cycles, selectedId, selectedCycleId, comp
             {[cycle.baseline, ...(cycle.increments ?? [])].map(node => <div className={`history-node ${node.research_kind}`} key={node.id}>
               <button className="history-select" aria-current={selectedId === node.id ? "page" : undefined} onClick={() => onSelect(node.id)}>
                 <time>{node.analysis_date}</time><span>{t(node.research_kind === "full" ? "fullResearch" : "incrementalResearch")}</span>
+                {node.decision && <ResearchRatingBadge rating={node.decision.rating} />}
+                {node.decision_outcome && <small>{t(`decisionOutcome_${node.decision_outcome}`)}</small>}
+                {node.is_cycle_head && <small className="cycle-head-label">{t("cycleHead")}</small>}
                 {!node.is_active && <small>{t("retainedInTrash")}</small>}
               </button>
               {comparisonMode && <button className="button compact-button" aria-pressed={selections.some(item => item.node_id === node.id)} disabled={selections.length === 2 && !selections.some(item => item.node_id === node.id)} onClick={() => onCompare?.(node)}>{t(selections.some(item => item.node_id === node.id) ? "removeFromComparison" : "selectForComparison")}</button>}

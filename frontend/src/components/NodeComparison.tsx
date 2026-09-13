@@ -1,512 +1,88 @@
 import type { TFunction } from "i18next";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { type ResearchNodeComparison, type ResearchNodeView } from "../api/client";
-import { localizePerformanceReason, researchConfidenceLabel } from "../i18n";
+import { localizePerformanceReason } from "../i18n";
 import { Link } from "../router";
-import { useModal } from "./Interaction";
+import { useReadingPosition } from "../useReadingPosition";
+import ComparisonValue, { comparisonLabels } from "./ComparisonValue";
+import EvidenceSourceDrawer from "./EvidenceSourceDrawer";
+import { useComparisonEvidence } from "./useComparisonEvidence";
+import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
 import ResearchKindBadge from "./ResearchKindBadge";
 
-function Confidence({ value }: { value?: "low" | "medium" | "high" | null }) {
-  const { t } = useTranslation();
-  return (
-    <span className="confidence-value">
-      {value == null
-        ? t("notRecorded")
-        : researchConfidenceLabel(t, value)}
-    </span>
-  );
-}
-
-const DECISION_FIELD_LABELS: Record<string, string> = {
-  rating: "researchRating",
-  confidence: "confidence",
-  executive_summary: "executiveSummary",
-  thesis: "thesis",
-  evidence_refs: "evidenceRefs",
-  catalysts: "catalysts",
-  risks: "risks",
-  invalidation_conditions: "invalidation",
-  unresolved_questions: "unresolvedQuestions",
-  time_horizon: "horizon",
-  scenarios: "scenarios",
-  valuation_assessment: "valuationAssessment",
-  market_reference_levels: "marketReferenceLevels",
-  calculation_records: "calculationRecords",
-  risk_review_adjustments: "riskReviewAdjustments",
-  numeric_audit_status: "numericAuditStatus",
-};
-
-const STRUCTURED_VALUE_LABELS: Record<string, string> = {
-  as_of_date: "asOfDate",
-  core_assumptions: "coreAssumptions",
-  evidence_refs: "evidenceRefs",
-  kind: "scenario",
-  limitations: "limitations",
-  outcome: "scenarioOutcome",
-  reference_ranges: "scenarioReferenceRange",
-};
-
-function comparisonFieldLabel(t: TFunction, key: string) {
-  const translationKey = DECISION_FIELD_LABELS[key] ?? STRUCTURED_VALUE_LABELS[key];
-  return translationKey ? t(translationKey) : key;
-}
-
-function StructuredComparisonValue({ value }: { value: unknown }) {
-  const { t } = useTranslation();
-  if (value === null || value === undefined) {
-    return <span className="muted-copy">{t("notApplicable")}</span>;
-  }
-  if (typeof value === "boolean") return <span>{t(value ? "yes" : "no")}</span>;
-  if (typeof value === "string" || typeof value === "number") return <span>{value}</span>;
-  if (Array.isArray(value)) {
-    return (
-      <ul className="comparison-value-list">
-        {value.map((item, index) => (
-          <li key={index}><StructuredComparisonValue value={item} /></li>
-        ))}
-      </ul>
-    );
-  }
-  if (typeof value === "object") {
-    return (
-      <dl className="comparison-value-fields">
-        {Object.entries(value).map(([key, nestedValue]) => (
-          <div key={key}>
-            <dt>{comparisonFieldLabel(t, key)}</dt>
-            <dd><StructuredComparisonValue value={nestedValue} /></dd>
-          </div>
-        ))}
-      </dl>
-    );
-  }
-  return <span>{String(value)}</span>;
-}
-
-function ComparisonValue({ value }: { value: unknown }) {
-  const { t } = useTranslation();
-  if (value === null || value === undefined || value === "") {
-    return <span className="muted-copy">{t("notApplicable")}</span>;
-  }
-  return <StructuredComparisonValue value={value} />;
-}
-
-function DecisionComparisonValue({
-  comparisonValue,
-  sectionKey,
-}: {
-  comparisonValue: ResearchNodeComparison["decision_sections"][number]["values"][number] | undefined;
-  sectionKey?: string;
-}) {
-  const { t } = useTranslation();
-  if (!comparisonValue || comparisonValue.state === "not_recorded_under_this_schema") {
-    return <span className="muted-copy">{t("notRecordedUnderThisSchema")}</span>;
-  }
-  if (comparisonValue.state === "null") {
-    return <span className="muted-copy">{t("comparisonNull")}</span>;
-  }
-  if (comparisonValue.state === "empty") {
-    return <span className="muted-copy">{t("comparisonEmpty")}</span>;
-  }
-  if (
-    sectionKey === "confidence" &&
-    (comparisonValue.value === "low" ||
-      comparisonValue.value === "medium" ||
-      comparisonValue.value === "high")
-  ) {
-    return <Confidence value={comparisonValue.value} />;
-  }
-  return <StructuredComparisonValue value={comparisonValue.value} />;
-}
-
-const CORE_DECISION_FIELDS = new Set([
-  "rating",
-  "confidence",
-  "executive_summary",
-  "thesis",
-  "catalysts",
-  "risks",
-  "invalidation_conditions",
-]);
-const RAW_DECISION_FIELDS = new Set([
-  "evidence_refs",
-  "calculation_records",
-  "numeric_audit_status",
-]);
-
 type ComparisonSide = ResearchNodeComparison["sides"][number];
-type ComparisonSection = ResearchNodeComparison["decision_sections"][number];
-type ProductComparisonRow = {
-  key: string;
-  label: string;
-  values: [unknown, unknown];
-};
+type ProductComparisonRow = { key: string; label: string; values: [unknown, unknown] };
 
-export default function NodeComparisonModal({
-  comparison,
-  baselineDates = {},
-  onClose,
-}: {
-  comparison: ResearchNodeComparison;
-  baselineDates?: Record<string, string>;
-  onClose: () => void;
+export default function NodeComparison({ comparison, baselineDates = {}, primaryCycleId, changedOnly: controlledChangedOnly, onChangedOnly, onSwap, onClose }: {
+  comparison: ResearchNodeComparison; baselineDates?: Record<string, string>; primaryCycleId?: string | null;
+  changedOnly?: boolean; onChangedOnly?: (value: boolean) => void; onSwap?: () => void; onClose: () => void;
 }) {
   const { t } = useTranslation();
   const titleId = useId();
-  const dialogRef = useModal<HTMLDivElement>(true, onClose);
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const [localChangedOnly, setChangedOnly] = useState(true);
   const [swapped, setSwapped] = useState(false);
-  const [changedOnly, setChangedOnly] = useState(true);
-  const sideIndexes: [number, number] = swapped ? [1, 0] : [0, 1];
-  const sides = sideIndexes.map((index) => comparison.sides[index]) as [
-    ComparisonSide,
-    ComparisonSide,
-  ];
-  const coreSections = filterDecisionSections(
-    comparison.decision_sections.filter((section) =>
-      CORE_DECISION_FIELDS.has(section.key),
-    ),
-    changedOnly,
-  );
-  const extendedSections = filterDecisionSections(
-    comparison.decision_sections.filter(
-      (section) =>
-        !CORE_DECISION_FIELDS.has(section.key) &&
-        !RAW_DECISION_FIELDS.has(section.key),
-    ),
-    changedOnly,
-  );
-  const primaryProducts = filterProductRows(
-    [
-      productRow(
-        "decision-outcome",
-        t("decisionOutcome"),
-        comparison.sides,
-        (side) =>
-          side.decision_outcome
-            ? t(`decisionOutcome_${side.decision_outcome}`)
-            : t("decisionOutcomeNotRecorded"),
-      ),
-      productRow(
-        "performance",
-        t("performance"),
-        comparison.sides,
-        (side) => performanceComparisonText(t, side),
-      ),
-      productRow(
-        "full-research-required",
-        t("fullResearchRecommended"),
-        comparison.sides,
-        (side) =>
-          side.full_research_required_reasons
-            ?.map((reason) => reason.message)
-            .join("\n") || null,
-      ),
-    ],
-    changedOnly,
-  );
-  const updateProducts = filterProductRows(
-    [
-      productRow(
-        "advancement",
-        t("informationAdvancement"),
-        comparison.sides,
-        (side) =>
-          side.information_advancement
-            ? advancementSummary(
-                t,
-                side.information_advancement.reasons ?? [],
-              )
-            : null,
-      ),
-      productRow(
-        "availability",
-        t("researchAvailability"),
-        comparison.sides,
-        (side) => availabilityComparisonText(t, side),
-      ),
-      productRow(
-        "reassessment",
-        t("reassessment"),
-        comparison.sides,
-        (side) => reassessmentComparisonText(t, side),
-      ),
-    ],
-    changedOnly,
-  );
-
-
-  return (
-    <div
-      className="comparison-modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        className="comparison-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        ref={dialogRef}
-      >
-        <header className="comparison-modal-header">
-          <div className="comparison-modal-title">
-            <h2 id={titleId}>{t("nodeComparison")}</h2>
-            <span>
-              {t(
-                comparison.cross_cycle
-                  ? "crossCycleComparison"
-                  : "sameCycleComparison",
-              )}
-            </span>
-          </div>
-          <div className="comparison-modal-actions">
-            <label className="comparison-changed-toggle">
-              <input
-                type="checkbox"
-                checked={changedOnly}
-                onChange={(event) => setChangedOnly(event.target.checked)}
-              />
-              {t("showChangedOnly")}
-            </label>
-            <button
-              type="button"
-              className="button compact-button"
-              onClick={() => setSwapped((value) => !value)}
-            >
-              {t("swapComparisonSides")}
-            </button>
-            <button
-              ref={closeRef}
-              type="button"
-              className="button compact-button"
-              onClick={onClose}
-            >
-              {t("close")}
-            </button>
-          </div>
-        </header>
-
-        <div
-          className="comparison-modal-scroll"
-          aria-label={t("nodeComparison")}
-          tabIndex={0}
-        >
-          <div className="comparison-baselines">{sides.map(side => <p key={side.node_id}><strong>{side.analysis_date}</strong><br /><Link to={`/timelines/${encodeURIComponent(comparison.instrument)}?node=${encodeURIComponent(side.cycle_id)}${side.lifecycle_state === "trashed" ? "&trash_state=all" : ""}`}>{t("baselineDate")}: {baselineDates[side.cycle_id] ?? (side.research_kind === "full" ? side.analysis_date : t("notRecorded"))}</Link></p>)}</div>
-          {comparison.method_changed && (
-            <div className="notice" role="status">
-              {t("methodChanged")}
-            </div>
-          )}
-          {(comparison.warnings?.length ?? 0) > 0 && (
-            <div className="comparison-warning-list">
-              {comparison.warnings?.map((warning) => (
-                <p key={warning.code}>{warning.message}</p>
-              ))}
-            </div>
-          )}
-
-          <ComparisonTable
-            sections={coreSections}
-            productRows={primaryProducts}
-            sides={sides}
-            sideIndexes={sideIndexes}
-          />
-
-          <ComparisonDisclosure title={t("extendedConclusions")}>
-            <ComparisonSectionList
-              sections={extendedSections}
-              sides={sides}
-              sideIndexes={sideIndexes}
-            />
-          </ComparisonDisclosure>
-
-          <ComparisonDisclosure title={t("updateDetails")}>
-            <ComparisonProductList
-              rows={updateProducts}
-              sides={sides}
-              sideIndexes={sideIndexes}
-            />
-          </ComparisonDisclosure>
-
-          <div className="action-row">{sides.map(side => <Link key={side.node_id} to={`/runs/${encodeURIComponent(side.node_id)}?view=diagnostics`}>{side.analysis_date} · {t("runDiagnostics")}</Link>)}</div>
-        </div>
-      </div>
-    </div>
-  );
+  const [source, setSource] = useState<{ side: number; ref: string } | null>(null);
+  const left = useComparisonEvidence(comparison.sides[0]);
+  const right = useComparisonEvidence(comparison.sides[1]);
+  const evidence = [left, right];
+  const changedOnly = controlledChangedOnly ?? localChangedOnly;
+  const order = swapped ? [1, 0] : [0, 1];
+  useReadingPosition(`comparison:${comparison.instrument}`);
+  const knownSections = comparison.decision_sections.filter(section => comparisonLabels[section.key]);
+  const sections = knownSections.flatMap(section => {
+    if (section.key !== "scenarios") return [{ ...section, label: t(comparisonLabels[section.key]) }];
+    const kinds = ["base", "bull", "bear"].filter(kind => section.values.some(value => Array.isArray(value.value) && value.value.some(item => item?.kind === kind)));
+    return kinds.length ? kinds.map(kind => ({ ...section, label: `${t("scenarios")} · ${t(`${kind}Scenario`)}`, values: section.values.map(value => {
+      if (value.state !== "recorded" || !Array.isArray(value.value)) return value;
+      const items = value.value.filter(item => item?.kind === kind);
+      return { state: items.length ? "recorded" as const : "empty" as const, value: items };
+    }) })) : [{ ...section, label: t("scenarios") }];
+  }).filter(section => !changedOnly || stableJson(section.values[0]) !== stableJson(section.values[1]));
+  const technicalFields = comparison.decision_sections.some(section => !comparisonLabels[section.key]);
+  const products = filterProductRows([
+    productRow("decision-outcome", t("decisionOutcome"), comparison.sides, side => side.decision_outcome ? `${t(`decisionOutcome_${side.decision_outcome}`)}${side.decision_outcome_reason ? `\n${side.decision_outcome_reason}` : ""}` : null),
+    productRow("performance", t("performance"), comparison.sides, side => performanceComparisonText(t, side)),
+    productRow("full-research-required", t("fullResearchRecommended"), comparison.sides, side => side.full_research_required_reasons?.map(reason => reason.message).join("\n") || null),
+    productRow("advancement", t("informationAdvancement"), comparison.sides, side => side.information_advancement ? advancementSummary(t, side.information_advancement.reasons ?? []) : null),
+    productRow("availability", t("researchAvailability"), comparison.sides, side => availabilityComparisonText(t, side)),
+    productRow("reassessment", t("reassessment"), comparison.sides, side => reassessmentComparisonText(t, side)),
+  ], changedOnly);
+  return <section className="workspace-reader comparison-reader" role="region" aria-labelledby={titleId}>
+    <header className="reading-toolbar comparison-toolbar">
+      <WorkspaceNavigationButtons />
+      <h2 id={titleId}>{t("nodeComparison")}</h2>
+      <label className="checkbox-label"><input type="checkbox" checked={changedOnly} onChange={event => (onChangedOnly ?? setChangedOnly)(event.target.checked)} />{t("showChangedOnly")}</label>
+      <button className="button" onClick={() => { setSource(null); if (onSwap) onSwap(); else setSwapped(value => !value); }}>{t("swapComparisonSides")}</button>
+      <button className="button" onClick={onClose}>{t("close")}</button>
+    </header>
+    <p className="comparison-context-note">{t(comparison.cross_cycle ? "crossCycleComparison" : "sameCycleComparison")}</p>
+    <div className="comparison-baselines">{order.map(index => { const side = comparison.sides[index]; const state = evidence[index]; return <section key={side.node_id}>
+      <strong>{side.analysis_date}</strong> <ResearchKindBadge kind={side.research_kind} />
+      <p><Link to={`/timelines/${encodeURIComponent(comparison.instrument)}?node=${encodeURIComponent(side.cycle_id)}${side.lifecycle_state === "trashed" ? "&trash_state=all" : ""}`}>{t("baselineDate")}: {baselineDates[side.cycle_id] ?? (side.research_kind === "full" ? side.analysis_date : t("notRecorded"))}</Link></p>
+      {primaryCycleId === side.cycle_id && <span className="cycle-primary">{t("primaryCycle")}</span>}
+      {side.lifecycle_state === "trashed" && <p>{t("retainedInTrash")}</p>}
+      {state.loading && <p role="status">{t("loadingEvidence")}</p>}
+      {state.error && <p className="research-limitations" role="alert">{t(state.error)} <button className="text-button" onClick={state.retry}>{t("retryLoad")}</button></p>}
+    </section>; })}</div>
+    {comparison.method_changed && <p className="notice">{t("methodChanged")}</p>}
+    {!!comparison.warnings?.length && <div className="research-limitations">{comparison.warnings.map(warning => <p key={`${warning.code}:${warning.message}`}>{warning.message}</p>)}</div>}
+    {sections.map(section => <section className="comparison-section" key={`${section.key}:${section.label}`}>
+      <h3>{section.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={comparison.sides[index].node_id}>
+        <time className="comparison-side-date">{comparison.sides[index].analysis_date}</time>
+        <ComparisonValue field={section.key} value={section.values[index]} index={evidence[index].index} onEvidence={ref => setSource({ side: index, ref })} />
+      </div>)}</div>
+    </section>)}
+    {products.map(row => <section className="comparison-section" key={row.key}><h3>{row.label}</h3><div className="comparison-side-by-side">{order.map(index => <div key={index}>
+      <time className="comparison-side-date">{comparison.sides[index].analysis_date}</time>
+      <ComparisonValue field="thesis" value={row.values[index] == null ? { state: "not_recorded_under_this_schema" } : { state: "recorded", value: row.values[index] }} index={evidence[index].index} onEvidence={ref => setSource({ side: index, ref })} />
+    </div>)}</div></section>)}
+    {!sections.length && !products.length && <p>{t("comparisonNoChangedSections")}</p>}
+    {technicalFields && <p className="notice">{t("comparisonTechnicalFields")}</p>}
+    <div className="action-row">{order.map(index => { const side = comparison.sides[index]; return <Link key={side.node_id} to={`/runs/${encodeURIComponent(side.node_id)}?view=diagnostics`}>{side.analysis_date} · {t("runDiagnostics")}</Link>; })}</div>
+    <EvidenceSourceDrawer evidenceRef={source?.ref ?? null} evidenceIndex={source ? evidence[source.side].index : left.index} onClose={() => setSource(null)} />
+  </section>;
 }
-
-function ComparisonTable({
-  sections,
-  productRows,
-  sides,
-  sideIndexes,
-}: {
-  sections: ComparisonSection[];
-  productRows: ProductComparisonRow[];
-  sides: [ComparisonSide, ComparisonSide];
-  sideIndexes: [number, number];
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="table-wrap comparison-decision-table">
-      <table>
-        <thead>
-          <tr>
-            <th aria-label={t("decisionSection")}>
-              <span className="sr-only">{t("decisionSection")}</span>
-            </th>
-            {sides.map((side) => (
-              <th key={side.node_id}>
-                <ResearchKindBadge
-                  kind={side.research_kind}
-                  methodSnapshot={side.method_snapshot}
-                />
-                <span>{side.analysis_date}</span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sections.map((section) => (
-            <tr key={section.key}>
-              <th scope="row">{comparisonFieldLabel(t, section.key)}</th>
-              {sideIndexes.map((sideIndex) => (
-                <td key={sideIndex}>
-                  <DecisionComparisonValue
-                    comparisonValue={section.values[sideIndex]}
-                    sectionKey={section.key}
-                  />
-                </td>
-              ))}
-            </tr>
-          ))}
-          {productRows.map((row) => (
-            <tr key={row.key}>
-              <th scope="row">{row.label}</th>
-              {sideIndexes.map((sideIndex) => (
-                <td key={sideIndex}>
-                  <ComparisonValue value={row.values[sideIndex]} />
-                </td>
-              ))}
-            </tr>
-          ))}
-          {sections.length === 0 && productRows.length === 0 && (
-            <tr>
-              <td colSpan={3} className="muted-copy">
-                {t("comparisonNoChangedSections")}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ComparisonDisclosure({
-  title,
-  audit = false,
-  children,
-}: {
-  title: string;
-  audit?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <details className={`comparison-disclosure ${audit ? "audit" : ""}`}>
-      <summary>{title}</summary>
-      <div className="comparison-disclosure-body">{children}</div>
-    </details>
-  );
-}
-
-function ComparisonSectionList({
-  sections,
-  sides,
-  sideIndexes,
-}: {
-  sections: ComparisonSection[];
-  sides: [ComparisonSide, ComparisonSide];
-  sideIndexes: [number, number];
-}) {
-  const { t } = useTranslation();
-  if (sections.length === 0) {
-    return <p className="muted-copy">{t("comparisonNoChangedSections")}</p>;
-  }
-  return (
-    <div className="comparison-section-list">
-      {sections.map((section) => (
-        <section key={section.key}>
-          <h3>{comparisonFieldLabel(t, section.key)}</h3>
-          <div className="comparison-side-by-side">
-            {sideIndexes.map((sideIndex, position) => (
-              <div key={sideIndex}>
-                <strong>{sides[position].analysis_date}</strong>
-                <DecisionComparisonValue
-                  comparisonValue={section.values[sideIndex]}
-                  sectionKey={section.key}
-                />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function ComparisonProductList({
-  rows,
-  sides,
-  sideIndexes,
-}: {
-  rows: ProductComparisonRow[];
-  sides: [ComparisonSide, ComparisonSide];
-  sideIndexes: [number, number];
-}) {
-  const { t } = useTranslation();
-  if (rows.length === 0) {
-    return <p className="muted-copy">{t("comparisonNoChangedSections")}</p>;
-  }
-  return (
-    <div className="comparison-section-list">
-      {rows.map((row) => (
-        <section key={row.key}>
-          <h3>{row.label}</h3>
-          <div className="comparison-side-by-side">
-            {sideIndexes.map((sideIndex, position) => (
-              <div key={sideIndex}>
-                <strong>{sides[position].analysis_date}</strong>
-                <ComparisonValue value={row.values[sideIndex]} />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function filterDecisionSections(
-  sections: ComparisonSection[],
-  changedOnly: boolean,
-) {
-  if (!changedOnly) return sections;
-  return sections.filter(
-    (section) => !comparisonValuesEqual(section.values[0], section.values[1]),
-  );
-}
-
-function comparisonValuesEqual(
-  left: ComparisonSection["values"][number] | undefined,
-  right: ComparisonSection["values"][number] | undefined,
-) {
-  return stableJson(left ?? null) === stableJson(right ?? null);
-}
-
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableJson).join(",")}]`;
@@ -585,9 +161,7 @@ function performanceComparisonText(
       );
       return benchmark.reported_difference == null
         ? summary
-        : `${summary} · ${t("reportedBenchmarkDifference")}: ${formatPercent(
-            benchmark.reported_difference,
-          )}`;
+        : `${summary} · ${t("reportedBenchmarkDifference")}: ${t("percentagePoints", { value: new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(benchmark.reported_difference * 100) })}`;
     }),
   ].join("\n");
 }

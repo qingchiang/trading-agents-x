@@ -1,3 +1,4 @@
+import { formatResearchDate } from "../researchDate";
 import { useTranslation } from "react-i18next";
 import type { EvidenceReferenceIndex } from "../evidence";
 import { useModal } from "./Interaction";
@@ -11,7 +12,7 @@ export default function EvidenceSourceDrawer({
   evidenceIndex: EvidenceReferenceIndex;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const group = evidenceRef
     ? evidenceIndex.groups.find((candidate) =>
         candidate.refs.includes(evidenceRef),
@@ -65,10 +66,10 @@ export default function EvidenceSourceDrawer({
               </div>
               <div>
                 <dt>{t("effectiveDate")}</dt>
-                <dd>{Array.from(new Set(group.items.flatMap(item => item.effective_date ? [item.effective_date] : []))).join(", ") || "—"}</dd>
+                <dd>{Array.from(new Set(group.items.flatMap(item => item.effective_date ? [formatResearchDate(item.effective_date, i18n.language)] : []))).join(", ") || "—"}</dd>
               </div>
-              <div><dt>{t("availableAt")}</dt><dd>{group.canonical.available_at ?? "—"}</dd></div>
-              {(group.canonical.origins ?? []).map((origin, index) => <div key={index}><dt>{origin.source}</dt><dd>{t(`temporal_${origin.temporal_scope ?? "unknown"}`)}{origin.retrieved_at ? ` · ${origin.retrieved_at}` : ""}</dd></div>) }
+              <div><dt>{t("availableAt")}</dt><dd>{formatResearchDate(group.canonical.available_at, i18n.language)}</dd></div>
+              {(group.canonical.origins ?? []).map((origin, index) => <div key={index}><dt>{origin.source}</dt><dd>{t(`temporal_${origin.temporal_scope ?? "unknown"}`)}{origin.retrieved_at ? ` · ${formatResearchDate(origin.retrieved_at, i18n.language)}` : ""}</dd></div>) }
 
               <div>
                 <dt>{t("fallback")}</dt>

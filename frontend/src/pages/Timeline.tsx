@@ -1,7 +1,7 @@
 import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import { researchConfidenceLabel } from "../i18n";
 import CycleHistory from "../components/CycleHistory";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ResearchNodeComparison, type ResearchNodeComparisonSelection, type ResearchNodeView, type TimelineDetail } from "../api/client";
 import ResearchWorkspace from "../components/ResearchWorkspace";
@@ -28,7 +28,8 @@ export default function Timeline() {
   const requestedNode = params.get("node") ?? "";
   const showRetainedTrash = params.get("trash_state") === "all";
   const cycleOffset = Math.max(0, Number(params.get("cycle_offset")) || 0);
-  const comparisonMode = params.get("compare_mode") === "1";
+  const comparisonView = params.get("view") === "compare";
+  const comparisonMode = params.get("compare_mode") === "1" || params.has("compare") || comparisonView;
   const selections = params.getAll("compare").slice(0, 2).map(value => {
     const split = value.indexOf(":");
     return { node_id: value.slice(split + 1), lifecycle_state: value.slice(0, split) === "trashed" ? "trashed" : "active" } as ResearchNodeComparisonSelection;
@@ -49,7 +50,7 @@ export default function Timeline() {
   };
   useEffect(() => {
     let active = true;
-    setError(""); setDetail(null); setComparison(null); setBusy(false);
+    setError(""); setDetail(null);
     if (!isList) {
       void api.timeline(instrument, CYCLE_PAGE_SIZE, cycleOffset, showRetainedTrash ? "all" : "active", requestedNode || undefined)
         .then(value => {
@@ -75,9 +76,10 @@ export default function Timeline() {
   for (const cycle of cycles) rememberedCycles.current.dates[cycle.id] = cycle.baseline.analysis_date;
   for (const cycle of activeFullCycles) rememberedCycles.current.dates[cycle.id] = cycle.analysis_date;
   const selectionKey = `${instrument}:${params.getAll("compare").join("|")}`;
-  const currentSelection = useRef(selectionKey);
-  currentSelection.current = selectionKey;
-  const closeComparison = useCallback(() => setComparison(null), []);
+  const closeComparison = () => {
+    if (location.returnResearch) navigate(location.returnResearch.url);
+    else update({ view: null, compare_mode: null, compare: null, changed_only: null });
+  };
   const toggleComparison = (node: ResearchNodeView) => {
     const next = new URLSearchParams(params);
     next.delete("compare");
@@ -87,12 +89,21 @@ export default function Timeline() {
     remaining.forEach(item => next.append("compare", `${item.lifecycle_state}:${item.node_id}`));
     navigate(`${location.pathname}?${next}`, { replace: true }); setComparison(null);
   };
-  const compare = async () => {
-    if (selections.length !== 2 || busy) return;
-    setBusy(true); setError("");
-    try { const value = await api.compareResearchNodes(instrument, selections); if (currentSelection.current === selectionKey) setComparison(value); }
-    catch (cause) { if (currentInstrument.current === instrument) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { if (currentInstrument.current === instrument) setBusy(false); }
+  const compare = () => { if (selections.length === 2 && !busy) update({ view: "compare" }); };
+  useEffect(() => {
+    if (!comparisonView || selections.length !== 2) return;
+    let active = true;
+    setBusy(true); setError(""); setComparison(null);
+    void api.compareResearchNodes(instrument, selections).then(value => {
+      if (active) setComparison(value);
+    }, cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [comparisonView, selectionKey, revision]);
+  const swapComparison = () => {
+    const next = new URLSearchParams(params); next.delete("compare");
+    [...selections].reverse().forEach(item => next.append("compare", `${item.lifecycle_state}:${item.node_id}`));
+    navigate(`${location.pathname}?${next}`, { replace: true });
   };
   const mutate = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
@@ -102,7 +113,7 @@ export default function Timeline() {
   };
   if (isList) return <Suspense fallback={<div className="loading">{t("loading")}</div>}><ResearchLibrary /></Suspense>;
   const secondaryActions = <>
-    <button className="button" onClick={() => update({ compare_mode: comparisonMode ? null : "1", compare: null })}>{t(comparisonMode ? "closeComparisonMode" : "comparisonMode")}</button>
+    <button className="button" onClick={() => comparisonView ? closeComparison() : update({ compare_mode: comparisonMode ? null : "1", compare: null })}>{t(comparisonMode ? "closeComparisonMode" : "comparisonMode")}</button>
     <button className="button" onClick={() => update({ trash_state: showRetainedTrash ? null : "all", compare: null, cycle_offset: null })}>{t(showRetainedTrash ? "hideRetainedTrash" : "showRetainedTrash")}</button>
   </>;
   return <section className="timeline-page">
@@ -128,7 +139,8 @@ export default function Timeline() {
     {!detail && !error && <div className="loading" role="status">{t("loading")}</div>}
     {detail?.timeline.timeline_warning && <p className="research-limitations" role="status">{t("fullResearchRecommended")}</p>}
     {detail && !selected && <div className="empty-state">{t(requestedNode ? "unavailableResearch" : "noCommittedFullResearch")}</div>}
-    {comparisonMode && <aside className="comparison-tray" aria-label={t("comparisonSelection")}>
+    {comparisonView && selections.length !== 2 && <p className="alert">{t("comparisonSelectionHint")}</p>}
+    {comparisonMode && !comparisonView && <aside className="comparison-tray" aria-label={t("comparisonSelection")}>
       <span>{t("comparisonSelectionHint")}</span>
       {selections.map((item, index) => <span className="comparison-selection-chip" key={item.node_id}>
         {nodes.find(node => node.id === item.node_id)?.analysis_date ?? `${t("selectedResearch")} ${index + 1}`}
@@ -144,9 +156,10 @@ export default function Timeline() {
           <button className="button" disabled={cycleOffset + cycles.length >= (detail.timeline.cycle_total ?? 0)} onClick={() => update({ cycle_offset: String(cycleOffset + CYCLE_PAGE_SIZE), node: null, view: null })}>{t("next")}</button>
         </div>}
       </div>}>
-      {selected && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace actionsTarget={actionsTarget} key={selected.id} /></Suspense>}
+      {selected && !comparisonView && <Suspense fallback={<div role="status">{t("loading")}</div>}><RunDetail selectedRunId={selected.id} workspace actionsTarget={actionsTarget} key={selected.id} /></Suspense>}
+      {comparisonView && busy && <p role="status">{t("loading")}</p>}
+      {comparisonView && comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} primaryCycleId={detail?.timeline.primary_cycle_id} changedOnly={params.get("changed_only") !== "0"} onChangedOnly={value => update({ changed_only: value ? "1" : "0" }, true)} onSwap={swapComparison} onClose={closeComparison} /></Suspense>}
     </ResearchWorkspace>
-    {comparison && <Suspense fallback={<div role="status">{t("loading")}</div>}><NodeComparison comparison={comparison} baselineDates={rememberedCycles.current.dates} onClose={closeComparison} /></Suspense>}
     {pendingNode && lifecycleMode && <RunLifecycleDialog runIds={[pendingNode.id]} action={lifecycleMode} onClose={() => setPendingNode(null)} onDone={() => { setPendingNode(null); setRevision(value => value + 1); }} />}
   </section>;
 }

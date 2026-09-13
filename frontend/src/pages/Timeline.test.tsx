@@ -373,18 +373,16 @@ test("selects human-readable nodes and renders a structured comparison", async (
   compareButton.focus();
   fireEvent.click(compareButton);
 
-  const dialog = await screen.findByRole("dialog", { name: "Node Comparison" }, { timeout: 3000 });
-  expect(document.body.style.overflow).toBe("hidden");
+  const dialog = await screen.findByRole("region", { name: "Node Comparison" }, { timeout: 3000 });
+  expect(document.body.style.overflow).not.toBe("hidden");
   expect(within(dialog).getByText("Incremental thesis changed")).toBeVisible();
   expect(within(dialog).queryByText("High confidence")).not.toBeInTheDocument();
 
-  fireEvent.click(within(dialog).getByText("Extended conclusions"));
-  expect(within(dialog).getByText("Not Recorded Under This Schema")).toBeVisible();
+  expect(within(dialog).getAllByText("Not Recorded Under This Schema")[0]).toBeVisible();
   expect(within(dialog).getByText("Null")).toBeVisible();
   expect(within(dialog).getByText("Empty")).toBeVisible();
   expect(within(dialog).getByText("Updated outcome")).toBeVisible();
 
-  fireEvent.click(within(dialog).getByText("Update details"));
   expect(within(dialog).getByText(/Weakened/)).toBeVisible();
   expect(within(dialog).queryByText(/openai \/ gpt-5.5/)).toBeNull();
   expect(within(dialog).getAllByRole("link", { name: /Run & diagnostics/ })).toHaveLength(2);
@@ -400,23 +398,14 @@ test("selects human-readable nodes and renders a structured comparison", async (
   );
   expect(within(dialog).getAllByText("High confidence")).toHaveLength(2);
 
-  let headers = within(dialog).getAllByRole("columnheader");
-  expect(headers[1]).toHaveTextContent("Full research");
-  expect(headers[2]).toHaveTextContent("Incremental research");
   fireEvent.click(within(dialog).getByRole("button", { name: "Swap sides" }));
-  headers = within(dialog).getAllByRole("columnheader");
-  expect(headers[1]).toHaveTextContent("Incremental research");
-  expect(headers[2]).toHaveTextContent("Full research");
-  expect(api.compareResearchNodes).toHaveBeenCalledTimes(1);
-  expect(api.compareResearchNodes).toHaveBeenCalledWith("NVDA", [
-    { node_id: "full-primary", lifecycle_state: "active" },
+  await waitFor(() => expect(api.compareResearchNodes).toHaveBeenLastCalledWith("NVDA", [
     { node_id: "increment-1", lifecycle_state: "active" },
-  ]);
-
-  fireEvent.keyDown(document, { key: "Escape" });
-  expect(screen.queryByRole("dialog", { name: "Node Comparison" })).not.toBeInTheDocument();
-  expect(document.body.style.overflow).toBe("");
-  expect(compareButton).toHaveFocus();
+    { node_id: "full-primary", lifecycle_state: "active" },
+  ]));
+  fireEvent.click(within(await screen.findByRole("region", { name: "Node Comparison" })).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("region", { name: "Node Comparison" })).not.toBeInTheDocument();
+  expect(document.body.style.overflow).not.toBe("hidden");
 });
 
 test("changes Primary Research using a human-readable cycle", async () => {

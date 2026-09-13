@@ -1,3 +1,4 @@
+import { formatResearchDate } from "../researchDate";
 import { createPortal } from "react-dom";
 import { WorkspaceNavigationButtons } from "../components/ResearchWorkspace";
 import PerformanceSection from "../components/PerformanceSection";
@@ -286,11 +287,7 @@ export default function RunDetail({ selectedRunId, workspace = false, actionsTar
     [artifacts, detail?.result?.decision],
   );
   const runWarnings = useMemo(() => {
-    const reportWarningKeys = new Set(
-      Object.values(reports)
-        .flatMap(reportWarnings)
-        .map(warningKey),
-    );
+    const reportWarningKeys = new Set([...Object.values(reports).flatMap(reportWarnings), ...(detail?.incremental_context?.analysis_brief?.warnings ?? [])].map(warningKey));
     return dedupeWarnings(detail?.result?.warnings ?? []).filter(
       (warning) => !reportWarningKeys.has(warningKey(warning)),
     );
@@ -831,6 +828,7 @@ function IncrementalBriefPanel({
         </div>
       ) : (
         <ResearchMarkdownReader
+          before={<ResearchLimitations warnings={brief.warnings ?? []} sections={brief.report_sections} />}
           markdown={brief.markdown}
           sections={brief.report_sections}
           runId={runId}
@@ -914,7 +912,7 @@ function ReassessmentPanel({
           <h2>{t("reassessment")}</h2>
         </div>
       </div>
-      <div className="reassessment-counts" aria-label={t("reassessmentSummary")}>
+      {entries.length > 0 && <div className="reassessment-counts" aria-label={t("reassessmentSummary")}>
         {[
           "strengthened",
           "weakened",
@@ -930,14 +928,14 @@ function ReassessmentPanel({
             <strong>{counts[disposition] ?? 0}</strong>
           </span>
         ))}
-      </div>
+      </div>}
       {!baselineDecision || !currentDecision ? (
         <div className="empty-state">{t("baselineDecisionUnavailable")}</div>
       ) : groups.length === 0 ? (
         <div className="empty-state">{t("notRecorded")}</div>
       ) : (
         <div className="reassessment-groups">
-          {groups.map((group) => {
+          {[...groups].sort((a, b) => Number(b.entries.some(entry => entry.disposition !== "reaffirmed")) - Number(a.entries.some(entry => entry.disposition !== "reaffirmed"))).map((group) => {
             const changed = group.entries.filter(
               (entry) => entry.disposition !== "reaffirmed",
             );
@@ -959,18 +957,6 @@ function ReassessmentPanel({
                     })}
                   </small>
                 </summary>
-                <section className="reassessment-current-snapshot">
-                  <h3>{t("currentDecisionSnapshot")}</h3>
-                  {group.currentSnapshot.length > 0 ? (
-                    <ul>
-                      {group.currentSnapshot.map((item, index) => (
-                        <li key={`${index}:${item}`}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>{t("notRecorded")}</p>
-                  )}
-                </section>
                 <div className="reassessment-entry-list">
                   {changed.map((entry) => (
                     <ReassessmentEntryCard
@@ -1028,11 +1014,11 @@ function ReassessmentEntryCard({
       </span>
       <div>
         <h4>{t("baselineContent")}</h4>
-        <p>{baselineText ?? t("notRecorded")}</p>
+        <Markdown evidenceAliases={evidenceIndex.aliases} onEvidence={onEvidence}>{baselineText ?? t("notRecorded")}</Markdown>
       </div>
       <div>
         <h4>{t("reassessmentReason")}</h4>
-        <p>{entry.reason}</p>
+        <Markdown evidenceAliases={evidenceIndex.aliases} onEvidence={onEvidence}>{entry.reason}</Markdown>
       </div>
       <EvidenceLinks
         refs={entry.evidence_refs ?? []}
@@ -1122,6 +1108,11 @@ function EvidencePanel({
   incrementalNode: ResearchNodeView | null;
 }) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState("");
+  const sources = [...new Set(evidenceIndex.groups.flatMap(group => group.sources))].sort();
+  const groups = evidenceIndex.groups.filter(group => (!source || group.sources.includes(source)) &&
+    [group.canonical.content, group.canonical.value, ...group.sources, ...group.items.map(item => item.effective_date)].join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
     <article
       className="panel audit-panel"
@@ -1215,8 +1206,13 @@ function EvidencePanel({
               evidenceIndex={evidenceIndex}
             />
           )}
+          <div className="evidence-filters">
+            <label>{t("searchEvidence")}<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
+            <label>{t("evidenceSourceFilter")}<select value={source} onChange={event => setSource(event.target.value)}><option value="">{t("all")}</option>{sources.map(value => <option key={value}>{value}</option>)}</select></label>
+          </div>
+          {!groups.length && <p role="status">{t("noEvidenceMatches")}</p>}
           <div className="evidence-list">
-            {evidenceIndex.groups.map((group) => (
+            {groups.map((group) => (
               <EvidenceCard
                 group={group}
                 focused={group.refs.includes(focusedRef)}
@@ -1298,7 +1294,7 @@ function EvidenceCard({
   focused: boolean;
   onSourceDetails: (ref: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const item = group.canonical;
   const hasValue = item.value !== null && item.value !== undefined;
   const effectiveDates = uniqueStrings(
@@ -1319,16 +1315,18 @@ function EvidenceCard({
       </div>
       <div>
         <dt>{t("effectiveDate")}</dt>
-        <dd>{effectiveDates.join(", ") || "—"}</dd>
+        <dd>{effectiveDates.map(date => formatResearchDate(date, i18n.language)).join(", ") || "—"}</dd>
       </div>
       <div>
         <dt>{t("availableAt")}</dt>
-        <dd>{availableDates.join(", ") || "—"}</dd>
+        <dd>{availableDates.map(date => formatResearchDate(date, i18n.language)).join(", ") || "—"}</dd>
       </div>
       <div>
         <dt>{t("fallback")}</dt>
         <dd>{group.fallback ? t("yes") : t("no")}</dd>
       </div>
+      <div><dt>{t("evidenceOrigin")}</dt><dd>{group.origins.map(origin => t(`evidenceOrigin_${origin}`)).join(", ")}</dd></div>
+      {(item.origins ?? []).map((origin, n) => <div key={n}><dt>{origin.source}</dt><dd>{t(`temporal_${origin.temporal_scope ?? "unknown"}`)}</dd></div>)}
       {hasValue && (
         <div>
           <dt>{t("value")}</dt>
@@ -1348,8 +1346,8 @@ function EvidenceCard({
     >
       <header>
         <div>
-          <code title={group.refs.join("\n")}>{group.alias}</code>
-          <h3>{group.evidenceTypes.join(" · ")}</h3>
+          <span className="evidence-alias">{group.alias}</span>
+          <h3>{group.sources.join(" · ")}</h3>
         </div>
         <span className={`quality quality-${group.quality}`}>
           {t(`quality_${group.quality}`)}
