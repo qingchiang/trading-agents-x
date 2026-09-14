@@ -828,7 +828,7 @@ export default function NewRun() {
               ))}
             </div>
             <h2>{t("modelsOutput")}</h2>
-            <div className={`form-grid ${researchKind === "full" ? "three" : "two"}`}>
+            <div className="model-provider">
               <label>
                 {t("provider")}
                 <select
@@ -842,6 +842,9 @@ export default function NewRun() {
                   ))}
                 </select>
               </label>
+            </div>
+            <div className="model-groups">
+              {researchKind === "full" && <fieldset className="model-group"><legend>{t("quickModel")}</legend>
               {researchKind === "full" && (
                 <label>
                   {t("quickModel")}
@@ -870,6 +873,22 @@ export default function NewRun() {
                   )}
                 </label>
               )}
+              {researchKind === "full" && (
+                <ReasoningSelect
+                  label={t("quickReasoning")}
+                  value={quickReasoning}
+                  options={reasoningOptions(
+                    modelCatalog,
+                    quickModel,
+                    quickReasoning,
+                  )}
+                  onChange={setQuickReasoning}
+                  providerDefault={t("providerDefault")}
+                />
+              )}
+
+              </fieldset>}
+              <fieldset className="model-group"><legend>{t("deepModel")}</legend>
               <label>
                 {t("deepModel")}
                 <select
@@ -896,19 +915,6 @@ export default function NewRun() {
                   />
                 )}
               </label>
-              {researchKind === "full" && (
-                <ReasoningSelect
-                  label={t("quickReasoning")}
-                  value={quickReasoning}
-                  options={reasoningOptions(
-                    modelCatalog,
-                    quickModel,
-                    quickReasoning,
-                  )}
-                  onChange={setQuickReasoning}
-                  providerDefault={t("providerDefault")}
-                />
-              )}
               <ReasoningSelect
                 label={t("deepReasoning")}
                 value={deepReasoning}
@@ -920,7 +926,7 @@ export default function NewRun() {
                 onChange={setDeepReasoning}
                 providerDefault={t("providerDefault")}
               />
-
+              </fieldset>
             </div>
             {(modelsLoading || modelWarning) && (
               <p

@@ -29,7 +29,7 @@ export default function ResearchDecisionView({
       <article
         className="panel audit-panel"
         id="run-view-decision" aria-labelledby="run-tab-decision"
-        role="tabpanel"
+        role="region"
       >
         <div className="empty-state">{t("noDecision")}</div>
       </article>
@@ -39,7 +39,7 @@ export default function ResearchDecisionView({
     <article
       className="panel audit-panel decision-panel-v2"
       id="run-view-decision" aria-labelledby="run-tab-decision"
-      role="tabpanel"
+      role="region"
     >
       <ResearchDecisionContent
         decision={decision}
@@ -85,10 +85,8 @@ export function ResearchDecisionContent({
           <small>{researchConfidenceLabel(t, decision.confidence)}</small>
         </div>
         <div className="decision-summary">
-          <span className="research-opinion-notice">
-            {t("nonPersonalizedResearchOpinion")}
-          </span>
           <h2 id={embedded ? undefined : "assessment-summary"} data-outline={embedded ? undefined : t("executiveSummary")}>{t("executiveSummary")}</h2>
+          <p className="research-opinion-notice">{t("nonPersonalizedResearchOpinion")}</p>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
@@ -103,7 +101,7 @@ export function ResearchDecisionContent({
             {decision.thesis}
           </Markdown>
           <div className="decision-horizon-summary">
-            <strong>{t("horizon")}</strong>
+            <span className="decision-horizon-label">{t("horizon")}</span>
             <Markdown
               evidenceAliases={evidenceIndex.aliases}
               onEvidence={onEvidence}
@@ -196,10 +194,10 @@ export function ResearchDecisionContent({
                         key={`${referenceRange.category}:${referenceRange.label}:${index}`}
                       >
                         <div className="scenario-reference-heading">
+                          <span className="scenario-range-name">{referenceRange.label}</span>
                           <span className="scenario-range-category">
                             {t(`scenarioRangeCategory.${referenceRange.category}`)}
                           </span>
-                          <span>{referenceRange.label}</span>
                           <strong
                             title={`${referenceRange.low.value}–${referenceRange.high.value}${referenceRange.unit ? ` ${referenceRange.unit}` : ""}`}
                           >

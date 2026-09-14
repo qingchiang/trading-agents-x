@@ -458,20 +458,20 @@ test("runs, templates, trash, and restores local research", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("button", { name: "Open evidence ev_0123456789ab" }).first()).toBeFocused();
-  await page.getByRole("tab", { name: "Research reports" }).click();
+  await page.getByRole("link", { name: "Research reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("navigation", { name: "Report section navigation" }).getByRole("button", { name: "Risk lens" }).click();
   await expect(page).toHaveURL(/#risk/);
-  await page.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
   await page.goBack();
   await expect(page).toHaveURL(/view=reports.*#risk/);
   await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(90);
 
   await page.goto("/runs/run-report?view=decision");
   await expect(
-    page.getByRole("tab", { name: "Overview", exact: true }),
+    page.getByRole("link", { name: "Overview", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),
@@ -1132,7 +1132,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
   await expect(page.locator(".history-node.full")).toBeVisible();
   await expect(page.locator(".history-node.incremental")).toBeVisible();
   await expect(page.getByText(/historical run did not record an analysis brief|此历史运行未记录分析简报/)).toBeVisible();
-  await page.getByRole("tab", { name: /Full assessment|完整研究判断/ }).click();
+  await page.getByRole("link", { name: /Full assessment|完整研究判断/ }).click();
   await expect(page.getByRole("heading", { name: /Executive summary|执行摘要|エグゼクティブサマリー/ })).toBeVisible();
   await expect(page.getByText(/Full research recommended|建议进行完整研究/).first()).toBeVisible();
 });

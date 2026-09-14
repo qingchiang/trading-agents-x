@@ -93,7 +93,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
     }
     await page.goto("/timelines/NVDA?node=increment");
     await expect(page.locator(".performance-section")).toBeVisible();
-    await page.locator(".auxiliary-tabs [role=tab]").last().click();
+    await page.locator(".auxiliary-tabs button").last().click();
     await page.locator(".workspace-contents .floating-navigation-items button").last().click();
     await expect(page).toHaveURL(/#workspace-period-performance/);
     await expect(page.locator(".workspace-contents .floating-navigation-items button").last()).toHaveAttribute("aria-current", "location");
@@ -105,10 +105,10 @@ for (const locale of ["en", "zh-CN", "ja"]) {
     await expect(page.locator(".source-drawer")).toBeVisible();
     await page.locator(".source-drawer > header button").click();
     await expect(evidence).toBeFocused();
-    await page.locator(".auxiliary-tabs [role=tab]").last().click();
+    await page.locator(".auxiliary-tabs button").last().click();
     await page.locator(".workspace-contents .floating-navigation-items button").last().click();
     await expect(page).toHaveURL(/#market-risk-lens|#risk-lens/);
-    await page.locator(".workspace-reader .reading-toolbar [role=tab]").first().click();
+    await page.locator(".workspace-reader .reading-toolbar nav a").first().click();
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Risk lens", exact: true })).toBeInViewport();
     await page.goto("/timelines/NVDA?node=full");

@@ -108,12 +108,11 @@ export default function NumericAuditAppendixView({
         )}
 
         {snapshots.length > 1 && (
-          <div className="numeric-snapshot-tabs" role="tablist">
+          <div className="numeric-snapshot-tabs" role="group">
             {[...snapshots].reverse().map((item) => (
               <button
                 type="button"
-                role="tab"
-                aria-selected={snapshot?.phase === item.phase}
+                aria-pressed={snapshot?.phase === item.phase}
                 className={snapshot?.phase === item.phase ? "active" : ""}
                 onClick={() => setPhase(item.phase)}
                 key={item.phase}
@@ -341,7 +340,7 @@ function omissionLabel(
 function NumericSnapshotView({ snapshot }: { snapshot: NumericAuditSnapshot }) {
   const { t } = useTranslation();
   return (
-    <section className="numeric-snapshot" role="tabpanel">
+    <section className="numeric-snapshot" role="region">
       <div className="numeric-snapshot-meta">
         <span>
           {t("generationMethod")}: <code>{snapshot.method}</code>

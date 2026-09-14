@@ -951,7 +951,7 @@ label small {
   gap: 5px;
   margin-bottom: 18px;
   padding: 6px;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
 
 .view-tabs button {
@@ -972,7 +972,7 @@ label small {
   background: var(--surface-soft);
 }
 
-.view-tabs button[aria-selected="true"] {
+.view-tabs button[aria-pressed="true"] {
   color: var(--blue);
   background: var(--blue-soft);
 }

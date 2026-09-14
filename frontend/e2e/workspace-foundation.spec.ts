@@ -23,8 +23,8 @@ test("keeps mobile controls sized, named and outside the closed navigation", asy
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(page.getByRole("link", { name: "New research", exact: true })).toBeVisible();
   await page.goto("/runs");
-  const active = page.getByRole("tab", { name: "Active runs" });
-  const trash = page.getByRole("tab", { name: "Trash", exact: true });
+  const active = page.getByRole("link", { name: "Active runs" });
+  const trash = page.getByRole("link", { name: "Trash", exact: true });
   expect(await active.evaluate(e => getComputedStyle(e).backgroundColor)).not.toBe(await trash.evaluate(e => getComputedStyle(e).backgroundColor));
 });
 

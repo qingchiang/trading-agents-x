@@ -10,7 +10,7 @@ export default function RunDiagnostics({ detail, events, artifacts, evidenceInde
 }) {
   const { t } = useTranslation();
   const decision = detail.result?.decision;
-  return <section className="diagnostics-view" id="run-view-diagnostics" aria-labelledby="run-tab-diagnostics" role="tabpanel">
+  return <section className="diagnostics-view" id="run-view-diagnostics" aria-labelledby="run-tab-diagnostics" role="region">
     <h2>{t("diagnostics")}</h2>
     <RunMetricsPanel metrics={detail.run.metrics} attempts={detail.attempts ?? []} events={events} artifacts={artifacts} />
     <NumericAuditAppendixView appendix={detail.result?.numeric_audit}

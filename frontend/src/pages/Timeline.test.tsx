@@ -220,7 +220,7 @@ test("selects the primary head and switches research inside the instrument works
   expect(await screen.findByRole("heading", { name: "英伟达" })).toBeVisible();
   await waitFor(() => expect(api.run).toHaveBeenCalledWith("increment-1"));
   const history = screen.getByRole("navigation", { name: "Research history" });
-  fireEvent.click(within(history).getByRole("button", { name: /2026-07-20/ }));
+  fireEvent.click(within(history).getByRole("button", { name: /^2026-07-20/ }));
   await waitFor(() => expect(api.run).toHaveBeenCalledWith("full-primary"));
   expect(api.selectPrimaryCycle).not.toHaveBeenCalled();
   expect(screen.queryByText("Audit details")).not.toBeInTheDocument();
@@ -363,7 +363,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
 
   fireEvent.click(await screen.findByRole("button", { name: "More" }));
   fireEvent.click(await screen.findByRole("button", { name: "Compare research" }));
-  const selectors = await screen.findAllByRole("button", { name: "Select for comparison" });
+  const selectors = await screen.findAllByRole("checkbox", { name: /Select for comparison/ });
   fireEvent.click(selectors[0]);
   fireEvent.click(selectors[1]);
   expect(screen.getAllByText("2026-07-25").length).toBeGreaterThan(0);
@@ -418,8 +418,8 @@ test("changes Primary Research using a human-readable cycle", async () => {
   vi.mocked(api.selectPrimaryCycle).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  const target = (await screen.findByRole("button", { name: /2026-07-10/ })).closest(".history-node")!;
-  fireEvent.click(target.closest("details")!.querySelector("summary")!);
+  fireEvent.click(await screen.findByRole("button", { name: /Expand cycle.*2026-07-10/ }));
+  const target = (await screen.findByRole("button", { name: /^2026-07-10/ })).closest(".history-node")!;
   fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
   fireEvent.click(screen.getByRole("button", { name: "Make primary" }));
   await waitFor(() => expect(api.selectPrimaryCycle).toHaveBeenCalledWith("NVDA", "full-secondary"));
@@ -434,7 +434,7 @@ test("requires an explicit Primary replacement when trashing the primary Full cy
   vi.mocked(api.timeline).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  const target = (await screen.findByRole("button", { name: /2026-07-20/ })).closest(".history-node")!;
+  const target = (await screen.findByRole("button", { name: /^2026-07-20/ })).closest(".history-node")!;
   fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
   fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
   fireEvent.change(await screen.findByLabelText("Replacement Primary Cycle"), { target: { value: "full-secondary" } });
@@ -459,7 +459,7 @@ test("offers Primary replacement cycles outside the current Timeline page", asyn
   vi.mocked(api.timeline).mockResolvedValue(current);
   render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
 
-  const target = (await screen.findByRole("button", { name: /2026-07-20/ })).closest(".history-node")!;
+  const target = (await screen.findByRole("button", { name: /^2026-07-20/ })).closest(".history-node")!;
   fireEvent.click(within(target as HTMLElement).getByRole("button", { name: "Manage" }));
   fireEvent.click(screen.getByRole("button", { name: "Move Cycle to Trash" }));
   expect(

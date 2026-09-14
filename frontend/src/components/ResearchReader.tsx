@@ -15,7 +15,7 @@ import { api, type AnalysisResult, type AnalystReport, type Capabilities, type E
 import EvidenceLinks from "../components/EvidenceLinks";
 import EvidenceSourceDrawer from "../components/EvidenceSourceDrawer";
 import { InstrumentIdentity } from "../components/Instruments";
-import { ActionMenu, tabsKeyDown } from "../components/Interaction";
+import { ActionMenu } from "../components/Interaction";
 import ResearchKindBadge from "../components/ResearchKindBadge";
 import RunExecutionView from "./RunExecutionView";
 import StatusBadge from "../components/StatusBadge";
@@ -76,16 +76,17 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
   const location = useLocation();
   const { runId: routeRunId = "" } = useParams();
   const runId = selectedRunId ?? routeRunId;
-  const navigate = useCallback((to: string, options?: { replace?: boolean }) => {
+  const readerPath = useCallback((to: string) => {
     if (workspace && to.startsWith(`/runs/${encodeURIComponent(runId)}?`)) {
       const next = new URL(to, "http://local");
       const params = new URLSearchParams(location.search);
       for (const key of ["view", "report", "ref", "return_view", "return_report"]) params.delete(key);
       next.searchParams.forEach((value, key) => params.set(key, value));
       params.set("node", runId);
-      routerNavigate(`${location.pathname}?${params}`, options);
-    } else routerNavigate(to, options);
-  }, [workspace, runId, location.pathname, location.search, routerNavigate]);
+      return `${location.pathname}?${params}${next.hash}`;
+    } else return to;
+  }, [workspace, runId, location.pathname, location.search]);
+  const navigate = useCallback((to: string, options?: { replace?: boolean }) => routerNavigate(readerPath(to), options), [readerPath, routerNavigate]);
   const { detail, evidence, artifacts, events, error, setError, refresh } = record;
   const [actionBusy, setActionBusy] = useState(false);
   const [baselineEvidence, setBaselineEvidence] = useState<EvidenceBundle | null>(null);
@@ -235,31 +236,13 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
     detail?.incremental_context?.full_baseline.run_id,
   ]);
 
-  const selectView = useCallback(
-    (view: ViewName) => {
-      navigate(
-        runDetailPath(runId, {
-          view,
-          report: view === "reports" && activeReport ? activeReport : undefined,
-          return_view: view === "evidence" && activeView !== "evidence" ? activeView : undefined,
-          return_report: view === "evidence" && activeView === "reports" ? activeReport : undefined,
-        }),
-      );
-    },
-    [activeReport, activeView, navigate, runId],
-  );
-
-  const selectReport = useCallback(
-    (report: string) => {
-      navigate(
-        runDetailPath(runId, {
-          view: "reports",
-          report,
-        }),
-      );
-    },
-    [navigate, runId],
-  );
+  const viewPath = (view: ViewName) => readerPath(runDetailPath(runId, {
+    view,
+    report: view === "reports" && activeReport ? activeReport : undefined,
+    return_view: view === "evidence" && activeView !== "evidence" ? activeView : undefined,
+    return_report: view === "evidence" && activeView === "reports" ? activeReport : undefined,
+  }));
+  const selectView = (view: ViewName) => routerNavigate(viewPath(view));
 
   const openEvidence = useCallback(
     (ref: string) => {
@@ -505,23 +488,17 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
       <nav
         className="panel view-tabs"
         aria-label={t("researchViews")}
-        role="tablist"
-        onKeyDown={tabsKeyDown}
       >
         {readingViews.map((view) => (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === view}
-            tabIndex={activeView === view ? 0 : -1}
+          <Link
+            to={viewPath(view)}
+            aria-current={activeView === view ? "page" : undefined}
             id={`run-tab-${view}`}
-            aria-controls={`run-view-${view}`}
             className={activeView === view ? "active" : ""}
-            onClick={() => selectView(view)}
             key={view}
           >
             {t(viewLabel(view, isIncremental))}
-          </button>
+          </Link>
         ))}
       </nav>
         <WorkspaceNavigationButtons />
@@ -593,7 +570,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
             reports={reports}
             reportNames={reportNames}
             activeReport={activeReport}
-            onReport={selectReport}
+            reportHref={report => readerPath(runDetailPath(runId, { view: "reports", report }))}
             onEvidence={openSourceDrawer}
             evidenceIndex={evidenceIndex}
           />
@@ -648,7 +625,7 @@ function IncrementalDecisionPanel({
     <article
       className="panel audit-panel decision-panel-v2 incremental-decision-panel"
       id="run-view-decision" aria-labelledby="run-tab-decision"
-      role="tabpanel"
+      role="region"
     >
       <IncrementalOutcomeSummary node={node} />
       <ResearchDecisionContentView
@@ -686,7 +663,7 @@ function IncrementalBriefPanel({
     <article
       className="panel audit-panel report-panel reader-panel"
       id="run-view-brief" aria-labelledby="run-tab-brief"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>
@@ -778,7 +755,7 @@ function ReassessmentPanel({
     <article
       className="panel audit-panel incremental-reassessment-panel"
       id="run-view-reassessment" aria-labelledby="run-tab-reassessment"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>
@@ -926,7 +903,7 @@ function DeliberationPanel({
     <article
       className="panel audit-panel reader-panel"
       id="run-view-deliberation" aria-labelledby="run-tab-deliberation"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>
@@ -981,7 +958,7 @@ function EvidencePanel({
     <article
       className="panel audit-panel"
       id="run-view-evidence" aria-labelledby="run-tab-evidence"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>
@@ -1194,7 +1171,7 @@ function ReportsPanel({
   reports,
   reportNames,
   activeReport,
-  onReport,
+  reportHref,
   onEvidence,
   evidenceIndex,
 }: {
@@ -1202,7 +1179,7 @@ function ReportsPanel({
   reports: Record<string, AnalystReport | string>;
   reportNames: string[];
   activeReport: string;
-  onReport: (report: string) => void;
+  reportHref: (report: string) => string;
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
 }) {
@@ -1211,7 +1188,7 @@ function ReportsPanel({
     <article
       className="panel audit-panel report-panel reader-panel"
       id="run-view-reports" aria-labelledby="run-tab-reports"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>
@@ -1223,18 +1200,17 @@ function ReportsPanel({
         <div className="empty-state">{t("noReports")}</div>
       ) : (
         <>
-          <div className="tabs" role="tablist" aria-label={t("reports")} onKeyDown={tabsKeyDown}>
+          <nav className="tabs" aria-label={t("reports")}>
             {reportNames.map((name) => (
-              <button
-                role="tab" aria-selected={activeReport === name} tabIndex={activeReport === name ? 0 : -1}
+              <Link
+                to={reportHref(name)} aria-current={activeReport === name ? "page" : undefined}
                 className={activeReport === name ? "active" : ""}
-                onClick={() => onReport(name)}
                 key={name}
               >
                 {reportLabel(t, name)}
-              </button>
+              </Link>
             ))}
-          </div>
+          </nav>
           <ResearchLimitations warnings={reportWarnings(reports[activeReport])} sections={typeof reports[activeReport] === "string" ? [] : (reports[activeReport] as AnalystReport).report_sections} />
           <AnalystReportView
             report={reports[activeReport]}

@@ -2,7 +2,7 @@ import Icon from "./Icon";
 import WorkspaceOutline from "./WorkspaceOutline";
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { tabsKeyDown, useModal } from "./Interaction";
+import { useModal } from "./Interaction";
 
 export const WorkspaceNavigationActions = createContext<{ open: (tab: string) => void; close: () => void; compact: boolean; hasContents: boolean; registerToolbar: (present: boolean) => void } | null>(null);
 
@@ -59,11 +59,11 @@ export default function ResearchWorkspace({ history, children }: { history: Reac
       {!wide && open && <div className="workspace-scrim" onClick={() => setOpen(false)} />}
       <aside className="workspace-auxiliary" hidden={!wide && !open} ref={panel} role={!wide && open ? "dialog" : undefined} aria-modal={!wide && open || undefined} aria-label={t("historyNavigation")}>
         {!wide && <button className="button" onClick={() => setOpen(false)}>{t("closeNavigation")}</button>}
-        <div className="auxiliary-tabs" role="tablist" onKeyDown={tabsKeyDown}>
-          {(hasContents ? ["history", "contents"] : ["history"]).map(value => <button role="tab" id={`${tabsId}-${value}`} aria-controls={`${tabsId}-${value}-panel`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
+        <div className="auxiliary-tabs" role="group">
+          {(hasContents ? ["history", "contents"] : ["history"]).map(value => <button id={`${tabsId}-${value}`} aria-controls={`${tabsId}-${value}-panel`} aria-pressed={tab === value} onClick={() => setTab(value)} key={value}>{t(value === "history" ? "historyNavigation" : "onThisReport")}</button>)}
         </div>
-        <div role="tabpanel" id={`${tabsId}-history-panel`} aria-labelledby={`${tabsId}-history`} hidden={tab !== "history"} onClick={event => { if ((event.target as HTMLElement).closest(".history-select")) setOpen(false); }}>{history}</div>
-        <div role="tabpanel" id={`${tabsId}-contents-panel`} aria-labelledby={`${tabsId}-contents`} hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
+        <div role="region" id={`${tabsId}-history-panel`} aria-labelledby={`${tabsId}-history`} hidden={tab !== "history"} onClick={event => { if ((event.target as HTMLElement).closest(".history-select")) setOpen(false); }}>{history}</div>
+        <div role="region" id={`${tabsId}-contents-panel`} aria-labelledby={`${tabsId}-contents`} hidden={tab !== "contents"} className="workspace-contents" ref={targetRef} onClick={event => { if ((event.target as HTMLElement).closest(".floating-navigation-items button")) setOpen(false); }} />
       </aside>
       {!wide && !hasToolbar && <div className="workspace-fallback-navigation"><button className="button" aria-expanded={open} onClick={() => { setTab("history"); setOpen(true); }}>{t("historyNavigation")}</button></div>}
       {children}

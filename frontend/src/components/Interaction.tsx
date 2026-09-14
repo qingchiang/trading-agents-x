@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export function focusableElements(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(
@@ -50,18 +50,6 @@ export function useModal<T extends HTMLElement>(open: boolean, onClose: () => vo
   return ref;
 }
 
-export function tabsKeyDown(event: KeyboardEvent<HTMLElement>) {
-  const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
-  const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
-  const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
-    : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
-    : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
-  if (next < 0) return;
-  event.preventDefault();
-  tabs[next]?.focus();
-  tabs[next]?.click();
-}
-
 export function ActionMenu({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -77,15 +65,7 @@ export function ActionMenu({ label, children }: { label: string; children: React
     if (event.key === 'Escape') {
       setOpen(false); ref.current?.querySelector('button')?.focus();
     }
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault();
-      if (!open) { setOpen(true); requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>('.action-menu-content a, .action-menu-content button')?.focus()); return; }
-      const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('.action-menu-content a, .action-menu-content button') ?? []);
-      const current = items.indexOf(document.activeElement as HTMLElement);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
-        : event.key === 'ArrowDown' ? (current + 1) % items.length : (current + items.length - 1) % items.length;
-      items[next]?.focus();
-    }
+
   }}>
     <button type="button" className="button" aria-expanded={open} onClick={() => setOpen(!open)}>{label}</button>
     {open && <div className="action-menu-content" onClick={() => { ref.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); setOpen(false); }}>{children}</div>}

@@ -36,6 +36,12 @@ export function localizePerformanceReason(
 
 const en = {
   translation: {
+    collapseCycle: "Collapse cycle",
+    expandCycle: "Expand cycle",
+    comparisonAdd: "Add to comparison",
+    comparisonSelected: "Selected",
+    comparisonLimit: "Two studies selected. Remove one to choose another.",
+
     openExistingResearch: "View existing research",
     materialsAndLimits: "Materials and limitations",
     currentUpdateMaterials: "These materials were included in this update. Baseline evidence is separate.",
@@ -474,7 +480,7 @@ const en = {
     profileFastDesc: "Core coverage with a concise discussion.",
     profileStandardDesc: "Balanced coverage with opposing views and a risk review.",
     profileDeepDesc: "More discussion rounds and detailed scrutiny of assumptions and risks.",
-    modelsOutput: "Models & output",
+    modelsOutput: "Model configuration",
     quickReasoning: "Quick reasoning",
     deepReasoning: "Deep reasoning",
     providerDefault: "Provider default",
@@ -952,6 +958,12 @@ const en = {
 
 const zhCN = {
   translation: {
+    collapseCycle: "收起周期",
+    expandCycle: "展开周期",
+    comparisonAdd: "加入比较",
+    comparisonSelected: "已选",
+    comparisonLimit: "已选择两份研究，请先取消一项再选择其他研究。",
+
     openExistingResearch: "查看已有研究内容",
     materialsAndLimits: "资料与限制",
     currentUpdateMaterials: "以下为本次更新纳入的资料，完整基线证据单独查看。",
@@ -1034,7 +1046,7 @@ const zhCN = {
     fullResearchTriggeredByCurrentNode: "这次更新建议重新开展完整研究。",
     fullResearchTriggeredByEarlierNode:
       "本周期较早的更新曾建议重新开展完整研究。",
-    fullBaseline: "完整研究基线",
+    fullBaseline: "完整基线",
     cycleHead: "本周期最新研究",
     primaryCycle: "主研究周期",
     primaryResearch: "主研究",
@@ -1376,7 +1388,7 @@ const zhCN = {
     profileFastDesc: "覆盖核心资料，进行简洁讨论。",
     profileStandardDesc: "均衡覆盖资料，对照不同观点并复核风险。",
     profileDeepDesc: "增加讨论轮次，深入核查假设和风险。",
-    modelsOutput: "模型与输出",
+    modelsOutput: "模型配置",
     quickReasoning: "快速模型推理强度",
     deepReasoning: "深度模型推理强度",
     providerDefault: "服务商默认",
@@ -1841,6 +1853,12 @@ const zhCN = {
 
 const ja = {
   translation: {
+    collapseCycle: "サイクルを閉じる",
+    expandCycle: "サイクルを開く",
+    comparisonAdd: "比較に追加",
+    comparisonSelected: "選択済み",
+    comparisonLimit: "2 件を選択済みです。別のリサーチを選ぶには 1 件解除してください。",
+
     openExistingResearch: "記録済みのリサーチを読む",
     materialsAndLimits: "資料と制約",
     currentUpdateMaterials: "今回の更新に採用された資料です。完全ベースラインの資料は別に確認できます。",
@@ -2273,7 +2291,7 @@ const ja = {
     profileFastDesc: "主要な資料を確認し、簡潔に検討します。",
     profileStandardDesc: "資料を広く確認し、異なる見解とリスクを検討します。",
     profileDeepDesc: "議論の回数を増やし、前提とリスクを詳しく検討します。",
-    modelsOutput: "モデルと出力",
+    modelsOutput: "モデル設定",
     quickReasoning: "高速モデルの推論強度",
     deepReasoning: "詳細モデルの推論強度",
     providerDefault: "プロバイダー既定",

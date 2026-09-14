@@ -36,7 +36,7 @@ export default function RunActivityView({
     <article
       className="panel audit-panel timeline-panel"
       id="run-view-timeline" aria-labelledby="run-tab-timeline"
-      role="tabpanel"
+      role="region"
     >
       <div className="panel-header">
         <div>

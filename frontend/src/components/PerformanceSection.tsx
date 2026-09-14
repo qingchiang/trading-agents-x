@@ -17,10 +17,11 @@ export default function PerformanceSection({ node, baselineDate }: { node: Resea
       {rows.map(({ name, component, difference, stock }) => <article className="performance-row" key={name}>
         <h3>{name}</h3>
         {component.calculation ? <>
-          <div><span>{t("actualSessions")}</span><strong>{formatResearchDate(component.calculation.start_session, i18n.language)} → {formatResearchDate(component.calculation.end_session, i18n.language)}</strong></div>
-          <div><span>{t("periodChange")}</span><strong className="performance-value">{percent(component.calculation.unrounded_return)}</strong></div>
-          {!stock && <div><span>{t("reportedBenchmarkDifference")}</span><strong>{difference === null ? "—" : t("percentagePoints", { value: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 2, signDisplay: "exceptZero" }).format(difference * 100) })}</strong></div>}
           <div className="performance-endpoints"><span>{t("endpointValues")}</span><strong>{number(component.calculation.start_value)} → {number(component.calculation.end_value)}</strong></div>
+
+          <div className="performance-change"><span>{t("periodChange")}</span><strong className="performance-value">{percent(component.calculation.unrounded_return)}</strong></div>
+          {!stock && <div className="performance-difference"><span>{t("reportedBenchmarkDifference")}</span><strong>{difference === null ? "—" : t("percentagePoints", { value: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 2, signDisplay: "exceptZero" }).format(difference * 100) })}</strong></div>}
+          <div className="performance-sessions"><span>{t("actualSessions")}</span><strong>{formatResearchDate(component.calculation.start_session, i18n.language)} → {formatResearchDate(component.calculation.end_session, i18n.language)}</strong></div>
           <p className="performance-basis">{component.calculation.provider} · {t(`adjustment_${component.calculation.adjustment_basis}`, { defaultValue: component.calculation.adjustment_basis })}{component.calculation.fallback ? ` · ${t("fallback")}` : ""}</p>
           <p className="performance-retrieved">{t("retrievedAt")}: {formatResearchDate(component.calculation.retrieved_at, i18n.language)}</p>
         </> : <p className="performance-missing"><strong>{t(`performance_${component.status}`)}</strong> · <span>{localizePerformanceReason(t, component.reason)}</span></p>}

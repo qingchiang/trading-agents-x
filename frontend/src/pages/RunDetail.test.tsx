@@ -546,7 +546,7 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   expect(screen.getByText(/repair-value/)).not.toBeVisible();
   fireEvent.click(screen.getByText("Raw candidate"));
   expect(screen.getByText(/repair-value/)).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Initial candidate" }));
+  fireEvent.click(screen.getByRole("button", { name: "Initial candidate" }));
   expect(screen.getByText(/initial-value/)).toBeVisible();
 
 });
@@ -819,30 +819,30 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByText("+6 pp")).toBeVisible();
   expect(screen.getAllByText("Jul 20, 2026 → Jul 24, 2026")).toHaveLength(3);
   expect(screen.getAllByText(/split-adjusted close/)).toHaveLength(3);
-  expect(screen.getByRole("tab", { name: "Analysis brief" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  expect(screen.getByRole("link", { name: "Analysis brief" })).toHaveAttribute(
+    "aria-current",
+    "page",
   );
-  expect(screen.queryByRole("tab", { name: "Research reports" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("tab", { name: "Deliberation" })).not.toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Analysis brief" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Reassessment" })).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Evidence updates" })).toBeVisible();
-  expect(screen.queryByRole("tab", { name: "Run progress" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Research reports" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Deliberation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Analysis brief" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Reassessment" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Evidence updates" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Run progress" })).toBeNull();
   expect(
-    screen.getAllByRole("tab").map((tab) => tab.textContent),
+    within(screen.getByRole("navigation", { name: "Research run views" })).getAllByRole("link").map((link) => link.textContent),
   ).toEqual([
     "Analysis brief",
     "Reassessment",
     "Full assessment",
     "Evidence updates",
   ]);
-  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
+  fireEvent.click(screen.getByRole("link", { name: "Full assessment" }));
   await waitFor(() =>
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "run-view-decision"),
+    expect(screen.getByRole("region", { name: "Full assessment" })).toHaveAttribute("id", "run-view-decision"),
   );
   expect(
-    within(screen.getByRole("tabpanel")).getByText("Overall assessment updated."),
+    within(screen.getByRole("region", { name: "Full assessment" })).getByText("Overall assessment updated."),
   ).toBeVisible();
   expect(screen.queryByText("Current instrument")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Update this research" })).toHaveAttribute(
@@ -850,7 +850,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "/runs/new?intent=update&from_run=run-1&full_baseline_run_id=full-baseline",
   );
 
-  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
+  fireEvent.click(screen.getByRole("link", { name: "Analysis brief" }));
   await waitFor(() => expect(api.evidence).toHaveBeenCalledTimes(1));
   await screen.findByRole("heading", { name: "Key update" });
   await waitFor(() => expect(screen.getByRole("heading", { name: "Key update" })).toBeVisible());
@@ -858,7 +858,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
     "The filing changes the outlook.",
   );
 
-  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
+  fireEvent.click(screen.getByRole("link", { name: "Full assessment" }));
   expect(await screen.findByRole("heading", { name: "Executive summary" })).toBeVisible();
   expect(screen.getByText("Balanced research summary.")).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
@@ -869,7 +869,7 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.getByText("calc_market_reference")).not.toBeVisible();
 
   fireEvent.click(screen.getByRole("link", { name: "Read research" }));
-  fireEvent.click(await screen.findByRole("tab", { name: "Reassessment" }));
+  fireEvent.click(await screen.findByRole("link", { name: "Reassessment" }));
   expect(await screen.findByText("The new filing adds uncertainty.")).toBeVisible();
   expect(screen.getByText("1 changed · 1 total")).toBeVisible();
   const reaffirmedSummary = screen.getByText("Show 1 reaffirmed item");
@@ -966,12 +966,12 @@ test("keeps baseline Evidence out of Evidence updates and supports historical br
   expect(within(screen.getByRole("dialog")).queryByText("Canonical IDs and provenance")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
-  fireEvent.click(screen.getByRole("tab", { name: "Analysis brief" }));
+  fireEvent.click(screen.getByRole("link", { name: "Analysis brief" }));
   expect(
     await screen.findByText("This historical run did not record an analysis brief."),
   ).toBeVisible();
   await waitFor(() => expect(screen.getByText("The overall assessment outcome was not recorded.")).toBeVisible());
-  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
+  fireEvent.click(screen.getByRole("link", { name: "Full assessment" }));
   await waitFor(() => expect(screen.getByText("The overall assessment outcome was not recorded.")).toBeVisible());
   await waitFor(() => expect(api.evidence).toHaveBeenCalledWith("full-baseline"));
 });
@@ -1165,7 +1165,7 @@ test("explains when an Incremental Decision is inherited unchanged", async () =>
     await screen.findByText("Overall assessment unchanged; baseline assessment retained."),
   ).toBeVisible();
   expect(screen.getByText("The baseline Decision remains valid as written.")).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Full assessment" }));
+  fireEvent.click(screen.getByRole("link", { name: "Full assessment" }));
   expect(
     await screen.findByText("Overall assessment unchanged; baseline assessment retained."),
   ).toBeInTheDocument();
@@ -1225,11 +1225,11 @@ test("loads only Run Detail initially and refreshes open deliberation artifacts 
     </Router>,
   );
 
-  expect(await screen.findByRole("tab", { name: "Overview" })).toBeVisible();
+  expect(await screen.findByRole("link", { name: "Overview" })).toBeVisible();
   expect(api.capabilities).not.toHaveBeenCalled();
   expect(api.artifacts).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
+  fireEvent.click(screen.getByRole("link", { name: "Deliberation" }));
   await waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(1));
 
   act(() =>
@@ -1370,7 +1370,7 @@ test("shows run metrics only in the Diagnostics view", async () => {
     </Router>,
   );
 
-  await screen.findByRole("tab", { name: "Overview" });
+  await screen.findByRole("link", { name: "Overview" });
   expect(screen.queryByText("Attempt metrics")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
@@ -1434,7 +1434,7 @@ test("labels runs that have no recorded artifacts", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
+  fireEvent.click(screen.getByRole("link", { name: "Deliberation" }));
 
   expect(
     await screen.findByText(
@@ -1735,7 +1735,7 @@ test("shows preserved decision artifacts after opening deliberation for an unsuc
   );
 
   await screen.findByRole("heading", { name: "Deliberation" });
-  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("link", { name: "Overview" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
   expect(screen.getByText(/Partial research is available/)).toBeVisible();
 });
@@ -1795,7 +1795,7 @@ test("localizes canonical report labels for zh-CN", async () => {
     ).toBeVisible();
   });
   const labels = ["基本面", "市场", "新闻", "舆情"].map((name) =>
-    screen.getByRole("tab", { name }),
+    screen.getByRole("link", { name }),
   );
   labels.slice(0, -1).forEach((label, index) => {
     expect(
@@ -1808,7 +1808,7 @@ test("localizes canonical report labels for zh-CN", async () => {
 test("returns from the evidence tab to the report the reader was viewing", async () => {
   render(<Router initialPath="/runs/run-1?view=reports&report=market"><RunDetail /><LocationProbe /></Router>);
   await screen.findByRole("heading", { name: "Market report" });
-  fireEvent.click(screen.getByRole("tab", { name: "Evidence" }));
+  fireEvent.click(screen.getByRole("link", { name: "Evidence" }));
   fireEvent.click(await screen.findByRole("button", { name: /Return to reports/ }));
   expect(screen.getByTestId("router-location")).toHaveTextContent("view=reports&report=market");
 });
