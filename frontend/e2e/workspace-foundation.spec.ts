@@ -30,15 +30,42 @@ test("keeps mobile controls sized, named and outside the closed navigation", asy
 
 test("preserves library position and keeps the selected history node within its rail", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/timelines?q=nvidia&offset=25&expanded=NVDA");
-  await expect(page.locator('.library-cycles .history-node').first()).toBeVisible();
-  await page.evaluate(() => scrollTo(0, 400));
-  await page.locator('.library-cycles .history-select').nth(12).click();
-  await expect(page.locator('.decision-hero,.markdown').first()).toBeVisible();
-  await page.locator('.research-header .back-link').click();
-  await expect(page).toHaveURL(/q=nvidia&offset=25&expanded=NVDA/);
-  await expect(page.locator('.library-cycles .history-node').first()).toBeAttached();
-  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(200);
+  const respond = workspaceFixture();
+  let historyUnavailable = false;
+  await page.route('**/api/v1/timelines/NVDA?*', async route => {
+    const shouldFail = historyUnavailable;
+    await new Promise(resolve => setTimeout(resolve, 400));
+    if (shouldFail) {
+      await route.fulfill({ status: 503, json: { detail: 'History temporarily unavailable' } });
+      return;
+    }
+    await route.fulfill({ json: respond(new URL(route.request().url()), route.request().method()) });
+  });
+  for (const returnVia of ['link', 'back', 'retry']) {
+    await page.goto("/timelines?q=nvidia&offset=25&expanded=NVDA");
+    await expect(page.locator('.library-cycles .history-node').first()).toBeVisible();
+    await page.evaluate(() => scrollTo(0, 400));
+    const target = page.locator('.library-cycles .history-select').nth(12);
+    await target.scrollIntoViewIfNeeded();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const departure = await page.evaluate(() => scrollY);
+    expect(departure).toBeGreaterThan(0);
+    await target.click();
+    await expect(page.locator('.decision-hero,.markdown').first()).toBeVisible();
+    historyUnavailable = returnVia === 'retry';
+    if (returnVia !== 'back') await page.locator('.research-header .back-link').click();
+    else await page.goBack();
+    await expect(page).toHaveURL(/q=nvidia&offset=25&expanded=NVDA/);
+    if (returnVia === 'retry') {
+      await expect(page.getByRole('alert')).toContainText('History temporarily unavailable');
+      historyUnavailable = false;
+      await page.getByRole('button', { name: 'Try again' }).click();
+    }
+    await expect(page.locator('.library-cycles .history-node').first()).toBeAttached();
+    await expect.poll(async () => Math.abs(await page.evaluate(() => scrollY) - departure), {
+      message: `Restore the departure position after delayed cycle loading via ${returnVia}`,
+    }).toBeLessThanOrEqual(2);
+  }
   await page.goto('/timelines/NVDA?node=increment');
   const selected = page.locator('.history-select[aria-current]');
   await expect(selected).toBeAttached();

@@ -8,6 +8,13 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("keeps reading and history reachable as the viewport changes", async ({ page }) => {
+  const respond = workspaceFixture();
+  await page.route('**/api/v1/runs/full', route => {
+    const detail = respond(new URL(route.request().url()), route.request().method()) as any;
+    // Exercise sticky navigation with enough report content even in tall viewports.
+    detail.result.reports.market.markdown += "\n\n" + Array(30).fill("Recorded research context remains available while navigating the long report.").join("\n\n");
+    return route.fulfill({ json: detail });
+  });
   for (const [width, height] of [[390,844], [768,1024], [1080,1920], [1440,1000], [1920,1080], [2560,1440]]) {
     await page.setViewportSize({ width, height });
     await page.goto('/timelines/NVDA?node=full');
@@ -21,9 +28,13 @@ test("keeps reading and history reachable as the viewport changes", async ({ pag
     await expect(workspace).toHaveClass(new RegExp(available >= 1100 ? 'wide' : 'compact'));
     await page.goto('/timelines/NVDA?node=full&view=reports&report=market');
     await expect(page.locator('#run-view-reports .markdown')).toBeVisible();
-    await page.evaluate(() => scrollTo(0, 550));
+    await page.evaluate(() => document.fonts.ready);
     const toolbar = page.locator('.reading-toolbar');
+    const stickyTarget = await toolbar.evaluate(element => element.getBoundingClientRect().top + scrollY + 100);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeGreaterThan(stickyTarget);
+    await page.evaluate(target => scrollTo(0, target), stickyTarget);
     await expect.poll(async () => (await toolbar.boundingBox())!.y).toBeLessThanOrEqual(56);
+    expect((await toolbar.boundingBox())!.y).toBeGreaterThanOrEqual(0);
     if (available < 1100) {
       const trigger = page.getByRole('button', { name: 'Research history', exact: true });
       const position = await page.evaluate(() => scrollY);
@@ -42,6 +53,32 @@ test("keeps reading and history reachable as the viewport changes", async ({ pag
   await page.evaluate(() => { document.documentElement.style.zoom = '1.25'; });
   await expect(page.locator('.research-workspace')).toHaveClass(/compact/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+});
+
+test("keeps navigation reachable when a short report cannot reach the sticky threshold", async ({ page }) => {
+  const respond = workspaceFixture();
+  await page.route('**/api/v1/runs/full', route => {
+    const detail = respond(new URL(route.request().url()), route.request().method()) as any;
+    detail.result.reports.market.markdown = "## Recorded context\n\nThis short report has no further sections.";
+    detail.result.reports.market.report_sections = [];
+    return route.fulfill({ json: detail });
+  });
+  await page.setViewportSize({ width: 1080, height: 1920 });
+  await page.goto('/timelines/NVDA?node=full&view=reports&report=market');
+  await expect(page.locator('#run-view-reports .markdown')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const toolbar = page.locator('.reading-toolbar');
+  const threshold = await toolbar.evaluate(element => element.getBoundingClientRect().top + scrollY);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThan(threshold);
+  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  await expect(toolbar).toBeInViewport({ ratio: 1 });
+  const trigger = page.getByRole('button', { name: 'Research history', exact: true });
+  await trigger.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  await page.getByRole('link', { name: 'Overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Executive summary', exact: true })).toBeVisible();
 });
 
 test("puts current tasks before expandable cycle history without dropping members", async ({ page }) => {
