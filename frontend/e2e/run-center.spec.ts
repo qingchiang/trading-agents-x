@@ -831,7 +831,9 @@ test("compares active and explicitly shown Trash nodes without creating research
   await expect(comparisonDialog.getByRole("link", { name: /Run & diagnostics|运行与诊断|実行と診断/ })).toHaveCount(2);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  // ResizeObserver and the shell transition settle after the viewport resize returns.
+  await expect(page.locator('.research-workspace')).toHaveClass(/compact/);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   const values = comparisonDialog.locator(".comparison-side-by-side").first().locator(":scope > div");
   const left = (await values.nth(0).boundingBox())!;
   const right = (await values.nth(1).boundingBox())!;
