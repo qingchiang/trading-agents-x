@@ -6,6 +6,7 @@ import { Router } from "./router";
 import "./styles.css";
 import "./research.css";
 import "./workspace.css";
+import "./diagnostics.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

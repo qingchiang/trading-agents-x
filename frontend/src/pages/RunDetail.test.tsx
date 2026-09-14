@@ -478,8 +478,8 @@ test("keeps research readable and exposes technical records only in diagnostics"
   fireEvent.click(screen.getByRole("button", { name: "Export" }));
   expect(screen.getByRole("link", { name: "Export research package" })).toHaveAttribute("href", "/api/v1/runs/run-1/export?format=package");
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  fireEvent.click(await screen.findByText("Structured recoveries"));
-  expect(screen.getByText(/debate.agenda.serialize/)).toBeVisible();
+  await screen.findByRole("heading", { name: "Recovery records" });
+  expect(screen.getByText("debate.agenda.serialize", { selector: "code" })).toBeVisible();
   expect(screen.getByText("Decision-critical calculation audit")).toBeVisible();
 });
 
@@ -542,12 +542,13 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   expect(screen.getByText("Optional numeric conclusions were omitted.")).toBeVisible();
   expect(screen.queryByText("Decision-critical calculation audit")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  fireEvent.click(await screen.findByText("Decision-critical calculation audit"));
-  expect(screen.getByText(/repair-value/)).not.toBeVisible();
-  fireEvent.click(screen.getByText("Raw candidate"));
-  expect(screen.getByText(/repair-value/)).toBeVisible();
+  await screen.findByRole("heading", { name: "Decision-critical calculation audit" });
+  expect(screen.queryByText(/repair-value/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Audit snapshots"));
+  fireEvent.click(screen.getByRole("button", { name: "Raw record: Raw candidate" }));
+  expect(await screen.findByText(/repair-value/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Initial candidate" }));
-  expect(screen.getByText(/initial-value/)).toBeVisible();
+  expect(await screen.findByText(/initial-value/)).toBeVisible();
 
 });
 
@@ -635,9 +636,7 @@ test("shows requirement comparisons separately from candidate drafts", async () 
   );
 
   const summary = await screen.findByText("Decision-critical calculation audit");
-  const appendix = summary.closest("details");
-  expect(appendix).not.toHaveAttribute("open");
-  fireEvent.click(summary);
+  expect(summary).toBeVisible();
   expect(screen.getAllByText("Calculation verified")[0]).toBeVisible();
   expect(screen.getByText("Display mismatched")).toBeVisible();
   expect(
@@ -658,7 +657,8 @@ test("formats verified calculations before exposing formula audit fields", async
     </Router>,
   );
 
-  fireEvent.click(await screen.findByText("Decision-critical calculation audit"));
+  await screen.findByRole("heading", { name: "Decision-critical calculation audit" });
+  fireEvent.click(screen.getByText(/Calculation records ·/));
   const calculation = screen.getAllByText("Observed market anchor")[0].closest("article");
   expect(calculation).not.toBeNull();
   expect(within(calculation!).getByText("Calculation verified")).toBeVisible();
@@ -864,11 +864,11 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   await screen.findByText("Decision-critical calculation audit");
-  fireEvent.click(screen.getByText("Decision-critical calculation audit"));
+  fireEvent.click(screen.getByText(/Calculation records ·/));
   expect(screen.getByText("Observed market anchor")).toBeVisible();
   expect(screen.getByText("calc_market_reference")).not.toBeVisible();
 
-  fireEvent.click(screen.getByRole("link", { name: "Read research" }));
+  fireEvent.click(screen.getAllByRole("link", { name: "Read research" })[0]);
   fireEvent.click(await screen.findByRole("link", { name: "Reassessment" }));
   expect(await screen.findByText("The new filing adds uncertainty.")).toBeVisible();
   expect(screen.getByText("1 changed · 1 total")).toBeVisible();
@@ -1310,8 +1310,8 @@ test("localizes Incremental activity and keeps one technical event log per attem
   expect(within(attempt!).queryByText("Audit details")).not.toBeInTheDocument();
   expect(within(attempt!).queryByText("Technical events (2)")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Diagnostics" }));
-  fireEvent.click(await screen.findByText("Live events"));
-  expect(screen.getByText(/incremental.collection_completed/)).toBeVisible();
+  await screen.findByRole("heading", { name: "Execution events" });
+  expect(screen.getByText("incremental.collection_completed", { selector: "strong" })).toBeVisible();
 
 });
 
@@ -1374,11 +1374,9 @@ test("shows run metrics only in the Diagnostics view", async () => {
   expect(screen.queryByText("Attempt metrics")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  const metricsSummary = await screen.findByText("Run metrics and diagnostics");
-  expect(screen.getByText("4 LLM calls · 1,200 input · 400 output · 12.4s")).toBeVisible();
-  expect(screen.getByText("Attempt metrics")).not.toBeVisible();
-  fireEvent.click(metricsSummary);
-  expect(await screen.findByText("Attempt metrics")).toBeVisible();
+  await screen.findByRole("heading", { name: "Run metrics and diagnostics" });
+  expect(screen.getByText("12.4s", { selector: ".metrics-strip strong" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Attempt metrics" })).toBeVisible();
 });
 
 test("shows trashed retention details and restores without deleting data", async () => {
@@ -1462,12 +1460,8 @@ test("groups metrics by role and expands phase observations", async () => {
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   fireEvent.click(await screen.findByText("Run metrics and diagnostics"));
   const roleMetricsTitle = screen.getByText("Metrics by role");
-  const roleMetrics = roleMetricsTitle.closest("details");
-  expect(roleMetrics).not.toHaveAttribute("open");
-
-  fireEvent.click(roleMetricsTitle);
-
-  expect(roleMetrics).toHaveAttribute("open");
+  const roleMetrics = roleMetricsTitle.closest("section");
+  expect(roleMetricsTitle).toBeVisible();
   const coverageMetric = screen.getByText("Token detail coverage", {
     selector: ".metrics-strip span",
   }).parentElement;
@@ -1524,7 +1518,7 @@ test("groups metrics by role and expands phase observations", async () => {
     .closest("tr");
   expect(committee).toHaveTextContent("13,003");
   expect(committee).toHaveTextContent("5,000");
-  expect(committee).toHaveTextContent("0/1");
+  expect(within(committee!).getAllByRole("cell")[13]).toHaveTextContent("Not recorded");
   expect(committee).toHaveTextContent("2.5s");
   expect(analyst).toHaveTextContent("300");
   expect(analyst).toHaveTextContent("100");
@@ -1579,16 +1573,9 @@ test("groups metrics by role and expands phase observations", async () => {
   expect(contextDetails).toHaveTextContent("12,345");
   expect(contextDetails).toHaveTextContent("43");
 
-  const attemptSummary = screen.getByText("Attempt metrics", { exact: false });
-  const attemptDetails = attemptSummary.closest("details");
-  expect(
-    attemptSummary
-      .closest("summary")!
-      .querySelector(".metric-disclosure-arrow"),
-  ).toHaveTextContent("›");
-  expect(attemptDetails).not.toHaveAttribute("open");
-  fireEvent.click(attemptSummary);
-  expect(attemptDetails).toHaveAttribute("open");
+  const attemptSummary = screen.getByRole("heading", { name: "Attempt metrics" });
+  const attemptDetails = attemptSummary.closest("section");
+  expect(attemptSummary).toBeVisible();
   const attemptRow = within(attemptDetails!).getByText(
     "Succeeded",
   ).closest("tr");

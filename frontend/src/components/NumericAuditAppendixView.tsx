@@ -11,6 +11,7 @@ import type {
 import type { EvidenceReferenceIndex } from "../evidence";
 import { formatDecisionNumber } from "../numericDisplay";
 import EvidenceLinks from "./EvidenceLinks";
+import JsonRecord from "./JsonRecord";
 
 export default function NumericAuditAppendixView({
   appendix,
@@ -49,18 +50,17 @@ export default function NumericAuditAppendixView({
   );
 
   return (
-    <details className="numeric-audit-appendix">
-      <summary>
-        <span>{t("decisionRequirementAudit")}</span>
+    <section className="diagnostic-block numeric-audit-appendix">
+      <header className="diagnostic-section-heading">
+        <h2>{t("decisionRequirementAudit")}</h2>
         <span className="details-summary-meta">
           <span
-            className={`numeric-audit-status status-${appendix?.status ?? "complete"}`}
+            className={`numeric-audit-status status-${appendix?.status ?? "unknown"}`}
           >
-            {t(`numericAppendixStatus.${appendix?.status ?? "complete"}`)}
+            {appendix?.status ? t(`numericAppendixStatus.${appendix.status}`) : t("auditNotRecorded")}
           </span>
-          <span className="details-chevron" aria-hidden="true" />
         </span>
-      </summary>
+      </header>
       <div className="numeric-audit-appendix-body">
         <p className="numeric-audit-boundary" role="note">
           {t(
@@ -82,7 +82,7 @@ export default function NumericAuditAppendixView({
           </p>
         )}
 
-        {otherCalculations.length > 0 && (
+        {otherCalculations.length > 0 && <details><summary>{t("auditCalculations")} · {otherCalculations.length}</summary>
           <OtherCalculations
             calculations={otherCalculations}
             calculationUses={calculationUses}
@@ -90,7 +90,7 @@ export default function NumericAuditAppendixView({
             onEvidence={onEvidence}
             language={i18n.language}
           />
-        )}
+        </details>}
 
         {omissions.length > 0 && (
           <section className="numeric-audit-omissions">
@@ -107,6 +107,7 @@ export default function NumericAuditAppendixView({
           </section>
         )}
 
+        {snapshot && <details><summary>{t("auditSnapshots")}</summary>
         {snapshots.length > 1 && (
           <div className="numeric-snapshot-tabs" role="group">
             {[...snapshots].reverse().map((item) => (
@@ -123,9 +124,11 @@ export default function NumericAuditAppendixView({
           </div>
         )}
 
-        {snapshot && <NumericSnapshotView snapshot={snapshot} />}
+        <NumericSnapshotView snapshot={snapshot} />
+        </details>}
+        <JsonRecord label={t("decisionRequirementAudit")} value={appendix} />
       </div>
-    </details>
+    </section>
   );
 }
 
@@ -304,7 +307,7 @@ function RequirementChecks({
                 <div><dt>{t("comparisonDifference")}</dt><dd><code>{check.comparison_difference ?? "—"}</code></dd></div>
                 <div><dt>{t("displayScale")}</dt><dd><code>{check.display_scale}</code></dd></div>
                 <div><dt>{t("formula")}</dt><dd><code>{check.formula}</code></dd></div>
-                <div><dt>{t("inputs")}</dt><dd><code>{JSON.stringify(check.inputs)}</code></dd></div>
+                <div><dt>{t("inputs")}</dt><dd><JsonRecord label={t("inputs")} value={check.inputs} /></dd></div>
                 <div><dt>{t("evidence")}</dt><dd><code>{check.input_evidence_refs.join(", ")}</code></dd></div>
               </dl>
               <IssueCodes issues={check.issue_codes ?? []} />
@@ -354,16 +357,7 @@ function NumericSnapshotView({ snapshot }: { snapshot: NumericAuditSnapshot }) {
       </div>
       <IssueCodes issues={snapshot.validation_issues ?? []} />
       {snapshot.candidate ? (
-        <details className="numeric-raw-candidate">
-          <summary>{t("rawNumericCandidate")}</summary>
-          {snapshot.schema_valid ? (
-            <StructuredCandidate candidate={snapshot.candidate} />
-          ) : (
-            <pre className="numeric-candidate-json">
-              {JSON.stringify(snapshot.candidate, null, 2)}
-            </pre>
-          )}
-        </details>
+        <JsonRecord label={t("rawNumericCandidate")} value={snapshot.candidate} />
       ) : (
         <p className="numeric-candidate-omitted">
           {snapshot.candidate_omitted === "oversize"
@@ -374,30 +368,6 @@ function NumericSnapshotView({ snapshot }: { snapshot: NumericAuditSnapshot }) {
         </p>
       )}
     </section>
-  );
-}
-
-function StructuredCandidate({ candidate }: { candidate: Record<string, unknown> }) {
-  const { t } = useTranslation();
-  const groups = [
-    ["valuation_assessment", "numericCandidateGroup.valuation"],
-    ["scenario_reference_ranges", "numericCandidateGroup.scenarios"],
-    ["market_reference_levels", "numericCandidateGroup.references"],
-    ["calculation_records", "numericCandidateGroup.calculations"],
-  ] as const;
-  const visible = groups.filter(([key]) => candidate[key] != null);
-  return (
-    <div className="numeric-candidate-groups">
-      {visible.map(([key, label]) => (
-        <section key={key}>
-          <h4>{t(label)}</h4>
-          <pre>{JSON.stringify(candidate[key], null, 2)}</pre>
-        </section>
-      ))}
-      {visible.length === 0 && (
-        <pre>{JSON.stringify(candidate, null, 2)}</pre>
-      )}
-    </div>
   );
 }
 

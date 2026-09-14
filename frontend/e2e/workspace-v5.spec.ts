@@ -57,3 +57,46 @@ test("exposes instrument links before hovering and aligns endpoint fields on sto
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   }
 });
+
+test("reads diagnostics directly and searches and downloads complete JSON beyond the rendered page", async ({ page }) => {
+  const respond = workspaceFixture();
+  const extra = Array.from({ length: 1800 }, (_, i) => i === 1799 ? '中文 <script>bad()</script> final-entry' : `entry-${i}`);
+  await page.addInitScript(() => localStorage.setItem('tradingagents-locale', 'en'));
+  await page.route('**/api/v1/**', route => {
+    const url = new URL(route.request().url());
+    const value = respond(url, route.request().method()) as Record<string, any>;
+    if (url.pathname === '/api/v1/runs/full') {
+      value.run.config_snapshot = { quick_model: 'quick-recorded', quick_reasoning_effort: 'medium', deep_model: 'deep-recorded', deep_reasoning_effort: 'high', temperature: 0, extra };
+      value.run.metrics = { llm_calls: 0, input_tokens: 1250 };
+      value.result.numeric_audit = null;
+    }
+    return route.fulfill({ json: value });
+  });
+  await page.goto('/runs/full?view=diagnostics');
+  await expect(page.getByRole('heading', { name: 'Run metrics and diagnostics' })).toBeVisible();
+  await expect(page.getByText('Audit not recorded')).toBeVisible();
+  await expect(page.getByText('quick-recorded', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Raw record: Configuration snapshot', exact: true }).click();
+  const viewer = page.getByRole('region', { name: 'Raw record: Configuration snapshot', exact: true });
+  await expect(viewer.locator('.json-line')).toHaveCount(500);
+  await viewer.getByRole('searchbox', { name: 'Search JSON' }).fill('中文');
+  await expect(viewer.locator('mark')).toHaveText('中文');
+  await expect(viewer.locator('.json-line-current')).toBeInViewport();
+  await expect(viewer.locator('script')).toHaveCount(0);
+  const downloadPromise = page.waitForEvent('download');
+  await viewer.getByRole('button', { name: 'Download JSON' }).click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  const data = JSON.parse(await new Promise<string>((resolve, reject) => {
+    let text = ""; const decoder = new TextDecoder();
+    stream.on('data', (chunk: Uint8Array) => { text += decoder.decode(chunk, { stream: true }); });
+    stream.on('end', () => resolve(text + decoder.decode())); stream.on('error', reject);
+  }));
+  expect(data.extra).toHaveLength(1800);
+  expect(data.extra[1799]).toBe('中文 <script>bad()</script> final-entry');
+  expect(data.temperature).toBe(0);
+  for (const width of [390, 768, 1080, 1440, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  }
+});
