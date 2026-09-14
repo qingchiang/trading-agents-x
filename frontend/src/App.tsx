@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Layout from "./components/Layout";
-import { usePathname } from "./router";
+import { Link, usePathname } from "./router";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const NewRun = lazy(() => import("./pages/NewRun"));
@@ -17,6 +17,7 @@ function LoadingFallback() {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [authRequired, setAuthRequired] = useState(false);
   const pathname = usePathname();
   useEffect(() => {
@@ -39,9 +40,9 @@ export default function App() {
       <RunDetail />
     ) : pathname === "/settings" ? (
       <Settings />
-    ) : (
+    ) : pathname === "/" ? (
       <Dashboard />
-    );
+    ) : <section><h1>{t("notFound")}</h1><Link to="/timelines">{t("backToResearch")}</Link></section>;
 
   return (
     <>

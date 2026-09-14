@@ -1,16 +1,14 @@
+import { useContext } from "react";
+import { NumericNoticeHandled } from "../researchWarnings";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
 
-import type {
-  DecisionNumericAuditAppendix,
-  ResearchDecision,
-} from "../api/client";
+import type { DecisionNumericAuditAppendix, ResearchDecision, } from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
 import { formatDecisionNumber } from "../numericDisplay";
-import EvidenceLinks from "./EvidenceLinks";
 import { MarkdownList } from "./AnalystReportView";
+import EvidenceLinks from "./EvidenceLinks";
 import Markdown from "./Markdown";
-import NumericAuditAppendixView from "./NumericAuditAppendixView";
 
 export default function ResearchDecisionView({
   decision,
@@ -30,8 +28,8 @@ export default function ResearchDecisionView({
     return (
       <article
         className="panel audit-panel"
-        id="run-view-decision"
-        role="tabpanel"
+        id="run-view-decision" aria-labelledby="run-tab-decision"
+        role="region"
       >
         <div className="empty-state">{t("noDecision")}</div>
       </article>
@@ -40,8 +38,8 @@ export default function ResearchDecisionView({
   return (
     <article
       className="panel audit-panel decision-panel-v2"
-      id="run-view-decision"
-      role="tabpanel"
+      id="run-view-decision" aria-labelledby="run-tab-decision"
+      role="region"
     >
       <ResearchDecisionContent
         decision={decision}
@@ -70,13 +68,13 @@ export function ResearchDecisionContent({
   embedded?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const noticeHandled = useContext(NumericNoticeHandled);
   const numberLanguage = i18n.resolvedLanguage ?? i18n.language;
   const visibleRefs = (refs: string[]) => (embedded ? [] : refs);
   const scenarios = [...decision.scenarios].sort(
     (left, right) =>
       scenarioOrder.indexOf(left.kind) - scenarioOrder.indexOf(right.kind),
   );
-  const calculationUses = buildCalculationUses(decision, t);
 
   return (
     <div className={embedded ? "decision-content embedded" : "decision-content"}>
@@ -87,17 +85,15 @@ export function ResearchDecisionContent({
           <small>{researchConfidenceLabel(t, decision.confidence)}</small>
         </div>
         <div className="decision-summary">
-          <span className="research-opinion-notice">
-            {t("nonPersonalizedResearchOpinion")}
-          </span>
-          <h2>{t("executiveSummary")}</h2>
+          <h2 id={embedded ? undefined : "assessment-summary"} data-outline={embedded ? undefined : t("executiveSummary")}>{t("executiveSummary")}</h2>
+          <p className="research-opinion-notice">{t("nonPersonalizedResearchOpinion")}</p>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
           >
             {decision.executive_summary}
           </Markdown>
-          <h3>{t("thesis")}</h3>
+          <h2 id={embedded ? undefined : "assessment-thesis"} data-outline={embedded ? undefined : t("thesis")}>{t("thesis")}</h2>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
@@ -105,7 +101,7 @@ export function ResearchDecisionContent({
             {decision.thesis}
           </Markdown>
           <div className="decision-horizon-summary">
-            <strong>{t("horizon")}</strong>
+            <span className="decision-horizon-label">{t("horizon")}</span>
             <Markdown
               evidenceAliases={evidenceIndex.aliases}
               onEvidence={onEvidence}
@@ -121,12 +117,12 @@ export function ResearchDecisionContent({
         </div>
       </header>
 
-      {(decision.numeric_audit_status === "partial" ||
+      {!noticeHandled && ((decision.numeric_audit_status === "partial" || numericAudit?.status === "partial") ||
         decision.numeric_audit_status === "incomplete") && (
         <div className="numeric-audit-notice" role="status">
           <span>
             {t(
-              decision.numeric_audit_status === "partial"
+              (decision.numeric_audit_status === "partial" || numericAudit?.status === "partial")
                 ? "numericAuditPartial"
                 : "numericAuditIncomplete",
             )}
@@ -139,11 +135,44 @@ export function ResearchDecisionContent({
         </div>
       )}
 
+      <section className="decision-section decision-lists-grid">
+        <MarkdownList
+          outlineId={embedded ? undefined : "assessment-catalysts"}
+          title={t("catalysts")}
+          items={decision.catalysts ?? []}
+          empty={t("noCatalystsIdentified")}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          outlineId={embedded ? undefined : "assessment-risks"}
+          title={t("risks")}
+          items={decision.risks}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          outlineId={embedded ? undefined : "assessment-invalidation"}
+          title={t("invalidation")}
+          items={decision.invalidation_conditions}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+        <MarkdownList
+          outlineId={embedded ? undefined : "assessment-unresolvedQuestions"}
+          title={t("unresolvedQuestions")}
+          items={decision.unresolved_questions ?? []}
+          empty={t("noneRecorded")}
+          evidenceIndex={evidenceIndex}
+          onEvidence={onEvidence}
+        />
+      </section>
+
       <section className="decision-section">
         <div className="decision-section-heading">
           <div>
             <p className="eyebrow">{t("conditionalAnalysis")}</p>
-            <h2>{t("scenarios")}</h2>
+            <h2 id={embedded ? undefined : "assessment-scenarios"} data-outline={embedded ? undefined : t("scenarios")}>{t("scenarios")}</h2>
           </div>
         </div>
         <div className="scenario-grid">
@@ -165,10 +194,10 @@ export function ResearchDecisionContent({
                         key={`${referenceRange.category}:${referenceRange.label}:${index}`}
                       >
                         <div className="scenario-reference-heading">
+                          <span className="scenario-range-name">{referenceRange.label}</span>
                           <span className="scenario-range-category">
                             {t(`scenarioRangeCategory.${referenceRange.category}`)}
                           </span>
-                          <span>{referenceRange.label}</span>
                           <strong
                             title={`${referenceRange.low.value}–${referenceRange.high.value}${referenceRange.unit ? ` ${referenceRange.unit}` : ""}`}
                           >
@@ -255,10 +284,8 @@ export function ResearchDecisionContent({
       {decision.valuation_assessment && (
         <section className="decision-section valuation-section">
           <article className="valuation-card">
-              <span className="decision-section-label">
-                {t("valuationAssessment")}
-              </span>
-              <h2
+              <h2 id={embedded ? undefined : "assessment-valuation"} data-outline={embedded ? undefined : t("valuationAssessment")}>{t("valuationAssessment")}</h2>
+              <p className="valuation-value"
                 title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.unit}`}
               >
                 {formatRange(
@@ -267,7 +294,7 @@ export function ResearchDecisionContent({
                   decision.valuation_assessment.unit,
                   numberLanguage,
                 )}
-              </h2>
+              </p>
               <dl>
                 <div>
                   <dt>{t("method")}</dt>
@@ -310,9 +337,7 @@ export function ResearchDecisionContent({
 
       {(decision.market_reference_levels ?? []).length > 0 && (
         <section className="decision-section market-reference-section">
-          <span className="decision-section-label">
-            {t("marketReferenceLevels")}
-          </span>
+          <h2 id={embedded ? undefined : "assessment-market"} data-outline={embedded ? undefined : t("marketReferenceLevels")}>{t("marketReferenceLevels")}</h2>
           <p className="reference-level-notice">
             {t("marketReferenceNotice")}
           </p>
@@ -385,38 +410,11 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      <section className="decision-section decision-lists-grid">
-        <MarkdownList
-          title={t("catalysts")}
-          items={decision.catalysts ?? []}
-          empty={t("noCatalystsIdentified")}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("risks")}
-          items={decision.risks}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("invalidation")}
-          items={decision.invalidation_conditions}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-        <MarkdownList
-          title={t("unresolvedQuestions")}
-          items={decision.unresolved_questions ?? []}
-          empty={t("noneRecorded")}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-        />
-      </section>
+
 
       {(decision.risk_review_adjustments ?? []).length > 0 && (
         <section className="decision-section">
-          <h2>{t("riskReviewAdjustments")}</h2>
+          <h2 id={embedded ? undefined : "assessment-riskReviewAdjustments"} data-outline={embedded ? undefined : t("riskReviewAdjustments")}>{t("riskReviewAdjustments")}</h2>
           <div className="adjustment-list">
             {(decision.risk_review_adjustments ?? []).map(
               (adjustment, index) => (
@@ -449,18 +447,7 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      {!embedded &&
-        (numericAudit || (decision.calculation_records ?? []).length > 0) && (
-        <section className="decision-section numeric-audit-section">
-          <NumericAuditAppendixView
-            appendix={numericAudit}
-            calculationRecords={decision.calculation_records ?? []}
-            calculationUses={calculationUses}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        </section>
-      )}
+
 
     </div>
   );
@@ -501,78 +488,6 @@ function formatRange(
   )}${
     currency ? ` ${currency}` : ""
   }`;
-}
-
-function buildCalculationUses(
-  decision: ResearchDecision,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): Map<string, string[]> {
-  const uses = new Map<string, string[]>();
-  const add = (ids: string[] | undefined, label: string) => {
-    (ids ?? []).forEach((id) => {
-      const labels = uses.get(id) ?? [];
-      if (!labels.includes(label)) labels.push(label);
-      uses.set(id, labels);
-    });
-  };
-  (decision.calculation_records ?? []).forEach((calculation) =>
-    (calculation.decision_uses ?? []).forEach((use) =>
-      add([calculation.id], decisionCalculationUseLocation(use.component_path, t)),
-    ),
-  );
-  decision.scenarios.forEach((scenario) =>
-    add(
-      (scenario.reference_ranges ?? []).flatMap((referenceRange) =>
-        [
-          referenceRange.low.calculation_id,
-          referenceRange.high.calculation_id,
-        ].filter((value): value is string => Boolean(value)),
-      ),
-      t("calculationUseScenario", { scenario: t(scenarioKey(scenario.kind)) }),
-    ),
-  );
-  if (decision.valuation_assessment) {
-    add(
-      [
-        decision.valuation_assessment.low.calculation_id,
-        decision.valuation_assessment.high.calculation_id,
-      ].filter((value): value is string => Boolean(value)),
-      t("valuationAssessment"),
-    );
-  }
-  (decision.market_reference_levels ?? []).forEach((level) =>
-    add(
-      level.calculation_ids,
-      t("calculationUseMarketReference", { label: level.label }),
-    ),
-  );
-  return uses;
-}
-
-function decisionCalculationUseLocation(
-  componentPath: string,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  let location = t("calculationUseDecisionClaim");
-  if (componentPath === "executive_summary") {
-    location = t("executiveSummary");
-  } else if (componentPath === "thesis") {
-    location = t("thesis");
-  } else if (componentPath.startsWith("risks.")) {
-    location = t("risks");
-  } else if (componentPath.startsWith("invalidation_conditions.")) {
-    location = t("invalidationConditions");
-  } else if (componentPath.startsWith("risk_review_adjustments.")) {
-    location = t("riskReviewAdjustments");
-  } else {
-    const match = /^scenarios\.(base|bull|bear)\./.exec(componentPath);
-    if (match) {
-      location = t("calculationUseScenario", {
-        scenario: t(scenarioKey(match[1] as "base" | "bull" | "bear")),
-      });
-    }
-  }
-  return location;
 }
 
 function latestEndpointDate(left: string, right: string): string {

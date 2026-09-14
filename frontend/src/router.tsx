@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from "react";
 
 type NavigateOptions = {
@@ -18,6 +19,10 @@ export type RouterLocation = {
   pathname: string;
   search: string;
   hash: string;
+  key: string;
+  sourceLibrary?: { url: string; key: string };
+  returnEvidence?: { url: string; key: string };
+  returnResearch?: { url: string; key: string };
 };
 
 type RouterValue = {
@@ -32,23 +37,60 @@ export function Router({
   initialPath,
 }: PropsWithChildren<{ initialPath?: string }>) {
   const browserBacked = initialPath === undefined;
-  const [location, setLocation] = useState<RouterLocation>(() =>
-    parseLocation(initialPath ?? browserLocation()),
-  );
+  const [location, setLocation] = useState<RouterLocation>(() => {
+    const next = parseLocation(initialPath ?? browserLocation());
+    return browserBacked ? { ...next, ...window.history.state?.researchNavigation, ...parseBrowserPath() } : next;
+  });
+  const locationRef = useRef(location);
+  locationRef.current = location;
 
   useEffect(() => {
     if (!browserBacked) return;
-    const syncLocation = () => setLocation(parseLocation(browserLocation()));
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    window.history.replaceState({ ...window.history.state, researchNavigation: locationRef.current }, "");
+    const syncLocation = () => setLocation({ ...parseLocation(browserLocation()), ...window.history.state?.researchNavigation, ...parseBrowserPath() });
     window.addEventListener("popstate", syncLocation);
-    return () => window.removeEventListener("popstate", syncLocation);
+    return () => { window.history.scrollRestoration = previousRestoration; window.removeEventListener("popstate", syncLocation); };
   }, [browserBacked]);
 
   const navigate = useCallback(
     (to: string, options?: NavigateOptions) => {
+      const current = locationRef.current;
       const next = parseLocation(to);
+      if (options?.replace) next.key = current.key;
+      if (next.pathname.startsWith("/timelines/") || next.pathname.startsWith("/runs/")) {
+        next.sourceLibrary = current.pathname === "/timelines"
+          ? { url: locationPath(current), key: current.key }
+          : current.sourceLibrary;
+      }
+      if (next.pathname === "/timelines" && locationPath(next) === current.sourceLibrary?.url) {
+        const saved = sessionStorage.getItem(`tradingagents-position:${current.sourceLibrary.key}`);
+        if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
+      }
+      if (options?.replace) { next.returnEvidence = current.returnEvidence; next.returnResearch = current.returnResearch; }
+      const currentParams = new URLSearchParams(current.search);
+      const nextParams = new URLSearchParams(next.search);
+      if (next.pathname === current.pathname && currentParams.get("view") === "evidence" && nextParams.get("view") === "evidence" && nextParams.get("node") !== currentParams.get("node") && current.returnEvidence?.url !== locationPath(next)) {
+        next.returnEvidence = { url: browserBacked ? browserLocation() : locationPath(current), key: current.key };
+      }
+      if (current.returnEvidence?.url === locationPath(next)) {
+        const saved = sessionStorage.getItem(`tradingagents-position:${current.returnEvidence.key}`);
+        if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
+      }
+      const comparing = (value: RouterLocation) => new URLSearchParams(value.search).get("view") === "compare";
+      if (comparing(next) && next.pathname === current.pathname) {
+        next.returnResearch = comparing(current) ? current.returnResearch : {
+          url: browserBacked ? browserLocation() : locationPath(current), key: current.key,
+        };
+      }
+      if (next.pathname === current.pathname && locationPath(next) === current.returnResearch?.url) {
+        const saved = sessionStorage.getItem(`tradingagents-position:${current.returnResearch.key}`);
+        if (saved !== null) sessionStorage.setItem(`tradingagents-position:${next.key}`, saved);
+      }
       if (browserBacked) {
         const method = options?.replace ? "replaceState" : "pushState";
-        window.history[method](null, "", locationPath(next));
+        window.history[method]({ researchNavigation: next }, "", locationPath(next));
       }
       setLocation(next);
     },
@@ -59,6 +101,10 @@ export function Router({
   return (
     <RouterContext.Provider value={value}>{children}</RouterContext.Provider>
   );
+}
+
+export function useHistoryEntryKey() {
+  return useContext(RouterContext)?.location.key;
 }
 
 export function useNavigate() {
@@ -147,6 +193,7 @@ function parseLocation(path: string): RouterLocation {
     pathname: normalizePathname(url.pathname),
     search: url.search,
     hash: url.hash,
+    key: crypto.randomUUID(),
   };
 }
 
@@ -156,4 +203,9 @@ function locationPath(location: RouterLocation) {
 
 function browserLocation() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function parseBrowserPath() {
+  const { pathname, search, hash } = parseLocation(browserLocation());
+  return { pathname, search, hash };
 }

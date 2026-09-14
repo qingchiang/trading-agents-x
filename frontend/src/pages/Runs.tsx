@@ -1,534 +1,132 @@
-import {
-  FormEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import type { TFunction } from "i18next";
+import { researchLocation } from "../researchLinks";
+import TaskGroupMembers from "../components/TaskGroupMembers";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-
-import {
-  api,
-  type Capabilities,
-  type RunPage,
-} from "../api/client";
-import ConfirmDialog from "../components/ConfirmDialog";
+import { api, type RunGroupPage, type RunSummaryView } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
-import ResearchRatingBadge from "../components/ResearchRatingBadge";
+import { ActionMenu } from "../components/Interaction";
+import RunLifecycleDialog, { type LifecycleAction } from "../components/RunLifecycleDialog";
 import ResearchKindBadge from "../components/ResearchKindBadge";
 import StatusBadge from "../components/StatusBadge";
-import { researchConfidenceLabel } from "../i18n";
 import { Link, useLocation, useNavigate } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
-
-const pageSize = 20;
-const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
-const runStatuses = [
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-] as const;
-
-type TrashState = "active" | "trashed";
 
 export default function Runs() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const params = useMemo(
-    () => new URLSearchParams(location.search),
-    [location.search],
-  );
-  const trashState: TrashState =
-    params.get("trash_state") === "trashed" ? "trashed" : "active";
-  const requestedStatus = params.get("status") ?? "";
-  const status = runStatuses.includes(
-    requestedStatus as (typeof runStatuses)[number],
-  )
-    ? requestedStatus
-    : "";
-  const query = params.get("q") ?? "";
-  const requestedKind = params.get("research_kind") ?? "";
-  const researchKind = requestedKind === "full" || requestedKind === "incremental"
-    ? requestedKind
-    : "";
-  const offset = parseOffset(params.get("offset"));
-  const [page, setPage] = useState<RunPage | null>(null);
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [qInput, setQInput] = useState(query);
-  const [statusInput, setStatusInput] = useState(status);
-  const [kindInput, setKindInput] = useState(researchKind);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [confirmTrash, setConfirmTrash] = useState(false);
+  const params = new URLSearchParams(location.search);
+  const queryParams = new URLSearchParams(location.search);
+  queryParams.delete("expanded_group");
+  const queryKey = queryParams.toString();
+  const filtered = Boolean(params.get("q") || params.get("status") || params.get("research_kind"));
+  const toggleHistory = (id: string, expanded: boolean) => {
+    const next = new URLSearchParams(location.search);
+    const values = next.getAll("expanded_group").filter(value => value !== id);
+    if (expanded) values.push(id);
+    next.delete("expanded_group");
+    values.forEach(value => next.append("expanded_group", value));
+    navigate(`/runs${next.size ? `?${next}` : ""}`);
+  };
+  const trash = params.get("trash_state") === "trashed";
+  const offset = Math.max(0, Number(params.get("offset")) || 0);
+  const [page, setPage] = useState<RunGroupPage | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    setQInput(query);
-    setStatusInput(status);
-    setKindInput(researchKind);
-  }, [query, status, researchKind]);
-
-  const load = useCallback(async () => {
-    const requestParams = new URLSearchParams({
-      trash_state: trashState,
-      limit: String(pageSize),
-      offset: String(offset),
-    });
-    if (query) requestParams.set("q", query);
-    if (status) requestParams.set("status", status);
-    if (researchKind) requestParams.set("research_kind", researchKind);
-    try {
-      const next = await api.runs(`?${requestParams}`);
-      setPage(next);
-      setSelected(new Set());
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
-    }
-  }, [trashState, offset, query, status, researchKind, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+  const [revision, setRevision] = useState(0);
+  const [retention, setRetention] = useState(30);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [operation, setOperation] = useState<{ ids: string[]; action: LifecycleAction } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const [query, setQuery] = useState(params.get("q") ?? "");
+  const [status, setStatus] = useState(params.get("status") ?? "");
+  const [kind, setKind] = useState(params.get("research_kind") ?? "");
+  useEffect(() => { let active = true; api.capabilities().then(value => { if (active) setRetention(value.defaults.trash_retention_days); }).catch(() => {}); return () => { active = false; }; }, []);
   useEffect(() => {
     let active = true;
-    void api
-      .capabilities()
-      .then((value) => {
-        if (active) setCapabilities(value);
-      })
-      .catch(() => {
-        if (active) setCapabilities(null);
-      });
-    return () => {
-      active = false;
+    const search = new URLSearchParams(queryKey);
+    setQuery(search.get("q") ?? ""); setStatus(search.get("status") ?? ""); setKind(search.get("research_kind") ?? "");
+    setPage(null); setSelected([]); setError("");
+    search.set("limit", "12"); search.set("offset", String(offset)); search.set("trash_state", trash ? "trashed" : "active");
+    let pending = false;
+    const refresh = async () => {
+      if (pending) return;
+      pending = true;
+      try { const value = await api.runGroups(`?${search}`); if (active) { setPage(value); setError(""); } }
+      catch (cause) { if (active) setError(String(cause)); }
+      finally { pending = false; }
     };
-  }, []);
-
-  const updateSearch = (updates: Record<string, string | null>) => {
-    const next = new URLSearchParams(params);
-    for (const [key, value] of Object.entries(updates)) {
-      if (value) next.set(key, value);
-      else next.delete(key);
-    }
-    const search = next.size ? `?${next}` : "";
-    navigate(`/runs${search}`, { replace: true });
+    void refresh();
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [queryKey, revision]);
+  const update = (values: Record<string, string | null>) => {
+    const next = new URLSearchParams(location.search);
+    for (const [key, value] of Object.entries(values)) value === null || value === "" ? next.delete(key) : next.set(key, value);
+    navigate(`/runs${next.size ? `?${next}` : ""}`);
   };
-
-  const applyFilters = (event: FormEvent) => {
-    event.preventDefault();
-    updateSearch({
-      q: qInput.trim() || null,
-      status: statusInput || null,
-      research_kind: kindInput || null,
-      offset: null,
-    });
+  const filter = (event: FormEvent) => { event.preventDefault(); update({ q: query.trim(), status, research_kind: kind, offset: null }); };
+  const act = async (run: RunSummaryView, action: "cancel" | "retry") => {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setError("");
+    try { await api.action(run.id, action); setNotice(t(action === "cancel" ? "taskCancelSent" : "taskRetrySent")); setRevision(value => value + 1); }
+    catch (cause) { setError(String(cause)); }
+    finally { lock.current = false; setBusy(false); }
   };
-
-  const eligibleRuns = (page?.items ?? []).filter((run) =>
-    !run.is_research_node &&
-    (trashState === "trashed" ? true : terminalStatuses.has(run.status)),
-  );
-  const allEligibleSelected =
-    eligibleRuns.length > 0 &&
-    eligibleRuns.every((run) => selected.has(run.id));
-
-  const toggleRun = (runId: string) => {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(runId)) next.delete(runId);
-      else next.add(runId);
-      return next;
-    });
-  };
-
-  const togglePage = () => {
-    setSelected(
-      allEligibleSelected
-        ? new Set()
-        : new Set(eligibleRuns.map((run) => run.id)),
-    );
-  };
-
-  const applyLifecycle = async () => {
-    const runIds = [...selected];
-    if (!runIds.length) return;
-    setConfirmTrash(false);
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result =
-        trashState === "active"
-          ? await api.trashRuns(runIds)
-          : await api.restoreRuns(runIds);
-      setNotice(
-        t(
-          trashState === "active" ? "runsTrashed" : "runsRestored",
-          { count: result.changed },
-        ),
-      );
-      if (offset > 0 && runIds.length >= (page?.items.length ?? 0)) {
-        updateSearch({ offset: String(Math.max(0, offset - pageSize)) });
-      } else {
-        await load();
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const start = page?.total ? offset + 1 : 0;
-  const end = page ? Math.min(offset + page.items.length, page.total) : 0;
-
-  return (
-    <section>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">{t("runHistory")}</p>
-          <h1>{t("runManagement")}</h1>
-          <p className="subtitle">{t("runManagementHint")}</p>
-        </div>
-        <Link className="button primary" to="/runs/new">
-          + {t("newRun")}
-        </Link>
+  const row = (run: RunSummaryView, matched: boolean, baseline = false) => <div className={`task-row ${baseline ? "baseline" : ""} ${matched ? "matched" : "context"}`} key={run.id}>
+    {!run.is_research_node && <input type="checkbox" aria-label={t("selectRun", { ticker: run.request.ticker })} disabled={!trash && ["queued", "running"].includes(run.status)} checked={selected.includes(run.id)} onChange={() => setSelected(value => value.includes(run.id) ? value.filter(id => id !== run.id) : [...value, run.id])} />}
+    <div><time>{run.request.analysis_date}</time><ResearchKindBadge kind={run.research_kind} /></div>
+    <StatusBadge status={run.status} />
+    {run.trashed_at && <small>{retention ? formatUtcDate(trashDeadline(run.trashed_at, retention)!.deletionAt) : t("trashRetentionDisabled")}</small>}
+    <div className="task-actions">
+      <Link className="text-link" to={`/runs/${run.id}?view=timeline`}>{t("executionDetails")}</Link>
+      {run.status === "succeeded" && <Link className="text-link" to={researchLocation(run)}>{t("openResearch")}</Link>}
+      {!run.trashed_at && ["queued", "running"].includes(run.status) && <button className="button" disabled={busy || run.cancel_requested} onClick={() => void act(run, "cancel")}>{t(run.cancel_requested ? "taskCancelSent" : "cancel")}</button>}
+      {!run.trashed_at && run.status === "failed" && <button className="button" disabled={busy} onClick={() => void act(run, "retry")}>{t("retry")}</button>}
+      {!baseline && !["queued", "running"].includes(run.status) && <ActionMenu label={t("manageTask")}>
+        {!run.trashed_at && <button className="button danger" onClick={() => setOperation({ ids: [run.id], action: "trash" })}>{t("moveNodeToTrash")}</button>}
+        {run.trashed_at && <><button className="button" onClick={() => setOperation({ ids: [run.id], action: "restore" })}>{t("restore")}</button><button className="button danger" onClick={() => setOperation({ ids: [run.id], action: "purge" })}>{t("confirmPurge")}</button></>}
+      </ActionMenu>}
+    </div>
+  </div>;
+  return <section>
+    <header className="page-header"><div><h1>{t("runManagement")}</h1><p className="subtitle">{t("cycleTasksHint")}</p></div></header>
+    <nav className="view-tabs" aria-label={t("runManagement")}>{[false, true].map(value => {
+      const next = new URLSearchParams(location.search); next.delete("offset");
+      if (value) next.set("trash_state", "trashed"); else next.delete("trash_state");
+      return <Link to={`/runs?${next}`} id={value ? "trash-tab" : "active-tab"} aria-current={trash === value ? "page" : undefined} key={String(value)}>{t(value ? "trashedRuns" : "activeRuns")}</Link>;
+    })}</nav>
+    {trash && <p className="research-limitations"><strong>{t("trashRetentionTitle")}</strong> · {t(retention ? "trashRetentionPolicy" : "trashRetentionDisabled", { count: retention })}</p>}
+    <form className="task-filter-bar" onSubmit={filter}>
+      <label>{t("runSearch")}<input id="runs-search" type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
+      <label>{t("status")}<select value={status} onChange={event => setStatus(event.target.value)}><option value="">{t("all")}</option>{["queued", "running", "succeeded", "failed", "cancelled"].map(value => <option key={value} value={value}>{t(`status${value[0].toUpperCase()}${value.slice(1)}`)}</option>)}</select></label>
+      <label>{t("researchKind")}<select id="runs-kind" value={kind} onChange={event => setKind(event.target.value)}><option value="">{t("all")}</option><option value="full">{t("fullResearch")}</option><option value="incremental">{t("incrementalResearch")}</option></select></label>
+      <button className="button" type="submit">{t("apply")}</button>
+    </form>
+    {selected.length > 0 && <button className="button" onClick={() => setOperation({ ids: selected, action: trash ? "restore" : "trash" })}>{t(trash ? "restoreSelected" : "trashSelected", { count: selected.length })}</button>}
+    <div id="task-results" role="region" aria-labelledby={trash ? "trash-tab" : "active-tab"}>
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {error && <p className="alert" role="alert">{error}<button className="button" onClick={() => setRevision(value => value + 1)}>{t("retryLoad")}</button></p>}
+    {!page && !error && <p role="status">{t("loading")}</p>}
+    {page && !page.items.length && <p className="empty-state">{t(params.get("q") || params.get("status") || params.get("research_kind") ? "searchEmpty" : trash ? "noTrashedRuns" : "noActiveRuns")}</p>}
+    {page?.items.map(group => <article className="task-group" key={group.id}>
+      <header className="task-group-heading"><InstrumentIdentity ticker={group.instrument} instrumentName={group.baseline?.instrument_name ?? (group.related_tasks ?? [])[0]?.instrument_name} instrumentLocalName={group.baseline?.instrument_local_name ?? (group.related_tasks ?? [])[0]?.instrument_local_name} />
+        <div>{group.baseline ? <span>{t("baselineDate")}: {group.baseline.request.analysis_date}</span> : <span>{t("standaloneTask")}</span>}{group.is_primary && <strong className="cycle-primary">{t("primaryCycle")}</strong>}{filtered && <small>{t("matchingTasks", { count: (group.matched_run_ids ?? []).length })}</small>}</div>
+        {group.baseline && <ActionMenu label={t("manageCycle")}>
+          <Link className="button" to={researchLocation(group.baseline)}>{t("researchTimeline")}</Link>
+          {!group.baseline.trashed_at ? <button className="button danger" onClick={() => setOperation({ ids: [group.baseline!.id], action: "trash" })}>{t("moveCycleToTrash")}</button> : <>
+            <button className="button" onClick={() => setOperation({ ids: [group.baseline!.id], action: "restore" })}>{t("restore")}</button>
+            <button className="button danger" onClick={() => setOperation({ ids: [group.baseline!.id], action: "purge" })}>{t("confirmPurge")}</button>
+          </>}
+        </ActionMenu>}
       </header>
-
-      <div className="panel trash-state-tabs" role="tablist">
-        {(["active", "trashed"] as const).map((state) => (
-          <button
-            key={state}
-            type="button"
-            role="tab"
-            aria-selected={trashState === state}
-            className={trashState === state ? "active" : ""}
-            onClick={() =>
-              updateSearch({
-                trash_state: state === "active" ? null : state,
-                offset: null,
-              })
-            }
-          >
-            {t(state === "active" ? "activeRuns" : "trashedRuns")}
-          </button>
-        ))}
-      </div>
-
-      {trashState === "trashed" && (
-        <div className="trash-notice trash-retention-notice" role="note">
-          <strong>{t("trashRetentionTitle")}</strong>
-          <span>
-            {retentionPolicyLabel(
-              capabilities?.defaults.trash_retention_days ?? 30,
-              t,
-            )}
-          </span>
-        </div>
-      )}
-
-      <form className="panel filter-bar run-filter-bar" onSubmit={applyFilters}>
-        <label htmlFor="runs-search">
-          {t("runSearch")}
-          <input
-            id="runs-search"
-            name="q"
-            autoComplete="on"
-            value={qInput}
-            onChange={(event) => setQInput(event.target.value)}
-            placeholder={t("runSearchPlaceholder")}
-          />
-        </label>
-        <label htmlFor="runs-status">
-          {t("status")}
-          <select
-            id="runs-status"
-            name="status"
-            value={statusInput}
-            onChange={(event) => setStatusInput(event.target.value)}
-          >
-            <option value="">{t("all")}</option>
-            {runStatuses.map((value) => (
-              <option key={value} value={value}>
-                {t(statusLabel(value))}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label htmlFor="runs-kind">
-          {t("researchKind")}
-          <select
-            id="runs-kind"
-            name="research_kind"
-            value={kindInput}
-            onChange={(event) => setKindInput(event.target.value)}
-          >
-            <option value="">{t("all")}</option>
-            <option value="full">{t("fullResearch")}</option>
-            <option value="incremental">{t("incrementalResearch")}</option>
-          </select>
-        </label>
-        <button className="button primary">{t("apply")}</button>
-      </form>
-
-      {error && <div className="alert">{error}</div>}
-      {notice && <div className="notice">{notice}</div>}
-
-      <article className="panel run-management-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">
-              {t(trashState === "active" ? "activeRuns" : "trashedRuns")}
-            </p>
-            <h2>
-              {t("runRange", {
-                start,
-                end,
-                total: page?.total ?? 0,
-              })}
-            </h2>
-          </div>
-          <button
-            type="button"
-            className={`button ${
-              trashState === "active" ? "danger" : "primary"
-            }`}
-            disabled={busy || selected.size === 0}
-            onClick={() => {
-              if (trashState === "active") setConfirmTrash(true);
-              else void applyLifecycle();
-            }}
-          >
-            {trashState === "active"
-              ? t("trashSelected", { count: selected.size })
-              : t("restoreSelected", { count: selected.size })}
-          </button>
-        </div>
-
-        {!page ? (
-          <div className="loading">{t("loading")}</div>
-        ) : page.items.length === 0 ? (
-          <div className="empty-state">
-            {t(trashState === "active" ? "noActiveRuns" : "noTrashedRuns")}
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="runs-table">
-              <thead>
-                <tr>
-                  <th className="selection-cell">
-                    <input
-                      type="checkbox"
-                      aria-label={t("selectCurrentPage")}
-                      checked={allEligibleSelected}
-                      onChange={togglePage}
-                    />
-                  </th>
-                  <th>{t("ticker")}</th>
-                  <th>{t("researchRating")}</th>
-                  <th>{t("researchKind")}</th>
-                  <th>{t("analysisDate")}</th>
-                  <th>{t("status")}</th>
-                  <th>
-                    {t(
-                      trashState === "active"
-                        ? "updated"
-                        : "permanentDeletion",
-                    )}
-                  </th>
-                  <th>{t("actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.items.map((run) => {
-                  const eligible =
-                    !run.is_research_node &&
-                    (trashState === "trashed" ||
-                      terminalStatuses.has(run.status));
-                  return (
-                    <tr key={run.id}>
-                      <td className="selection-cell">
-                        <input
-                          type="checkbox"
-                          aria-label={t("selectRun", {
-                            ticker: run.request.ticker,
-                          })}
-                          disabled={!eligible}
-                          checked={selected.has(run.id)}
-                          onChange={() => toggleRun(run.id)}
-                        />
-                      </td>
-                      <td>
-                        <InstrumentIdentity
-                          ticker={run.request.ticker}
-                          instrumentName={run.instrument_name}
-                          instrumentLocalName={run.instrument_local_name}
-                        />
-                      </td>
-                      <td>
-                        <div className="decision-cell">
-                          <ResearchRatingBadge rating={run.research_rating} />
-                          {run.research_confidence != null && (
-                            <small>{researchConfidenceLabel(t, run.research_confidence)}</small>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="run-kind-cell">
-                          <ResearchKindBadge
-                            kind={run.research_kind}
-                            request={run.request}
-                            methodSnapshot={run.method_snapshot}
-                          />
-                        </div>
-                      </td>
-                      <td>{run.request.analysis_date}</td>
-                      <td>
-                        <StatusBadge status={run.status} />
-                      </td>
-                      <td>
-                        {trashState === "trashed" && run.trashed_at ? (
-                          <TrashDeadlineLabel
-                            trashedAt={run.trashed_at}
-                            retentionDays={
-                              capabilities?.defaults.trash_retention_days ?? 30
-                            }
-                            t={t}
-                          />
-                        ) : (
-                          formatDate(run.updated_at)
-                        )}
-                      </td>
-                      <td className="run-actions-cell">
-                        <Link
-                          className="button compact-button"
-                          to={`/runs/${run.id}`}
-                        >
-                          {t("open")}
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="pagination">
-          <button
-            type="button"
-            className="button"
-            disabled={offset === 0}
-            onClick={() =>
-              updateSearch({
-                offset: String(Math.max(0, offset - pageSize)),
-              })
-            }
-          >
-            ← {t("previous")}
-          </button>
-          <span>{t("runRange", { start, end, total: page?.total ?? 0 })}</span>
-          <button
-            type="button"
-            className="button"
-            disabled={!page || offset + page.items.length >= page.total}
-            onClick={() =>
-              updateSearch({ offset: String(offset + pageSize) })
-            }
-          >
-            {t("next")} →
-          </button>
-        </div>
-      </article>
-      {confirmTrash && (
-        <ConfirmDialog
-          title={t("trashDialogTitle", { count: selected.size })}
-          confirmLabel={t("confirmTrash")}
-          cancelLabel={t("keepRuns")}
-          busy={busy}
-          onCancel={() => setConfirmTrash(false)}
-          onConfirm={() => void applyLifecycle()}
-        >
-          <p>{t("trashDialogImpact")}</p>
-          <p>
-            {trashDialogRetention(
-              capabilities?.defaults.trash_retention_days ?? 30,
-              t,
-            )}
-          </p>
-        </ConfirmDialog>
-      )}
-    </section>
-  );
-}
-
-function parseOffset(value: string | null) {
-  const parsed = Number.parseInt(value ?? "0", 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function statusLabel(status: (typeof runStatuses)[number]) {
-  return `status${status[0].toUpperCase()}${status.slice(1)}`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function retentionPolicyLabel(retentionDays: number, t: TFunction) {
-  if (retentionDays === 0) return t("trashRetentionDisabled");
-  return t("trashRetentionPolicy", { count: retentionDays });
-}
-
-function trashDialogRetention(retentionDays: number, t: TFunction) {
-  const deadline = trashDeadline(new Date(), retentionDays);
-  if (!deadline) return t("trashRetentionDisabled");
-  return t("trashDialogDeletion", {
-    date: formatUtcDate(deadline.deletionAt),
-    count: retentionDays,
-  });
-}
-
-function TrashDeadlineLabel({
-  trashedAt,
-  retentionDays,
-  t,
-}: {
-  trashedAt: string;
-  retentionDays: number;
-  t: TFunction;
-}) {
-  const deadline = trashDeadline(trashedAt, retentionDays);
-  if (!deadline) {
-    return (
-      <span className="trash-deadline">
-        <strong>{t("permanentCleanupDisabled")}</strong>
-        <small>{t("movedToTrashAt", { date: formatDate(trashedAt) })}</small>
-      </span>
-    );
-  }
-  return (
-    <span className="trash-deadline">
-      <strong>{formatUtcDate(deadline.deletionAt)}</strong>
-      <small>
-        {deadline.due
-          ? t("trashCleanupDue")
-          : t("trashDaysRemaining", { count: deadline.remainingDays })}
-      </small>
-    </span>
-  );
+      <div className="task-group-counts">{Object.entries(group.status_counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => <span key={state}>{t(`status${state[0].toUpperCase()}${state.slice(1)}`)} {count}</span>)}{group.cycle_warning && <span className="warning-copy">{t("fullResearchRecommended")}</span>}</div>
+      <TaskGroupMembers group={group} filtered={filtered} expanded={params.getAll("expanded_group").includes(group.id)} onExpanded={value => toggleHistory(group.id, value)} renderRow={row} />
+    </article>)}
+    {page && (page.total > page.limit || offset > 0) && <div className="pagination"><button className="button" disabled={!offset} onClick={() => update({ offset: String(Math.max(0, offset - page.limit)) })}>{t("previous")}</button><span>{t("groupRange", { start: page.total ? offset + 1 : 0, end: Math.min(offset + page.items.length, page.total), total: page.total })}</span><button className="button" disabled={offset + page.limit >= page.total} onClick={() => update({ offset: String(offset + page.limit) })}>{t("next")}</button></div>}
+    </div>
+    {operation && <RunLifecycleDialog runIds={operation.ids} action={operation.action} onClose={() => setOperation(null)} onDone={changed => { setNotice(t(operation.action === "trash" ? "runsTrashed" : operation.action === "restore" ? "runsRestored" : "researchRemoved", { count: changed })); setOperation(null); setSelected([]); if (offset) update({ offset: "0" }); else setRevision(value => value + 1); }} />}
+  </section>;
 }

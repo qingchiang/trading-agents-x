@@ -1,7 +1,8 @@
+import { useReadingPosition } from "../useReadingPosition";
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
+  useLayoutEffect,
   useState,
   type ReactNode,
   type RefObject,
@@ -38,7 +39,6 @@ export default function AnalystReportView({
       />
     );
   }
-  const claims = report.key_claims ?? [];
   const sections = report.report_sections ?? [];
 
   return (
@@ -51,16 +51,6 @@ export default function AnalystReportView({
       onEvidence={onEvidence}
       before={
         <>
-          <div className="report-audit-summary">
-            {report.confidence !== null && report.confidence !== undefined && (
-              <span>
-                {t("confidence")} {Math.round(report.confidence * 100)}%
-              </span>
-            )}
-            <span>
-              {t("keyClaimsCount", { count: claims.length })}
-            </span>
-          </div>
           {report.audit_status === "incomplete" && (
             <div className="audit-incomplete-notice" role="status">
               {t("auditIncomplete")}
@@ -68,21 +58,7 @@ export default function AnalystReportView({
           )}
         </>
       }
-      after={
-        claims.length > 0 ? (
-          <details className="claim-audit-details">
-            <summary>{t("keyClaimsAudit")}</summary>
-            <ol>
-              {claims.map((claim) => (
-                <li key={claim.id}>
-                  <strong>{claim.statement}</strong>
-                  {claim.implication && <p>{claim.implication}</p>}
-                </li>
-              ))}
-            </ol>
-          </details>
-        ) : null
-      }
+
     />
   );
 }
@@ -96,6 +72,7 @@ export function ResearchMarkdownReader({
   onEvidence,
   before,
   after,
+  extraSections = [],
 }: {
   markdown: string;
   sections: AnalystReport["report_sections"];
@@ -105,30 +82,32 @@ export function ResearchMarkdownReader({
   onEvidence: (ref: string) => void;
   before?: ReactNode;
   after?: ReactNode;
+  extraSections?: AnalystReport["report_sections"];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
+  const [fallback, setFallback] = useState<AnalystReport["report_sections"]>([]);
   useLayoutEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
-    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
-    };
-  }, [scrollStorageKey]);
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      sessionStorage.setItem(
-        scrollStorageKey,
-        String(scrollRef.current.scrollTop),
-      );
-    }
-  };
+    if (sections.length) { setFallback([]); return; }
+    const headings = [...(scrollRef.current?.querySelectorAll<HTMLElement>(".markdown:first-of-type :is(h1,h2,h3)") ?? [])];
+    const occurrences = new Map<string, number>();
+    setFallback(headings.map(heading => {
+      const title = heading.textContent ?? "";
+      let hash = 2166136261;
+      for (const char of `${reportKey}:${title}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+      const identity = `legacy-${(hash >>> 0).toString(36)}`;
+      const count = occurrences.get(identity) ?? 0; occurrences.set(identity, count + 1);
+      const anchor = `${identity}${count ? `-${count}` : ""}`;
+      heading.id = `user-content-${anchor}`;
+      return { id: anchor, anchor, title, source_refs: [] };
+    }));
+  }, [markdown, reportKey, sections.length]);
+  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
+  useReadingPosition(scrollStorageKey, scrollRef);
+
   return (
-    <div className="report-reading-layout">
-      <ReportSectionNavigation sections={sections} containerRef={scrollRef} />
-      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+    <div className="report-reading-layout" data-report-outline data-historical-outline={!sections.length || undefined}>
+      <ReportSectionNavigation sections={[...(sections.length ? sections : fallback), ...extraSections]} containerRef={scrollRef} />
+      <div className="analyst-report" ref={scrollRef}>
         {before}
         <Markdown
           evidenceAliases={evidenceIndex.aliases}
@@ -156,36 +135,9 @@ function LegacyMarkdownReader({
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
-  useLayoutEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
-    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
-    };
-  }, [scrollStorageKey]);
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      sessionStorage.setItem(
-        scrollStorageKey,
-        String(scrollRef.current.scrollTop),
-      );
-    }
-  };
-  return (
-    <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
-      <Markdown
-        evidenceAliases={evidenceIndex.aliases}
-        onEvidence={onEvidence}
-      >
-        {markdown}
-      </Markdown>
-    </div>
-  );
+  return <ResearchMarkdownReader markdown={markdown} sections={emptySections} runId={runId} reportKey={reportKey} evidenceIndex={evidenceIndex} onEvidence={onEvidence} />;
 }
+const emptySections: AnalystReport["report_sections"] = [];
 
 function ReportSectionNavigation({
   sections,
@@ -196,36 +148,47 @@ function ReportSectionNavigation({
 }) {
   const { t } = useTranslation();
   const [active, setActive] = useState(sections[0]?.anchor ?? "");
+  const [levels, setLevels] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || sections.length === 0) return;
     const update = () => {
-      const threshold = container.scrollTop + 48;
+      const threshold = 96;
       let next = sections[0].anchor;
       for (const section of sections) {
-        const candidate = document.getElementById(headingDomId(section.anchor));
+        const candidate = document.getElementById(headingDomId(section.anchor)) ?? document.getElementById(section.anchor);
         const heading =
           candidate && container.contains(candidate) ? candidate : null;
-        if (heading && headingScrollTop(container, heading) <= threshold) {
+        if (heading && heading.getBoundingClientRect().top <= threshold) {
           next = section.anchor;
         }
       }
+      // The final section may be too short to reach the top of the viewport.
+      if (window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2) {
+        const last = sections.at(-1)!;
+        const heading = document.getElementById(headingDomId(last.anchor)) ?? document.getElementById(last.anchor);
+        if (heading && container.contains(heading) && heading.getBoundingClientRect().top < window.innerHeight) next = last.anchor;
+      }
       setActive(next);
     };
+    const nextLevels = Object.fromEntries(sections.map(section => [section.anchor, Number(document.getElementById(headingDomId(section.anchor))?.tagName.slice(1)) || 2]));
+    setLevels(current => JSON.stringify(current) === JSON.stringify(nextLevels) ? current : nextLevels);
     update();
-    container.addEventListener("scroll", update, { passive: true });
-    return () => container.removeEventListener("scroll", update);
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
   }, [containerRef, sections]);
 
   if (sections.length === 0) return null;
   const jump = (anchor: string) => {
     const container = containerRef.current;
-    const candidate = document.getElementById(headingDomId(anchor));
+    const candidate = document.getElementById(headingDomId(anchor)) ?? document.getElementById(anchor);
     const heading =
       container && candidate && container.contains(candidate) ? candidate : null;
     if (!container || !heading) return;
-    container.scrollTop = Math.max(headingScrollTop(container, heading) - 16, 0);
+    heading.scrollIntoView?.({ block: "start" });
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${encodeURIComponent(anchor)}`);
+    window.dispatchEvent(new Event("hashchange"));
     heading.focus({ preventScroll: true });
     setActive(anchor);
   };
@@ -235,6 +198,7 @@ function ReportSectionNavigation({
       entries={sections.map((section) => ({
         id: section.anchor,
         label: section.title,
+        level: levels[section.anchor] ?? 2,
       }))}
       active={active}
       title={t("onThisReport")}
@@ -246,11 +210,6 @@ function ReportSectionNavigation({
   );
 }
 
-function headingScrollTop(container: HTMLElement, heading: HTMLElement): number {
-  const containerTop = container.getBoundingClientRect().top;
-  const headingTop = heading.getBoundingClientRect().top;
-  return container.scrollTop + headingTop - containerTop;
-}
 
 function headingDomId(anchor: string): string {
   return `user-content-${anchor}`;
@@ -258,12 +217,14 @@ function headingDomId(anchor: string): string {
 
 export function MarkdownList({
   title,
+  outlineId,
   items,
   empty = "—",
   evidenceIndex,
   onEvidence,
 }: {
   title: string;
+  outlineId?: string;
   items: string[];
   empty?: string;
   evidenceIndex: EvidenceReferenceIndex;
@@ -271,7 +232,7 @@ export function MarkdownList({
 }) {
   return (
     <section className="research-list">
-      <h3>{title}</h3>
+      {outlineId ? <h2 id={outlineId} data-outline={title}>{title}</h2> : <h3>{title}</h3>}
       {items.length > 0 ? (
         <ul>
           {items.map((item, index) => (

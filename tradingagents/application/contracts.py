@@ -1781,6 +1781,14 @@ class PrimaryCycleCandidate(FrozenModel):
     confidence: ResearchConfidenceLevel | None = None
 
 
+class RunLifecyclePreview(FrozenModel):
+    action: Literal["trash", "restore", "purge"]
+    affected_run_ids: tuple[str, ...]
+    affected_runs: tuple[RunView, ...]
+    blocked_reasons: tuple[str, ...] = ()
+    primary_replacements: dict[str, tuple[PrimaryCycleCandidate, ...]] = Field(default_factory=dict)
+
+
 class ResearchTimeline(FrozenModel):
     instrument: str
     instrument_name: str | None = None
@@ -1809,6 +1817,14 @@ class ResearchTimelineSummary(FrozenModel):
     full_cycle_count: int = Field(ge=1)
     incremental_node_count: int = Field(default=0, ge=0)
     latest_analysis_date: date
+    primary_baseline_date: date | None = None
+    primary_thesis: str | None = None
+    latest_research_completed_at: datetime | None = None
+    latest_completed_run_id: str | None = None
+    latest_completed_cycle_id: str | None = None
+    latest_completed_analysis_date: date | None = None
+    primary_head_run_id: str | None = None
+    primary_analysis_date: date | None = None
     primary_rating: ResearchRating | None = None
     primary_confidence: ResearchConfidenceLevel | None = None
     timeline_warning: bool = False
@@ -2452,6 +2468,26 @@ class RunSummaryView(RunView):
 
 class RunPage(FrozenModel):
     items: tuple[RunSummaryView, ...]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
+
+
+class RunGroupView(FrozenModel):
+    id: str
+    kind: Literal["cycle", "standalone"]
+    instrument: str
+    baseline: RunSummaryView | None = None
+    research_runs: tuple[RunSummaryView, ...] = ()
+    related_tasks: tuple[RunSummaryView, ...] = ()
+    matched_run_ids: tuple[str, ...] = ()
+    is_primary: bool = False
+    cycle_warning: bool = False
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class RunGroupPage(FrozenModel):
+    items: tuple[RunGroupView, ...]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
     offset: int = Field(ge=0)

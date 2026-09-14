@@ -246,8 +246,12 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: "")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+    )
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: ""
+    )
     service = AnalysisService(
         web_settings,
         repository=web_repository,
@@ -412,7 +416,9 @@ Date,Open,High,Low,Close,Volume
         }[method]
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
-    monkeypatch.setattr("tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: "")
+    monkeypatch.setattr(
+        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+    )
     synthesis_inputs = []
 
     def synthesize(input_):
@@ -454,8 +460,12 @@ Date,Open,High,Low,Close,Volume
     assert node["performance"]["stock"]["status"] == "calculated"
     assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
     assert domains["news"]["state"] == "empty"
-    assert domains["news"]["diagnostic"] == {"code": "bounded_feed_no_observed_records.news_context_partial"}
-    assert domains["fundamentals"]["diagnostic"] == {"code": "near_live_snapshot.financial_inputs_partial"}
+    assert domains["news"]["diagnostic"] == {
+        "code": "bounded_feed_no_observed_records.news_context_partial"
+    }
+    assert domains["fundamentals"]["diagnostic"] == {
+        "code": "near_live_snapshot.financial_inputs_partial"
+    }
     assert {
         domain["domain"]: domain["status"] for domain in node["research_availability"]["domains"]
     } == {
@@ -599,9 +609,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     detail = await web_client.get(f"/api/v1/runs/{result.run_id}")
     evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
     exported = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=json")
-    exported_markdown = await web_client.get(
-        f"/api/v1/runs/{result.run_id}/export?format=markdown"
-    )
+    exported_markdown = await web_client.get(f"/api/v1/runs/{result.run_id}/export?format=markdown")
 
     assert (
         timeline.status_code
@@ -1057,6 +1065,15 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         commit_full(date(2026, 7, 24), make_primary=False),
     ]
 
+    focused = await web_client.get(
+        f"/api/v1/timelines/NVDA?cycle_limit=2&focus_node_id={sorted(same_cutoff)[1]}"
+    )
+    assert focused.status_code == 200
+    assert focused.json()["timeline"]["cycle_offset"] == 2
+    assert focused.json()["timeline"]["cycles"][0]["id"] == sorted(same_cutoff)[1]
+    missing = await web_client.get("/api/v1/timelines/NVDA?focus_node_id=missing")
+    assert missing.status_code == 404
+
     first_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2")
     second_page = await web_client.get("/api/v1/timelines/NVDA?cycle_limit=2&cycle_offset=2")
 
@@ -1066,6 +1083,18 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
     assert first_page.json()["timeline"]["cycle_limit"] == 2
     assert first_page.json()["timeline"]["cycle_offset"] == 0
     assert second_page.json()["timeline"]["cycle_offset"] == 2
+    hidden_id = sorted(same_cutoff)[1]
+    web_repository.trash_runs((hidden_id,))
+    hidden = await web_client.get(f"/api/v1/timelines/NVDA?focus_node_id={hidden_id}")
+    assert hidden.status_code == 409
+    retained = await web_client.get(
+        f"/api/v1/timelines/NVDA?focus_node_id={hidden_id}&trash_state=all"
+    )
+    assert retained.status_code == 200
+    assert hidden_id in [node["id"] for node in _timeline_nodes(retained.json()["timeline"])]
+    wrong_instrument = await web_client.get(f"/api/v1/timelines/7203.T?focus_node_id={oldest}")
+    assert wrong_instrument.status_code == 404
+
     assert len(first_page.json()["timeline"]["active_full_cycles"]) == 3
     assert (
         first_page.json()["timeline"]["active_full_cycles"]
@@ -1137,6 +1166,16 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
                 "instrument_name": None,
                 "instrument_local_name": None,
                 "primary_cycle_id": run.id,
+                "primary_head_run_id": run.id,
+                "primary_baseline_date": "2026-07-24",
+                "primary_thesis": research_decision().thesis,
+                "latest_completed_run_id": run.id,
+                "latest_completed_cycle_id": run.id,
+                "latest_completed_analysis_date": "2026-07-24",
+                "latest_research_completed_at": web_repository.get_run(run.id).model_dump(
+                    mode="json"
+                )["finished_at"],
+                "primary_analysis_date": "2026-07-24",
                 "full_cycle_count": 1,
                 "incremental_node_count": 0,
                 "latest_analysis_date": "2026-07-24",
@@ -1149,6 +1188,15 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
         "limit": 50,
         "offset": 0,
     }
+
+    web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
+    matching = await web_client.get("/api/v1/timelines?q=vidi&limit=1")
+    assert matching.json()["total"] == 1
+    assert matching.json()["items"][0]["instrument"] == "NVDA"
+    for query in ("q=unknown", "q=NVDA&offset=1", "warning_only=true"):
+        empty = await web_client.get(f"/api/v1/timelines?{query}")
+        assert empty.json()["items"] == []
+    assert (await web_client.get("/api/v1/timelines?q=unknown")).json()["total"] == 0
 
 
 @pytest.mark.anyio
@@ -1687,9 +1735,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
     )
     transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get(
-            "/api/v1/instruments/600519/analysis-cutoff-context"
-        )
+        response = await client.get("/api/v1/instruments/600519/analysis-cutoff-context")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -1706,9 +1752,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
 async def test_analysis_cutoff_context_rejects_a_known_unsupported_instrument(
     web_client: httpx.AsyncClient,
 ) -> None:
-    response = await web_client.get(
-        "/api/v1/instruments/SPX500/analysis-cutoff-context"
-    )
+    response = await web_client.get("/api/v1/instruments/SPX500/analysis-cutoff-context")
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "unsupported_instrument"
@@ -1827,13 +1871,12 @@ async def test_openapi_documents_analysis_cutoff_context_errors(
     web_client: httpx.AsyncClient,
 ) -> None:
     schema = (await web_client.get("/openapi.json")).json()
-    response = schema["paths"][
-        "/api/v1/instruments/{instrument}/analysis-cutoff-context"
-    ]["get"]["responses"]["422"]
+    response = schema["paths"]["/api/v1/instruments/{instrument}/analysis-cutoff-context"]["get"][
+        "responses"
+    ]["422"]
 
     assert {
-        member["$ref"]
-        for member in response["content"]["application/json"]["schema"]["anyOf"]
+        member["$ref"] for member in response["content"]["application/json"]["schema"]["anyOf"]
     } == {
         "#/components/schemas/InstrumentAdmissionErrorResponse",
         "#/components/schemas/RequestValidationErrorResponse",
@@ -2231,3 +2274,71 @@ async def test_validation_error_does_not_echo_request_values(
     assert payload["error"]["code"] == "validation_error"
     assert payload["details"]
     assert {"location", "message", "type"} <= set(payload["details"][0])
+
+
+@pytest.mark.anyio
+async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    def commit_full(
+        analysis_date: date, *, make_primary: bool | None, confidence: str, ticker: str = "NVDA"
+    ) -> str:
+        request = AnalysisRequest(
+            ticker=ticker,
+            analysis_date=analysis_date,
+            make_primary=make_primary,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="2",
+            information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
+            method_snapshot={"schema_version": "1"},
+            research_kind="full",
+        )
+        web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
+        web_repository.set_instrument_local_name(run.id, "英伟达")
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=analysis_date,
+            effective_date=analysis_date,
+            content=run.id,
+        )
+        evidence = EvidenceBundle(instrument=ticker, analysis_date=analysis_date, items=(item,))
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument=ticker,
+                reports={},
+                decision=research_decision(
+                    confidence=confidence,
+                    thesis=f"Decision from {analysis_date.isoformat()}.",
+                    evidence_refs=(item.ref,),
+                ),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    primary = commit_full(date(2026, 7, 20), make_primary=True, confidence="medium")
+    commit_full(date(2026, 7, 24), make_primary=False, confidence="high")
+    for ticker in ("AAPL", "MSFT"):
+        commit_full(date(2026, 7, 25), make_primary=True, confidence="high", ticker=ticker)
+    page = (await web_client.get("/api/v1/timelines?q=nvda&limit=1")).json()
+    assert page["total"] == 1
+    assert page["items"][0]["primary_head_run_id"] == primary
+    assert page["items"][0]["primary_analysis_date"] == "2026-07-20"
+    assert page["items"][0]["latest_analysis_date"] == "2026-07-24"
+    assert page["items"][0]["primary_confidence"] == "medium"
+    named = (await web_client.get("/api/v1/timelines?q=英伟达&limit=1&offset=1")).json()
+    assert named["total"] == 3
+    assert named["items"][0]["instrument"] == "MSFT"
+    assert (await web_client.get("/api/v1/timelines?warning_only=true")).json()["total"] == 0

@@ -8,6 +8,9 @@ export type AnalysisCutoffErrorResponse =
 export type RunCreateRequest = components["schemas"]["RunCreateRequest"];
 export type RunView = components["schemas"]["RunView"];
 export type RunSummaryView = components["schemas"]["RunSummaryView"];
+export type RunGroupPage = components["schemas"]["RunGroupPage"];
+export type RunGroupView = components["schemas"]["RunGroupView"];
+export type RunLifecyclePreview = components["schemas"]["RunLifecyclePreview"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
@@ -139,23 +142,26 @@ export const api = {
       }`,
     ),
   runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
-  trashRuns: (runIds: string[], primaryReplacements: Record<string, string> = {}) =>
+  runGroups: (query = "") => request<RunGroupPage>(`/api/v1/run-groups${query}`),
+  previewLifecycle: (runIds: string[], action: "trash" | "restore" | "purge") => request<RunLifecyclePreview>("/api/v1/runs/lifecycle-preview", { method: "POST", body: JSON.stringify({ run_ids: runIds, action }) }),
+  trashRuns: (runIds: string[], primaryReplacements: Record<string, string> = {}, expected?: string[]) =>
     request<RunBatchResult>("/api/v1/runs/trash", {
       method: "POST",
       body: JSON.stringify({
         run_ids: runIds,
         primary_replacements: primaryReplacements,
+        expected_affected_run_ids: expected,
       }),
     }),
-  restoreRuns: (runIds: string[]) =>
+  restoreRuns: (runIds: string[], expected?: string[]) =>
     request<RunBatchResult>("/api/v1/runs/restore", {
       method: "POST",
-      body: JSON.stringify({ run_ids: runIds }),
+      body: JSON.stringify({ run_ids: runIds, expected_affected_run_ids: expected }),
     }),
-  purgeRuns: (runIds: string[]) =>
+  purgeRuns: (runIds: string[], expected?: string[]) =>
     request<RunBatchResult>("/api/v1/runs/purge", {
       method: "POST",
-      body: JSON.stringify({ run_ids: runIds }),
+      body: JSON.stringify({ run_ids: runIds, expected_affected_run_ids: expected }),
     }),
   recentInstruments: (limit = 50) =>
     request<RecentInstrument[]>(
@@ -171,9 +177,10 @@ export const api = {
     cycleLimit = 20,
     cycleOffset = 0,
     trashState: "active" | "trashed" | "all" = "active",
+    focusNodeId?: string,
   ) =>
     request<TimelineDetail>(
-      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}`,
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}${focusNodeId ? `&focus_node_id=${encodeURIComponent(focusNodeId)}` : ""}`,
     ),
   baselineCandidates: (instrument: string, before: string) =>
     request<FullBaselineCandidates>(
@@ -187,9 +194,9 @@ export const api = {
       `/api/v1/timelines/${encodeURIComponent(instrument)}/compare`,
       { method: "POST", body: JSON.stringify({ nodes }) },
     ),
-  timelines: (limit = 50, offset = 0) =>
+  timelines: (limit = 50, offset = 0, q = "", warningOnly = false, sort: "analysis_date" | "recent_activity" = "analysis_date") =>
     request<ResearchTimelinePage>(
-      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&q=${encodeURIComponent(q)}&warning_only=${warningOnly}&sort=${sort}`,
     ),
   selectPrimaryCycle: (instrument: string, fullRunId: string) =>
     request<TimelineDetail>(

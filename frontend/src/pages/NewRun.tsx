@@ -222,7 +222,7 @@ export default function NewRun() {
       if (lockedKind) {
         setResearchKind(lockedKind);
       } else if (!researchKindSelectedByUser.current) {
-        setResearchKind(baselines.length > 0 && !primaryWarning ? "incremental" : "full");
+        setResearchKind("full");
       }
     };
     void loadBaselines()
@@ -556,27 +556,35 @@ export default function NewRun() {
     }
   };
 
+  const submitUnavailable = submitting ? t("loading")
+    : !ticker.trim() ? t("enterInstrumentFirst")
+    : analysisContextLoading ? t("marketDateLoading")
+    : !analysisContext ? analysisContextError || t("marketDateLoading")
+    : !analysisDate ? t("selectAnalysisDate")
+    : !capabilities || modelsLoading ? t("loading")
+    : !provider || researchKind === "full" && !quickModel || !deepModel ? t("chooseResearchModels")
+    : researchKind === "incremental" && !fullBaselineRunId ? t("selectResearchBaseline")
+    : "";
+
   return (
     <section>
       <header className="page-header">
         <div>
-          <p className="eyebrow">{t("requestEyebrow")}</p>
           <h1>{t("newRun")}</h1>
-          <p className="subtitle">{t("evidenceSnapshotHint")}</p>
+          <p className="subtitle">{t("newResearchHint")}</p>
         </div>
       </header>
       {sourceRunId && (
         <div className="panel template-source">
           {t("templateFromRun")}{" "}
           <Link to={`/runs/${encodeURIComponent(sourceRunId)}`}>
-            {sourceRunId}
+            {t("executionDetails")}
           </Link>
         </div>
       )}
       {templateWarning && <div className="alert">{templateWarning}</div>}
-      <form className="run-form" onSubmit={submit}>
+      <form className="run-form" onSubmit={submit} onInvalidCapture={event => { const details = (event.target as HTMLElement).closest("details"); if (details) details.open = true; }}>
         <article className="panel form-section">
-          <span className="step">01</span>
           <div className="form-section-body">
             <h2>{t("instrumentCutoff")}</h2>
             <div className="form-grid two">
@@ -630,7 +638,7 @@ export default function NewRun() {
                       })
                     : t("cutoffHint")}
                 </small>
-                {analysisContextError && <small className="warning" role="alert">{analysisContextError}</small>}
+                {analysisContextError && <small id="cutoff-context-error" className="warning" role="alert">{analysisContextError} <button type="button" className="text-button" disabled={submitting} onClick={() => setAnalysisContextRefresh(value => value + 1)}>{t("retryLoad")}</button></small>}
                 {analysisDateNotice && <small className="warning" role="status">{analysisDateNotice}</small>}
               </label>
             </div>
@@ -638,9 +646,8 @@ export default function NewRun() {
         </article>
 
         <article className="panel form-section">
-          <span className="step">02</span>
           <div className="form-section-body">
-            <h2>{t("researchKind")}</h2>
+            <h2>{t("researchConfiguration")}</h2>
             {lockedKind ? (
               <div className={`research-kind-lock ${lockedKind}`}>
                 <strong>
@@ -683,6 +690,20 @@ export default function NewRun() {
                 </span>
               </label>
             </div>}
+        {researchKind === "full" && <div className="primary-cycle-choice">
+            <label className="check-card">
+              <input
+                type="checkbox"
+                checked={makePrimary}
+                onChange={(event) => setMakePrimary(event.target.checked)}
+              />
+              <span>
+                <strong>{t("makePrimary")}</strong>
+                <small>{t("makePrimaryHint")}</small>
+              </span>
+            </label>
+        </div>}
+
             {researchKind === "incremental" && (
               <div className="baseline-picker">
                 <label>
@@ -733,18 +754,16 @@ export default function NewRun() {
               </p>
             )}
           </div>
-        </article>
 
-        <article className="panel form-section">
-          <span className="step">03</span>
           <div className="form-section-body">
             {researchKind === "full" && (
               <>
-                <h2>{t("profile")}</h2>
+                <h3>{t("profile")}</h3>
                 <div className="profile-grid">
                   {(["fast", "standard", "deep"] as const).map((key) => (
                     <button
                       type="button"
+                      aria-pressed={profile === key}
                       className={`profile-card ${profile === key ? "selected" : ""}`}
                       onClick={() => setProfile(key)}
                       key={key}
@@ -762,6 +781,34 @@ export default function NewRun() {
                 </div>
               </>
             )}
+              <label>
+                {t("reportLanguage")}
+                <select
+                  value={outputLanguage}
+                  onChange={(event) => setOutputLanguage(event.target.value)}
+                >
+                  {customOutputLanguage && (
+                    <option value={customOutputLanguage}>
+                      {customOutputLanguage === configuredOutputLanguage
+                        ? t("configuredOutputLanguage", {
+                            value: customOutputLanguage,
+                          })
+                        : t("sourceOutputLanguage", {
+                            value: customOutputLanguage,
+                          })}
+                    </option>
+                  )}
+                  {reportLanguageOptions.map((language) => (
+                    <option key={language} value={language}>
+                      {reportLanguageLabel(language)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+          </div>
+        <details className="advanced-configuration">
+          <summary>{t("advancedConfiguration")}</summary>
+          <div className="form-section-body">
             <h2>{t(researchKind === "incremental" ? "updateScope" : "analysts")}</h2>
             {researchKind === "incremental" && (
               <p className="section-hint">{t("updateScopeHint")}</p>
@@ -776,19 +823,12 @@ export default function NewRun() {
                   />
                   <span>
                     <strong>{t(`${key}Analyst`)}</strong>
-                    <small>{key}</small>
                   </span>
                 </label>
               ))}
             </div>
-          </div>
-        </article>
-
-        <article className="panel form-section">
-          <span className="step">04</span>
-          <div className="form-section-body">
             <h2>{t("modelsOutput")}</h2>
-            <div className={`form-grid ${researchKind === "full" ? "three" : "two"}`}>
+            <div className="model-provider">
               <label>
                 {t("provider")}
                 <select
@@ -802,6 +842,9 @@ export default function NewRun() {
                   ))}
                 </select>
               </label>
+            </div>
+            <div className="model-groups">
+              {researchKind === "full" && <fieldset className="model-group"><legend>{t("quickModel")}</legend>
               {researchKind === "full" && (
                 <label>
                   {t("quickModel")}
@@ -830,6 +873,22 @@ export default function NewRun() {
                   )}
                 </label>
               )}
+              {researchKind === "full" && (
+                <ReasoningSelect
+                  label={t("quickReasoning")}
+                  value={quickReasoning}
+                  options={reasoningOptions(
+                    modelCatalog,
+                    quickModel,
+                    quickReasoning,
+                  )}
+                  onChange={setQuickReasoning}
+                  providerDefault={t("providerDefault")}
+                />
+              )}
+
+              </fieldset>}
+              <fieldset className="model-group"><legend>{t("deepModel")}</legend>
               <label>
                 {t("deepModel")}
                 <select
@@ -856,19 +915,6 @@ export default function NewRun() {
                   />
                 )}
               </label>
-              {researchKind === "full" && (
-                <ReasoningSelect
-                  label={t("quickReasoning")}
-                  value={quickReasoning}
-                  options={reasoningOptions(
-                    modelCatalog,
-                    quickModel,
-                    quickReasoning,
-                  )}
-                  onChange={setQuickReasoning}
-                  providerDefault={t("providerDefault")}
-                />
-              )}
               <ReasoningSelect
                 label={t("deepReasoning")}
                 value={deepReasoning}
@@ -880,30 +926,7 @@ export default function NewRun() {
                 onChange={setDeepReasoning}
                 providerDefault={t("providerDefault")}
               />
-              <label>
-                {t("reportLanguage")}
-                <select
-                  value={outputLanguage}
-                  onChange={(event) => setOutputLanguage(event.target.value)}
-                >
-                  {customOutputLanguage && (
-                    <option value={customOutputLanguage}>
-                      {customOutputLanguage === configuredOutputLanguage
-                        ? t("configuredOutputLanguage", {
-                            value: customOutputLanguage,
-                          })
-                        : t("sourceOutputLanguage", {
-                            value: customOutputLanguage,
-                          })}
-                    </option>
-                  )}
-                  {reportLanguageOptions.map((language) => (
-                    <option key={language} value={language}>
-                      {reportLanguageLabel(language)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              </fieldset>
             </div>
             {(modelsLoading || modelWarning) && (
               <p
@@ -915,40 +938,26 @@ export default function NewRun() {
               </p>
             )}
           </div>
+        </details>
         </article>
-        {researchKind === "full" && <article className="panel form-section">
-          <span className="step">05</span>
-          <div className="form-section-body">
-            <h2>{t("primaryResearch")}</h2>
-            <label className="check-card">
-              <input
-                type="checkbox"
-                checked={makePrimary}
-                onChange={(event) => setMakePrimary(event.target.checked)}
-              />
-              <span>
-                <strong>{t("makePrimary")}</strong>
-                <small>{t("makePrimaryHint")}</small>
-              </span>
-            </label>
-          </div>
-        </article>}
+        <section className="request-summary panel" aria-label={t("requestSummary")}>
+          <h2>{t("requestSummary")}</h2>
+          <dl className="definition-list">
+            <div><dt>{t("ticker")}</dt><dd>{ticker || "—"}</dd></div>
+            <div><dt>{t("analysisDate")}</dt><dd>{analysisDate || "—"}</dd></div>
+            <div><dt>{t("researchKind")}</dt><dd>{t(researchKind === "full" ? "newCycle" : "incrementalResearch")}{researchKind === "full" ? ` · ${t(profile)}` : ` · ${t("baselineDate")}: ${fullBaselines.find(item => item.id === fullBaselineRunId)?.analysis_date ?? "—"}`}</dd></div>
+            <div><dt>{t("analysts")}</dt><dd>{analysts.map(key => t(`${key}Analyst`)).join(" · ") || "—"}</dd></div>
+            <div><dt>{t("reportLanguage")}</dt><dd>{reportLanguageLabel(outputLanguage)}</dd></div>
+            {researchKind === "full" && <div><dt>{t("makePrimary")}</dt><dd>{t(makePrimary ? "enabled" : "disabled")}</dd></div>}
+          </dl>
+        </section>
         {error && <div className="alert">{error}</div>}
+        {submitUnavailable && !analysisContextError && <p id="submit-unavailable" role="status">{submitUnavailable}</p>}
         <div className="form-actions">
           <button
             className="button primary large"
-            disabled={
-              submitting ||
-              analysisContextLoading ||
-              analysisContext === null ||
-              !analysisDate ||
-              capabilities === null ||
-              modelsLoading ||
-              !provider ||
-              (researchKind === "full" && !quickModel) ||
-              !deepModel ||
-              (researchKind === "incremental" && !fullBaselineRunId)
-            }
+            disabled={Boolean(submitUnavailable)}
+            aria-describedby={analysisContextError ? "cutoff-context-error" : submitUnavailable ? "submit-unavailable" : undefined}
           >
             {submitting ? t("loading") : t("startResearch")} →
           </button>

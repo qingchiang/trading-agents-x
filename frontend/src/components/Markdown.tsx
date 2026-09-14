@@ -1,3 +1,6 @@
+import { useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -29,30 +32,23 @@ export default function Markdown({
   onEvidence?: (ref: string) => void;
   headingAnchors?: string[];
 }) {
-  return (
-    <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[
-          remarkGfm,
-          [
-            remarkEvidenceReferences,
-            { aliases: evidenceAliases },
-          ],
-          [remarkHeadingAnchors, { anchors: headingAnchors }],
-        ]}
-        rehypePlugins={[rehypeSanitize]}
-        skipHtml
-        components={{
+  const { t } = useTranslation();
+  const evidenceAction = useRef(onEvidence);
+  evidenceAction.current = onEvidence;
+  const openEvidenceLabel = useRef(t("openEvidence"));
+  openEvidenceLabel.current = t("openEvidence");
+  // Stable renderers keep the citation button mounted while a source drawer opens.
+  const components = useMemo<Components>(() => ({
           a: ({ href, children: linkChildren }) => {
             const evidenceRef = evidenceRefFromHref(href);
-            if (evidenceRef && onEvidence) {
+            if (evidenceRef && evidenceAction.current) {
               return (
                 <button
                   type="button"
                   className="inline-evidence-ref"
                   title={evidenceRef}
-                  aria-label={`Open evidence ${evidenceRef}`}
-                  onClick={() => onEvidence(evidenceRef)}
+                  aria-label={`${openEvidenceLabel.current} ${evidenceRef}`}
+                  onClick={() => evidenceAction.current?.(evidenceRef)}
                 >
                   {linkChildren}
                 </button>
@@ -78,7 +74,21 @@ export default function Markdown({
           h6: ({ children: headingChildren, node: _node, ...props }) => (
             <h6 {...props} tabIndex={-1}>{headingChildren}</h6>
           ),
-        }}
+  }), []);
+  return (
+    <div className="markdown">
+      <ReactMarkdown
+        remarkPlugins={[
+          remarkGfm,
+          [
+            remarkEvidenceReferences,
+            { aliases: evidenceAliases },
+          ],
+          [remarkHeadingAnchors, { anchors: headingAnchors }],
+        ]}
+        rehypePlugins={[rehypeSanitize]}
+        skipHtml
+        components={components}
       >
         {children}
       </ReactMarkdown>

@@ -1,317 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-const timestamp = "2026-07-24T00:00:00Z";
+import { timestamp, makeRun, result, artifacts, cycleTimeline, type MockRun, type TimelineNodeFixture } from "./fixtures/research";
 
-type MockRun = ReturnType<typeof makeRun>;
-
-function makeRun(
-  id: string,
-  status: string,
-  options: {
-    ticker?: string;
-    instrumentName?: string;
-    instrumentLocalName?: string;
-    trashedAt?: string | null;
-    sourceRunId?: string | null;
-  } = {},
-) {
-  return {
-    id,
-    source_run_id: options.sourceRunId ?? null,
-    instrument_name: options.instrumentName ?? null,
-    instrument_local_name: options.instrumentLocalName ?? null,
-    research_schema_version: status === "succeeded" ? "1" : null,
-    information_cutoff_at: status === "succeeded" ? "2026-07-24T23:59:59Z" : null,
-    method_snapshot: status === "succeeded" ? { llm_provider: "openai" } : null,
-    research_rating: status === "succeeded" ? "Hold" : null,
-    trashed_at: options.trashedAt ?? null,
-    status,
-    request: {
-      ticker: options.ticker ?? "NVDA",
-      analysis_date: "2026-07-24",
-      asset_type: "stock",
-      profile: "standard",
-      analysts: ["market", "news"],
-      llm_provider: "openai",
-      quick_model: "gpt-5.4-mini",
-      deep_model: "gpt-5.5",
-      quick_reasoning_effort: "provider_default",
-      deep_reasoning_effort: "provider_default",
-      output_language: "en",
-      research_kind: "full",
-      full_baseline_run_id: null,
-      make_primary: true,
-    },
-    config_snapshot: {},
-    attempt: 1,
-    cancel_requested: false,
-    error_code: null,
-    error_message: null,
-    metrics: {
-      llm_calls: 0,
-      tool_calls: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      wall_time_seconds: 0,
-      node_metrics: {},
-    },
-    created_at: timestamp,
-    started_at: null,
-    finished_at: status === "queued" || status === "running" ? null : timestamp,
-    updated_at: timestamp,
-  };
-}
-
-function result(id: string) {
-  return {
-    run_id: id,
-    status: "succeeded",
-    instrument: "NVDA",
-    instrument_name: "NVIDIA Corporation",
-    reports: {
-      market: {
-        analyst: "market",
-        markdown:
-          "# Market report\n\nMarket evidence is balanced.[^ev_0123456789ab]\n\n" +
-          "| Signal | Reading |\n|---|---:|\n| Close | 100 USD |\n\n" +
-          "Supporting market context remains evidence-bound.\n\n".repeat(60) +
-          "## Risk lens\n\nDemand sensitivity remains material.\n\n" +
-          "Supporting risk context remains evidence-bound.\n\n".repeat(30),
-        report_sections: [
-          {
-            id: "market.market-report",
-            title: "Market report",
-            anchor: "market-report",
-            source_refs: ["ev_0123456789ab"],
-          },
-          {
-            id: "market.risk-lens",
-            title: "Risk lens",
-            anchor: "risk-lens",
-            source_refs: ["ev_0123456789ab"],
-          },
-        ],
-        confidence: 0.7,
-        key_claims: [
-          {
-            id: "market.claim_1",
-            section_id: "market.market-report",
-            kind: "inference",
-            importance: "primary",
-            statement: "The observed market signal is constructive.",
-            implication: "Upside sensitivity remains relevant.",
-            confidence: 0.7,
-            evidence_refs: ["ev_0123456789ab"],
-          },
-        ],
-        source_refs: ["ev_0123456789ab"],
-        audit_status: "complete",
-        warnings: [
-          {
-            code: "evidence.partial",
-            message: "Partial historical source",
-            evidence_ref: "ev_0123456789ab",
-            source: "fixture-feed",
-          },
-        ],
-      },
-      news: {
-        analyst: "news",
-        markdown:
-          "# News report\n\nNo material change in the news path.[^ev_0123456789ab]",
-        report_sections: [
-          {
-            id: "news.news-report",
-            title: "News report",
-            anchor: "news-report",
-            source_refs: ["ev_0123456789ab"],
-          },
-        ],
-        confidence: 0.6,
-        key_claims: [
-          {
-            id: "news.claim_1",
-            section_id: "news.news-report",
-            kind: "observation",
-            importance: "supporting",
-            statement: "The supplied snapshot contains no adverse event.",
-            implication: "The news path does not override the market evidence.",
-            confidence: 0.6,
-            evidence_refs: ["ev_0123456789ab"],
-          },
-        ],
-        source_refs: ["ev_0123456789ab"],
-        audit_status: "complete",
-        warnings: [],
-      },
-    },
-    decision: {
-      rating: "Hold",
-      confidence: 0.65,
-      executive_summary: "The evidence supports a balanced research opinion.",
-      thesis: "Evidence is balanced.",
-      evidence_refs: ["ev_0123456789ab"],
-      catalysts: ["Demand improves"],
-      risks: ["Demand slows"],
-      invalidation_conditions: ["New filing changes the thesis"],
-      unresolved_questions: ["How durable is demand?"],
-      time_horizon: "6-12 months",
-      scenarios: [
-        {
-          kind: "base",
-          core_assumptions: ["Demand remains stable"],
-          outcome: "The balanced view persists.",
-          evidence_refs: ["ev_0123456789ab"],
-          reference_ranges: [],
-        },
-        {
-          kind: "bull",
-          core_assumptions: ["Demand improves"],
-          outcome: "Operating leverage improves.",
-          evidence_refs: ["ev_0123456789ab"],
-          reference_ranges: [],
-        },
-        {
-          kind: "bear",
-          core_assumptions: ["Demand slows"],
-          outcome: "The thesis weakens.",
-          evidence_refs: ["ev_0123456789ab"],
-          reference_ranges: [],
-        },
-      ],
-      valuation_assessment: null,
-      market_reference_levels: [],
-      risk_review_adjustments: [],
-      calculation_records: Array.from({ length: 16 }, (_, index) => ({
-        id: `calc_fixture_${index + 1}`,
-        formula: "observed_value",
-        inputs: { observed_value: 100 + index },
-        input_evidence_refs: ["ev_0123456789ab"],
-        result: 100 + index,
-        unit: "USD",
-        as_of_date: "2026-07-24",
-        limitations: [],
-        decision_uses: [
-          {
-            component_path: "thesis",
-            label: `Observed anchor ${index + 1}`,
-          },
-        ],
-      })),
-    },
-    evidence: {
-      version: "5",
-      instrument: "NVDA",
-      analysis_date: "2026-07-24",
-      sealed_at: timestamp,
-      digest: "fixture-digest",
-      items: [
-        {
-          ref: "ev_0123456789ab",
-          source: "fixture-feed",
-          evidence_type: "Price snapshot",
-          requested_date: "2026-07-24",
-          effective_date: "2026-07-24",
-          available_at: timestamp,
-          content: "The close was **100 USD**.",
-          value: 100,
-          unit: "USD",
-          quality: "high",
-          fallback: false,
-          origins: [],
-          provenance: { vendor: "fixture-feed" },
-        },
-      ],
-      tables: [],
-    },
-    metrics: {
-      llm_calls: 4,
-      tool_calls: 3,
-      input_tokens: 1200,
-      output_tokens: 400,
-      wall_time_seconds: 12.4,
-      node_metrics: {},
-    },
-    warnings: [],
-  };
-}
-
-function artifacts(id: string) {
-  return [
-    {
-      id: "artifact-bull",
-      run_id: id,
-      attempt: 1,
-      stage: "perspective",
-      role: "bull",
-      round: 0,
-      prompt_version: "research-case-bull-v2",
-      generation_method: "markdown_audited",
-      created_at: timestamp,
-      content: {
-        role: "bull",
-        markdown:
-          "Demand remains **constructive**.[^ev_0123456789ab]\n\n" +
-          "| Case input | Assessment |\n|---|---|\n| Demand | Resilient |",
-        focus_claim_ids: ["market.claim_1"],
-        report_section_refs: ["market.market-report"],
-      },
-    },
-  ];
-}
-
-type TimelineNodeFixture = {
-  id: string;
-  cycle_id: string;
-  research_kind: "full" | "incremental";
-  [key: string]: unknown;
-};
-
-function cycleTimeline(
-  instrument: string,
-  nodes: TimelineNodeFixture[],
-  primaryCycleId: string | null,
-  timelineWarning = false,
-) {
-  const grouped = new Map<string, TimelineNodeFixture[]>();
-  for (const node of nodes) {
-    const items = grouped.get(node.cycle_id) ?? [];
-    items.push(node);
-    grouped.set(node.cycle_id, items);
-  }
-  const cycles = [...grouped.entries()].map(([cycleId, items]) => {
-    const baseline = items.find((item) => item.research_kind === "full") ?? {
-      ...items[0],
-      id: `fixture-baseline-${cycleId}`,
-      research_kind: "full" as const,
-      full_baseline_run_id: null,
-      is_cycle_head: false,
-      is_primary: cycleId === primaryCycleId,
-    };
-    const increments = items.filter((item) => item.research_kind === "incremental");
-    return {
-      id: cycleId,
-      baseline,
-      increments,
-      head_run_id: increments.at(-1)?.id ?? baseline.id,
-      is_primary: cycleId === primaryCycleId,
-      cycle_warning: Boolean(baseline.cycle_warning) ||
-        increments.some((item) => item.cycle_warning === true),
-    };
-  });
-  return {
-    timeline: {
-      instrument,
-      primary_cycle_id: primaryCycleId,
-      timeline_warning: timelineWarning,
-      cycles,
-      cycle_total: cycles.length,
-      cycle_limit: 12,
-      cycle_offset: 0,
-    },
-    primary_cycle_candidates: [],
-  };
-}
+test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 1000 }); });
 
 test("runs, templates, trash, and restores local research", async ({
   page,
@@ -343,6 +34,19 @@ test("runs, templates, trash, and restores local research", async ({
     const url = new URL(request.url());
     const path = url.pathname;
 
+    if (path === "/api/v1/timelines") {
+      const items = url.searchParams.get("warning_only") === "true" ? [] : [...runs.values()].filter(run => run.status === "succeeded" && !run.trashed_at).map(run => ({ instrument: run.request.ticker, instrument_name: run.instrument_name, instrument_local_name: run.instrument_local_name, primary_cycle_id: run.id, primary_head_run_id: run.id, primary_rating: "Hold", primary_confidence: "medium", primary_analysis_date: run.request.analysis_date, primary_baseline_date: run.request.analysis_date, latest_analysis_date: run.request.analysis_date, full_cycle_count: 1 }));
+      return route.fulfill({ json: { items, total: items.length, limit: 6, offset: 0 } });
+    }
+    if (path === "/api/v1/run-groups") {
+      const trash = url.searchParams.get("trash_state") === "trashed";
+      const visible = [...runs.values()].filter(run => !purged.has(run.id) && Boolean(run.trashed_at) === trash);
+      return route.fulfill({ json: { items: visible.map(run => ({ id: run.id, kind: "standalone", instrument: run.request.ticker, research_runs: [], related_tasks: [run], matched_run_ids: [run.id], status_counts: { [run.status]: 1 } })), total: visible.length, limit: 12, offset: 0 } });
+    }
+    if (path === "/api/v1/runs/lifecycle-preview") {
+      const payload = request.postDataJSON();
+      return route.fulfill({ json: { action: payload.action, affected_run_ids: payload.run_ids, affected_runs: payload.run_ids.flatMap((id: string) => runs.get(id) ?? []), blocked_reasons: [], primary_replacements: {} } });
+    }
     if (path === "/api/v1/health") {
       return route.fulfill({
         json: {
@@ -707,11 +411,11 @@ test("runs, templates, trash, and restores local research", async ({
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "研究工作台" })).toBeVisible();
+  await expect(page.getByText("NVIDIA Corporation").first()).toBeVisible();
   await page.getByLabel("界面语言").selectOption("en");
 
-  await page.getByRole("link", { name: "New run", exact: true }).click();
+  await page.getByRole("link", { name: "New research", exact: true }).click();
   const ticker = page.getByLabel(/^Ticker/);
   await expect(ticker).toHaveAttribute("name", "ticker");
   await expect(ticker).toHaveAttribute("list", "recent-instruments");
@@ -723,6 +427,7 @@ test("runs, templates, trash, and restores local research", async ({
     page.locator("header").getByText("Cancelled", { exact: true }),
   ).toBeVisible();
 
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("link", { name: "Reuse configuration for Full Research" }).click();
   await expect(ticker).toHaveValue("7203.T");
   await ticker.fill("MSFT");
@@ -752,13 +457,22 @@ test("runs, templates, trash, and restores local research", async ({
     page.getByRole("heading", { name: "fixture-feed" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("tab", { name: "Reports" }).click();
+  await expect(page.getByRole("button", { name: "Open evidence ev_0123456789ab" }).first()).toBeFocused();
+  await page.getByRole("link", { name: "Research reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("navigation", { name: "Report section navigation" }).getByRole("button", { name: "Risk lens" }).click();
+  await expect(page).toHaveURL(/#risk/);
+  await page.getByRole("link", { name: "Overview", exact: true }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/view=reports.*#risk/);
+  await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(90);
 
   await page.goto("/runs/run-report?view=decision");
   await expect(
-    page.getByRole("tab", { name: "Overview", exact: true }),
-  ).toHaveAttribute("aria-selected", "true");
+    page.getByRole("link", { name: "Overview", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),
   ).toBeVisible();
@@ -773,7 +487,8 @@ test("runs, templates, trash, and restores local research", async ({
   expect(decisionWidth.summary).toBeGreaterThan(decisionWidth.hero * 0.7);
 
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
-  await page.getByText("Decision-critical calculation audit").click();
+  await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
+  await page.getByRole("link", { name: "Run & diagnostics" }).click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
   await expect(
@@ -784,8 +499,8 @@ test("runs, templates, trash, and restores local research", async ({
       .first(),
   ).toBeHidden();
 
-  await page.getByRole("tab", { name: "Activity" }).click();
-  await expect(page.getByText("Run metrics and diagnostics")).toBeVisible();
+  await page.getByRole("link", { name: "Run progress" }).click();
+  await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Attempt metrics")).toBeHidden();
   await expect(page.getByRole("button", { name: "Latest first" })).toHaveAttribute(
     "aria-pressed",
@@ -810,11 +525,11 @@ test("runs, templates, trash, and restores local research", async ({
     .poll(() => attemptBody.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   const attemptPanel = page.locator(".activity-attempt").first();
-  await expect(attemptPanel.getByText(/Technical events \(25\)/)).toHaveCount(1);
+  await expect(attemptPanel.getByText(/Technical events \(25\)/)).toHaveCount(0);
   await expect(attemptPanel.getByText("Audit details", { exact: true })).toHaveCount(0);
-  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("run.lifecycle");
+  await expect(attemptPanel.locator(".activity-node-key")).toHaveCount(0);
   await page.getByRole("button", { name: "Earliest first" }).click();
-  await expect(attemptPanel.locator(".activity-node-key").first()).toHaveText("fixture.stage.0");
+
   expect(
     await page.evaluate(() =>
       localStorage.getItem("tradingagents-timeline-order"),
@@ -854,7 +569,7 @@ test("runs, templates, trash, and restores local research", async ({
   expect(detailGeometry.gap).toBeLessThanOrEqual(10);
   const detailKindBadge = page
     .locator(".run-title")
-    .getByRole("button", { name: "Full research" });
+    .getByText("Full research", { exact: true });
   const badgeGeometry = await detailKindBadge.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -863,45 +578,29 @@ test("runs, templates, trash, and restores local research", async ({
     badgeGeometry.clientHeight,
   );
   await expect(page.locator(".run-heading .subtitle").first()).toHaveText(
-    "2026-07-24 · Attempt 1",
+    "2026-07-24",
   );
 
   await page.goto("/timelines/NVDA");
   await expect(page.getByText("Primary Cycle")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open research detail →" })).toHaveAttribute(
-    "href",
-    "/runs/run-report",
-  );
-  const timelineSummary = page.locator(".timeline-decision-summary").first();
-  const timelineWidth = await timelineSummary.evaluate((element) => ({
-    summary: element.getBoundingClientRect().width,
-    card: element.closest(".research-node-card")?.getBoundingClientRect().width ?? 0,
-  }));
-  expect(timelineWidth.summary).toBeGreaterThan(timelineWidth.card * 0.85);
-
+  await expect(page.locator(".history-node.full")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Executive summary" })).toBeVisible();
   await page.goto("/runs");
-  await expect(page.getByRole("columnheader", { name: "Actions" })).toBeVisible();
-  const runsTable = page.locator(".runs-table");
+  await expect(page.locator(".task-group").first()).toBeVisible();
+  const runsTable = page.locator(".task-group");
   await expect(
     runsTable.getByRole("link", { name: "Research Timeline" }),
   ).toHaveCount(0);
-  const tickerColumnRatio = await runsTable.evaluate((table) => {
-    const tickerHeader = table.querySelectorAll("th")[1];
-    if (!tickerHeader) throw new Error("ticker column not found");
-    return tickerHeader.getBoundingClientRect().width / table.getBoundingClientRect().width;
-  });
-  expect(tickerColumnRatio).toBeGreaterThan(0.25);
-  expect(tickerColumnRatio).toBeLessThan(0.30);
   const openAction = page
-    .getByRole("row")
+    .locator(".task-group")
     .filter({ hasText: "NVDA" })
-    .getByRole("link", { name: "Open" });
-  await expect(openAction).toHaveClass(/compact-button/);
+    .getByRole("link", { name: "Execution details" });
+  await expect(openAction).toBeVisible();
   expect(
     await openAction.evaluate(
       (element) => element.getBoundingClientRect().height,
     ),
-  ).toBeLessThanOrEqual(34);
+  ).toBeLessThanOrEqual(48);
   const runsSearch = page.locator("#runs-search");
   const runsKind = page.locator("#runs-kind");
   const applyFilters = page.getByRole("button", { name: "Apply", exact: true });
@@ -920,7 +619,7 @@ test("runs, templates, trash, and restores local research", async ({
   expect(applyBox?.x ?? 0).toBeGreaterThan((kindBox?.x ?? 0) + (kindBox?.width ?? 0));
 
   const daiichiIdentity = page
-    .getByRole("row")
+    .locator(".task-group")
     .filter({ hasText: "4568.T" })
     .locator(".instrument-identity");
   const nameGeometry = await daiichiIdentity.evaluate((element) => {
@@ -945,33 +644,30 @@ test("runs, templates, trash, and restores local research", async ({
   expect(nameGeometry.alternateScrollWidth).toBeLessThanOrEqual(nameGeometry.alternateClientWidth + 1);
 
   const daiichiKindBadge = page
-    .getByRole("row")
+    .locator(".task-group")
     .filter({ hasText: "4568.T" })
-    .getByRole("button", { name: "Full research" });
-  await daiichiKindBadge.click();
-  const configuration = page.getByRole("tooltip", { name: "Research configuration" });
-  await expect(configuration).toContainText("gpt-5.4-mini");
-  await expect(configuration).toContainText("gpt-5.5");
-  await page.keyboard.press("Escape");
-  await expect(configuration).toBeHidden();
+    .getByText("Full research", { exact: true });
+  await expect(daiichiKindBadge).toBeVisible();
+  await expect(page.getByRole("tooltip", { name: "Research configuration" })).toHaveCount(0);
 
-  const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  const reportRow = page.locator(".task-group").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Move to Trash (1)" }).click();
   const trashDialog = page.getByRole("alertdialog", {
-    name: "Move 1 selected run(s) to Trash?",
+    name: "Move research to Trash?",
   });
-  await expect(trashDialog).toContainText("permanent deletion");
+  await expect(trashDialog).toContainText("Affected records: 1");
   await trashDialog
-    .getByRole("button", { name: "Move to Trash", exact: true })
+    .getByRole("button", { name: "Confirm Trash", exact: true })
     .click();
   await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
-  const trashedRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  const trashedRow = page.locator(".task-group").filter({ hasText: "NVDA" });
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Restore", exact: true }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
   const restored = runs.get("run-report")!;
   restored.trashed_at = "2026-06-01T00:00:00Z";
@@ -979,58 +675,24 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/runs/run-report");
   await expect(page.getByText("Run not found")).toBeVisible();
 
-  await page.setViewportSize({ width: 1080, height: 1920 });
   purged.delete("run-report");
   restored.trashed_at = null;
-  await page.goto("/runs/run-report?view=reports&report=market");
-  await expect(
-    page.getByRole("navigation", { name: "Report section navigation" }),
-  ).toBeVisible();
-  const reportScroller = page.locator(".report-panel .analyst-report");
-  const expandedReportWidth = await reportScroller.evaluate(
-    (element) => element.getBoundingClientRect().width,
-  );
-  await page.getByRole("button", { name: "Close navigation" }).click();
-  await expect(
-    page.getByRole("navigation", { name: "Report section navigation" }),
-  ).toBeHidden();
-  const compactNavigation = page.getByRole("button", {
-    name: "Open navigation",
-  });
-  await expect(compactNavigation).toHaveText("☰");
-  expect(
-    await compactNavigation.evaluate(
-      (element) => element.getBoundingClientRect().width,
-    ),
-  ).toBeLessThanOrEqual(36);
-  expect(
-    await reportScroller.evaluate(
-      (element) => element.getBoundingClientRect().width,
-    ),
-  ).toBe(expandedReportWidth);
-  await compactNavigation.click();
-  await page
-    .getByRole("navigation", { name: "Report section navigation" })
-    .getByRole("button", { name: "Risk lens" })
-    .click();
-  const riskOffset = await page
-    .getByRole("heading", { name: "Risk lens" })
-    .evaluate((heading) => {
-      const scroller = heading.closest(".analyst-report");
-      if (!scroller) throw new Error("report scroller not found");
-      return (
-        heading.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top
-      );
-    });
-  expect(riskOffset).toBeGreaterThanOrEqual(12);
-  expect(riskOffset).toBeLessThanOrEqual(24);
-  const reportMaxHeight = await page
-    .locator(".report-panel .analyst-report")
-    .evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).maxHeight),
-    );
-  expect(reportMaxHeight).toBeGreaterThan(660);
+  for (const width of [1440, 1024]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/runs/run-report?view=reports&report=market");
+    await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
+    const body = page.locator(".report-panel .analyst-report");
+    expect(await body.evaluate(element => getComputedStyle(element).overflowY)).toBe("visible");
+    expect(await body.locator("p").first().evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(880);
+    if (width === 1440) {
+      const nav = page.getByRole("navigation", { name: "Report section navigation" });
+      await expect(nav).toBeVisible();
+      const boxes = await Promise.all([nav.boundingBox(), body.boundingBox()]);
+      expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
+      await nav.getByRole("button", { name: "Risk lens" }).click();
+      await expect(page).toHaveURL(/#risk/);
+    } else await expect(page.getByLabel("Jump to section")).toBeVisible();
+  }
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/runs/run-report?view=reports&report=market");
@@ -1124,16 +786,16 @@ test("compares active and explicitly shown Trash nodes without creating research
             lifecycle_state: "trashed", collection_summary: { version: "1", domains: [] },
             research_availability: { version: "1", domains: [] }, reassessment: { entries: [] },
             full_research_required_reasons: [{ code: "attribution.unreliable",
-              message: "Comparison side needs Full research.", origin: "semantic",
+              message: "Comparison side needs Full research. " + "Additional context for reading and comparing retained research. ".repeat(30), origin: "semantic",
               evidence_refs: [] }],
             decision: { rating: "bullish" }, performance: {
               stock: { status: "unavailable", reason: "fixture" }, benchmarks: [],
             } },
         ],
-        decision_sections: [{ key: "rating", values: [
-          { state: "recorded", value: "hold" },
-          { state: "recorded", value: "bullish" },
-        ] }],
+        decision_sections: Array.from({ length: 12 }, (_, index) => ({ key: `rating-${index}`, values: [
+          { state: "recorded", value: "Hold with bounded evidence." },
+          { state: "recorded", value: "Overweight after new evidence." },
+        ] })),
       } });
     }
     if (url.pathname === "/api/v1/runs" && request.method() === "POST") {
@@ -1142,20 +804,22 @@ test("compares active and explicitly shown Trash nodes without creating research
     return route.fulfill({ status: 404, json: { detail: "not mocked" } });
   });
 
-  await page.goto("/timelines/NVDA");
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/timelines/NVDA?compare_mode=1");
+  await page.locator(".research-header").getByRole("button", { name: /^(More|更多)$/ }).click();
   await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
   await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).click();
+  await page.getByRole("checkbox", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
+  await page.getByRole("checkbox", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
   await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
 
-  const comparisonDialog = page.getByRole("dialog", {
+  const comparisonDialog = page.getByRole("region", {
     name: /Node Comparison|节点对照|ノード比較/,
   });
   await expect(comparisonDialog).toBeVisible();
   await expect(page.getByText(/Method Changed|方法已变更|メソッド変更/)).toBeVisible();
   await expect(
-    page.getByText("Comparison side needs Full research.", { exact: true }),
+    page.getByText(/Comparison side needs Full research\./),
   ).toBeVisible();
   expect(comparisonPayload).toEqual({ nodes: [
     { node_id: full.id, lifecycle_state: "active" },
@@ -1163,38 +827,22 @@ test("compares active and explicitly shown Trash nodes without creating research
   ] });
   expect(researchCreateCalls).toBe(0);
 
-  await comparisonDialog.getByText(/Extended conclusions|扩展结论|拡張結論/).click();
-  await comparisonDialog.getByText(/Update audit|更新审计|更新監査/).click();
-  await comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/).click();
+  await expect(comparisonDialog.getByText(/Raw audit|原始审计|生監査情報/)).toHaveCount(0);
+  await expect(comparisonDialog.getByRole("link", { name: /Run & diagnostics|运行与诊断|実行と診断/ })).toHaveCount(2);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const dialogBox = await comparisonDialog.boundingBox();
-  expect(dialogBox).not.toBeNull();
-  expect(dialogBox?.x).toBe(0);
-  expect(dialogBox?.y).toBe(0);
-  expect(dialogBox?.width).toBe(390);
-  expect(dialogBox?.height).toBe(844);
-  const comparisonValues = comparisonDialog.locator(
-    ".comparison-decision-table tbody tr",
-  ).first().locator("td");
-  const leftValueBox = await comparisonValues.nth(0).boundingBox();
-  const rightValueBox = await comparisonValues.nth(1).boundingBox();
-  expect(leftValueBox).not.toBeNull();
-  expect(rightValueBox).not.toBeNull();
-  expect(rightValueBox!.y).toBeGreaterThanOrEqual(
-    leftValueBox!.y + leftValueBox!.height,
-  );
-  const comparisonScroll = comparisonDialog.locator(".comparison-modal-scroll");
-  await comparisonScroll.focus();
-  await page.keyboard.press("PageDown");
-  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await comparisonScroll.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await comparisonScroll.hover();
-  await page.mouse.wheel(0, 400);
-  await expect.poll(() => comparisonScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  // ResizeObserver and the shell transition settle after the viewport resize returns.
+  await expect(page.locator('.research-workspace')).toHaveClass(/compact/);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  const values = comparisonDialog.locator(".comparison-side-by-side").first().locator(":scope > div");
+  const left = (await values.nth(0).boundingBox())!;
+  const right = (await values.nth(1).boundingBox())!;
+  expect(right.y).toBeGreaterThanOrEqual(left.y + left.height);
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await expect(page.getByRole("button", { name: /Research history|研究历史|リサーチ履歴/, exact: true })).toBeVisible();
+
 });
 
 test("covers every supported retained-node comparison pair", async ({ page }) => {
@@ -1250,20 +898,20 @@ test("covers every supported retained-node comparison pair", async ({ page }) =>
 
   for (const [index, pair] of pairs.entries()) {
     currentPair = pair;
-    await page.goto(`/timelines/NVDA?pair=${index}`);
+    await page.goto(`/timelines/NVDA?pair=${index}&compare_mode=1`);
     for (const node of pair) {
       const card = page
-        .locator(`.research-node-card.${node.research_kind}`)
+        .locator(`.history-node.${node.research_kind}`)
         .filter({ hasText: node.analysis_date })
         .first();
-      await card.getByRole("button", {
+      await card.getByRole("checkbox", {
         name: /Select for comparison|选择用于对照|比較対象に選択/,
       }).click();
     }
     await page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     }).click();
-    await expect(page.getByRole("dialog", {
+    await expect(page.getByRole("region", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeVisible();
     expect(comparisonPayloads.at(-1)).toEqual({ nodes: pair.map((node) => ({
@@ -1315,28 +963,29 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
 
   for (const [index, message] of rejectionMessages.entries()) {
     rejectionMessage = message;
-    await page.goto(`/timelines/NVDA?rejection=${index}`);
+    await page.goto(`/timelines/NVDA?rejection=${index}&compare_mode=1`);
     const compareButton = page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     });
-    const selectButtons = page.getByRole("button", {
+    const selectChoices = page.getByRole("checkbox", {
       name: /Select for comparison|选择用于对照|比較対象に選択/,
     });
     await expect(compareButton).toBeDisabled();
-    await selectButtons.nth(0).click();
+    await selectChoices.nth(0).click();
     await expect(compareButton).toBeDisabled();
-    await selectButtons.nth(0).click();
+    await selectChoices.nth(0).click();
     await expect(compareButton).toBeEnabled();
-    await expect(selectButtons.nth(0)).toBeDisabled();
+    await expect(selectChoices.nth(0)).toBeDisabled();
     await compareButton.click();
     await expect(page.getByText(message)).toBeVisible();
-    await expect(page.getByRole("dialog", {
+    await expect(page.getByRole("region", {
       name: /Node Comparison|节点对照|ノード比較/,
     })).toBeHidden();
   }
 });
 
 test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
+  let journeyNodes: TimelineNodeFixture[] = [];
   let stage: "none" | "full" | "incremental" = "none";
   let incrementalPayload: Record<string, unknown> | null = null;
 
@@ -1385,7 +1034,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
           analysis_date: "2026-07-20",
           is_primary: true,
           rating: "Hold",
-          confidence: 0.65,
+          confidence: "medium",
           instrument_name: "NVIDIA Corporation",
           instrument_local_name: null,
           thesis: "Evidence is balanced.",
@@ -1441,6 +1090,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
       };
       const nodes = stage === "none" ? [] :
         stage === "full" ? [full] : [full, incremental];
+      journeyNodes = nodes as TimelineNodeFixture[];
       return route.fulfill({ json: cycleTimeline(
         "NVDA",
         nodes as TimelineNodeFixture[],
@@ -1455,7 +1105,7 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
       const run = makeRun(id, "succeeded", { ticker: "NVDA" });
       run.request = { ...run.request, research_kind: isIncremental ? "incremental" : "full",
         full_baseline_run_id: isIncremental ? "full-journey" : null };
-      return route.fulfill({ json: { run, result: result(id), attempts: [],
+      return route.fulfill({ json: { run: { ...run, research_kind: isIncremental ? "incremental" : "full", is_research_node: true, full_baseline_run_id: isIncremental ? "full-journey" : null }, research_node: journeyNodes.find(node => node.id === id) ?? null, result: result(id), attempts: [],
         evidence_status: { status: "sealed", digest: "fixture-digest", item_count: 1,
           table_count: 0, sealed_attempt: 1, sealed_at: timestamp } } });
     }
@@ -1480,30 +1130,10 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
     full_baseline_run_id: "full-journey" });
 
   await page.goto("/timelines/NVDA");
-  await expect(page.locator(".research-node-card.full")).toBeVisible();
-  await expect(page.locator(".research-node-card.incremental")).toBeVisible();
-  await page.getByText(/Update details|更新详情|更新詳細/).click();
-  await expect(
-    page.getByText(/Research Availability|研究可用性|リサーチ可用性/),
-  ).toBeVisible();
-  await expect(page.getByText("Current complete decision")).toBeVisible();
-  await expect(page.getByText("The bounded update cannot resolve attribution.")).toBeVisible();
-  await expect(
-    page.getByText(/Full research recommended|建议进行完整研究/).first(),
-  ).toBeVisible();
-  const warningGeometry = await page
-    .locator(".research-node-card.incremental .research-warning-block")
-    .evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        borderRadius: Number.parseFloat(style.borderRadius),
-        borderWidth: Number.parseFloat(style.borderTopWidth),
-        paddingLeft: Number.parseFloat(style.paddingLeft),
-        paddingRight: Number.parseFloat(style.paddingRight),
-      };
-    });
-  expect(warningGeometry.borderRadius).toBeGreaterThanOrEqual(9);
-  expect(warningGeometry.borderWidth).toBeGreaterThanOrEqual(1);
-  expect(warningGeometry.paddingLeft).toBeGreaterThanOrEqual(14);
-  expect(warningGeometry.paddingRight).toBeGreaterThanOrEqual(14);
+  await expect(page.locator(".history-node.full")).toBeVisible();
+  await expect(page.locator(".history-node.incremental")).toBeVisible();
+  await expect(page.getByText(/historical run did not record an analysis brief|此历史运行未记录分析简报/)).toBeVisible();
+  await page.getByRole("link", { name: /Full assessment|完整研究判断/ }).click();
+  await expect(page.getByRole("heading", { name: /Executive summary|执行摘要|エグゼクティブサマリー/ })).toBeVisible();
+  await expect(page.getByText(/Full research recommended|建议进行完整研究/).first()).toBeVisible();
 });

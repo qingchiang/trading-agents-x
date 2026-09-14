@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import Icon from "./Icon";
+import { createPortal } from "react-dom";
+import { WorkspaceNavigationActions, WorkspaceNavigationTarget } from "./ResearchWorkspace";
+import { useContext, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export type SectionNavigationEntry = {
   id: string;
   label: string;
+  level?: number;
 };
 
 export default function FloatingSectionNavigation({
@@ -26,33 +30,11 @@ export default function FloatingSectionNavigation({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const navigation = useContext(WorkspaceNavigationActions);
+  const workspaceTarget = useContext(WorkspaceNavigationTarget);
   const slotRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(() => readOpenState(storageKey));
-  const [external, setExternal] = useState(false);
 
-  useEffect(() => {
-    const slot = slotRef.current;
-    const reader = slot?.parentElement;
-    const sidebar = document.querySelector<HTMLElement>(".sidebar");
-    if (!slot || !reader) return;
-    const update = () => {
-      const readerLeft = reader.getBoundingClientRect().left;
-      const sidebarRight = sidebar?.getBoundingClientRect().right ?? 0;
-      setExternal(readerLeft - sidebarRight >= 218);
-    };
-    update();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(update);
-    observer?.observe(reader);
-    if (sidebar) observer?.observe(sidebar);
-    window.addEventListener("resize", update);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, []);
 
   if (entries.length === 0) return null;
   const toggle = () => {
@@ -61,13 +43,17 @@ export default function FloatingSectionNavigation({
     sessionStorage.setItem(storageKey, next ? "open" : "closed");
   };
 
-  return (
+  if (workspaceTarget !== undefined) return workspaceTarget ? createPortal(
+    <nav aria-label={ariaLabel} className="floating-navigation-items">{entries.map(entry => <button
+      type="button" key={entry.id} className={active === entry.id ? "active" : ""}
+      data-level={entry.level ?? 2} aria-current={active === entry.id ? ariaCurrent : undefined}
+      onClick={() => { onSelect(entry.id); navigation?.close(); }}>{entry.label}</button>)}</nav>, workspaceTarget) : null;
+
+  const content = (
     <>
       <div className="floating-navigation-slot" ref={slotRef}>
         <div
-          className={`floating-section-navigation ${open ? "open" : "collapsed"} ${
-            external ? "external" : "overlay"
-          }`}
+          className={`floating-section-navigation ${open ? "open" : "collapsed"} `}
         >
           {open ? (
             <nav aria-label={ariaLabel}>
@@ -80,7 +66,7 @@ export default function FloatingSectionNavigation({
                   aria-expanded="true"
                   onClick={toggle}
                 >
-                  <span aria-hidden="true">‹</span>
+                  <Icon name="close" />
                 </button>
               </header>
               <div className="floating-navigation-items">
@@ -89,7 +75,7 @@ export default function FloatingSectionNavigation({
                     type="button"
                     className={active === entry.id ? "active" : ""}
                     aria-current={active === entry.id ? ariaCurrent : undefined}
-                    onClick={() => onSelect(entry.id)}
+                    onClick={() => { onSelect(entry.id); navigation?.close(); }}
                     key={entry.id}
                   >
                     {entry.label}
@@ -105,7 +91,7 @@ export default function FloatingSectionNavigation({
               aria-expanded="false"
               onClick={toggle}
             >
-              <span aria-hidden="true">☰</span>
+              <Icon name="menu" />
             </button>
           )}
         </div>
@@ -122,6 +108,7 @@ export default function FloatingSectionNavigation({
       </label>
     </>
   );
+  return content;
 }
 
 function readOpenState(storageKey: string): boolean {

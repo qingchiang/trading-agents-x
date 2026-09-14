@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -88,7 +89,11 @@ export default function DeliberationView({
         label: numberedLabel(t("finalResearchOpinion"), index, decisions.length),
       }),
     );
-    return entries;
+    const reportEntries = (items: ResearchArtifact[]) => items.map(artifact => ({ id: `deliberation-report-${artifact.id}`, label: `${roleLabel(t, artifact.role)}${(artifact.round ?? 0) > 0 ? ` · ${t("round")} ${artifact.round}` : ""}`, level: 3 }));
+    return entries.flatMap(entry => {
+      const items = entry.id === "deliberation-case" ? cases : entry.id === "deliberation-risk" ? risks : entry.id.startsWith("deliberation-rebuttal-") ? (rebuttalsByRound.find(([round]) => entry.id === `deliberation-rebuttal-${round}`)?.[1] ?? []) : [];
+      return [entry, ...(items.length > 1 ? reportEntries(items) : [])];
+    });
   }, [agendas, briefs, cases, decisions, judges, rebuttalsByRound, risks, t]);
 
   if (visible.length === 0) {
@@ -111,7 +116,7 @@ export default function DeliberationView({
   );
 
   return (
-    <div className="deliberation-reading-layout">
+    <div className="deliberation-reading-layout" data-process-outline>
       <DeliberationNavigation entries={navigation} />
       <div className="deliberation-flow">
       {cases.length > 0 && (
@@ -124,13 +129,6 @@ export default function DeliberationView({
           <div className="case-comparison">
             {cases.map((artifact) => (
               <ArtifactFrame artifact={artifact} key={artifact.id}>
-                <span className={`case-role case-role-${artifact.content.role}`}>
-                  {t(
-                    artifact.content.role === "bull"
-                      ? "bullCase"
-                      : "bearCase",
-                  )}
-                </span>
                 {markdown(artifact.content.markdown)}
               </ArtifactFrame>
             ))}
@@ -177,15 +175,6 @@ export default function DeliberationView({
             {entries.map((artifact) => (
               <ArtifactFrame artifact={artifact} key={artifact.id}>
                 {markdown(artifact.content.markdown)}
-                <NavigationFields
-                  labels={[
-                    [
-                      t("addressedIssues"),
-                      artifact.content.addressed_issue_ids,
-                    ],
-                    [t("openIssues"), artifact.content.open_issue_ids],
-                  ]}
-                />
               </ArtifactFrame>
             ))}
           </div>
@@ -226,18 +215,6 @@ export default function DeliberationView({
             {risks.map((artifact) => (
               <ArtifactFrame artifact={artifact} key={artifact.id}>
                 {markdown(artifact.content.markdown)}
-                <NavigationFields
-                  labels={[
-                    [
-                      t("challengedIssues"),
-                      artifact.content.challenged_issue_ids,
-                    ],
-                    [
-                      t("unresolvedIssues"),
-                      artifact.content.unresolved_issue_ids,
-                    ],
-                  ]}
-                />
               </ArtifactFrame>
             ))}
           </div>
@@ -321,6 +298,8 @@ function DeliberationNavigation({
     if (!target) return;
     target.scrollIntoView?.({ behavior: "auto", block: "start" });
     target.focus({ preventScroll: true });
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
+    window.dispatchEvent(new Event("hashchange"));
     setActive(id);
   };
 
@@ -351,16 +330,13 @@ function ArtifactFrame({
 }) {
   const { t } = useTranslation();
   return (
-    <article className="artifact-card typed-artifact-card">
+    <article className="artifact-card typed-artifact-card" id={`deliberation-report-${artifact.id}`} tabIndex={-1}>
       <header className="artifact-header compact">
         <div>
-          <span className="artifact-stage">{artifact.stage}</span>
-          <h3>{humanize(artifact.role)}</h3>
+          <h3>{roleLabel(t, artifact.role)}</h3>
         </div>
         <small>
-          {t("round")} {artifact.round} · {t("attempt")} {artifact.attempt}
-          {" · "}
-          {artifact.prompt_version ?? "—"}
+          {(artifact.round ?? 0) > 0 ? `${t("round")} ${artifact.round}` : ""}
         </small>
       </header>
       <div className="artifact-body">{children}</div>
@@ -373,25 +349,6 @@ function StageHeading({ title }: { title: string }) {
     <div className="stage-heading">
       <h2>{title}</h2>
     </div>
-  );
-}
-
-function NavigationFields({
-  labels,
-}: {
-  labels: Array<[string, string[] | undefined]>;
-}) {
-  const visible = labels.filter(([, values]) => values && values.length > 0);
-  if (visible.length === 0) return null;
-  return (
-    <details className="artifact-navigation-fields">
-      <summary>Navigation</summary>
-      {visible.map(([label, values]) => (
-        <p key={label}>
-          <strong>{label}:</strong> {values?.join(", ")}
-        </p>
-      ))}
-    </details>
   );
 }
 
@@ -408,6 +365,7 @@ function typedArtifacts<T extends ResearchArtifact["content"]>(
 function isResearchCase(value: ResearchArtifact["content"]): value is ResearchCase {
   return (
     "role" in value &&
+    !("addressed_issue_ids" in value) &&
     "markdown" in value &&
     (value.role === "bull" || value.role === "bear")
   );
@@ -450,4 +408,9 @@ function isResearchDecision(
 
 function humanize(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function roleLabel(t: TFunction, role: string): string {
+  const keys: Record<string, string> = { bull: "bullCase", bear: "bearCase", moderator: "debateModerator", research_judge: "researchJudge", final_committee: "finalCommittee", integrated: "riskLenses", neutral: "riskLenses" };
+  return keys[role] ? t(keys[role]) : humanize(role);
 }

@@ -17,7 +17,6 @@ export type ReassessmentGroupKey =
 export interface ReassessmentGroup {
   key: ReassessmentGroupKey;
   entries: ReassessmentEntry[];
-  currentSnapshot: string[];
 }
 
 const groupOrder: ReassessmentGroupKey[] = [
@@ -34,7 +33,6 @@ const groupOrder: ReassessmentGroupKey[] = [
 
 export function groupReassessment(
   entries: ReassessmentEntry[],
-  current: ResearchDecision,
 ): ReassessmentGroup[] {
   const groups = new Map<ReassessmentGroupKey, ReassessmentEntry[]>();
   for (const entry of entries) {
@@ -46,7 +44,6 @@ export function groupReassessment(
     .map((key) => ({
       key,
       entries: groups.get(key) ?? [],
-      currentSnapshot: decisionGroupSnapshot(current, key),
     }));
 }
 
@@ -109,24 +106,4 @@ function reassessmentGroupKey(componentId: string): ReassessmentGroupKey {
   }
   if (componentId.startsWith("risk_review_adjustments.")) return "risk_review";
   return "other";
-}
-
-function decisionGroupSnapshot(
-  decision: ResearchDecision,
-  key: ReassessmentGroupKey,
-): string[] {
-  if (key === "core") return [decision.executive_summary, decision.thesis];
-  if (key === "catalysts") return decision.catalysts ?? [];
-  if (key === "risks") return decision.risks;
-  if (key === "invalidation") return decision.invalidation_conditions;
-  if (key === "risk_review") {
-    return (decision.risk_review_adjustments ?? []).map(
-      (adjustment) => adjustment.explanation,
-    );
-  }
-  if (key === "base" || key === "bull" || key === "bear") {
-    const scenario = decision.scenarios.find((candidate) => candidate.kind === key);
-    return scenario ? [scenario.outcome, ...scenario.core_assumptions] : [];
-  }
-  return [];
 }

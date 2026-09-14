@@ -515,7 +515,7 @@ test("lets a user choose an informative Full Baseline for Incremental research",
   );
 });
 
-test("recommends Incremental research and selects the primary baseline", async () => {
+test("defaults generic research to Full while selecting a baseline for optional updates", async () => {
   vi.mocked(api.baselineCandidates).mockResolvedValue({
     instrument: "NVDA",
     before: "2026-08-29",
@@ -535,7 +535,9 @@ test("recommends Incremental research and selects the primary baseline", async (
   const incremental = screen.getByRole("radio", {
     name: /Incremental research/,
   });
-  await waitFor(() => expect(incremental).toBeChecked());
+  await waitFor(() => expect(incremental).not.toBeChecked());
+  fireEvent.click(incremental);
+  await screen.findByRole("option", { name: /Primary Cycle · 2026-07-20/ });
   expect(
     screen.getByRole("option", {
       name: /Primary Cycle · 2026-07-20 · Overweight · High confidence/,
@@ -768,7 +770,7 @@ test("loads a terminal run as an editable template and preserves custom values",
   expect(screen.getByLabelText(/^Report language/)).toHaveValue(
     "Use concise Simplified Chinese",
   );
-  expect(screen.getByRole("link", { name: "source-run" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Execution details" })).toHaveAttribute(
     "href",
     "/runs/source-run",
   );
@@ -833,6 +835,7 @@ test("locks the update intent to Incremental fields and keeps the root Full base
   expect(screen.queryByText("Research profile")).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/^Quick model/)).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/^Quick reasoning/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Advanced configuration"));
   expect(screen.getByText("Update scope")).toBeVisible();
   expect(
     await screen.findByRole("option", {

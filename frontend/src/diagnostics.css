@@ -1,0 +1,65 @@
+/* Diagnostics share one surface hierarchy; detailed tables retain local scrolling. */
+.diagnostics-view { display: grid; gap: 20px; }
+.diagnostic-block { min-width: 0; padding: 24px; background: white; border: 1px solid var(--line); border-radius: 8px; }
+.diagnostic-block h2 { margin: 0 0 16px; font-size: 20px; }
+.diagnostic-block h3 { margin: 20px 0 12px; font-size: 17px; }
+.diagnostic-block p { line-height: 1.65; }
+.diagnostic-section-heading, .diagnostic-event header, .diagnostic-recovery header, .diagnostic-index-row header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; }
+.diagnostic-section-heading h2 { flex: 1; }
+.diagnostic-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px 24px; margin: 16px 0; }
+.diagnostic-fields div { min-width: 0; }
+.diagnostic-fields dt { color: var(--muted); font-size: 13px; margin-bottom: 5px; }
+.diagnostic-fields dd { margin: 0; overflow-wrap: anywhere; }
+.diagnostic-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 24px; }
+.diagnostic-models > section { border-top: 1px solid var(--line); }
+.diagnostic-models .diagnostic-fields { grid-template-columns: 1fr; }
+.diagnostic-index-row, .diagnostic-event, .diagnostic-recovery { padding: 16px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.diagnostic-index-row time, .diagnostic-event time, .diagnostic-recovery time { color: var(--muted); font-size: 13px; }
+.diagnostic-filters, .json-tools, .json-pagination { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; }
+.diagnostic-filters label { flex: 1 1 220px; }
+.diagnostic-block details > summary { cursor: pointer; line-height: 1.65; }
+.diagnostic-disclosure { margin: 16px 0; }
+.diagnostic-block.run-metrics { overflow: visible; }
+.diagnostic-block .metrics-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 16px 0; }
+.diagnostic-block .metrics-strip > div { background: white; border: 0; padding: 16px; min-width: 0; overflow-wrap: anywhere; }
+.diagnostic-block .metrics-strip strong { display: block; margin-top: 7px; color: var(--ink); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.diagnostic-block .metrics-strip span { display: block; color: var(--muted-2); font-size: 12px; font-weight: 400; }
+.diagnostic-block .metrics-observation-note { padding: 0; border: 0; }
+.diagnostic-block .role-metrics, .diagnostic-block .attempt-metrics { border: 0; }
+.diagnostic-block .role-metric-list { border-top: 1px solid var(--line); }
+.diagnostic-block .role-metric-group { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.diagnostic-block .role-metric-group > summary { padding: 12px 0; background: transparent; }
+.diagnostic-block .metric-summary-description { font-weight: 400; }
+.diagnostic-block .numeric-audit-appendix-body { padding: 0; }
+.diagnostic-block .numeric-audit-boundary { margin-top: 0; }
+.diagnostic-block .numeric-audit-omissions { margin: 16px 0; }
+.diagnostic-block .numeric-snapshot-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.diagnostic-block .numeric-snapshot-tabs button[aria-pressed=true] { background: var(--blue-soft); color: var(--blue-dark); }
+.json-record { margin: 12px 0; min-width: 0; }
+.json-viewer { margin-top: 12px; border: 1px solid var(--line); background: #f7f9fc; border-radius: 6px; padding: 16px; min-width: 0; }
+.json-tools { align-items: center; }
+.json-tools label:first-child { flex: 1 1 220px; }
+.json-tools .checkbox-label { display: flex; flex-direction: row; }
+.json-pagination { align-items: center; margin: 12px 0; }
+.json-pagination > span { margin-right: auto; font-size: 13px; color: var(--muted); }
+.json-code { margin: 0; padding: 12px 0; max-height: 560px; overflow: auto; white-space: pre; background: white; border: 1px solid var(--line); color: var(--ink); font: 13px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.json-code code { font: inherit; background: transparent; }
+.json-line { display: block; min-width: max-content; }
+.json-line-number { display: inline-block; width: 6ch; padding-right: 2ch; margin-right: 1ch; text-align: right; color: #68788e; user-select: none; border-right: 1px solid var(--line); }
+.json-line-current { background: #fff8df; }
+.json-code.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.json-code.wrap .json-line { min-width: 0; display: grid; grid-template-columns: 7ch minmax(0, 1fr); }
+.json-key { color: #1e559d; }
+.json-string { color: #216846; }
+.json-number { color: #86470f; }
+.json-boolean, .json-null { color: #755294; }
+.json-code mark { background: #ffe38b; color: #18243a; }
+@media (max-width: 700px) {
+  .diagnostic-block { padding: 16px; }
+  .diagnostic-block .metrics-strip { grid-template-columns: 1fr 1fr; }
+  .diagnostic-block .role-metric-group > summary { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .diagnostic-block .role-metric-name { grid-column: 1 / -1; }
+  .json-viewer { padding: 12px; }
+  .diagnostic-fields { grid-template-columns: 1fr; }
+  .diagnostic-event header, .diagnostic-recovery header { display: grid; gap: 6px; }
+}

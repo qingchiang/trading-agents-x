@@ -120,19 +120,15 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   const reportScroller = document.querySelector<HTMLElement>(".analyst-report");
   const reportHeading = screen.getByRole("heading", { name: "Market view" });
   expect(reportScroller).not.toBeNull();
-  reportScroller!.scrollTop = 40;
-  vi.spyOn(reportScroller!, "getBoundingClientRect").mockReturnValue({
-    top: 100,
-  } as DOMRect);
-  vi.spyOn(reportHeading, "getBoundingClientRect").mockReturnValue({
-    top: 260,
-  } as DOMRect);
+  reportHeading.scrollIntoView = vi.fn();
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Report section navigation" }),
     ).getByRole("button", { name: "Market view" }),
   );
-  expect(reportScroller!.scrollTop).toBe(184);
+  expect(reportHeading.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  expect(reportHeading).toHaveFocus();
+  expect(window.location.hash).toBe("#market-view");
   expect(screen.queryByText(evidenceRef)).not.toBeInTheDocument();
   const footnote = screen.getByRole("button", {
     name: `Open evidence ${evidenceRef}`,
@@ -149,7 +145,7 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   const openNavigation = screen.getByRole("button", {
     name: "Open navigation",
   });
-  expect(openNavigation).toHaveTextContent("☰");
+  expect(openNavigation.querySelector("svg")).not.toBeNull();
   expect(openNavigation).not.toHaveTextContent("On this report");
   fireEvent.click(openNavigation);
   expect(
@@ -261,7 +257,8 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "40–50 x" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Valuation assessment" })).toBeVisible();
+  expect(screen.getByText("40–50 x")).toBeVisible();
   expect(screen.getByText("7.25")).toBeVisible();
   expect(screen.queryByText("Unit unspecified")).not.toBeInTheDocument();
   const horizon = container.querySelector(".decision-horizon-summary");
@@ -414,6 +411,7 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
 
   expect(screen.getByRole("heading", { name: "Bull and bear cases" })).toBeVisible();
   expect(screen.getByText("Bull thesis.")).toBeVisible();
+  expect(screen.getAllByText("Demand concerns are addressable.")).toHaveLength(1);
   expect(screen.getByText("Bear thesis.")).toBeVisible();
   expect(screen.getAllByText("Is demand durable?")[0]).toBeVisible();
   expect(screen.getByText(/material · unresolved/)).toBeVisible();

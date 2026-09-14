@@ -6,7 +6,15 @@ from tradingagents.dataflows import y_finance
 
 
 def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeypatch):
+    from tradingagents.dataflows import symbol_utils
     from tradingagents.dataflows.source_observations import capture_observations
+
+    class MarketClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 5, 16, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr(symbol_utils, "datetime", MarketClock)
 
     class Stock:
         quarterly_cashflow = pd.DataFrame(

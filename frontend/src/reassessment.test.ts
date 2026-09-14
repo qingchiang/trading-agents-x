@@ -47,18 +47,9 @@ describe("reassessment mapping", () => {
         evidence_refs: [],
       },
     ] as Parameters<typeof groupReassessment>[0];
-    const current = {
-      ...decision,
-      risks: ["Current risk snapshot", "New risk"],
-    } as ResearchDecision;
-
-    const groups = groupReassessment(entries, current);
-
+    const groups = groupReassessment(entries);
     expect(groups.map((group) => group.key)).toEqual(["core", "risks", "base"]);
-    expect(groups.find((group) => group.key === "risks")?.currentSnapshot).toEqual([
-      "Current risk snapshot",
-      "New risk",
-    ]);
+    expect(groups.find(group => group.key === "risks")?.entries[0].reason).toBe("Removed");
     expect(
       baselineComponentText(
         decision,

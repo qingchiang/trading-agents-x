@@ -270,7 +270,10 @@ The Timeline Web API is cycle-shaped rather than a flat Node feed. A
 `ResearchTimeline` contains whole `cycles`; every cycle carries one Full
 `baseline` followed by its chronological `increments`. Pagination uses
 `cycle_limit` and `cycle_offset`, so a Full-rooted cycle is never divided
-between pages. The Primary cycle is returned first and other cycles are ordered
+between pages. Optional `focus_node_id` resolves a retained same-instrument Node
+to its complete cycle page and returns the resolved `cycle_offset`; missing or
+foreign Nodes return 404, and an explicitly focused Node excluded by the requested
+Trash state returns 409. The Primary cycle is returned first and other cycles are ordered
 by Full analysis date descending. This contract intentionally replaces the
 pre-redesign `nodes` envelope without a compatibility layer.
 `active_full_cycles` remains unpaginated and contains the compact decision
@@ -789,3 +792,43 @@ modules.
 - Routing: `tradingagents/dataflows/interface.py`
 - Japan/China: `tradingagents/dataflows/jp/`,
   `tradingagents/dataflows/cn/`
+
+### Research workspace presentation
+
+The Web library filters active Timeline summaries by optional `q` (instrument
+code or stored display names, case-insensitive) and `warning_only` before
+pagination. `total` counts the filtered set. `primary_head_run_id`,
+`primary_analysis_date`, rating, and confidence derive from the same Primary
+Cycle head; `latest_analysis_date` still describes the latest active research
+across cycles. These are derived reads and introduce no persistence migration.
+
+The instrument route `/timelines/:instrument?node=:id` shares the Run reader
+with legacy `/runs/:id` links. Selecting history does not select a Primary
+Cycle. Technical snapshots, recovery records, numeric audit appendices, and
+raw events are available under `view=diagnostics`; evidence and consequential
+limitations stay reachable from research reading. Presentation never rewrites
+stored reports or export products. The dashboard uses bounded summary and Run
+list requests, without loading individual reports.
+
+### Workspace summaries and cycle task groups
+
+Timeline summaries include the Primary baseline date and current thesis from the
+same Primary head used for its rating. `sort=recent_activity` orders instruments
+by the latest recorded completion time of active research; the default analysis-date
+ordering is unchanged. Latest completed run/cycle/date metadata remains separate
+from the Primary assessment, including when another cycle completed more recently.
+
+`GET /api/v1/run-groups` matches the existing task filters before paging complete
+groups. A committed Full baseline supplies the parent context even when only an
+Incremental task matches. Committed children and related uncommitted tasks occupy
+separate arrays. Independent Full tasks and Legacy runs are standalone groups.
+These reads do not load reports, Evidence or artifacts and create no new tables.
+
+`POST /api/v1/runs/lifecycle-preview` is a read-only ownership preview. It returns
+all affected records, immediate blockers and replacement Primary candidates.
+Trash/restore/purge accept optional `expected_affected_run_ids`; under the existing
+write transaction lock the repository recomputes ownership and rejects changed
+scope before any mutation. Existing callers may omit the field. Actual transition,
+compatibility and uniqueness validations remain authoritative at submission.
+Related uncommitted tasks never become owned nodes merely because they are grouped
+under a baseline in the UI. Restore retains the existing cascade provenance rules.

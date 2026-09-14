@@ -683,9 +683,17 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       latest_analysis_date: string;
+      latest_completed_analysis_date?: string | null;
+      latest_completed_cycle_id?: string | null;
+      latest_completed_run_id?: string | null;
+      latest_research_completed_at?: string | null;
+      primary_analysis_date?: string | null;
+      primary_baseline_date?: string | null;
       primary_confidence?: components["schemas"]["ResearchConfidenceLevel"] | null;
       primary_cycle_id?: string | null;
+      primary_head_run_id?: string | null;
       primary_rating?: components["schemas"]["ResearchRating"] | null;
+      primary_thesis?: string | null;
       timeline_warning?: boolean;
     };
     ResearchWarning: {
@@ -718,6 +726,7 @@ export interface components {
       status: components["schemas"]["RunStatus"];
     };
     RunBatchRequest: {
+      expected_affected_run_ids?: string[] | null;
       primary_replacements?: Record<string, string>;
       run_ids: string[];
     };
@@ -769,6 +778,24 @@ export interface components {
       run_id: string;
       sequence: number;
     };
+    RunGroupPage: {
+      items: components["schemas"]["RunGroupView"][];
+      limit: number;
+      offset: number;
+      total: number;
+    };
+    RunGroupView: {
+      baseline?: components["schemas"]["RunSummaryView"] | null;
+      cycle_warning?: boolean;
+      id: string;
+      instrument: string;
+      is_primary?: boolean;
+      kind: "cycle" | "standalone";
+      matched_run_ids?: string[];
+      related_tasks?: components["schemas"]["RunSummaryView"][];
+      research_runs?: components["schemas"]["RunSummaryView"][];
+      status_counts?: Record<string, number>;
+    };
     RunLifecycleImpact: {
       affected_run_ids?: string[];
       cascade_moved_run_ids?: string[];
@@ -776,6 +803,17 @@ export interface components {
       replacement_primary_cycle_id?: string | null;
       requested_run_id: string;
       research_kind?: "full" | "incremental" | null;
+    };
+    RunLifecyclePreview: {
+      action: "trash" | "restore" | "purge";
+      affected_run_ids: string[];
+      affected_runs: components["schemas"]["RunView"][];
+      blocked_reasons?: string[];
+      primary_replacements?: Record<string, components["schemas"]["PrimaryCycleCandidate"][]>;
+    };
+    RunLifecyclePreviewRequest: {
+      action: "trash" | "restore" | "purge";
+      run_ids: string[];
     };
     RunMetrics: {
       cache_hit_input_tokens?: number;

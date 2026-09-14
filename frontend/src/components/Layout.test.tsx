@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 
 import i18n from "../i18n";
 import { Router } from "../router";
@@ -22,20 +22,20 @@ function renderLayout(initialPath = "/") {
 
 test("distinguishes new-run and run-management navigation", () => {
   const newRun = renderLayout("/runs/new");
-  expect(screen.getByRole("link", { name: "New run" })).toHaveClass("active");
-  expect(screen.getByRole("link", { name: "Runs" })).not.toHaveClass("active");
+  expect(screen.getByRole("link", { name: "New research" })).toHaveAttribute("href", "/runs/new");
+  expect(screen.getByRole("link", { name: "Run tasks" })).not.toHaveClass("active");
   newRun.unmount();
 
   const runDetail = renderLayout("/runs/run-1");
-  expect(screen.getByRole("link", { name: "Runs" })).toHaveClass("active");
-  expect(screen.getByRole("link", { name: "New run" })).not.toHaveClass(
+  expect(screen.getByRole("link", { name: "Run tasks" })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: "New research" })).not.toHaveClass(
     "active",
   );
   runDetail.unmount();
 
   renderLayout("/timelines/7203.T");
   expect(
-    screen.getByRole("link", { name: "Research Timelines" }),
+    screen.getByRole("link", { name: "Research library" }),
   ).toHaveClass("active");
 });
 
@@ -98,4 +98,21 @@ test("closes the mobile drawer after navigation, backdrop, or Escape", () => {
   open();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(shell).not.toHaveClass("sidebar-open");
+});
+
+
+test("removes closed mobile navigation from accessibility and releases its modal on desktop resize", () => {
+  let changed!: (event: { matches: boolean }) => void;
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: (_: string, fn: typeof changed) => { changed = fn; }, removeEventListener() {} }));
+  try {
+    renderLayout();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(document.body.style.overflow).toBe("hidden");
+    act(() => changed({ matches: false }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  } finally { vi.unstubAllGlobals(); }
 });

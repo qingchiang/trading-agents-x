@@ -1,15 +1,16 @@
 import { PropsWithChildren, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import Icon from "./Icon";
+import { useModal } from "./Interaction";
 import i18n from "../i18n";
 import { Link, usePathname } from "../router";
 
 const sidebarPreferenceKey = "tradingagents-sidebar-collapsed";
 const nav = [
-  { to: "/", key: "dashboard", icon: "⌁" },
-  { to: "/runs/new", key: "newRun", icon: "+" },
-  { to: "/runs", key: "runManagement", icon: "≡" },
-  { to: "/timelines", key: "researchTimelines", icon: "⌘" },
-  { to: "/settings", key: "settings", icon: "◇" },
+  { to: "/", key: "dashboard" },
+  { to: "/timelines", key: "researchTimelines" },
+  { to: "/runs", key: "runManagement" },
+  { to: "/settings", key: "settings" },
 ];
 
 export default function Layout({ children }: PropsWithChildren) {
@@ -18,7 +19,17 @@ export default function Layout({ children }: PropsWithChildren) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(sidebarPreferenceKey) === "true",
   );
+  const [compact, setCompact] = useState(() => window.matchMedia?.("(max-width: 820px)").matches ?? false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const sidebarRef = useModal<HTMLElement>(drawerOpen, () => setDrawerOpen(false));
+
+  useEffect(() => {
+    const query = window.matchMedia?.("(max-width: 820px)");
+    if (!query) return;
+    const resize = (event: MediaQueryListEvent) => { setCompact(event.matches); if (!event.matches) setDrawerOpen(false); };
+    query.addEventListener("change", resize);
+    return () => query.removeEventListener("change", resize);
+  }, []);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -29,6 +40,11 @@ export default function Layout({ children }: PropsWithChildren) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [drawerOpen]);
 
+  useEffect(() => {
+    const refresh = () => setCollapsed(localStorage.getItem(sidebarPreferenceKey) === "true");
+    window.addEventListener("tradingagents:preferences", refresh);
+    return () => window.removeEventListener("tradingagents:preferences", refresh);
+  }, []);
   const changeLocale = (locale: string) => {
     localStorage.setItem("tradingagents-locale", locale);
     void i18n.changeLanguage(locale);
@@ -48,6 +64,7 @@ export default function Layout({ children }: PropsWithChildren) {
         .filter(Boolean)
         .join(" ")}
     >
+      <header className="mobile-topbar">
       <button
         type="button"
         className="mobile-menu-button"
@@ -56,16 +73,18 @@ export default function Layout({ children }: PropsWithChildren) {
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
       >
-        ☰
+        <Icon name="menu" />
       </button>
-      <aside className="sidebar" id="primary-sidebar">
+      <strong>TradingAgentsX</strong>
+      </header>
+      <aside className="sidebar" inert={compact && !drawerOpen} aria-hidden={compact && !drawerOpen || undefined} id="primary-sidebar" ref={sidebarRef} role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen || undefined} aria-label={t("primaryNavigation")}>
         <button
           type="button"
           className="mobile-sidebar-close"
           aria-label={t("closeNavigation")}
           onClick={() => setDrawerOpen(false)}
         >
-          ×
+          <Icon name="close" />
         </button>
         <div className="brand">
           <div className="brand-mark">TX</div>
@@ -74,6 +93,7 @@ export default function Layout({ children }: PropsWithChildren) {
             <small>{t("brandTagline")}</small>
           </div>
         </div>
+        <Link className="button primary global-new-research" aria-label={t("newRun")} to="/runs/new" onClick={() => setDrawerOpen(false)}><Icon name="newRun" /><span className="nav-label">{t("newRun")}</span></Link>
         <nav aria-label={t("primaryNavigation")}>
           {nav.map((item) => (
             <Link
@@ -84,7 +104,7 @@ export default function Layout({ children }: PropsWithChildren) {
               title={collapsed ? t(item.key) : undefined}
             >
               <span className="nav-icon" aria-hidden="true">
-                {item.icon}
+                <Icon name={item.key} />
               </span>
               <span className="nav-label">{t(item.key)}</span>
             </Link>
@@ -97,7 +117,7 @@ export default function Layout({ children }: PropsWithChildren) {
           aria-expanded={!collapsed}
           onClick={toggleCollapsed}
         >
-          <span aria-hidden="true">{collapsed ? "›" : "‹"}</span>
+          <Icon name="menu" />
           <span className="nav-label">
             {t(collapsed ? "expandSidebar" : "collapseSidebar")}
           </span>

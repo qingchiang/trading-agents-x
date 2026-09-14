@@ -1,0 +1,1 @@
+function i(t,r){if(!t)return"—";const e=/^\d{4}-\d{2}-\d{2}$/.test(t),n=new Date(e?`${t}T00:00:00Z`:t);return Number.isFinite(n.getTime())?new Intl.DateTimeFormat(r,{year:"numeric",month:"short",day:"numeric",timeZone:"UTC",...e?{}:{hour:"2-digit",minute:"2-digit",timeZoneName:"short"}}).format(n):t}export{i as f};

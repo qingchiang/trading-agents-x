@@ -66,10 +66,10 @@ beforeEach(async () => {
 test("shows configured and unavailable providers without exposing secrets", async () => {
   render(<Settings />);
 
-  expect(await screen.findByText("OpenAI")).toBeInTheDocument();
+  expect(await screen.findAllByText("OpenAI")).toHaveLength(2);
   expect(screen.getByText("Anthropic")).toBeInTheDocument();
   expect(screen.getByText("Ollama")).toBeInTheDocument();
-  expect(screen.getAllByText("openai")).toHaveLength(2);
+  expect(screen.getAllByText("openai")).toHaveLength(1);
   expect(screen.getAllByText("Configured")).toHaveLength(1);
   expect(screen.getAllByText("Missing")).toHaveLength(1);
   expect(screen.getAllByText("Ready")).toHaveLength(1);
@@ -77,4 +77,13 @@ test("shows configured and unavailable providers without exposing secrets", asyn
   expect(screen.getByText("Trash retention (days)")).toBeVisible();
   expect(screen.queryByText("trash retention days")).not.toBeInTheDocument();
   expect(screen.queryByText("private-key")).not.toBeInTheDocument();
+});
+
+test("keeps interface preferences available on configuration failure and retries", async () => {
+  vi.mocked(api.capabilities).mockRejectedValueOnce(new Error("Offline"));
+  render(<Settings />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Offline");
+  expect(screen.getByRole("heading", { name: "Interface preferences" })).toBeVisible();
+  screen.getByRole("button", { name: "Try again" }).click();
+  expect(await screen.findByText("Anthropic")).toBeVisible();
 });
