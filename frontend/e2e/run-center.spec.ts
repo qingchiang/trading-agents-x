@@ -489,7 +489,6 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
   await page.getByRole("link", { name: "Run & diagnostics" }).click();
-  await page.getByText(/^Calculation records ·/).click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
   await expect(

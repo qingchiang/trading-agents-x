@@ -74,7 +74,7 @@ test("reads diagnostics directly and searches and downloads complete JSON beyond
   });
   await page.goto('/runs/full?view=diagnostics');
   await expect(page.getByRole('heading', { name: 'Run metrics and diagnostics' })).toBeVisible();
-  await expect(page.getByText('Audit not recorded')).toBeVisible();
+  await expect(page.getByText('Audit not recorded', { exact: true })).toBeVisible();
   await expect(page.getByText('quick-recorded', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Raw record: Configuration snapshot', exact: true }).click();
   const viewer = page.getByRole('region', { name: 'Raw record: Configuration snapshot', exact: true });
@@ -98,5 +98,46 @@ test("reads diagnostics directly and searches and downloads complete JSON beyond
   for (const width of [390, 768, 1080, 1440, 1920, 2560]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  }
+});
+
+test('preserves baseline audit problems and evidence through incremental diagnostics at every viewport', async ({ page }) => {
+  const respond = workspaceFixture();
+  await page.addInitScript(() => localStorage.setItem('tradingagents-locale', 'en'));
+  await page.route('**/api/v1/**', route => {
+    const url = new URL(route.request().url());
+    const value = structuredClone(respond(url, route.request().method())) as Record<string, any>;
+    if (url.pathname === '/api/v1/runs/full') {
+      const calculation = value.result.decision.calculation_records[0];
+      value.result.numeric_audit = { status: 'complete', requirement_checks: [{ requirement_id: 'display-check', calculation_id: calculation.id, component_path: 'thesis', label: calculation.decision_uses[0].label, stated_value: 1000, canonical_result: 100, comparison_result: 100, comparison_difference: -900, rounded_stated_value: 1000, rounded_canonical_result: 100, fraction_digits: 2, display_scale: 'base', unit: 'USD', formula: calculation.formula, inputs: calculation.inputs, input_evidence_refs: calculation.input_evidence_refs, calculation_status: 'verified', display_status: 'mismatched', issue_codes: ['numeric.display_mismatch'] }], omitted_components: [], snapshots: [] };
+    }
+    if (url.pathname === '/api/v1/runs/increment') {
+      value.result.numeric_audit = null;
+      value.result.evidence.items = [];
+    }
+    return route.fulfill({ json: value });
+  });
+  for (const [width, height] of [[390,844], [768,1024], [1080,1920], [1440,1000], [1920,1080], [2560,1440]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/runs/increment?view=diagnostics');
+    const audit = page.locator('.numeric-audit-appendix');
+    await expect(audit.getByText('Audit not recorded', {exact: true})).toBeVisible();
+    await expect(audit.getByRole('heading', { name: 'Baseline audit result', exact: true })).toBeVisible();
+    await expect(audit.getByText('Display mismatched')).toBeVisible();
+    const row = audit.locator('article').first();
+    expect((await row.boundingBox())!.height, 'Default audit row stays compact while retaining its status and comparison values').toBeLessThan(260);
+    await row.getByText('Formula and Evidence', { exact: true }).click();
+    const trigger = row.getByRole('button', { name: /Open evidence/ }).last();
+    await trigger.click();
+    await expect(page.getByRole('dialog')).toContainText('Full baseline');
+    await expect(page.getByRole('dialog')).toContainText('100 USD');
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+    await expect(trigger).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    await audit.getByRole('link', { name: /View baseline audit/ }).click();
+    await expect(page).toHaveURL(/runs\/full\?view=diagnostics#numeric-audit/);
+    await expect(page.getByRole('heading', { name: 'Current audit result', exact: true })).toBeVisible();
+    await expect(page.getByText('Display mismatched')).toBeVisible();
+    await expect(page.locator('#numeric-audit > header')).toBeInViewport();
   }
 });

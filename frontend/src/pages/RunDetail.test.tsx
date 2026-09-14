@@ -643,14 +643,14 @@ test("shows requirement comparisons separately from candidate drafts", async () 
     screen.getByText(
       "The calculation is valid, but the decision text or display scale does not match.",
     ),
-  ).toBeVisible();
+  ).not.toBeVisible();
   expect(screen.queryByText("price / eps")).not.toBeVisible();
-  fireEvent.click(screen.getByText("Formula, inputs, and Evidence"));
+  fireEvent.click(within(screen.getByText("Forward PE", { selector: "strong" }).closest("article")!).getByText("Formula and Evidence"));
   expect(screen.getByText("price / eps")).toBeVisible();
   expect(screen.getByText("numeric.requirement.req_forward_pe.result_mismatch")).toBeVisible();
 });
 
-test("formats verified calculations before exposing formula audit fields", async () => {
+test("formats recorded calculations without inventing a per-item audit", async () => {
   render(
     <Router initialPath="/runs/run-1?view=diagnostics">
       <RunDetail />
@@ -658,22 +658,15 @@ test("formats verified calculations before exposing formula audit fields", async
   );
 
   await screen.findByRole("heading", { name: "Decision-critical calculation audit" });
-  fireEvent.click(screen.getByText(/Calculation records ·/));
   const calculation = screen.getAllByText("Observed market anchor")[0].closest("article");
   expect(calculation).not.toBeNull();
-  expect(within(calculation!).getByText("Calculation verified")).toBeVisible();
-  expect(within(calculation!).getByText("100 USD")).toBeVisible();
-  expect(within(calculation!).getByText("2026-07-24")).toBeVisible();
+  expect(within(calculation!).getByText("Per-item audit not recorded")).toBeVisible();
+  expect(within(calculation!).getByText("100 USD", { selector: "strong" })).toBeVisible();
+  expect(within(calculation!).getByText("Jul 24, 2026")).not.toBeVisible();
   expect(within(calculation!).getByText("calc_market_reference")).not.toBeVisible();
-  within(calculation!)
-    .getAllByText("close", { exact: true })
-    .forEach((value) => expect(value).not.toBeVisible());
-
   fireEvent.click(within(calculation!).getByText("Formula and Evidence"));
   expect(within(calculation!).getByText("calc_market_reference")).toBeVisible();
-  within(calculation!)
-    .getAllByText("close", { exact: true })
-    .forEach((value) => expect(value).toBeVisible());
+  expect(within(calculation!).getByRole('button', { name: 'Raw record: Inputs' })).toBeVisible();
 });
 
 test("opens a locked Full clone template instead of rerunning immediately", async () => {
@@ -864,7 +857,6 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   await screen.findByText("Decision-critical calculation audit");
-  fireEvent.click(screen.getByText(/Calculation records ·/));
   expect(screen.getByText("Observed market anchor")).toBeVisible();
   expect(screen.getByText("calc_market_reference")).not.toBeVisible();
 
@@ -1810,4 +1802,38 @@ test("filters evidence locally by text and source without changing research", as
   fireEvent.change(search, { target: { value: "" } });
   expect(document.querySelectorAll(".evidence-card").length).toBeGreaterThan(0);
   expect(screen.getByRole("combobox", { name: "Source filter" })).toBeVisible();
+});
+
+test('retries unavailable baseline audit data and opens inherited calculation evidence in diagnostics', async () => {
+  const incremental = structuredClone(detail) as RunDetailType;
+  incremental.run.id = 'increment-audit';
+  incremental.run.research_kind = 'incremental';
+  incremental.run.full_baseline_run_id = 'baseline-audit';
+  incremental.result!.numeric_audit = null;
+  const baseline = structuredClone(detail) as RunDetailType;
+  baseline.run.id = 'baseline-audit';
+  baseline.run.research_kind = 'full';
+  incremental.result!.evidence!.items = [];
+  let available = false;
+  vi.mocked(api.run).mockImplementation(async id => {
+    if (id === 'baseline-audit') {
+      if (!available) throw new Error('Baseline temporarily unavailable');
+      return baseline;
+    }
+    return incremental;
+  });
+  render(<Router initialPath="/runs/increment-audit?view=diagnostics"><RunDetail /></Router>);
+  expect(await screen.findByText('Full baseline audit and evidence could not be loaded. Current records remain available.')).toBeVisible();
+  available = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await screen.findAllByText('Calculation record unchanged from full baseline');
+  const row = document.querySelector('.numeric-audit-appendix article')!;
+  fireEvent.click(within(row as HTMLElement).getByText('Formula and Evidence'));
+  const source = within(row as HTMLElement).getByRole('button', { name: /Open evidence/ });
+  source.focus();
+  fireEvent.click(source);
+  expect(await screen.findByRole('dialog')).toHaveTextContent('Full baseline');
+  expect(screen.getByRole('dialog')).toHaveTextContent('Close: 100 USD');
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(source).toHaveFocus();
 });

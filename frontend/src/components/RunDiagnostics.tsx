@@ -1,23 +1,20 @@
 import { useTranslation } from "react-i18next";
 import type { RunDetail, RunEvent, ResearchArtifact, EvidenceBundle } from "../api/client";
-import type { EvidenceReferenceIndex } from "../evidence";
 import { formatResearchDate } from "../researchDate";
 import { researchLocation } from "../researchLinks";
 import { Link } from "../router";
-import NumericAuditAppendixView from "./NumericAuditAppendixView";
+import ResearchNumericAudit from "./ResearchNumericAudit";
 import RunMetricsPanel from "./RunMetricsPanel";
 import StatusBadge from "./StatusBadge";
 import JsonRecord from "./JsonRecord";
 import DiagnosticEvents from "./DiagnosticEvents";
 import DiagnosticSnapshot from "./DiagnosticSnapshot";
 
-export default function RunDiagnostics({ detail, events, artifacts, evidence, evidenceIndex, onEvidence }: {
+export default function RunDiagnostics({ detail, events, artifacts, evidence }: {
   detail: RunDetail; events: RunEvent[]; artifacts: ResearchArtifact[]; evidence?: EvidenceBundle | null;
-  evidenceIndex: EvidenceReferenceIndex; onEvidence: (ref: string) => void;
 }) {
   const { t, i18n } = useTranslation();
   const { run, result, research_node: node } = detail;
-  const decision = result?.decision;
   const bundle = evidence ?? result?.evidence;
   const reports = result?.reports ?? {};
   const reading = (view: string, report?: string, hash?: string) => {
@@ -39,7 +36,7 @@ export default function RunDiagnostics({ detail, events, artifacts, evidence, ev
       <JsonRecord label={t('diagnosticOverview')} value={run} />
     </section>
     <RunMetricsPanel metrics={run.metrics} attempts={detail.attempts ?? []} events={events} artifacts={artifacts} />
-    <NumericAuditAppendixView appendix={result?.numeric_audit} calculationRecords={decision?.calculation_records ?? []} calculationUses={new Map()} evidenceIndex={evidenceIndex} onEvidence={onEvidence} />
+    <ResearchNumericAudit detail={detail} evidence={evidence} />
     <section className="diagnostic-block">
       <h2>{t('diagnosticRecoveries')}</h2>
       {result?.recoveries?.length ? result.recoveries.map((item, index) => <article className="diagnostic-recovery" key={`${item.node}:${item.attempt}:${index}`}>

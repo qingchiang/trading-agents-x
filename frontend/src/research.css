@@ -824,15 +824,6 @@ details[open] > summary .details-chevron {
   font-size: 13px;
 }
 
-.numeric-other-calculations {
-  margin-top: 18px;
-}
-
-.numeric-other-calculations h3 {
-  margin: 0 0 8px;
-  font-size: 12px;
-}
-
 .numeric-requirement-grid {
   display: grid;
   gap: 10px;
@@ -853,6 +844,7 @@ details[open] > summary .details-chevron {
 
 .numeric-requirement-check > header {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
@@ -893,7 +885,7 @@ details[open] > summary .details-chevron {
 
 .numeric-requirement-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 8px 14px;
   margin: 12px 0 0;
 }
@@ -1341,40 +1333,31 @@ details[open] > summary .details-chevron {
   font-size: 15px;
 }
 
-.calculation-record-list {
-  display: grid;
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.calculation-record-list article {
-  padding: 14px 16px;
-  background: #fafbfd;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-}
-
-.calculation-record-list article > header {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
+/* Audit and calculation-only entries share the same row hierarchy. */
 .calculation-record-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px 20px;
+  margin: 16px 0;
 }
-
-.calculation-record-summary > div {
-  display: flex;
-  gap: 6px;
-}
-
-.calculation-record-list dd {
-  margin: 0;
-}
+.calculation-record-summary > div { min-width: 0; }
+.calculation-record-summary dt { font-size: 13px; color: var(--muted); }
+.calculation-record-summary dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.audit-record-source { color: var(--muted); font-size: 13px; }
+.audit-baseline-context { display: grid; gap: 8px; font-size: 14px; }
+.audit-entry-checks { margin-top: 8px; }
+.audit-value-unit { white-space: nowrap; }
+.audit-entry-checks h4 { margin: 0; font-size: 13px; font-weight: 400; color: var(--muted); }
+.audit-check-heading { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.audit-entry-checks .numeric-requirement-statuses { justify-content: flex-start; }
+.audit-entry-checks > div + div { margin-top: 12px; }
+.audit-entry-checks .numeric-requirement-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; }
+.audit-recorded-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin-top: 8px; font-size: 14px; }
+.audit-recorded-summary .secondary-line { margin: 0; }
+.numeric-calculation-detail[open] > summary { margin-bottom: 12px; }
+.numeric-requirement-statuses.display-mismatched span:last-child,
+.numeric-requirement-statuses.calculation-invalid span:first-child,
+.numeric-requirement-statuses.calculation-missing span:first-child { color: #72520f; background: #fff3c4; }
 
 .numeric-calculation-detail,
 .numeric-raw-candidate {

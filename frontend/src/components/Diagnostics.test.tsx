@@ -7,7 +7,7 @@ import { buildEvidenceReferenceIndex } from "../evidence";
 
 test("shows recorded zero separately from missing metrics and never invents a completed audit", async () => {
   await i18n.changeLanguage('en');
-  const { container } = render(<><RunMetricsPanel metrics={{ llm_calls: 0 }} attempts={[]} events={[]} artifacts={[]} /><NumericAuditAppendixView calculationRecords={[]} calculationUses={new Map()} evidenceIndex={buildEvidenceReferenceIndex(null)} onEvidence={() => {}} /></>);
+  const { container } = render(<><RunMetricsPanel metrics={{ llm_calls: 0 }} attempts={[]} events={[]} artifacts={[]} /><NumericAuditAppendixView calculationRecords={[]} evidenceIndex={buildEvidenceReferenceIndex(null)} onEvidence={() => {}} /></>);
   const calls = screen.getByText('LLM calls').parentElement!;
   expect(within(calls).getByText('0')).toBeVisible();
   const tools = screen.getByText('Tool calls').parentElement!;

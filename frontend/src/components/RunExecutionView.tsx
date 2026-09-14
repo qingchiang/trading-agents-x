@@ -1,7 +1,6 @@
-import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
-import { buildEvidenceReferenceIndex } from "../evidence";
 import { researchLocation } from "../researchLinks";
 import { Link } from "../router";
 import { useReadingPosition } from "../useReadingPosition";
@@ -14,7 +13,6 @@ import RunActivityView from "./RunActivityView";
 import RunLifecycleDialog from "./RunLifecycleDialog";
 
 const RunDiagnostics = lazy(() => import("./RunDiagnostics"));
-const EvidenceSourceDrawer = lazy(() => import("./EvidenceSourceDrawer"));
 
 export default function RunExecutionView({ record, diagnostics }: { record: RunRecord; diagnostics: boolean }) {
   const { t } = useTranslation();
@@ -23,8 +21,6 @@ export default function RunExecutionView({ record, diagnostics }: { record: RunR
   const lock = useRef(false);
   const [notice, setNotice] = useState("");
   const [restore, setRestore] = useState(false);
-  const [source, setSource] = useState<string | null>(null);
-  const index = useMemo(() => buildEvidenceReferenceIndex(record.evidence), [record.evidence]);
   useReadingPosition(`execution:${detail?.run.id}:${diagnostics}`);
   if (!detail) return null;
   const { run } = detail;
@@ -58,8 +54,7 @@ export default function RunExecutionView({ record, diagnostics }: { record: RunR
     {error && <p className="alert" role="alert">{error}<button className="button" onClick={() => void refresh()}>{t("retryLoad")}</button></p>}
     {run.error_message && <p className="alert">{run.error_message}</p>}
     <nav className="view-tabs" aria-label={t("executionDetails")}><Link id="run-tab-timeline" to={`/runs/${encodeURIComponent(run.id)}?view=timeline`} aria-current={!diagnostics ? "page" : undefined}>{t("activity")}</Link><Link id="run-tab-diagnostics" to={`/runs/${encodeURIComponent(run.id)}?view=diagnostics`} aria-current={diagnostics ? "page" : undefined}>{t("diagnostics")}</Link></nav>
-    {diagnostics ? <Suspense fallback={<p role="status">{t("loading")}</p>}><RunDiagnostics detail={detail} events={events} artifacts={artifacts} evidence={record.evidence} evidenceIndex={index} onEvidence={setSource} /></Suspense> : <RunActivityView events={events} elapsedSeconds={run.metrics?.wall_time_seconds} researchKind={run.research_kind === "incremental" ? "incremental" : "full"} currentAttempt={run.attempt} runStatus={run.status} />}
+    {diagnostics ? <Suspense fallback={<p role="status">{t("loading")}</p>}><RunDiagnostics detail={detail} events={events} artifacts={artifacts} evidence={record.evidence} /></Suspense> : <RunActivityView events={events} elapsedSeconds={run.metrics?.wall_time_seconds} researchKind={run.research_kind === "incremental" ? "incremental" : "full"} currentAttempt={run.attempt} runStatus={run.status} />}
     {restore && <RunLifecycleDialog action="restore" runIds={[run.id]} onClose={() => setRestore(false)} onDone={() => { setRestore(false); void refresh(); }} />}
-    {source && <Suspense fallback={null}><EvidenceSourceDrawer evidenceRef={source} evidenceIndex={index} onClose={() => setSource(null)} /></Suspense>}
   </section>;
 }

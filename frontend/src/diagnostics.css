@@ -32,7 +32,6 @@
 .diagnostic-block .metric-summary-description { font-weight: 400; }
 .diagnostic-block .numeric-audit-appendix-body { padding: 0; }
 .diagnostic-block .numeric-audit-boundary { margin-top: 0; }
-.diagnostic-block .numeric-requirement-card { box-shadow: none; background: #f8fafc; }
 .diagnostic-block .numeric-audit-omissions { margin: 16px 0; }
 .diagnostic-block .numeric-snapshot-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
 .diagnostic-block .numeric-snapshot-tabs button[aria-pressed=true] { background: var(--blue-soft); color: var(--blue-dark); }

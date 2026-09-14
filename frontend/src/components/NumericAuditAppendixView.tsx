@@ -12,17 +12,30 @@ import type { EvidenceReferenceIndex } from "../evidence";
 import { formatDecisionNumber } from "../numericDisplay";
 import EvidenceLinks from "./EvidenceLinks";
 import JsonRecord from "./JsonRecord";
+import { Link } from "../router";
+import { formatResearchDate } from "../researchDate";
+
+export type AuditBaseline = { runId: string; date: string; calculations: CalculationRecord[]; appendix?: DecisionNumericAuditAppendix | null };
+
+// Compare complete persisted records, including inputs, dates and limitations, not only IDs.
+function sameRecord(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const a = Object.entries(left), b = Object.entries(right);
+  return a.length === b.length && a.every(([key, value]) => Object.prototype.hasOwnProperty.call(right, key) && sameRecord(value, (right as Record<string, unknown>)[key]));
+}
 
 export default function NumericAuditAppendixView({
   appendix,
   calculationRecords,
-  calculationUses,
+  baseline,
   evidenceIndex,
   onEvidence,
 }: {
   appendix?: DecisionNumericAuditAppendix | null;
   calculationRecords: CalculationRecord[];
-  calculationUses: Map<string, string[]>;
+  baseline?: AuditBaseline;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
 }) {
@@ -45,12 +58,15 @@ export default function NumericAuditAppendixView({
       check.calculation_id ? [check.calculation_id] : [],
     ),
   );
-  const otherCalculations = calculationRecords.filter(
-    (calculation) => !checkedCalculationIds.has(calculation.id),
-  );
+  const rows = [
+    ...checks.map(check => ({ check, calculation: calculationRecords.find(item => item.id === check.calculation_id), key: check.requirement_id })),
+    ...calculationRecords.filter(item => !checkedCalculationIds.has(item.id)).map(calculation => ({ check: undefined, calculation, key: calculation.id })),
+  ];
+  const inherited = (calculation?: CalculationRecord) => !!calculation && !!baseline?.calculations.some(item => sameRecord(item, calculation));
+  const hasInherited = rows.some(row => inherited(row.calculation));
 
   return (
-    <section className="diagnostic-block numeric-audit-appendix">
+    <section className="diagnostic-block numeric-audit-appendix" id="numeric-audit">
       <header className="diagnostic-section-heading">
         <h2>{t("decisionRequirementAudit")}</h2>
         <span className="details-summary-meta">
@@ -62,35 +78,17 @@ export default function NumericAuditAppendixView({
         </span>
       </header>
       <div className="numeric-audit-appendix-body">
-        <p className="numeric-audit-boundary" role="note">
-          {t(
-            checks.length > 0
-              ? "numericRequirementBoundary"
-              : hasSnapshots
-                ? "unverifiedNumericBoundary"
-                : omissions.length > 0
-                  ? "numericAuditGapBoundary"
-                  : "formalCalculationBoundary",
-          )}
-        </p>
-
-        {checks.length > 0 ? (
-          <RequirementChecks checks={checks} language={i18n.language} />
-        ) : (
-          <p className="numeric-requirement-empty">
-            {t("numericRequirementNotRecorded")}
-          </p>
-        )}
-
-        {otherCalculations.length > 0 && <details><summary>{t("auditCalculations")} · {otherCalculations.length}</summary>
-          <OtherCalculations
-            calculations={otherCalculations}
-            calculationUses={calculationUses}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-            language={i18n.language}
-          />
-        </details>}
+        <p className="numeric-audit-boundary" role="note">{t(checks.length ? 'numericRequirementBoundary' : omissions.length ? 'numericAuditGapBoundary' : hasSnapshots ? 'unverifiedNumericBoundary' : 'auditNoCurrentChecks')}</p>
+        {baseline && <p className="audit-baseline-context"><Link className="text-link" to={`/runs/${encodeURIComponent(baseline.runId)}?view=diagnostics#numeric-audit`}>{t('viewBaselineAudit')} · {formatResearchDate(baseline.date, i18n.language)}</Link>{hasInherited && <span>{t('baselineAuditScope')}</span>}</p>}
+        {rows.length ? <section className="numeric-requirement-checks">
+          <h3>{t('auditCalculations')} · {rows.length}</h3>
+          <div className="numeric-requirement-grid calculation-record-list">{rows.map(({ check, calculation, key }) => {
+            const fromBaseline = inherited(calculation);
+            const baselineChecks = fromBaseline ? baseline?.appendix?.requirement_checks?.filter(item => item.calculation_id === calculation?.id) ?? [] : [];
+            return <CalculationEntry key={key} check={check} calculation={calculation} inherited={fromBaseline} baselineChecks={baselineChecks} evidenceIndex={evidenceIndex} onEvidence={onEvidence} language={i18n.language} />;
+          })}</div>
+        </section> : <p className="numeric-requirement-empty">{t('auditNoCalculations')}</p>}
+        {hasInherited && !!baseline?.appendix?.omitted_components?.length && <section className="numeric-audit-omissions"><h3>{t('baselineAuditOmissions')}</h3><ul>{baseline.appendix.omitted_components.map(item => <li key={item.component_path}><strong>{omissionLabel(item, t)}</strong><code>{item.component_path}</code><IssueCodes issues={item.issue_codes} /></li>)}</ul></section>}
 
         {omissions.length > 0 && (
           <section className="numeric-audit-omissions">
@@ -132,191 +130,60 @@ export default function NumericAuditAppendixView({
   );
 }
 
-function OtherCalculations({
-  calculations,
-  calculationUses,
-  evidenceIndex,
-  onEvidence,
-  language,
-}: {
-  calculations: CalculationRecord[];
-  calculationUses: Map<string, string[]>;
-  evidenceIndex: EvidenceReferenceIndex;
-  onEvidence: (ref: string) => void;
-  language: string;
+function CalculationEntry({ check, calculation, inherited, baselineChecks, language, evidenceIndex, onEvidence }: {
+  check?: NumericRequirementCheck; calculation?: CalculationRecord; inherited: boolean; baselineChecks: NumericRequirementCheck[]; language: string;
+  evidenceIndex: EvidenceReferenceIndex; onEvidence: (ref: string) => void;
 }) {
   const { t } = useTranslation();
-  return (
-    <section className="numeric-other-calculations">
-      <h3>{t("otherVerifiedCalculations")}</h3>
-      <div className="calculation-record-list">
-        {calculations.map((calculation) => (
-          <article key={calculation.id}>
-            <header>
-              <div>
-                <strong>
-                  {calculation.decision_uses
-                    ?.map((use) => use.label)
-                    .filter(
-                      (label, index, labels) => labels.indexOf(label) === index,
-                    )
-                    .join(" · ") ||
-                    t("otherVerifiedCalculations")}
-                </strong>
-                <small>{t("numericCalculationStatus.verified")}</small>
-              </div>
-              <span title={String(calculation.result)}>
-                {formatDecisionNumber(
-                  calculation.result,
-                  calculation.unit,
-                  language,
-                )}{" "}
-                {calculation.unit}
-              </span>
-            </header>
-            <dl className="calculation-record-summary">
-              <div>
-                <dt>{t("calculationUseLocation")}</dt>
-                <dd>
-                  {calculationUses.get(calculation.id)?.join(" · ") ?? "—"}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("asOfDate")}</dt>
-                <dd>{calculation.as_of_date}</dd>
-              </div>
-            </dl>
-            <details className="numeric-calculation-detail">
-              <summary>{t("formulaAndEvidence")}</summary>
-              <dl>
-                <div>
-                  <dt>{t("calculationId")}</dt>
-                  <dd><code>{calculation.id}</code></dd>
-                </div>
-                <div>
-                  <dt>{t("formula")}</dt>
-                  <dd><code>{calculation.formula}</code></dd>
-                </div>
-                <div>
-                  <dt>{t("inputs")}</dt>
-                  <dd>
-                    <dl className="calculation-inputs">
-                      {Object.entries(calculation.inputs).map(([name, value]) => (
-                        <div key={name}>
-                          <dt><code>{name}</code></dt>
-                          <dd title={String(value)}>
-                            {formatDecisionNumber(value, undefined, language)}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </dd>
-                </div>
-                {calculation.temporal_basis && (
-                  <div>
-                    <dt>{t("temporalBasis")}</dt>
-                    <dd><code>{calculation.temporal_basis}</code></dd>
-                  </div>
-                )}
-                {calculation.limitations.length > 0 && (
-                  <div>
-                    <dt>{t("limitations")}</dt>
-                    <dd>{calculation.limitations.join(" · ")}</dd>
-                  </div>
-                )}
-              </dl>
-              <EvidenceLinks
-                refs={calculation.input_evidence_refs}
-                evidenceIndex={evidenceIndex}
-                onEvidence={onEvidence}
-                compact
-              />
-            </details>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function RequirementChecks({
-  checks,
-  language,
-}: {
-  checks: NumericRequirementCheck[];
-  language: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <section className="numeric-requirement-checks">
-      <h3>{t("decisionRequirementComparisons")}</h3>
-      <div className="numeric-requirement-grid">
-        {checks.map((check) => (
-          <article
-            className={`numeric-requirement-check display-${check.display_status} calculation-${check.calculation_status}`}
-            key={check.requirement_id}
-          >
-            <header>
-              <div>
-                <strong>{check.label}</strong>
-                <code>{check.component_path}</code>
-              </div>
-              <div className="numeric-requirement-statuses">
-                <span>{t(`numericCalculationStatus.${check.calculation_status}`)}</span>
-                <span>{t(`numericDisplayStatus.${check.display_status}`)}</span>
-              </div>
-            </header>
-            <dl className="numeric-requirement-summary">
-              <div>
-                <dt>{t("statedValue")}</dt>
-                <dd>{formatDecisionNumber(check.stated_value, check.unit, language)} {check.unit}</dd>
-              </div>
-              <div>
-                <dt>{t("canonicalResult")}</dt>
-                <dd>
-                  {check.comparison_result == null
-                    ? "—"
-                    : `${formatDecisionNumber(check.comparison_result, check.unit, language)} ${check.unit}`}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("comparisonPrecision")}</dt>
-                <dd>{check.fraction_digits}</dd>
-              </div>
-              <div>
-                <dt>{t("roundedComparison")}</dt>
-                <dd>
-                  {check.rounded_stated_value == null ||
-                  check.rounded_canonical_result == null
-                    ? "—"
-                    : `${check.rounded_stated_value} / ${check.rounded_canonical_result}`}
-                </dd>
-              </div>
-            </dl>
-            {check.display_status === "mismatched" && (
-              <p className="numeric-display-mismatch-note">
-                {t("numericDisplayMismatchExplanation")}
-              </p>
-            )}
-            <details className="numeric-requirement-detail">
-              <summary>{t("fullCalculationAudit")}</summary>
-              <dl>
-                <div><dt>{t("rawStatedValue")}</dt><dd><code>{check.stated_value}</code></dd></div>
-                <div><dt>{t("rawCanonicalResult")}</dt><dd><code>{check.canonical_result ?? "—"}</code></dd></div>
-                <div><dt>{t("comparisonResult")}</dt><dd><code>{check.comparison_result ?? "—"}</code></dd></div>
-                <div><dt>{t("comparisonDifference")}</dt><dd><code>{check.comparison_difference ?? "—"}</code></dd></div>
-                <div><dt>{t("displayScale")}</dt><dd><code>{check.display_scale}</code></dd></div>
-                <div><dt>{t("formula")}</dt><dd><code>{check.formula}</code></dd></div>
-                <div><dt>{t("inputs")}</dt><dd><JsonRecord label={t("inputs")} value={check.inputs} /></dd></div>
-                <div><dt>{t("evidence")}</dt><dd><code>{check.input_evidence_refs.join(", ")}</code></dd></div>
-              </dl>
-              <IssueCodes issues={check.issue_codes ?? []} />
-            </details>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+  const effectiveChecks = check ? [check] : baselineChecks;
+  const mismatch = effectiveChecks.some(item => item.display_status === 'mismatched' || ['missing', 'invalid'].includes(item.calculation_status));
+  const location = (path: string) => {
+    const [section, ...rest] = path.split('.');
+    const label = { thesis: 'thesis', executive_summary: 'executiveSummary', risks: 'risks', scenarios: 'scenarios', valuation_assessment: 'valuationAssessment', market_reference_levels: 'marketReferenceLevels', invalidation_conditions: 'invalidationConditions' }[section];
+    return label ? `${t(label)}${rest.length ? ` · ${rest.join('.')}` : ''}` : path;
+  };
+  const locations = [...new Set([...(check ? [check.component_path] : []), ...(calculation?.decision_uses ?? []).map(use => use.component_path)])];
+  const title = check?.label ?? ([...new Set(calculation?.decision_uses?.map(use => use.label))].join(' · ') || t('recordedCalculation'));
+  const metadata = <>
+    {inherited && <p className="audit-record-source">{t('baselineCalculationUnchanged')}</p>}
+    <dl className="calculation-record-summary">
+      <div><dt>{t('calculationUseLocation')}</dt><dd>{locations.length ? locations.map(location).join(' · ') : t('notRecorded')}</dd></div>
+      {calculation && <><div><dt>{t('recordedCalculationResult')}</dt><dd>{formatDecisionNumber(calculation.result, calculation.unit, language)} {calculation.unit}</dd></div><div><dt>{t('asOfDate')}</dt><dd>{formatResearchDate(calculation.as_of_date, language)}</dd></div></>}
+    </dl>
+  </>;
+  return <article className={`numeric-requirement-check${mismatch ? ' display-mismatched' : ''}`}>
+    <header><strong>{title}</strong>{!effectiveChecks.length && <span className="audit-record-source">{t(inherited ? 'baselineCalculationUnchanged' : 'currentCalculationRecord')}</span>}</header>
+    {effectiveChecks.length ? <section className="audit-entry-checks">{effectiveChecks.map(item => <div key={item.requirement_id}>
+      <div className="audit-check-heading"><h4>{t(check ? 'currentAuditResult' : 'baselineAuditResult')}</h4>
+      <div className={`numeric-requirement-statuses display-${item.display_status} calculation-${item.calculation_status}`}><span>{t(`numericCalculationStatus.${item.calculation_status}`)}</span><span>{t(`numericDisplayStatus.${item.display_status}`)}</span></div></div>
+      <dl className="numeric-requirement-summary">
+        <div><dt>{t('statedValue')}</dt><dd>{formatDecisionNumber(item.stated_value, item.unit, language)} <span className="audit-value-unit">{item.unit}</span></dd></div>
+        <div><dt>{t('canonicalResult')}</dt><dd>{item.comparison_result == null ? t('notRecorded') : <>{formatDecisionNumber(item.comparison_result, item.unit, language)} <span className="audit-value-unit">{item.unit}</span></>}</dd></div>
+      </dl>
+      <details className="numeric-requirement-detail numeric-calculation-detail"><summary>{t('formulaAndEvidence')}</summary>
+      {metadata}
+      {item.display_status === 'mismatched' && item.calculation_status === 'verified' && <p className="numeric-display-mismatch-note">{t('numericDisplayMismatchExplanation')}</p>}
+      <IssueCodes issues={item.issue_codes ?? []} />
+      <dl>
+        <div><dt>{t('comparisonPrecision')}</dt><dd>{item.fraction_digits}</dd></div>
+        <div><dt>{t('roundedComparison')}</dt><dd>{item.rounded_stated_value == null || item.rounded_canonical_result == null ? t('notRecorded') : `${item.rounded_stated_value} / ${item.rounded_canonical_result}`}</dd></div>
+        <div><dt>{t('rawStatedValue')}</dt><dd><code>{item.stated_value}</code></dd></div>
+        <div><dt>{t('rawCanonicalResult')}</dt><dd><code>{item.canonical_result ?? '—'}</code></dd></div>
+        <div><dt>{t('comparisonResult')}</dt><dd><code>{item.comparison_result ?? '—'}</code></dd></div>
+        <div><dt>{t('comparisonDifference')}</dt><dd><code>{item.comparison_difference ?? '—'}</code></dd></div>
+        <div><dt>{t('displayScale')}</dt><dd><code>{item.display_scale}</code></dd></div>
+        <div><dt>{t('formula')}</dt><dd><code>{item.formula}</code></dd></div>
+        <div><dt>{t('inputs')}</dt><dd><JsonRecord label={t('inputs')} value={item.inputs} /></dd></div>
+      </dl><EvidenceLinks refs={item.input_evidence_refs} evidenceIndex={evidenceIndex} onEvidence={onEvidence} compact /><JsonRecord label={t(check ? 'currentAuditResult' : 'baselineAuditResult')} value={item} />{calculation && <>{calculation.limitations.length > 0 && <p>{calculation.limitations.join(' · ')}</p>}<JsonRecord label={t('recordedCalculation')} value={calculation} /></>}</details>
+    </div>)}</section> : <div className="audit-recorded-summary"><span className="secondary-line">{t('auditNoItemCheck')}</span>{calculation && <span>{t('recordedCalculationResult')}: <strong>{formatDecisionNumber(calculation.result, calculation.unit, language)} {calculation.unit}</strong></span>}</div>}
+    {calculation && !effectiveChecks.length && <details className="numeric-calculation-detail"><summary>{t('formulaAndEvidence')}</summary>{metadata}<dl>
+      <div><dt>{t('calculationId')}</dt><dd><code>{calculation.id}</code></dd></div>
+      <div><dt>{t('formula')}</dt><dd><code>{calculation.formula}</code></dd></div>
+      <div><dt>{t('inputs')}</dt><dd><JsonRecord label={t('inputs')} value={calculation.inputs} /></dd></div>
+      {calculation.temporal_basis && <div><dt>{t('temporalBasis')}</dt><dd><code>{calculation.temporal_basis}</code></dd></div>}
+      {!!calculation.limitations.length && <div><dt>{t('limitations')}</dt><dd>{calculation.limitations.join(' · ')}</dd></div>}
+    </dl><EvidenceLinks refs={calculation.input_evidence_refs} evidenceIndex={evidenceIndex} onEvidence={onEvidence} compact /><JsonRecord label={t('recordedCalculation')} value={calculation} /></details>}
+  </article>;
 }
 
 function omissionLabel(
