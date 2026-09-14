@@ -130,9 +130,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .research-limitations { padding: 14px 18px; margin: 12px 0; background: #fff8e9; border-left: 3px solid #bc8b30; font-size: 14px; }
 .research-limitations ul { margin: 8px 0 0; padding-left: 20px; }
 .diagnostics-view { min-width: 0; }
-.diagnostic-section { border-bottom: 1px solid var(--line); padding: 16px 0; }
-.diagnostic-section summary { cursor: pointer; }
-.diagnostic-section pre { max-height: 560px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f0f2f5; padding: 16px; font-size: 12px; }
 
 .global-new-research { margin-bottom: 20px; justify-content: center; }
 .secondary-line { display: block; color: var(--muted); margin-top: 5px; }
@@ -211,7 +208,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .workspace-reader .floating-section-select { display: none; }
 
 .decision-content .decision-lists-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-.scenario-grid { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1200px) { .decision-content .decision-lists-grid { grid-template-columns: 1fr; } }
 
 .decision-section { border-top: 1px solid var(--line); }

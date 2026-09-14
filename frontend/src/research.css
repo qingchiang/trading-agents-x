@@ -744,22 +744,10 @@
   background: #fffdf7;
 }
 
-.numeric-audit-appendix > summary {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--ink);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.numeric-audit-appendix > summary,
 .audit-details > summary {
   list-style: none;
 }
 
-.numeric-audit-appendix > summary::-webkit-details-marker,
 .audit-details > summary::-webkit-details-marker {
   display: none;
 }
@@ -954,8 +942,7 @@ details[open] > summary .details-chevron {
   margin-top: 16px;
 }
 
-.numeric-audit-omissions h3,
-.numeric-candidate-groups h4 {
+.numeric-audit-omissions h3 {
   margin: 0 0 8px;
   font-size: 13px;
 }
@@ -1038,45 +1025,6 @@ details[open] > summary .details-chevron {
   overflow-wrap: anywhere;
   background: #fff0e9;
   border-radius: 4px;
-}
-
-.numeric-candidate-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.numeric-candidate-groups > section {
-  min-width: 0;
-  padding: 11px;
-  background: #f8fafc;
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
-}
-
-.numeric-candidate-json,
-.numeric-candidate-groups pre {
-  max-height: 320px;
-  margin: 12px 0 0;
-  padding: 11px;
-  overflow: auto;
-  color: #29364a;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #f4f7fa;
-  border-radius: 6px;
-}
-
-.numeric-candidate-groups pre {
-  margin: 0;
-}
-
-.numeric-candidate-omitted {
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .decision-section {
@@ -1467,8 +1415,7 @@ details[open] > summary .details-chevron {
 
 @media (max-width: 1120px) {
   .case-comparison,
-  .rebuttal-round,
-  .scenario-grid {
+  .rebuttal-round {
     grid-template-columns: 1fr;
   }
 }

@@ -17,6 +17,15 @@ test("opens only the requested record and finds and copies content beyond the fi
   await waitFor(() => expect(container.querySelector('mark')).toHaveTextContent('中文'));
   expect(container.querySelectorAll('script')).toHaveLength(0);
   expect(container.querySelector('.json-string')).toBeTruthy();
+  fireEvent.change(search, { target: { value: '"value"' } });
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 / 520'));
+  fireEvent.click(screen.getByRole('button', { name: 'Previous match' }));
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('520 / 520'));
+  expect(container.querySelector('.json-line-current')).toHaveTextContent('中文');
+  fireEvent.click(screen.getByRole('button', { name: 'Next match' }));
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 / 520'));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Wrap lines' }));
+  expect(container.querySelector('pre')).toHaveClass('wrap');
   fireEvent.click(screen.getByRole('button', { name: 'Copy full JSON' }));
   await waitFor(() => expect(copy).toHaveBeenCalledWith(JSON.stringify(value, null, 2)));
 });

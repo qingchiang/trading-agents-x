@@ -33,3 +33,13 @@ Reading surfaces share a 960px maximum outer boundary; Markdown fills the availa
 `/runs/:id` defaults to execution progress. Explicit historical reading links normalize to the exact instrument/node with their report, citation, section and Trash context. Legacy and partial artifacts remain accessible through the shared reader. Task lists retain cycle ownership and status, while assessments belong in the instrument workspace.
 
 Incremental Evidence describes only the current update's recorded materials, with a separate baseline Evidence link and return context. Domain filters use recorded references, and source names come from actual Evidence rather than attempted providers. Unknown limitations remain visible. Performance exposes recorded endpoint values, readable provider adjustment basis and minute-resolution UTC retrieval times; full precision remains in diagnostics and exports.
+
+Instrument names are visibly underlined links. Independent row actions retain separate focus targets. A cycle heading identifies ownership; its named collapse button controls disclosure, while the Full baseline row opens research. Compare selection uses labeled native checkboxes.
+
+URL-driven research views are links. Local switches are ordinary buttons with pressed state; all options remain in the Tab order. Home, End and arrow keys retain browser and native-control behavior. Escape dismissal and modal focus containment/restoration remain available.
+
+Assessment scenarios use one column, with each range name on its own full-width row. The research-only notice is supporting text beneath the executive summary heading. Time horizon uses a label and Markdown value. Model configuration pairs each model with its own reasoning selection.
+
+Diagnostics show recorded metrics, role and attempt summaries, audit results, recoveries, and separately attributed configuration/method snapshots directly. Missing observations are not zero, and a missing audit appendix is not a completed audit. Cumulative recorded activity is distinct from wall-clock duration. Research records have reading indexes rather than duplicated report bodies.
+
+Raw records open on demand in a shared text-only JSON viewer. Pagination renders at most 500 lines; search covers the complete serialized record and locates matching pages. Copy and download include the complete record, preserving raw keys, types and recorded precision.

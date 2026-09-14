@@ -20,10 +20,10 @@
 .diagnostic-block details > summary { cursor: pointer; line-height: 1.65; }
 .diagnostic-disclosure { margin: 16px 0; }
 .diagnostic-block.run-metrics { overflow: visible; }
-.diagnostic-block .metrics-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 16px 0; }
+.diagnostic-block .metrics-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 16px 0; }
 .diagnostic-block .metrics-strip > div { background: white; border: 0; padding: 16px; min-width: 0; overflow-wrap: anywhere; }
-.diagnostic-block .metrics-strip strong { font-size: 20px; font-weight: 600; }
-.diagnostic-block .metrics-strip span { text-transform: none; font-weight: 400; }
+.diagnostic-block .metrics-strip strong { display: block; margin-top: 7px; color: var(--ink); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.diagnostic-block .metrics-strip span { display: block; color: var(--muted-2); font-size: 12px; font-weight: 400; }
 .diagnostic-block .metrics-observation-note { padding: 0; border: 0; }
 .diagnostic-block .role-metrics, .diagnostic-block .attempt-metrics { border: 0; }
 .diagnostic-block .role-metric-list { border-top: 1px solid var(--line); }

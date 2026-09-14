@@ -1458,7 +1458,7 @@ test("groups metrics by role and expands phase observations", async () => {
 
   expect(await screen.findByRole("heading", { name: "NVIDIA Corporation" })).toBeVisible();
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  fireEvent.click(await screen.findByText("Run metrics and diagnostics"));
+  await screen.findByRole("heading", { name: "Run metrics and diagnostics" });
   const roleMetricsTitle = screen.getByText("Metrics by role");
   const roleMetrics = roleMetricsTitle.closest("section");
   expect(roleMetricsTitle).toBeVisible();
@@ -1610,7 +1610,6 @@ test("shows persisted run metrics when a failed run has no result", async () => 
   );
 
   expect(await screen.findByText("Validated output failed.")).toBeVisible();
-  fireEvent.click(screen.getByText("Run metrics and diagnostics"));
   expect(screen.getAllByText("1,200")[0]).toBeVisible();
   fireEvent.click(screen.getByText("Attempt metrics", { exact: false }));
   expect(screen.getByText("StructuredOutputError")).toBeVisible();

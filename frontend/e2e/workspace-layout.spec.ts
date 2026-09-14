@@ -14,6 +14,8 @@ for (const locale of ["en", "zh-CN", "ja"]) {
     const text = locale === "en" ? "Demand remains resilient, while valuation and source coverage require careful interpretation." : locale === "ja" ? "需要は底堅いものの、評価と資料の対象範囲には注意が必要です。" : "需求保持韧性，但估值和资料覆盖仍需审慎解读。";
     report.decision.executive_summary = text;
     report.decision.thesis = text.repeat(5);
+    const rangeName = locale === 'en' ? 'Neutral consolidation technical reference range under the recorded assumptions' : locale === 'ja' ? '中立的な推移を想定した技術的参考範囲と前提条件' : '中性震荡技术参考区间及当前已记录的假设条件';
+    Object.assign(report.decision.scenarios[0], { reference_ranges: [{ category: 'technical', label: rangeName, unit: 'USD', interpretation: text, low: { value: 100, basis: 'observed', evidence_refs: [], as_of_date: '2026-07-24' }, high: { value: 120, basis: 'observed', evidence_refs: [], as_of_date: '2026-07-24' } }] });
     const node = { id: "full", cycle_id: "full", research_kind: "full" as const, instrument: "NVDA", analysis_date: "2026-07-20", decision: report.decision, is_active: true, is_primary: true, is_cycle_head: false };
     const calculation = { provider: "fixture-feed", fallback: false, adjustment_basis: "split-adjusted close", retrieved_at: "2026-07-24T20:05:00Z", baseline_information_cutoff_at: "2026-07-20T20:00:00Z", target_information_cutoff_at: "2026-07-24T20:00:00Z", start_session: "2026-07-20", end_session: "2026-07-24", start_value: 100, end_value: 112, formula: "(end / start) - 1", unrounded_return: 0.12 };
     const incNode = { ...node, id: "increment", research_kind: "incremental" as const, full_baseline_run_id: "full", analysis_date: "2026-07-24", is_cycle_head: true, decision_outcome: "unchanged", decision_outcome_reason: text, reassessment: { entries: [] }, performance: { stock: { status: "calculated", calculation }, benchmarks: [{ name: "S&P 500", component: { status: "calculated", calculation: { ...calculation, end_value: 104, unrounded_return: 0.04 } }, reported_difference: 0.08 }, { name: "NASDAQ 100", component: { status: "unavailable", reason: "No price observations." } }] } };
@@ -53,6 +55,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
         ["library", "/timelines", ".research-library-table"],
         ["new", "/runs/new", ".run-form"],
         ["settings", "/settings", ".settings-grid"],
+        ["diagnostics", "/runs/full?view=diagnostics", ".diagnostic-block"],
       ]) {
         await page.goto(path);
         await expect(page.locator(ready).first()).toBeVisible();
@@ -82,6 +85,28 @@ for (const locale of ["en", "zh-CN", "ja"]) {
             await expect(trigger).toBeFocused();
             await expect(page.locator(".workspace-auxiliary")).toBeHidden();
           }
+        }
+        if (label === 'full') {
+          const range = page.locator('.scenario-range-name').first();
+          await expect(range).toHaveText(rangeName);
+          const available = (await page.locator('.scenario-reference-heading').first().boundingBox())!.width;
+          expect((await range.boundingBox())!.width).toBeGreaterThan(available * 0.95);
+          const cards = await page.locator('.scenario-card').all();
+          for (let i = 1; i < cards.length; i++) {
+            const before = (await cards[i - 1].boundingBox())!;
+            const after = (await cards[i].boundingBox())!;
+            expect(after.y).toBeGreaterThanOrEqual(before.y + before.height);
+          }
+        }
+        if (label === "new") {
+          await page.locator(".advanced-configuration > summary").click();
+          await expect(page.locator(".model-group")).toHaveCount(2);
+          for (const group of await page.locator(".model-group").all()) {
+            await expect(group.locator("legend")).toBeVisible();
+            await expect(group.locator("select")).toHaveCount(2);
+          }
+          await page.locator(".model-groups").scrollIntoViewIfNeeded();
+          expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         }
         if (label === "settings") {
           const checkbox = await page.locator(".interface-preferences input[type=checkbox]").boundingBox();

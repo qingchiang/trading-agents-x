@@ -472,7 +472,7 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/runs/run-report?view=decision");
   await expect(
     page.getByRole("link", { name: "Overview", exact: true }),
-  ).toHaveAttribute("aria-selected", "true");
+  ).toHaveAttribute("aria-current", "page");
   await expect(
     page.getByRole("heading", { name: "Executive summary", exact: true }),
   ).toBeVisible();
@@ -489,7 +489,7 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
   await page.getByRole("link", { name: "Run & diagnostics" }).click();
-  await page.getByText("Decision-critical calculation audit").click();
+  await page.getByText(/^Calculation records ·/).click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
   await expect(
@@ -810,8 +810,8 @@ test("compares active and explicitly shown Trash nodes without creating research
   await page.locator(".research-header").getByRole("button", { name: /^(More|更多)$/ }).click();
   await page.getByRole("button", { name: /Show retained Trash|显示回收站保留项|ゴミ箱の保持項目を表示/ }).click();
   await expect(page.getByText(/Retained in Trash|保留在回收站|ゴミ箱に保持中/)).toBeVisible();
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
-  await page.getByRole("button", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
+  await page.getByRole("checkbox", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
+  await page.getByRole("checkbox", { name: /Select for comparison|选择用于对照|比較対象に選択/ }).first().click();
   await page.getByRole("button", { name: /Compare selected nodes|对照所选节点|選択したノードを比較/ }).click();
 
   const comparisonDialog = page.getByRole("region", {
@@ -903,7 +903,7 @@ test("covers every supported retained-node comparison pair", async ({ page }) =>
         .locator(`.history-node.${node.research_kind}`)
         .filter({ hasText: node.analysis_date })
         .first();
-      await card.getByRole("button", {
+      await card.getByRole("checkbox", {
         name: /Select for comparison|选择用于对照|比較対象に選択/,
       }).click();
     }
@@ -966,15 +966,15 @@ test("enforces selection cardinality and surfaces every comparison rejection", a
     const compareButton = page.getByRole("button", {
       name: /Compare selected nodes|对照所选节点|選択したノードを比較/,
     });
-    const selectButtons = page.getByRole("button", {
+    const selectChoices = page.getByRole("checkbox", {
       name: /Select for comparison|选择用于对照|比較対象に選択/,
     });
     await expect(compareButton).toBeDisabled();
-    await selectButtons.nth(0).click();
+    await selectChoices.nth(0).click();
     await expect(compareButton).toBeDisabled();
-    await selectButtons.nth(0).click();
+    await selectChoices.nth(0).click();
     await expect(compareButton).toBeEnabled();
-    await expect(selectButtons.nth(0)).toBeDisabled();
+    await expect(selectChoices.nth(0)).toBeDisabled();
     await compareButton.click();
     await expect(page.getByText(message)).toBeVisible();
     await expect(page.getByRole("region", {
