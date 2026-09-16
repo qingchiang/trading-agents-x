@@ -102,12 +102,14 @@ export interface components {
     };
     CapabilitiesResponse: {
       analysts: string[];
+      configuration_initialized?: boolean;
       defaults: components["schemas"]["CapabilityDefaults"];
       output_languages: string[];
       profiles: string[];
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
+      analysts?: string[];
       deep_model: string;
       deep_reasoning_effort: string | null;
       lan_enabled: boolean;
@@ -147,6 +149,83 @@ export interface components {
     };
     CollectionTemporalBasis: "pit" | "near_live_advisory";
     ComparisonValueState: "recorded" | "null" | "empty" | "not_recorded_under_this_schema";
+    ConfigurationField: {
+      default?: unknown;
+      description: Record<string, string>;
+      env_names?: string[];
+      group: string;
+      key: string;
+      kind: "text" | "number" | "boolean" | "list" | "choice" | "routes" | "providers";
+      label: Record<string, string>;
+      maximum?: number | null;
+      minimum?: number | null;
+      nullable?: boolean;
+      options?: string[];
+    };
+    ConfigurationPatch: {
+      credentials?: Record<string, string | null>;
+      reset_fields?: string[];
+      revision: number;
+      values?: components["schemas"]["ConfigurationValues"];
+    };
+    ConfigurationSchema: {
+      credential_owners: Record<string, string>;
+      fields: components["schemas"]["ConfigurationField"][];
+      provider_defaults: Record<string, components["schemas"]["ProviderConnection"]>;
+      providers: Record<string, string>;
+      route_options: Record<string, string[]>;
+      tool_options: Record<string, string[]>;
+    };
+    ConfigurationValues: {
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      anthropic_effort?: string | null;
+      cn_news_candidate_limit?: number;
+      data_vendors?: Record<string, string>;
+      data_vendors_by_market?: Record<string, Record<string, string>>;
+      deep_reasoning_effort?: string | null;
+      deep_think_llm?: string;
+      global_news_article_limit?: number;
+      global_news_candidate_limit?: number;
+      global_news_lookback_days?: number;
+      global_news_queries?: string[];
+      global_news_query_limit?: number;
+      google_thinking_level?: string | null;
+      llm_max_retries?: number | null;
+      llm_provider?: string;
+      news_article_limit?: number;
+      news_cache_enabled?: boolean;
+      news_cache_refresh_seconds?: number;
+      news_cache_retention_days?: number;
+      news_cache_scope_limit?: number;
+      news_cache_total_limit?: number;
+      openai_reasoning_effort?: string | null;
+      output_language?: string;
+      profile?: "fast" | "standard" | "deep";
+      providers?: Record<string, components["schemas"]["ProviderConnection"]>;
+      quick_reasoning_effort?: string | null;
+      quick_think_llm?: string;
+      sentiment_filing_limit?: number;
+      social_lookback_days?: number;
+      temperature?: number | null;
+      ticker_news_lookback_days?: number;
+      tool_vendors?: Record<string, string>;
+      trash_retention_days?: number;
+      yahoo_news_candidate_limit?: number;
+    };
+    ConfigurationView: {
+      credentials: Record<string, boolean>;
+      deployment: Record<string, string | number | boolean>;
+      initialized: boolean;
+      revision: number;
+      sources: Record<string, "database" | "default">;
+      values: components["schemas"]["ConfigurationValues"];
+    };
+    CredentialRequest: {
+      name: string;
+    };
+    CredentialView: {
+      value: string | null;
+    };
     DebateAgenda: {
       issues: components["schemas"]["DebateIssue"][];
       summary: string;
@@ -289,6 +368,26 @@ export interface components {
       queue: components["schemas"]["QueueHealth"];
       status: "ok" | "degraded";
       version: string;
+    };
+    ImportIssue: {
+      message: string;
+      name: string;
+    };
+    ImportPreview: {
+      conflicts: string[];
+      credentials: Record<string, boolean>;
+      fingerprint: string;
+      issues: components["schemas"]["ImportIssue"][];
+      revision: number;
+      values: Record<string, unknown>;
+    };
+    ImportRequest: {
+      enterprise?: string | null;
+      exclude?: string[];
+      fingerprint?: string | null;
+      primary?: string | null;
+      revision?: number;
+      use_defaults?: boolean;
     };
     IncrementalAnalysisBrief: {
       evidence_refs?: string[];
@@ -464,6 +563,14 @@ export interface components {
       model_discovery_supported: boolean;
       selectable: boolean;
       unavailable_reason?: string | null;
+    };
+    ProviderConnection: {
+      api_version?: string | null;
+      auth_mode?: "bearer" | "system" | "static";
+      aws_profile?: string | null;
+      base_url?: string | null;
+      deployment?: string | null;
+      region?: string;
     };
     ProviderModelCatalog: {
       fetched_at: string;

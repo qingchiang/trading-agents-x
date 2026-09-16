@@ -151,8 +151,11 @@ execution fields do not belong in this contract.
 
 `AppSettings` and `RunSettings` are immutable Pydantic models.
 `AppSettings.from_env()` is called at an application entry point; dotenv files
-are never loaded as a package-import side effect. Provider keys remain in the
-process environment and are excluded from persisted configuration snapshots.
+are never loaded as a package-import side effect. Daily defaults, provider connections and credentials live in SQLite and are
+resolved by the shared configuration module. Environment files supply startup
+settings and explicit import candidates; they never override initialized daily
+configuration. Provider keys are excluded from Run configuration snapshots.
+See [Application configuration](configuration.md) for migration and precedence.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
@@ -750,10 +753,14 @@ The normal server binds to loopback and needs no login. LAN mode requires one
 environment token; the login endpoint exchanges it for a signed, expiring,
 `HttpOnly`, `SameSite=Strict` cookie. Mutating requests validate same origin.
 
-Provider keys, authorization headers, LAN tokens, session secrets, raw provider
-exceptions, and sensitive tool arguments must not be stored in application
-tables, events, SSE, API errors, or browser logs. Settings/capability endpoints
-expose only whether a key is configured.
+Provider and data-service keys are stored only in the dedicated configuration
+credential table and are bound to execution-scoped memory at attempt start. They
+must not enter Run tables, graph state/checkpoints, events, SSE, research exports,
+API errors or browser persistent storage. Ordinary settings/capability endpoints
+expose only presence; an explicit same-origin reveal endpoint returns the selected
+key with caching disabled. Whole-database backups contain credentials. LAN tokens
+and session secrets remain startup-only. Raw provider exceptions and sensitive
+tool arguments remain excluded from events, API errors and browser logs.
 
 This is a single-user local boundary. It does not provide TLS, user accounts,
 roles, tenant isolation, or Internet-facing hardening.

@@ -1,0 +1,195 @@
+.configuration-page {
+  max-width: 1100px;
+}
+.configuration-page label {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.configuration-page input:not([type="checkbox"]),
+.configuration-page select,
+.configuration-page textarea {
+  width: 100%;
+  min-width: 0;
+}
+.configuration-page input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  justify-self: start;
+  flex: 0 0 1rem;
+}
+.configuration-page .checkbox-label {
+  display: flex;
+  align-items: center;
+}
+.configuration-search {
+  margin: 1.5rem 0;
+}
+.configuration-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.4rem;
+  margin-bottom: 1.4rem;
+}
+.configuration-group {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  scroll-margin-top: 1rem;
+}
+.configuration-group h2 {
+  margin-top: 0;
+}
+.configuration-field {
+  margin: 1.2rem 0 0.3rem;
+}
+.configuration-field > label,
+.configuration-credential > label {
+  font-weight: 600;
+}
+.configuration-help,
+.configuration-source,
+.configuration-details,
+.configuration-provider small {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.configuration-details {
+  overflow-wrap: anywhere;
+  margin: 0.4rem 0;
+}
+.configuration-details code {
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+.configuration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+.configuration-provider {
+  border: 1px solid var(--border, #d5dbe3);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.configuration-provider h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: space-between;
+  margin-top: 0;
+}
+.configuration-provider-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.configuration-credential {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.configuration-credential code {
+  overflow-wrap: anywhere;
+}
+.configuration-list {
+  display: grid;
+  gap: 0.5rem;
+}
+.configuration-list-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  min-width: 0;
+}
+.configuration-list-row input,
+.configuration-list-row select {
+  flex: 1;
+}
+.configuration-list-row button {
+  flex-shrink: 0;
+}
+.configuration-checks {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.configuration-checks label {
+  display: flex;
+  align-items: center;
+}
+.configuration-routes fieldset {
+  border: 1px solid var(--border, #d5dbe3);
+  margin: 0.8rem 0;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+.configuration-routes legend {
+  overflow-wrap: anywhere;
+}
+.configuration-import {
+  padding: 1rem;
+  border: 1px solid var(--border, #d5dbe3);
+  border-radius: 10px;
+}
+.configuration-import > label {
+  margin: 1rem 0;
+}
+.configuration-preview,
+.configuration-group dd {
+  overflow-wrap: anywhere;
+}
+.configuration-preview dl > div,
+.configuration-group dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 2fr;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.configuration-page dd {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .configuration-group {
+    padding: 1rem;
+  }
+  .configuration-provider-fields {
+    grid-template-columns: 1fr;
+  }
+  .configuration-preview dl > div,
+  .configuration-group dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+.configuration-field-error {
+  color: var(--danger, #b42318);
+}
+[data-invalid="true"] {
+  border-inline-start: 3px solid var(--danger, #b42318);
+  padding-inline-start: 0.75rem;
+}
+
+.configuration-page input:not([type="checkbox"]),
+.configuration-page select,
+.configuration-page textarea {
+  min-height: 41px;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.configuration-page input:focus-visible,
+.configuration-page select:focus-visible,
+.configuration-page textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.configuration-list-row button {
+  min-width: 32px;
+  min-height: 36px;
+}

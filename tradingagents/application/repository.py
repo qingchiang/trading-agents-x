@@ -151,7 +151,9 @@ def _aware(value: datetime | None) -> datetime | None:
 def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
     if value is None:
         return None
-    redacted = _SECRET_RE.sub(r"\1\2[REDACTED]", str(value))
+    from tradingagents.credentials import credential_redactor
+
+    redacted = _SECRET_RE.sub(r"\1\2[REDACTED]", credential_redactor()(str(value)))
     return redacted[:limit]
 
 

@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 
+from tradingagents.credentials import use_credentials
 from tradingagents.dataflows import estat
 from tradingagents.dataflows.errors import NoMarketDataError
 
@@ -75,7 +76,7 @@ class EstatFetchSeriesTests(unittest.TestCase):
             estat.fetch_series("not_a_real_alias", "2026-06-20")
 
     def test_missing_app_id_raises_not_configured(self):
-        with mock.patch.dict("os.environ", {}, clear=True), \
+        with use_credentials({}), \
                 self.assertRaises(estat.EstatNotConfiguredError):
             estat.fetch_series("jp_cpi", "2026-06-20")
 

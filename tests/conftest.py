@@ -71,6 +71,10 @@ def _dummy_api_keys(monkeypatch, request):
             if value and value != "placeholder":
                 monkeypatch.setenv(env_var, value)
 
+    from tradingagents.credentials import use_credentials
+    with use_credentials({name: os.environ[name] for name in _CREDENTIAL_ENV_VARS}):
+        yield
+
 
 @pytest.fixture(autouse=True)
 def _isolate_config():
@@ -109,7 +113,7 @@ def mock_llm_client():
 def app_settings(tmp_path: Path):
     from tradingagents.application.settings import AppSettings
 
-    return AppSettings.from_env(
+    settings = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path),
             "TRADINGAGENTS_DATABASE_PATH": str(
@@ -120,6 +124,8 @@ def app_settings(tmp_path: Path):
         load_env_files=False,
     )
 
+    return settings
+
 
 @pytest.fixture
 def repository(app_settings):
@@ -127,4 +133,6 @@ def repository(app_settings):
     from tradingagents.persistence import upgrade_database
 
     upgrade_database(app_settings)
+    from tests.configuration_helpers import initialize_configuration
+    initialize_configuration(app_settings)
     return RunRepository(app_settings)

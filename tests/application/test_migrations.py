@@ -81,7 +81,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0010_decision_confidence_levels"
+    assert revision == "0011_application_configuration"
     assert {
         "id",
         "run_id",

@@ -11,6 +11,8 @@ from zipfile import ZipFile
 
 _REQUIRED_FILES = {
     "cli/main.py",
+    "tradingagents/application/configuration.py",
+    "tradingagents/persistence/alembic/versions/0011_application_configuration.py",
     "tradingagents/client.py",
     "tradingagents/graph/research_graph.py",
     "tradingagents/persistence/alembic/versions/0001_markdown_research.py",

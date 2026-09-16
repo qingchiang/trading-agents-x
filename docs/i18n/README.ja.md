@@ -64,10 +64,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
 uv sync --locked --no-dev
-cp .env.example .env
 ```
 
-`.env` に利用する LLM provider を設定し、ローカルの Web と worker を
+ローカルの Web と worker を起動し、設定画面で初期化とモデルサービスの設定を
 まとめて起動します。
 
 ```bash
@@ -101,14 +100,12 @@ uv run --locked --no-dev tradingagents run 7203.T \
 ### Docker Compose
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
 `web` と `worker` は同じローカル named volume を共有します。ポートは
-デフォルトで `127.0.0.1` のみに公開されます。Ollama を使う場合は `.env`
-で `TRADINGAGENTS_LLM_PROVIDER=ollama` と
-`OLLAMA_BASE_URL=http://ollama:11434/v1` を設定してから実行します。
+デフォルトで `127.0.0.1` のみに公開されます。Ollama を使う場合は以下を実行し、
+設定画面で Ollama を選択して URL を `http://ollama:11434/v1` にします。
 
 ```bash
 docker compose --profile ollama up --build
@@ -227,9 +224,12 @@ export、capabilities、health を提供します。run 作成時に
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。
 
-API key は process environment からのみ読み取り、SQLite、SSE、browser
-storage には保存しません。デフォルトは loopback bind です。LAN へ公開する
-場合は明示的に設定します。
+日常設定と認証情報は SQLite に保存し、設定画面で検索・編集・インポートできます。
+キーの表示・コピーも可能ですが、研究スナップショット、SSE、研究エクスポート、
+ブラウザー永続ストレージには含めません。DB 全体のバックアップにはキーが含まれます。
+`.env` は起動・配備設定用です。既存設定は明示的に確認してインポートし、初期化前は
+worker が待機します。[設定と移行](../configuration.md)を参照してください。
+デフォルトは loopback bind です。LAN 公開は明示的に設定します。
 
 ```dotenv
 TRADINGAGENTS_LAN_ENABLED=true

@@ -461,18 +461,12 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     changed_value,
 ) -> None:
     """Queued Runs retain non-secret LLM behavior that can change a method."""
-    base_run_settings = app_settings.default_run_settings.model_copy(
-        update={
-            "backend_url": "https://gateway.example.invalid/v1",
-            "temperature": 0.2,
-            "llm_max_retries": 3,
-            "data_config": {
-                **app_settings.default_run_settings.data_config,
-                "provider_api_key": "method-snapshot-test-secret",
-            },
-        }
-    )
-    base_settings = app_settings.model_copy(update={"default_run_settings": base_run_settings})
+    from tests.configuration_helpers import save_configuration
+    save_configuration(app_settings, {
+        "providers": {"openai": {"base_url": "https://gateway.example.invalid/v1"}},
+        "temperature": 0.2, "llm_max_retries": 3,
+    }, {"OPENAI_API_KEY": "method-snapshot-test-secret"})
+    base_settings = app_settings
     request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
 
     base_run = AnalysisService(
@@ -487,10 +481,9 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     assert base_snapshot["llm_max_retries"] == 3
     assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
 
-    changed_run_settings = base_run_settings.model_copy(update={field: changed_value})
-    changed_settings = app_settings.model_copy(
-        update={"default_run_settings": changed_run_settings}
-    )
+    changed_values = {"providers": {"openai": {"base_url": changed_value}}} if field == "backend_url" else {field: changed_value}
+    save_configuration(app_settings, changed_values)
+    changed_settings = app_settings
     changed_run = AnalysisService(
         changed_settings,
         repository=repository,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
@@ -120,7 +121,10 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         query_results = [_safe_query(query) for query in queries]
     else:
         with ThreadPoolExecutor(max_workers=len(queries)) as pool:
-            query_results = list(pool.map(_safe_query, queries))
+            query_results = list(pool.map(
+                lambda item: item[0].run(_safe_query, item[1]),
+                [(copy_context(), query) for query in queries],
+            ))
     failures = [exc for _items, exc in query_results if exc is not None]
     if len(failures) == len(query_results):
         raise failures[0]

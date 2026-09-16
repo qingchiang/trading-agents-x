@@ -8,7 +8,6 @@ import pytest
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
-from tradingagents.persistence import upgrade_database
 from tradingagents.web import create_app
 
 
@@ -23,7 +22,8 @@ def _lan_app(tmp_path: Path):
         },
         load_env_files=False,
     )
-    upgrade_database(settings)
+    from tests.configuration_helpers import initialize_configuration
+    initialize_configuration(settings)
     repository = RunRepository(settings)
     service = AnalysisService(
         settings,

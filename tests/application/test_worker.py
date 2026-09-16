@@ -7,6 +7,8 @@ from tradingagents.application.worker import AnalysisWorker
 class _Service:
     def __init__(self, repository):
         self.repository = repository
+        from tradingagents.application.configuration import ConfigurationStore
+        self.configuration = ConfigurationStore(repository.settings)
         self.executed = []
 
     def execute_claimed(self, run, *, worker_id, shutdown_requested):

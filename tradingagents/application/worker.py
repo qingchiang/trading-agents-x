@@ -44,6 +44,8 @@ class AnalysisWorker:
         self.stop_event = threading.Event()
 
     def run_once(self) -> bool:
+        if not self.service.configuration.read().initialized:
+            return False
         self._run_maintenance_if_due()
         claimed = self.repository.claim_next(
             self.worker_id,

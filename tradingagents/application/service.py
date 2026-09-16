@@ -7,20 +7,20 @@ import logging
 import math
 import threading
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, time, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from langgraph.checkpoint.sqlite import SqliteSaver
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     resolve_instrument_identity,
 )
+from tradingagents.credentials import use_credentials
 from tradingagents.dataflows.config import use_config
 from tradingagents.dataflows.interface import (
     resolve_instrument_eligibility,
@@ -46,6 +46,8 @@ from tradingagents.graph.structured_output import (
 from tradingagents.persistence import upgrade_database
 from tradingagents.version import __version__
 
+from .checkpoints import CredentialSafeSqliteSaver as SqliteSaver
+from .configuration import ConfigurationStore, configuration_credentials
 from .contracts import (
     CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisCutoffContext,
@@ -298,6 +300,7 @@ class AnalysisService:
         if repository is None:
             upgrade_database(settings)
         self.repository = repository or RunRepository(settings)
+        self.configuration = ConfigurationStore(settings)
         self.llm_factory = llm_factory
         self.graph_factory = graph_factory
         self.identity_resolver = identity_resolver
@@ -351,6 +354,7 @@ class AnalysisService:
         """Compare retained Node products without starting research or writing state."""
         return self.repository.compare_research_nodes(instrument, selections)
 
+    @configuration_credentials
     def enqueue(
         self,
         request: AnalysisRequest,
@@ -363,9 +367,9 @@ class AnalysisService:
         # Re-run the creation validators at the lifecycle seam.  A caller can
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
-        request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False))
+        request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False, exclude_unset=True))
         information_cutoff_at = self._information_cutoff_at(request)
-        run_settings = self.settings.resolve_run(request)
+        request, run_settings = self.configuration.resolve_request(request)
         request_dataflow_config = run_settings.dataflow_config(self.settings)
         self._validate_instrument_eligibility(
             request,
@@ -486,6 +490,7 @@ class AnalysisService:
             "quick_model": snapshot["quick_model"],
             "deep_model": snapshot["deep_model"],
             "backend_url": snapshot["backend_url"],
+            "connection": snapshot["connection"],
             "quick_reasoning_effort": snapshot["quick_reasoning_effort"],
             "deep_reasoning_effort": snapshot["deep_reasoning_effort"],
             "temperature": snapshot["temperature"],
@@ -550,7 +555,7 @@ class AnalysisService:
         """Fail closed unless one exact resolver result confirms an equity."""
         try:
             effective_config = dataflow_config or (
-                self.settings.default_run_settings.dataflow_config(self.settings)
+                self.configuration.default_run_settings().dataflow_config(self.settings)
             )
             with use_config(effective_config, merge=False):
                 result = self.eligibility_resolver(request.ticker)
@@ -617,7 +622,7 @@ class AnalysisService:
         instrument_name = run.instrument_name
         instrument_local_name = run.instrument_local_name
 
-        with self._heartbeat(run.id, worker_id):
+        with self._heartbeat(run.id, worker_id), ExitStack() as execution_scope:
             try:
                 if run.research_schema_version is None:
                     raise ValueError(
@@ -631,6 +636,7 @@ class AnalysisService:
                 # terminal failed Run rather than strand a claimed attempt.
                 request = self._creation_request_from_history(run.request)
                 run_settings = RunSettings.model_validate(run.config_snapshot)
+                execution_scope.enter_context(use_credentials(self.configuration.execution_credentials(run_settings)))
                 dataflow_config = run_settings.dataflow_config(self.settings)
                 self._validate_instrument_eligibility(
                     request,
@@ -1214,6 +1220,7 @@ class AnalysisService:
         )
         return view
 
+    @configuration_credentials
     def retry(self, run_id: str) -> RunView:
         # Validate the retained request through the current creation contract
         # before mutating the retry lifecycle.  This keeps retry from becoming
@@ -1221,10 +1228,11 @@ class AnalysisService:
         retained = self.repository.require_retryable(run_id)
         request = self._creation_request_from_history(retained.request)
         retained_settings = RunSettings.model_validate(retained.config_snapshot)
+        self.configuration.execution_credentials(retained_settings)
         retained_dataflow_config = retained_settings.dataflow_config(self.settings)
         retained_vendors = retained_dataflow_config.setdefault("data_vendors", {})
         if "instrument_eligibility" not in retained_vendors:
-            current_vendors = self.settings.default_run_settings.dataflow_config(self.settings).get(
+            current_vendors = self.configuration.default_run_settings().dataflow_config(self.settings).get(
                 "data_vendors", {}
             )
             if "instrument_eligibility" in current_vendors:

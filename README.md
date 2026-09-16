@@ -76,10 +76,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
 uv sync --locked --no-dev
-cp .env.example .env
 ```
 
-Configure one LLM provider in `.env`, then start the local Web and worker
+Start the local Web and worker, then open Settings to initialize configuration
+and configure an LLM provider:
 together:
 
 ```bash
@@ -114,14 +114,12 @@ uv run --locked --no-dev tradingagents run 7203.T \
 ### Docker Compose
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
 Compose runs `web` and `worker` against one named volume. Port 8000 is published
-to `127.0.0.1` by default. To use the optional Ollama service, set
-`TRADINGAGENTS_LLM_PROVIDER=ollama` and
-`OLLAMA_BASE_URL=http://ollama:11434/v1` in `.env`, then run:
+to `127.0.0.1` by default. For the optional Ollama service, run the command below,
+then select Ollama and set its service address to `http://ollama:11434/v1` in Settings:
 
 ```bash
 docker compose --profile ollama up --build
@@ -277,10 +275,15 @@ are checked for drift in CI.
 
 ## Configuration and security
 
-Copy [.env.example](.env.example) and set only the providers you use. API keys
-are read from the environment at process startup. They are excluded from run
-snapshots and must not enter SQLite, SSE payloads, HTTP errors, or browser
-storage.
+Manage daily settings and provider/data credentials in the Web **Settings** page.
+SQLite is their source of truth; `.env` is optional and only needed for startup
+and deployment overrides. Existing environment configuration can be previewed
+and explicitly imported. Workers wait until initialization is complete.
+
+Keys can be revealed, copied, replaced and deleted in Settings. They are excluded
+from research snapshots, events and exports; whole-database backups include them.
+See [Application configuration](docs/configuration.md) for migration, CLI setup,
+configuration precedence and when changes take effect.
 
 The default server binds to loopback. To expose it intentionally on a LAN:
 

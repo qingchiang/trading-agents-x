@@ -17,10 +17,11 @@ Today this backs the Japan inflation cells of the cross-region macro panel
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timedelta
 
 import requests
+
+from tradingagents.credentials import credential
 
 from .errors import NoMarketDataError, VendorNotConfiguredError
 from .macro_common import SeriesCache, render_macro_report
@@ -69,10 +70,10 @@ class EstatNotConfiguredError(VendorNotConfiguredError):
 
 def get_app_id() -> str:
     """Return the e-Stat application id from the environment."""
-    app_id = os.getenv("ESTAT_APP_ID")
+    app_id = credential("ESTAT_APP_ID")
     if not app_id:
         raise EstatNotConfiguredError(
-            "ESTAT_APP_ID environment variable is not set. Get a free application "
+            "ESTAT_APP_ID credential is not configured in Settings. Get a free application "
             "id at https://www.e-stat.go.jp/api/."
         )
     return app_id

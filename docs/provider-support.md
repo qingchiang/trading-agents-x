@@ -92,3 +92,11 @@ Provider-native references:
 - [Claude structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
 - [Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - [Amazon Bedrock structured outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html)
+
+## Provider configuration
+
+Manage each provider connection and credential in Web Settings. Azure accepts
+endpoint, deployment and API version there; Bedrock exposes its authentication
+mode, region and profile. Existing environment files require an explicit import.
+See [Application configuration](configuration.md). Configuration migration does
+not promote a provider or model to a higher validation level.

@@ -106,7 +106,7 @@ def create_app(
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
-    model_discovery = model_discovery or ModelDiscoveryService(settings)
+    model_discovery = model_discovery or ModelDiscoveryService(settings, configuration=service.configuration)
     maintenance = maintenance or TrashMaintenance(settings, repository)
     auth = LanSessionManager(settings)
 
@@ -127,6 +127,8 @@ def create_app(
         description="Local evidence-first investment research run center.",
         lifespan=lifespan,
     )
+    from .settings_api import register_settings_routes
+    register_settings_routes(app, service.configuration)
     app.state.settings = settings
     app.state.service = service
     app.state.model_discovery = model_discovery
@@ -748,8 +750,10 @@ def create_app(
                 "unavailable_reason": availability.reason,
                 "model_discovery_supported": definition.adapter != "custom",
             }
-        defaults = settings.default_run_settings
+        configuration = service.configuration.read()
+        defaults = service.configuration.default_run_settings()
         return CapabilitiesResponse(
+            configuration_initialized=configuration.initialized,
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
             output_languages=["en", "zh-CN", "ja"],
@@ -763,7 +767,8 @@ def create_app(
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
                 "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
-                "trash_retention_days": settings.trash_retention_days,
+                "trash_retention_days": configuration.values.trash_retention_days,
+                "analysts": configuration.values.analysts,
             },
         )
 

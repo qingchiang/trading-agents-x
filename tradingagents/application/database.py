@@ -28,6 +28,23 @@ class Base(DeclarativeBase):
     pass
 
 
+class ConfigurationRecord(Base):
+    __tablename__ = "application_configuration"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    values_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    initialized: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CredentialRecord(Base):
+    __tablename__ = "configuration_credentials"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class RunRecord(Base):
     __tablename__ = "runs"
 

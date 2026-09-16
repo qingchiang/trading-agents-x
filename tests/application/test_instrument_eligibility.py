@@ -30,15 +30,23 @@ def _with_eligibility_vendor(
     app_settings: AppSettings,
     vendor: str,
 ) -> AppSettings:
-    data_config = deepcopy(dict(app_settings.default_run_settings.data_config))
-    data_config["data_vendors"]["instrument_eligibility"] = vendor
-    return app_settings.model_copy(
-        update={
-            "default_run_settings": app_settings.default_run_settings.model_copy(
-                update={"data_config": data_config}
-            )
-        }
-    )
+    from sqlalchemy.orm import Session
+
+    from tests.configuration_helpers import initialize_configuration
+    from tradingagents.application.configuration import ConfigurationError, ConfigurationStore
+    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.application.database import ConfigurationRecord
+    initialize_configuration(app_settings)
+    store = ConfigurationStore(app_settings)
+    routes = {**store.read().values.data_vendors, "instrument_eligibility": vendor}
+    # New saves reject unsupported routing. Retained/corrupt configurations
+    # must still fail closed at admission rather than silently using Yahoo.
+    with pytest.raises(ConfigurationError):
+        store.save(ConfigurationPatch(revision=store.read().revision, values={"data_vendors": routes}))
+    with Session(store.engine) as session, session.begin():
+        record = session.get(ConfigurationRecord, 1)
+        record.values_json = {**record.values_json, "data_vendors": routes}
+    return app_settings
 
 
 @pytest.mark.parametrize(
@@ -330,7 +338,9 @@ def test_retry_uses_current_eligibility_config_for_legacy_snapshot(
     app_settings,
     repository,
 ) -> None:
-    settings = _with_eligibility_vendor(app_settings, "alpha_vantage")
+    from tests.configuration_helpers import save_configuration
+    save_configuration(app_settings, {"data_vendors": {**app_settings.default_run_settings.data_config["data_vendors"], "instrument_eligibility": "default"}})
+    settings = app_settings
     observed_vendors: list[str | None] = []
 
     def resolve(ticker: str):
@@ -357,7 +367,7 @@ def test_retry_uses_current_eligibility_config_for_legacy_snapshot(
 
     service.retry(queued.id)
 
-    assert observed_vendors == ["alpha_vantage", "alpha_vantage"]
+    assert observed_vendors == ["default", "default"]
 
 
 @pytest.mark.parametrize("operation", ["enqueue", "run"])

@@ -19,6 +19,7 @@ from rich.logging import RichHandler
 from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
+from tradingagents.application.configuration import ConfigurationError
 from tradingagents.application.contracts import RunEvent, RunStatus
 from tradingagents.application.errors import (
     InstrumentEligibilityUnavailableError,
@@ -45,6 +46,8 @@ app = typer.Typer(
 )
 runs_app = typer.Typer(help="Inspect and control durable research runs.")
 db_app = typer.Typer(help="Maintain the local SQLite database.")
+config_app = typer.Typer(help="Initialize or import application configuration.")
+app.add_typer(config_app, name="config")
 app.add_typer(runs_app, name="runs")
 app.add_typer(db_app, name="db")
 
@@ -95,11 +98,11 @@ def run_command(
             help="Point-in-time cutoff (YYYY-MM-DD); defaults to the market-local date.",
         ),
     ] = None,
-    profile: Annotated[RunProfile, typer.Option("--profile")] = RunProfile.STANDARD,
+    profile: Annotated[RunProfile | None, typer.Option("--profile")] = None,
     analysts: Annotated[
-        str,
-        typer.Option("--analysts", help="Comma-separated analyst keys."),
-    ] = ",".join(_ANALYSTS),
+        str | None,
+        typer.Option("--analysts", help="Comma-separated analyst keys; omitted uses saved defaults."),
+    ] = None,
     provider: Annotated[str | None, typer.Option("--provider")] = None,
     quick_model: Annotated[str | None, typer.Option("--quick-model")] = None,
     deep_model: Annotated[str | None, typer.Option("--deep-model")] = None,
@@ -129,7 +132,7 @@ def run_command(
     ] = False,
 ) -> None:
     """Execute one analysis synchronously and persist it in SQLite."""
-    selected = _parse_analysts(analysts)
+    selected = _parse_analysts(analysts) if analysts is not None else None
     cutoff = (
         _parse_analysis_date(analysis_date)
         if analysis_date
@@ -139,8 +142,8 @@ def run_command(
         request = AnalysisRequest(
             ticker=ticker,
             analysis_date=cutoff,
-            profile=profile,
-            analysts=selected,
+            **({"profile": profile} if profile is not None else {}),
+            **({"analysts": selected} if selected is not None else {}),
             llm_provider=provider,
             quick_model=quick_model,
             deep_model=deep_model,
@@ -165,6 +168,10 @@ def run_command(
             "please retry later.[/red]"
         )
         raise typer.Exit(code=1) from exc
+    except ConfigurationError as exc:
+        event_console.print(f"[red]{exc}[/red]")
+        event_console.print("Open Settings, or use tradingagents config initialize / import-env.")
+        raise typer.Exit(code=1) from None
     except Exception as exc:
         event_console.print(
             f"[red]Analysis failed ({type(exc).__name__}). "
@@ -406,6 +413,57 @@ def backup_database(
         event_console.print(f"[red]Database backup failed: {exc}[/red]")
         raise typer.Exit(code=1) from None
     console.print(f"Backup created at {created}")
+
+
+@config_app.command("initialize")
+def initialize_configuration(
+    apply: Annotated[bool, typer.Option("--apply", help="Persist program defaults and enable the worker.")] = False,
+):
+    from tradingagents.application.configuration import ConfigurationStore
+    from tradingagents.application.configuration_models import ImportRequest
+    from tradingagents.persistence import upgrade_database
+    settings = _settings()
+    if apply:
+        upgrade_database(settings)
+    store = ConfigurationStore(settings)
+    if apply:
+        store.apply_import(ImportRequest(revision=store.read().revision, use_defaults=True))
+        console.print("Configuration initialized. Manage providers and credentials in Settings.")
+    else:
+        console.print("Program defaults will be used; existing credentials are retained. Pass --apply to initialize.")
+
+
+@config_app.command("import-env")
+def import_configuration(
+    primary: Annotated[Path | None, typer.Option("--file", exists=True, dir_okay=False)] = None,
+    enterprise: Annotated[Path | None, typer.Option("--enterprise-file", exists=True, dir_okay=False)] = None,
+    exclude: Annotated[list[str] | None, typer.Option("--exclude")] = None,
+    apply: Annotated[bool, typer.Option("--apply")] = False,
+):
+    from pydantic import SecretStr
+
+    from tradingagents.application.configuration import ConfigurationStore
+    from tradingagents.application.configuration_models import ImportRequest
+    from tradingagents.persistence import upgrade_database
+    settings = _settings()
+    if apply:
+        upgrade_database(settings)
+    store = ConfigurationStore(settings)
+    request = ImportRequest(
+        revision=store.read().revision,
+        primary=SecretStr(primary.read_text()) if primary else None,
+        enterprise=SecretStr(enterprise.read_text()) if enterprise else None,
+        exclude=exclude or [],
+    )
+    preview = store.preview_import(request)
+    console.print(preview.model_dump_json(indent=2))
+    if apply:
+        try:
+            store.apply_import(request.model_copy(update={"fingerprint": preview.fingerprint}))
+        except ValueError as exc:
+            event_console.print(str(exc))
+            raise typer.Exit(1) from None
+        console.print("Configuration imported. Daily environment overrides are no longer used.")
 
 
 def _settings() -> AppSettings:

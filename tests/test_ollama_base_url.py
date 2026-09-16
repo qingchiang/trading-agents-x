@@ -20,18 +20,18 @@ def test_resolver_returns_default_when_env_unset(monkeypatch):
     assert _base_url(mod, "ollama") == "http://localhost:11434/v1"
 
 
-def test_resolver_returns_env_when_set(monkeypatch):
+def test_resolver_ignores_ambient_environment(monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://remote-ollama:11434/v1")
     mod = _reload_client()
-    assert _base_url(mod, "ollama") == "http://remote-ollama:11434/v1"
+    assert _base_url(mod, "ollama") == "http://localhost:11434/v1"
 
 
-def test_resolver_evaluation_is_call_time(monkeypatch):
-    """Setting the env AFTER module import must still take effect."""
+def test_ambient_changes_do_not_change_connection(monkeypatch):
+    """Changing ambient environment cannot replace the resolved connection."""
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     mod = _reload_client()
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://late-set:11434/v1")
-    assert _base_url(mod, "ollama") == "http://late-set:11434/v1"
+    assert _base_url(mod, "ollama") == "http://localhost:11434/v1"
 
 
 def test_resolver_does_not_affect_other_providers(monkeypatch):
@@ -42,11 +42,11 @@ def test_resolver_does_not_affect_other_providers(monkeypatch):
     assert _base_url(mod, "deepseek") == "https://api.deepseek.com"
 
 
-def test_client_get_llm_picks_up_env(monkeypatch):
-    """End-to-end: OllamaClient.get_llm() respects OLLAMA_BASE_URL."""
+def test_client_uses_explicit_connection(monkeypatch):
+    """End-to-end: the client uses the explicit resolved endpoint."""
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://my-ollama:11434/v1")
     mod = _reload_client()
-    client = mod.OpenAIClient(model="llama3.1", provider="ollama")
+    client = mod.OpenAIClient(model="llama3.1", provider="ollama", base_url="http://my-ollama:11434/v1")
     llm = client.get_llm()
     assert "my-ollama" in str(llm.openai_api_base)
 

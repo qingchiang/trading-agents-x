@@ -2,7 +2,10 @@ from typing import Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from tradingagents.credentials import credential
+
 from .base_client import BaseLLMClient, normalize_content
+from .provider_registry import PROVIDER_REGISTRY
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
@@ -29,15 +32,16 @@ class GoogleClient(BaseLLMClient):
         self.warn_if_unknown_model()
         llm_kwargs = {"model": self.model}
 
-        if self.base_url:
-            llm_kwargs["base_url"] = self.base_url
+        llm_kwargs["base_url"] = self.base_url or PROVIDER_REGISTRY["google"].default_base_url
 
         for key in ("timeout", "max_retries", "temperature", "callbacks", "http_client", "http_async_client"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
         # Unified api_key maps to provider-specific google_api_key
-        google_api_key = self.kwargs.get("api_key") or self.kwargs.get("google_api_key")
+        google_api_key = self.kwargs.get("api_key") or self.kwargs.get("google_api_key") or credential("GOOGLE_API_KEY")
+        if not google_api_key:
+            raise ValueError("Configure the Google credential in Settings")
         if google_api_key:
             llm_kwargs["google_api_key"] = google_api_key
 

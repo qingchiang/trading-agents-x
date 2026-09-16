@@ -40,7 +40,7 @@ def create_run_llms(
         "temperature": settings.temperature,
         "llm_max_retries": settings.llm_max_retries,
     }
-    common: dict[str, Any] = {}
+    common: dict[str, Any] = {"connection": settings.connection or {}}
     if settings.temperature is not None:
         common["temperature"] = float(settings.temperature)
     if settings.llm_max_retries is not None:

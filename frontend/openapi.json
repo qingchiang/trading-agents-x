@@ -719,6 +719,11 @@
             "title": "Analysts",
             "type": "array"
           },
+          "configuration_initialized": {
+            "default": false,
+            "title": "Configuration Initialized",
+            "type": "boolean"
+          },
           "defaults": {
             "$ref": "#/components/schemas/CapabilityDefaults"
           },
@@ -757,6 +762,13 @@
       "CapabilityDefaults": {
         "additionalProperties": false,
         "properties": {
+          "analysts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
           "deep_model": {
             "title": "Deep Model",
             "type": "string"
@@ -1037,6 +1049,570 @@
         ],
         "title": "ComparisonValueState",
         "type": "string"
+      },
+      "ConfigurationField": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "title": "Default"
+          },
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Description",
+            "type": "object"
+          },
+          "env_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Names",
+            "type": "array"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "number",
+              "boolean",
+              "list",
+              "choice",
+              "routes",
+              "providers"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "group",
+          "label",
+          "description",
+          "kind"
+        ],
+        "title": "ConfigurationField",
+        "type": "object"
+      },
+      "ConfigurationPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "format": "password",
+                  "type": "string",
+                  "writeOnly": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "reset_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reset Fields",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ConfigurationValues"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ConfigurationPatch",
+        "type": "object"
+      },
+      "ConfigurationSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_owners": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credential Owners",
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "provider_defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConnection"
+            },
+            "title": "Provider Defaults",
+            "type": "object"
+          },
+          "providers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "object"
+          },
+          "route_options": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Route Options",
+            "type": "object"
+          },
+          "tool_options": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Tool Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields",
+          "providers",
+          "provider_defaults",
+          "credential_owners",
+          "route_options",
+          "tool_options"
+        ],
+        "title": "ConfigurationSchema",
+        "type": "object"
+      },
+      "ConfigurationValues": {
+        "additionalProperties": false,
+        "properties": {
+          "analysts": {
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Analysts",
+            "type": "array"
+          },
+          "anthropic_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anthropic Effort"
+          },
+          "cn_news_candidate_limit": {
+            "default": 100,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Cn News Candidate Limit",
+            "type": "integer"
+          },
+          "data_vendors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Data Vendors",
+            "type": "object"
+          },
+          "data_vendors_by_market": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Data Vendors By Market",
+            "type": "object"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "deep_think_llm": {
+            "default": "gpt-5.5",
+            "minLength": 1,
+            "title": "Deep Think Llm",
+            "type": "string"
+          },
+          "global_news_article_limit": {
+            "default": 10,
+            "minimum": 1.0,
+            "title": "Global News Article Limit",
+            "type": "integer"
+          },
+          "global_news_candidate_limit": {
+            "default": 10,
+            "minimum": 1.0,
+            "title": "Global News Candidate Limit",
+            "type": "integer"
+          },
+          "global_news_lookback_days": {
+            "default": 7,
+            "minimum": 0.0,
+            "title": "Global News Lookback Days",
+            "type": "integer"
+          },
+          "global_news_queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Global News Queries",
+            "type": "array"
+          },
+          "global_news_query_limit": {
+            "default": 5,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Global News Query Limit",
+            "type": "integer"
+          },
+          "google_thinking_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Thinking Level"
+          },
+          "llm_max_retries": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Max Retries"
+          },
+          "llm_provider": {
+            "default": "openai",
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "news_article_limit": {
+            "default": 30,
+            "minimum": 1.0,
+            "title": "News Article Limit",
+            "type": "integer"
+          },
+          "news_cache_enabled": {
+            "default": true,
+            "title": "News Cache Enabled",
+            "type": "boolean"
+          },
+          "news_cache_refresh_seconds": {
+            "default": 900,
+            "minimum": 0.0,
+            "title": "News Cache Refresh Seconds",
+            "type": "integer"
+          },
+          "news_cache_retention_days": {
+            "default": 90,
+            "minimum": 1.0,
+            "title": "News Cache Retention Days",
+            "type": "integer"
+          },
+          "news_cache_scope_limit": {
+            "default": 2000,
+            "minimum": 1.0,
+            "title": "News Cache Scope Limit",
+            "type": "integer"
+          },
+          "news_cache_total_limit": {
+            "default": 50000,
+            "minimum": 1.0,
+            "title": "News Cache Total Limit",
+            "type": "integer"
+          },
+          "openai_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openai Reasoning Effort"
+          },
+          "output_language": {
+            "default": "en",
+            "minLength": 1,
+            "title": "Output Language",
+            "type": "string"
+          },
+          "profile": {
+            "default": "standard",
+            "enum": [
+              "fast",
+              "standard",
+              "deep"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "providers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConnection"
+            },
+            "title": "Providers",
+            "type": "object"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "quick_think_llm": {
+            "default": "gpt-5.4-mini",
+            "minLength": 1,
+            "title": "Quick Think Llm",
+            "type": "string"
+          },
+          "sentiment_filing_limit": {
+            "default": 20,
+            "minimum": 1.0,
+            "title": "Sentiment Filing Limit",
+            "type": "integer"
+          },
+          "social_lookback_days": {
+            "default": 7,
+            "minimum": 0.0,
+            "title": "Social Lookback Days",
+            "type": "integer"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "ticker_news_lookback_days": {
+            "default": 14,
+            "minimum": 0.0,
+            "title": "Ticker News Lookback Days",
+            "type": "integer"
+          },
+          "tool_vendors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tool Vendors",
+            "type": "object"
+          },
+          "trash_retention_days": {
+            "default": 30,
+            "minimum": 0.0,
+            "title": "Trash Retention Days",
+            "type": "integer"
+          },
+          "yahoo_news_candidate_limit": {
+            "default": 200,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Yahoo News Candidate Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ConfigurationValues",
+        "type": "object"
+      },
+      "ConfigurationView": {
+        "additionalProperties": false,
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "deployment": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Deployment",
+            "type": "object"
+          },
+          "initialized": {
+            "title": "Initialized",
+            "type": "boolean"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sources": {
+            "additionalProperties": {
+              "enum": [
+                "database",
+                "default"
+              ],
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "object"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ConfigurationValues"
+          }
+        },
+        "required": [
+          "initialized",
+          "revision",
+          "values",
+          "sources",
+          "credentials",
+          "deployment"
+        ],
+        "title": "ConfigurationView",
+        "type": "object"
+      },
+      "CredentialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CredentialRequest",
+        "type": "object"
+      },
+      "CredentialView": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CredentialView",
+        "type": "object"
       },
       "DebateAgenda": {
         "additionalProperties": false,
@@ -2040,6 +2616,136 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImportIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "message"
+        ],
+        "title": "ImportIssue",
+        "type": "object"
+      },
+      "ImportPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "revision",
+          "fingerprint",
+          "values",
+          "credentials",
+          "issues",
+          "conflicts"
+        ],
+        "title": "ImportPreview",
+        "type": "object"
+      },
+      "ImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enterprise": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enterprise"
+          },
+          "exclude": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exclude",
+            "type": "array"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          },
+          "revision": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "use_defaults": {
+            "default": false,
+            "title": "Use Defaults",
+            "type": "boolean"
+          }
+        },
+        "title": "ImportRequest",
         "type": "object"
       },
       "IncrementalAnalysisBrief": {
@@ -3239,6 +3945,72 @@
           "model_discovery_supported"
         ],
         "title": "ProviderCapabilities",
+        "type": "object"
+      },
+      "ProviderConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Version"
+          },
+          "auth_mode": {
+            "default": "system",
+            "enum": [
+              "bearer",
+              "system",
+              "static"
+            ],
+            "title": "Auth Mode",
+            "type": "string"
+          },
+          "aws_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aws Profile"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "deployment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment"
+          },
+          "region": {
+            "default": "us-west-2",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "title": "ProviderConnection",
         "type": "object"
       },
       "ProviderModelCatalog": {
@@ -7873,6 +8645,192 @@
           }
         },
         "summary": "Retry Run"
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "read_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Settings"
+      },
+      "patch": {
+        "operationId": "save_settings_api_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigurationPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Settings"
+      }
+    },
+    "/api/v1/settings/credentials/reveal": {
+      "post": {
+        "operationId": "reveal_api_v1_settings_credentials_reveal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal"
+      }
+    },
+    "/api/v1/settings/import/apply": {
+      "post": {
+        "operationId": "apply_api_v1_settings_import_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply"
+      }
+    },
+    "/api/v1/settings/import/preview": {
+      "post": {
+        "operationId": "preview_api_v1_settings_import_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview"
+      }
+    },
+    "/api/v1/settings/schema": {
+      "get": {
+        "operationId": "schema_api_v1_settings_schema_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schema"
       }
     },
     "/api/v1/timelines": {

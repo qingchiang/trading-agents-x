@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
+import { settingsCopy } from "../settingsCopy";
 import {
   api,
   ApiError,
@@ -47,7 +48,7 @@ function reconcileAnalysisDate(
 }
 
 export default function NewRun() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const entry = useMemo(() => {
@@ -285,26 +286,26 @@ export default function NewRun() {
         setAnalysts(
           sourceIsTerminal
             ? [...(sourceRequest?.analysts ?? analystKeys)]
-            : [...analystKeys],
+            : [...(data.defaults.analysts ?? analystKeys)] as typeof analystKeys[number][],
         );
         setProvider(nextProvider);
         if (sourceIsTerminal && sourceProviderAvailable) {
           setQuickModel(sourceRequest?.quick_model ?? "");
           setDeepModel(sourceRequest?.deep_model ?? "");
           setQuickReasoning(
-            sourceRequest?.quick_reasoning_effort ?? "provider_default",
+            sourceRequest?.quick_reasoning_effort ?? "",
           );
           setDeepReasoning(
-            sourceRequest?.deep_reasoning_effort ?? "provider_default",
+            sourceRequest?.deep_reasoning_effort ?? "",
           );
         } else if (nextProvider === data.defaults.llm_provider) {
           setQuickModel(data.defaults.quick_model);
           setDeepModel(data.defaults.deep_model);
           setQuickReasoning(
-            data.defaults.quick_reasoning_effort ?? "provider_default",
+            data.defaults.quick_reasoning_effort ?? "",
           );
           setDeepReasoning(
-            data.defaults.deep_reasoning_effort ?? "provider_default",
+            data.defaults.deep_reasoning_effort ?? "",
           );
         } else {
           setQuickModel("");
@@ -512,8 +513,8 @@ export default function NewRun() {
         llm_provider: provider,
         quick_model: resolvedQuickModel,
         deep_model: resolvedDeepModel,
-        quick_reasoning_effort: quickReasoning,
-        deep_reasoning_effort: deepReasoning,
+        quick_reasoning_effort: quickReasoning || null,
+        deep_reasoning_effort: deepReasoning || null,
         output_language: outputLanguage,
         research_kind: researchKind,
         full_baseline_run_id:
@@ -557,6 +558,7 @@ export default function NewRun() {
   };
 
   const submitUnavailable = submitting ? t("loading")
+    : capabilities?.configuration_initialized === false ? settingsCopy[i18n.language.startsWith("zh") ? "zh-CN" : i18n.language.startsWith("ja") ? "ja" : "en"].setup
     : !ticker.trim() ? t("enterInstrumentFirst")
     : analysisContextLoading ? t("marketDateLoading")
     : !analysisContext ? analysisContextError || t("marketDateLoading")
@@ -568,6 +570,7 @@ export default function NewRun() {
 
   return (
     <section>
+      {capabilities?.configuration_initialized === false && <div className="alert"><Link to="/settings">{settingsCopy[i18n.language.startsWith("zh") ? "zh-CN" : i18n.language.startsWith("ja") ? "ja" : "en"].setup}</Link></div>}
       <header className="page-header">
         <div>
           <h1>{t("newRun")}</h1>
@@ -1058,9 +1061,8 @@ function reasoningOptions(
       ? ["provider_default"]
       : (catalog?.models.find((option) => option.id === model)
           ?.reasoning_efforts ?? ["provider_default"]);
-  return current && !options.includes(current)
-    ? [...options, current]
-    : options;
+  const inherited = ["", ...options];
+  return current && !inherited.includes(current) ? [...inherited, current] : inherited;
 }
 
 function ReasoningSelect({
@@ -1076,6 +1078,7 @@ function ReasoningSelect({
   onChange: (value: string) => void;
   providerDefault: string;
 }) {
+  const { t } = useTranslation();
   return (
     <label>
       {label}
@@ -1085,7 +1088,7 @@ function ReasoningSelect({
       >
         {options.map((option) => (
           <option key={option} value={option}>
-            {option === "provider_default" ? providerDefault : option}
+            {option === "" ? t("defaults") : option === "provider_default" ? providerDefault : option}
           </option>
         ))}
       </select>

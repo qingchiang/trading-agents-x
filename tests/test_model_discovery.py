@@ -397,3 +397,49 @@ def test_bedrock_adapter_filters_non_text_models(tmp_path: Path) -> None:
     models = service._discover_bedrock()
 
     assert models == [("text-model", "supported")]
+
+
+def test_database_discovery_uses_latest_connection_and_credentials_without_ambient_fallback(tmp_path, monkeypatch):
+    from tradingagents.application.configuration import ConfigurationStore
+    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.persistence.migrations import upgrade_database
+
+    settings = _settings(tmp_path)
+    upgrade_database(settings)
+    store = ConfigurationStore(settings)
+    store.save(ConfigurationPatch(revision=0, credentials={"OPENAI_API_KEY": "first"}), initialize=True)
+    session = FakeSession(lambda *args, **kwargs: FakeResponse({"data": [{"id": "model"}]}))
+    service = ModelDiscoveryService(settings, configuration=store, session=session)
+    assert service.discover("openai").source == "live"
+    assert service.discover("openai").source == "cache"
+    assert len(session.calls) == 1
+    assert session.calls[-1]["headers"]["Authorization"] == "Bearer first"
+    store.save(ConfigurationPatch(revision=1, credentials={"OPENAI_API_KEY": "second"}, values={"providers": {"openai": {"base_url": "https://relay.example/v1"}}}))
+    assert service.discover("openai").source == "live"
+    assert session.calls[-1]["url"].startswith("https://relay.example/v1")
+    assert session.calls[-1]["headers"]["Authorization"] == "Bearer second"
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-not-allowed")
+    store.save(ConfigurationPatch(revision=2, credentials={"OPENAI_API_KEY": None}))
+    assert service.discover("openai").source == "fallback"
+    assert len(session.calls) == 2
+
+
+@pytest.mark.parametrize("provider,root,path", [
+    ("anthropic", "https://api.anthropic.com", "/v1/models"),
+    ("google", "https://generativelanguage.googleapis.com", "/v1beta/models"),
+])
+def test_execution_and_discovery_use_one_api_version_segment(tmp_path, provider, root, path):
+    from tradingagents.application.configuration import ConfigurationStore
+    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.application.contracts import AnalysisRequest
+    from tradingagents.persistence.migrations import upgrade_database
+
+    settings = _settings(tmp_path)
+    upgrade_database(settings)
+    store = ConfigurationStore(settings)
+    store.save(ConfigurationPatch(revision=0, values={"llm_provider": provider}, credentials={PROVIDER_REGISTRY[provider].api_key_env: "offline-key"}), initialize=True)
+    _, run = store.resolve_request(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10"))
+    assert run.backend_url == root
+    session = FakeSession([FakeResponse({"data": [], "models": []})])
+    ModelDiscoveryService(settings, configuration=store, session=session).discover(provider)
+    assert session.calls[0]["url"] == root + path

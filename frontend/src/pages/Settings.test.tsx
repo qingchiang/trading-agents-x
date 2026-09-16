@@ -1,89 +1,163 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-
-import { api, type Capabilities } from "../api/client";
+import { api, ApiError } from "../api/client";
 import i18n from "../i18n";
 import Settings from "./Settings";
-
-vi.mock("../api/client", () => ({
+vi.mock("../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/client")>()),
   api: {
+    settings: vi.fn(),
+    settingsSchema: vi.fn(),
     capabilities: vi.fn(),
+    saveSettings: vi.fn(),
+    revealCredential: vi.fn(),
+    applySettingsImport: vi.fn(),
+    previewSettingsImport: vi.fn(),
   },
 }));
-
-const capabilities = {
-  profiles: ["fast", "standard", "deep"],
-  analysts: ["market", "social", "news", "fundamentals"],
-  output_languages: ["en", "zh-CN", "ja"],
-  providers: {
-    openai: {
-      label: "OpenAI",
-      api_key_required: true,
-      api_key_configured: true,
-      configured: true,
-      selectable: true,
-      unavailable_reason: null,
-      model_discovery_supported: true,
+const view = {
+  initialized: true,
+  revision: 1,
+  values: { output_language: "en", providers: {} },
+  sources: { output_language: "default" },
+  credentials: { OPENAI_API_KEY: true },
+  deployment: { host: "127.0.0.1" },
+};
+const schema = {
+  fields: [
+    {
+      key: "output_language",
+      group: "research",
+      kind: "text",
+      label: { en: "Report language" },
+      description: { en: "Language of new research" },
+      default: "en",
+      options: [],
+      env_names: ["TRADINGAGENTS_OUTPUT_LANGUAGE"],
     },
-    anthropic: {
-      label: "Anthropic",
-      api_key_required: true,
-      api_key_configured: false,
-      configured: false,
-      selectable: false,
-      unavailable_reason: "api_key_missing",
-      model_discovery_supported: true,
+    {
+      key: "providers",
+      group: "providers",
+      kind: "providers",
+      label: { en: "Model services" },
+      description: { en: "Connections" },
+      default: {},
+      options: [],
+      env_names: [],
     },
-    ollama: {
-      label: "Ollama",
-      api_key_required: false,
-      api_key_configured: null,
-      configured: true,
-      selectable: true,
-      unavailable_reason: null,
-      model_discovery_supported: true,
-    },
-  },
-  defaults: {
-    profile: "standard",
-    llm_provider: "openai",
-    quick_model: "gpt-5.4-mini",
-    deep_model: "gpt-5.5",
-    quick_reasoning_effort: null,
-    deep_reasoning_effort: null,
-    output_language: "zh-CN",
-    lan_enabled: false,
-    trash_retention_days: 30,
-  },
-} as Capabilities;
-
+  ],
+  providers: { openai: "OpenAI" },
+  provider_defaults: { openai: { base_url: "https://api.openai.com/v1" } },
+  credential_owners: { OPENAI_API_KEY: "openai" },
+  route_options: {},
+  tool_options: {},
+};
 beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
-  vi.mocked(api.capabilities).mockResolvedValue(capabilities);
+  vi.mocked(api.settings).mockResolvedValue(view as never);
+  vi.mocked(api.settingsSchema).mockResolvedValue(schema as never);
+  vi.mocked(api.capabilities).mockResolvedValue({
+    providers: { openai: { configured: true } },
+  } as never);
+});
+test("edits one group and reveals credentials only on demand", async () => {
+  vi.mocked(api.saveSettings).mockResolvedValue({
+    ...view,
+    revision: 2,
+  } as never);
+  vi.mocked(api.revealCredential).mockResolvedValue({ value: "private-key" });
+  render(<Settings />);
+  fireEvent.change(await screen.findByLabelText("Report language"), {
+    target: { value: "ja" },
+  });
+  fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+  await waitFor(() =>
+    expect(api.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revision: 1,
+        values: { output_language: "ja" },
+      }),
+    ),
+  );
+  expect(screen.queryByDisplayValue("private-key")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show key" }));
+  expect(await screen.findByDisplayValue("private-key")).toBeVisible();
+});
+test("retains unsaved values after a failed save and can search by environment name", async () => {
+  vi.mocked(api.saveSettings).mockRejectedValue(
+    new ApiError(409, "configuration_revision_conflict", "Conflict"),
+  );
+  render(<Settings />);
+  const input = await screen.findByLabelText("Report language");
+  fireEvent.change(input, { target: { value: "ja" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Your edits are retained",
+  );
+  expect(input).toHaveValue("ja");
+  fireEvent.change(screen.getByRole("searchbox"), {
+    target: { value: "TRADINGAGENTS_OUTPUT_LANGUAGE" },
+  });
+  expect(screen.getByLabelText("Report language")).toBeVisible();
+  expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
 });
 
-test("shows configured and unavailable providers without exposing secrets", async () => {
+test("shows field validation beside the setting without losing edits", async () => {
+  vi.mocked(api.saveSettings).mockRejectedValue(
+    new ApiError(
+      422,
+      "validation_error",
+      "Invalid configuration",
+      undefined,
+      undefined,
+      [
+        {
+          location: ["body", "values", "output_language"],
+          message: "Use a report language",
+        },
+      ],
+    ),
+  );
   render(<Settings />);
-
-  expect(await screen.findAllByText("OpenAI")).toHaveLength(2);
-  expect(screen.getByText("Anthropic")).toBeInTheDocument();
-  expect(screen.getByText("Ollama")).toBeInTheDocument();
-  expect(screen.getAllByText("openai")).toHaveLength(1);
-  expect(screen.getAllByText("Configured")).toHaveLength(1);
-  expect(screen.getAllByText("Missing")).toHaveLength(1);
-  expect(screen.getAllByText("Ready")).toHaveLength(1);
-  expect(screen.getByText("Default model provider")).toBeVisible();
-  expect(screen.getByText("Trash retention (days)")).toBeVisible();
-  expect(screen.queryByText("trash retention days")).not.toBeInTheDocument();
-  expect(screen.queryByText("private-key")).not.toBeInTheDocument();
+  fireEvent.change(await screen.findByLabelText("Report language"), {
+    target: { value: "" },
+  });
+  fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+  expect(await screen.findByText("Use a report language")).toBeVisible();
+  expect(screen.getByLabelText("Report language")).toHaveValue("");
 });
 
-test("keeps interface preferences available on configuration failure and retries", async () => {
-  vi.mocked(api.capabilities).mockRejectedValueOnce(new Error("Offline"));
+test("requires an import preview before applying and never displays credential values", async () => {
+  vi.mocked(api.settings).mockResolvedValue({
+    ...view,
+    initialized: false,
+  } as never);
+  vi.mocked(api.previewSettingsImport).mockResolvedValue({
+    revision: 1,
+    fingerprint: "reviewed-source",
+    values: { output_language: "ja" },
+    credentials: { OPENAI_API_KEY: true },
+    conflicts: [],
+    issues: [],
+  });
+  vi.mocked(api.applySettingsImport).mockResolvedValue({
+    ...view,
+    initialized: true,
+    revision: 2,
+  } as never);
   render(<Settings />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Offline");
-  expect(screen.getByRole("heading", { name: "Interface preferences" })).toBeVisible();
-  screen.getByRole("button", { name: "Try again" }).click();
-  expect(await screen.findByText("Anthropic")).toBeVisible();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Preview import" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Apply reviewed import" }),
+  );
+  await waitFor(() =>
+    expect(api.applySettingsImport).toHaveBeenCalledWith({
+      revision: 1,
+      fingerprint: "reviewed-source",
+    }),
+  );
+  expect(api.revealCredential).not.toHaveBeenCalled();
 });

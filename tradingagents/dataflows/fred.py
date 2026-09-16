@@ -9,11 +9,12 @@ A free API key (https://fred.stlouisfed.org/docs/api/api_key.html) is read from
 the routing layer treats it as "unavailable" rather than a hard crash.
 """
 import logging
-import os
 import re
 from datetime import datetime, timedelta
 
 import requests
+
+from tradingagents.credentials import credential
 
 from .errors import VendorNotConfiguredError
 from .macro_common import SeriesCache, render_macro_report
@@ -82,10 +83,10 @@ class FredNotConfiguredError(VendorNotConfiguredError):
 
 def get_api_key() -> str:
     """Retrieve the FRED API key from the environment."""
-    api_key = os.getenv("FRED_API_KEY")
+    api_key = credential("FRED_API_KEY")
     if not api_key:
         raise FredNotConfiguredError(
-            "FRED_API_KEY environment variable is not set. Get a free key at "
+            "FRED_API_KEY credential is not configured in Settings. Get a free key at "
             "https://fred.stlouisfed.org/docs/api/api_key.html."
         )
     return api_key

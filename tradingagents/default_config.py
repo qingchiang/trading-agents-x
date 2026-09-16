@@ -4,11 +4,8 @@ from copy import deepcopy
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
-# Single source of truth for env-var → config-key overrides. To expose
-# a new config key for environment-based override, add a row here — no
-# entry-point script changes required. Coercion is driven by the type
-# of the existing default, so users can keep writing plain strings in
-# their .env file.
+# Legacy environment aliases used by the explicit configuration importer.
+# Runtime daily settings come from the database configuration module.
 _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_PROVIDER":         "llm_provider",
     "TRADINGAGENTS_DEEP_THINK_LLM":       "deep_think_llm",
@@ -22,8 +19,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_QUICK_REASONING_EFFORT": "quick_reasoning_effort",
     "TRADINGAGENTS_DEEP_REASONING_EFFORT":  "deep_reasoning_effort",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
-    # default). Settable here for non-interactive runs; the CLI also offers an
-    # interactive choice, which is skipped when the matching var is set.
+    # default). These names are accepted by explicit legacy imports; the
+    # settings page exposes their priority relative to role-specific values.
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
@@ -217,6 +214,6 @@ def build_default_config(
     return config
 
 
-# Imports are deterministic. Entry points call ``build_default_config`` through
-# ``AppSettings.from_env`` after they have explicitly loaded environment files.
+# Imports are deterministic. These program defaults also back the typed
+# configuration catalog; environment values enter daily settings only by import.
 DEFAULT_CONFIG = build_default_config()

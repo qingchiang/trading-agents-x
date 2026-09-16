@@ -74,6 +74,9 @@ class ModelDiscoveryService:
         settings: AppSettings,
         *,
         environ: Mapping[str, str] | None = None,
+        configuration=None,
+        connections=None,
+        revision=0,
         session: requests.Session | None = None,
         timeout_seconds: float = 5.0,
         cache_ttl_seconds: float = 300.0,
@@ -82,6 +85,9 @@ class ModelDiscoveryService:
         bedrock_client_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self.settings = settings
+        self.configuration = configuration
+        self.connections = connections
+        self.revision = revision
         self.environ = environ
         self.session = session or requests.Session()
         self.timeout_seconds = timeout_seconds
@@ -89,18 +95,34 @@ class ModelDiscoveryService:
         self.clock = clock
         self.now = now or (lambda: datetime.now(UTC))
         self.bedrock_client_factory = bedrock_client_factory
-        self._cache: dict[tuple[str, str | None], _CacheEntry] = {}
+        self._cache: dict[tuple[str, str | None, int], _CacheEntry] = {}
         self._lock = Lock()
+
+    def _resolved(self):
+        settings, environment, connections, revision = self.configuration.discovery_snapshot()
+        service = ModelDiscoveryService(settings, environ=environment, connections=connections,
+            revision=revision, session=self.session, timeout_seconds=self.timeout_seconds,
+            cache_ttl_seconds=self.cache_ttl_seconds, clock=self.clock, now=self.now,
+            bedrock_client_factory=self.bedrock_client_factory)
+        with self._lock:
+            for key in list(self._cache):
+                if key[2] != revision:
+                    del self._cache[key]
+        service._cache = self._cache
+        service._lock = self._lock
+        return service
 
     def providers(self) -> dict[str, tuple[ProviderDefinition, ProviderAvailability]]:
         """Return every provider for Settings, including unavailable entries."""
+        if self.configuration is not None:
+            return self._resolved().providers()
         return {
             name: (
                 definition,
                 provider_availability(
                     definition,
                     self.settings,
-                    self.environ,
+                    self.environ, self.connections,
                 ),
             )
             for name, definition in PROVIDER_REGISTRY.items()
@@ -108,20 +130,22 @@ class ModelDiscoveryService:
 
     def discover(self, provider: str, *, refresh: bool = False) -> ModelCatalog:
         """Return a live, cached, or configured-default model catalog."""
+        if self.configuration is not None:
+            return self._resolved().discover(provider, refresh=refresh)
         definition = get_provider_definition(provider)
         if definition is None:
             raise UnknownProviderError(provider)
         availability = provider_availability(
             definition,
             self.settings,
-            self.environ,
+            self.environ, self.connections,
         )
         base_url = resolve_provider_base_url(
             definition,
             self.settings,
-            self.environ,
+            self.environ, self.connections,
         )
-        cache_key = (definition.name, _safe_endpoint_identity(base_url))
+        cache_key = (definition.name, _safe_endpoint_identity(base_url), self.revision)
         now_monotonic = self.clock()
         if not refresh:
             with self._lock:
@@ -237,7 +261,8 @@ class ModelDiscoveryService:
             "x-api-key": self._env_value(definition.api_key_env) or "",
             "anthropic-version": "2023-06-01",
         }
-        endpoint = f"{base_url.rstrip('/')}/models"
+        root = base_url.rstrip("/")
+        endpoint = f"{root}/models" if root.endswith("/v1") else f"{root}/v1/models"
         models: list[tuple[str, ModelCompatibility]] = []
         after: str | None = None
         for _page in range(20):
@@ -264,7 +289,8 @@ class ModelDiscoveryService:
     ) -> list[tuple[str, ModelCompatibility]]:
         if not base_url:
             raise RuntimeError("Provider endpoint is not configured")
-        endpoint = f"{base_url.rstrip('/')}/models"
+        root = base_url.rstrip("/")
+        endpoint = f"{root}/models" if root.endswith(("/v1", "/v1beta")) else f"{root}/v1beta/models"
         models: list[tuple[str, ModelCompatibility]] = []
         page_token: str | None = None
         for _page in range(20):
@@ -329,7 +355,17 @@ class ModelDiscoveryService:
         else:
             import boto3
 
-            client = boto3.client("bedrock", region_name=region)
+            mode = self._env_value("BEDROCK_AUTH_MODE") or "system"
+            if mode == "bearer":
+                raise ValueError("Model discovery is unavailable for bearer authentication; enter a model ID")
+            kwargs = {}
+            if mode == "static":
+                kwargs = {"aws_access_key_id": self._env_value("AWS_ACCESS_KEY_ID"),
+                          "aws_secret_access_key": self._env_value("AWS_SECRET_ACCESS_KEY"),
+                          "aws_session_token": self._env_value("AWS_SESSION_TOKEN")}
+            else:
+                kwargs["profile_name"] = self._env_value("AWS_PROFILE")
+            client = boto3.Session(**kwargs).client("bedrock", region_name=region)
         models: list[tuple[str, ModelCompatibility]] = []
         token: str | None = None
         for _page in range(20):
@@ -473,14 +509,14 @@ class ModelDiscoveryService:
             return None
         if self.environ is not None:
             return self.environ.get(name)
-        return os_environ_get(name)
+        return context_credential(name)
 
 
-def os_environ_get(name: str) -> str | None:
+def context_credential(name: str) -> str | None:
     """Small seam kept out of serialized settings and easy to isolate in tests."""
-    import os
+    from tradingagents.credentials import credential
 
-    return os.environ.get(name)
+    return credential(name)
 
 
 def _safe_endpoint_identity(base_url: str | None) -> str | None:

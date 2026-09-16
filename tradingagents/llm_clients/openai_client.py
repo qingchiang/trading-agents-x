@@ -1,10 +1,11 @@
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+
+from tradingagents.credentials import credential
 
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
@@ -246,7 +247,7 @@ class ProviderSpec:
 
     chat_class: type = NormalizedChatOpenAI   # provider quirks live in the subclass
     base_url: str | None = None            # default endpoint (None -> SDK default)
-    base_url_env: str | None = None        # env var that overrides base_url (e.g. OLLAMA_BASE_URL)
+    base_url_env: str | None = None        # legacy import alias (e.g. OLLAMA_BASE_URL)
     key_optional: bool = False                # don't require/prompt; send a placeholder if unset
     placeholder_key: str = "EMPTY"            # sent when no key is available (keyless local servers)
     require_base_url: bool = False            # error if no base_url is resolved (generic endpoint)
@@ -330,15 +331,13 @@ class OpenAIClient(BaseLLMClient):
         if spec is not None:
             chat_cls = spec.chat_class
 
-            # base_url precedence: explicit client base_url (carries the config /
-            # TRADINGAGENTS_LLM_BACKEND_URL value) > provider env override (e.g.
-            # OLLAMA_BASE_URL) > provider default. None means use the SDK default.
-            env_base_url = os.environ.get(spec.base_url_env) if spec.base_url_env else None
-            base_url = self.base_url or env_base_url or spec.base_url
+            # An explicit resolved connection takes precedence over the built-in
+            # provider endpoint. Ambient environment cannot change a Run.
+            base_url = self.base_url or spec.base_url
             if spec.require_base_url and not base_url:
                 raise ValueError(
                     f"Provider '{self.provider}' requires a base_url. Set it via "
-                    "backend_url / TRADINGAGENTS_LLM_BACKEND_URL to your endpoint, "
+                    "the service address in Settings to your endpoint, "
                     "e.g. http://localhost:8000/v1 (vLLM) or http://localhost:1234/v1 "
                     "(LM Studio)."
                 )
@@ -348,7 +347,7 @@ class OpenAIClient(BaseLLMClient):
             # API key: required unless key_optional; keyless local servers get a
             # placeholder. The env-var name is the single source in api_key_env.
             api_key_env = get_api_key_env(self.provider)
-            api_key = os.environ.get(api_key_env) if api_key_env else None
+            api_key = self.kwargs.get("api_key") or (credential(api_key_env) if api_key_env else None)
             if api_key:
                 llm_kwargs["api_key"] = api_key
             elif spec.key_optional:
@@ -356,8 +355,7 @@ class OpenAIClient(BaseLLMClient):
             elif api_key_env:
                 raise ValueError(
                     f"API key for provider '{self.provider}' is not set. "
-                    f"Please set the {api_key_env} environment variable "
-                    f"(e.g. add {api_key_env}=your_key to your .env file)."
+                    "Configure the credential in Settings."
                 )
 
             # The Responses API only exists on native OpenAI; if the user points

@@ -4,7 +4,6 @@ All network calls are mocked — no credentials or connectivity needed.
 """
 
 import copy
-import os
 import unittest
 from io import StringIO
 from unittest import mock
@@ -14,6 +13,7 @@ import pytest
 import requests
 
 import tradingagents.default_config as default_config
+from tradingagents.credentials import use_credentials
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import (
@@ -164,7 +164,7 @@ class StockFetchTests(unittest.TestCase):
 class AuthTests(unittest.TestCase):
     def test_missing_api_key_raises_not_configured(self):
         with (
-            mock.patch.dict(os.environ, {}, clear=True),
+            use_credentials({}),
             self.assertRaises(JQuantsNotConfiguredError),
         ):
             jquants_common.get_api_key()
@@ -181,7 +181,7 @@ class AuthTests(unittest.TestCase):
             return FakeResp(200, {"data": []})
 
         with (
-            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY123"}, clear=True),
+            use_credentials({"JQUANTS_API_KEY": "KEY123"}),
             mock.patch.object(jquants_common.requests, "get", side_effect=fake_get),
         ):
             jquants_common._request("/equities/bars/daily", {})
@@ -189,7 +189,7 @@ class AuthTests(unittest.TestCase):
 
     def test_rate_limit_surfaces_typed_error(self):
         with (
-            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True),
+            use_credentials({"JQUANTS_API_KEY": "KEY"}),
             mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(429)),
             self.assertRaises(JQuantsRateLimitError),
         ):
@@ -197,7 +197,7 @@ class AuthTests(unittest.TestCase):
 
     def test_unauthorized_surfaces_not_configured(self):
         with (
-            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "BAD"}, clear=True),
+            use_credentials({"JQUANTS_API_KEY": "BAD"}),
             mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(403)),
             self.assertRaises(JQuantsNotConfiguredError),
         ):
@@ -213,7 +213,7 @@ class AuthTests(unittest.TestCase):
             'check the URL, HTTP method, and API version"}'
         )
         with (
-            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True),
+            use_credentials({"JQUANTS_API_KEY": "KEY"}),
             mock.patch.object(
                 jquants_common.requests, "get", return_value=FakeResp(403, text=body)
             ),

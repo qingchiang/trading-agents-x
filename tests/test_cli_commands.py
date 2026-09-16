@@ -46,6 +46,8 @@ def cli_settings(tmp_path: Path) -> AppSettings:
 
 @pytest.fixture
 def cli_service(cli_settings: AppSettings) -> AnalysisService:
+    from tests.configuration_helpers import initialize_configuration
+    initialize_configuration(cli_settings)
     return AnalysisService(
         cli_settings,
         eligibility_resolver=lambda ticker: {
@@ -696,7 +698,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0010_decision_confidence_levels",
+                "0011_application_configuration",
             )
             assert (
                 upgraded.execute(
@@ -726,3 +728,22 @@ def test_database_backup_is_consistent_and_refuses_overwrite(
     assert destination.stat().st_size > 0
     assert refused.exit_code == 1
     assert "Refusing to overwrite" in refused.output
+
+
+@pytest.mark.parametrize("flags,expected", [([], "deep"), (["--profile", "standard"], "standard")])
+def test_cli_omissions_inherit_db_defaults_and_explicit_standard_wins(cli_service, monkeypatch, flags, expected):
+    from tradingagents.application.configuration_models import ConfigurationPatch
+    config = cli_service.configuration
+    config.save(ConfigurationPatch(revision=config.read().revision, values={"profile": "deep", "analysts": ["news"]}))
+    captured = []
+
+    class FakeApplication:
+        def run(self, request, *, on_event):
+            captured.append(config.resolve_request(request)[0])
+            return AnalysisResult(run_id="configured", status=RunStatus.SUCCEEDED, instrument="GOOG", reports={}, decision=research_decision(confidence="medium", thesis="Offline configuration check."))
+
+    monkeypatch.setattr(cli, "_application", FakeApplication)
+    result = runner.invoke(cli.app, ["run", "GOOG", "--date", "2026-09-10", "--json", *flags])
+    assert result.exit_code == 0, result.output
+    assert captured[0].profile.value == expected
+    assert captured[0].analysts == ("news",)

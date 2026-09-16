@@ -1006,7 +1006,7 @@ test("shows only configured providers and discovers models lazily", async () => 
   ).toHaveLength(2);
 });
 
-test("unknown and custom model IDs only expose provider-default reasoning", async () => {
+test("unknown and custom model IDs expose inherited or explicit provider-default reasoning", async () => {
   render(
     <Router initialPath="/runs/new">
       <NewRunRoutes />
@@ -1018,13 +1018,13 @@ test("unknown and custom model IDs only expose provider-default reasoning", asyn
     target: { value: "future-model" },
   });
   const quickReasoning = screen.getByLabelText(/^Quick reasoning/);
-  expect(quickReasoning.querySelectorAll("option")).toHaveLength(1);
+  expect(Array.from(quickReasoning.querySelectorAll("option"), option => option.value)).toEqual(["", "provider_default"]);
 
   fireEvent.change(screen.getByLabelText(/^Deep model/), {
     target: { value: "__custom_model_id__" },
   });
-  expect(screen.getByLabelText(/^Deep reasoning/).querySelectorAll("option"))
-    .toHaveLength(1);
+  expect(Array.from(screen.getByLabelText(/^Deep reasoning/).querySelectorAll("option"), option => option.value))
+    .toEqual(["", "provider_default"]);
   expect(
     screen.getByPlaceholderText("Custom model ID"),
   ).toBeInTheDocument();
