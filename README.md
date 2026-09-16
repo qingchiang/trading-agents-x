@@ -28,9 +28,8 @@ or portfolio rebalancing.
 > **Independent product line.** TradingAgentsX preserves the Git history,
 > Apache-2.0 attribution, and paper citation inherited from
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents),
-> but no longer merges upstream as a development strategy. Upstream is monitored
-> read-only; relevant security or correctness fixes are independently audited
-> and selectively reimplemented or cherry-picked. See
+> and is maintained independently, without monitoring or synchronizing with
+> the original project's development or releases. See
 > [ADR 0001](docs/adr/0001-independent-product-line.md).
 
 > TradingAgentsX is a research tool, not financial or investment advice. Model

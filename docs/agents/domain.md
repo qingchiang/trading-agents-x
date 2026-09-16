@@ -2,10 +2,13 @@
 
 How engineering skills should consume this repository's domain documentation.
 
-## Before exploring, read these
+## Read when relevant
 
-- `CONTEXT.md` at the repository root
-- Relevant ADRs under `docs/adr/`
+- Read `CONTEXT.md` when working on domain terminology or concepts.
+- Read relevant ADRs under `docs/adr/` when work touches their design decisions.
+
+These documents are not prerequisites for unrelated exploration or mechanical
+edits. Read only the material relevant to the current task.
 
 If either path does not exist, proceed silently. Domain documentation is
 created lazily when terminology or durable decisions are resolved.

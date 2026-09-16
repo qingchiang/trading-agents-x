@@ -19,9 +19,8 @@ Yahoo 风格 Instrument Key；服务商支持更广泛的符号并不会扩大�
 
 > **独立产品线。** TradingAgentsX 保留源自
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-> 的 Git 历史、Apache-2.0 归因和论文引用，但已不再把合并 upstream 作为
-> 开发策略。上游仅用于只读监控；相关安全或正确性修复会在审计后选择性重写
-> 或 cherry-pick。详见 [ADR 0001](../adr/0001-independent-product-line.md)。
+> 的 Git 历史、Apache-2.0 归因和论文引用，并独立维护，不再监控或同步
+> 原项目的开发与发布。详见 [ADR 0001](../adr/0001-independent-product-line.md)。
 
 > 本项目是研究工具，不构成金融或投资建议。模型可能出错，数据也可能缺失、
 > 过期或不可用。

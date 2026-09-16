@@ -21,10 +21,8 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 
 > **独立したプロダクトライン。** TradingAgentsX は
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-> 由来の Git 履歴、Apache-2.0 の帰属表示、論文引用を維持しますが、
-> upstream のマージを開発方針にはしません。upstream は読み取り専用で監視し、
-> セキュリティや正確性に関わる修正だけを監査後に再実装または選択的に
-> cherry-pick します。詳細は
+> 由来の Git 履歴、Apache-2.0 の帰属表示、論文引用を維持しつつ、独立して
+> 保守します。元プロジェクトの開発やリリースの監視・同期は行いません。詳細は
 > [ADR 0001](../adr/0001-independent-product-line.md) を参照してください。
 
 > 本プロジェクトはリサーチツールであり、金融・投資助言ではありません。

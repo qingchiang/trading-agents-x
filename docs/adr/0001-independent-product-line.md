@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-27
+- Amended: 2026-09-16 (independent maintenance without upstream monitoring)
 
 ## Context
 
@@ -28,19 +29,23 @@ to implement and would keep two incompatible product models coupled.
 
 TradingAgentsX is an independent product line.
 
-1. Normal development does not merge `upstream/main`.
-2. The upstream remote may be retained for read-only monitoring.
-3. Security and critical correctness changes are assessed individually.
-4. A relevant change may be independently reimplemented or cherry-picked only
-   after reviewing its assumptions, dependencies, data semantics, and effect on
-   TradingAgentsX tests.
-5. Upstream release numbers and schedules do not determine TradingAgentsX
-   versions.
-6. Git history, Apache-2.0 licensing, NOTICE attribution, and the original paper
+1. Development does not monitor or synchronize with the original project's
+   branches, releases, or roadmap. No upstream remote is needed for maintenance.
+2. Security and correctness work is driven by this project's requirements and
+   evidence, without an obligation to track the original project's changes.
+3. External work may be incorporated when relevant to a task, after reviewing its
+   assumptions, dependencies, data semantics, and effect on TradingAgentsX tests.
+4. Release versions and schedules are owned by TradingAgentsX.
+5. Git history, Apache-2.0 licensing, NOTICE attribution, and the original paper
    citation are retained.
 
-This is a release-level hard cut implemented through reviewable phases, not a
-single rewrite.
+### Amendment: 2026-09-16
+
+The original decision retained read-only upstream monitoring and selective fix
+triage. The maintainer ended that standing workflow because this product is now
+maintained independently of the original project's development. This amendment
+removes the monitoring obligation while preserving the architectural decision,
+project history, licensing, and attribution.
 
 ## Consequences
 
@@ -56,8 +61,8 @@ single rewrite.
 ### Costs
 
 - Upstream fixes are no longer received automatically.
-- Maintainers must monitor and triage relevant upstream security/correctness
-  work.
+- Security and correctness fixes must be identified and validated through this
+  project's own maintenance, rather than a standing upstream-monitoring process.
 - Users of `TradingAgentsGraph`, interactive questionnaire flows, Markdown
   memory, or report-directory APIs need a breaking migration.
 - Attribution and provenance of selectively incorporated changes require
@@ -70,8 +75,6 @@ single rewrite.
   data assumptions first.
 - Preserve TradingAgentsX market-local date, Evidence, fallback, and provenance
   contracts when adapting external work.
-- Keep upstream-monitoring work separate from feature changes whenever
-  practical.
 - Document incorporated work in commits, changelog entries, and NOTICE when
   licensing or attribution requires it.
 

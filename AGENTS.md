@@ -1,8 +1,30 @@
 # Repository Agent Instructions
 
-This is the shared entry point for coding agents and agent harnesses working in
-this repository. Keep it concise, tool-neutral, and limited to stable rules that
-are useful across tasks.
+This is the shared project instruction source for coding agents. Local Codex
+preferences live in the git-ignored `AGENTS.override.md`, which explicitly loads
+this file.
+
+## Task scope and completion
+
+- Investigation, review, and planning requests authorize inspection and a report;
+  implement changes only when the request includes them.
+- For implementation requests, complete the in-scope changes, relevant local
+  validation, and fixes for failures caused by those changes. Reuse decisions and
+  authorization already established in the conversation; ask only when a missing
+  decision materially affects scope, correctness, or permission.
+- Skill workflows must stay within the current task, project rules, and granted
+  permissions.
+- Complete the work needed to deliver the requested outcome without expanding
+  the task's goals. Report the result, relevant validation, and unresolved blockers.
+
+## Independent maintenance and licensing
+
+TradingAgentsX is maintained independently. Do not monitor or synchronize with
+the original project's branches, releases, or roadmap as part of development.
+See ADR 0001 for the independent product-line decision and maintenance policy.
+
+Preserve `LICENSE`, `NOTICE`, and applicable copyright, license, and attribution
+notices for inherited or incorporated work.
 
 ## Before changing code
 
@@ -14,20 +36,22 @@ are useful across tasks.
    point-in-time handling, market adapters, or security boundaries. Localized
    changes outside those boundaries do not require reloading the architecture
    document.
-3. Keep the typed objects exported from `tradingagents` stable as the public
-   application contracts. Internal graph, service, repository, and adapter
-   interfaces may evolve with the independent product architecture, provided
-   the same change updates their callers, tests, migrations, and documentation
-   where applicable.
+3. Internal interfaces may evolve provided the same change updates their
+   callers, tests, migrations, and documentation where applicable. Preserve
+   the public contracts listed below unless the task explicitly authorizes a
+   contract change; update affected callers, tests, and documentation together.
 
 ## Commands
+
+Choose commands relevant to the task; this is a reference, not a mandatory
+checklist. Use uv 0.12.1 or newer locally, `uv.lock` for reproducible dependencies,
+and `--no-dev` for source-checkout runtime sync and run commands.
 
 ```bash
 uv sync --locked
 
 uv run --locked pytest -q
 uv run --locked pytest tests/test_market_routing.py
-uv run --locked pytest tests/test_x.py::Cls::test_y
 uv run --locked ruff check .
 
 npm ci --prefix frontend
@@ -35,28 +59,61 @@ npm test --prefix frontend
 npm run typecheck --prefix frontend
 npm run build --prefix frontend
 
-# Omit --wheel: uv then builds the wheel from an isolated sdist instead of
-# reusing a potentially stale in-tree build/ directory.
+# Build the wheel through an isolated sdist; see package-data rules below.
 uv build --out-dir wheelhouse
 uv run --locked --no-dev python scripts/verify_wheel.py \
   wheelhouse/trading_agents_x-*.whl
 
-# Opt-in network contracts; default pytest and CI skip these.
+# Select relevant probes under the access policy below; default pytest and CI skip these.
 RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
-  uv run --locked pytest -q -m live_data
-
-uv run --locked --no-dev tradingagents run NVDA --date 2026-07-24
-uv run --locked --no-dev tradingagents serve
-uv run --locked --no-dev tradingagents worker
+  uv run --locked pytest -q -m live_data -k '<relevant_probe>'
 ```
 
-CI (`.github/workflows/ci.yml`) uses uv and `uv.lock` for pytest on Python
-3.12-3.14, repo-wide Ruff, frontend unit/browser/type/build checks,
-OpenAPI/type drift checks, wheel validation, and Docker Web/worker smoke. A
-fresh standard venv installs the final wheel with pip as the only project
-installation path that does not use uv, preserving the downstream wheel
-consumer contract. Pytest markers are `unit`, `integration`, `live_data`, and
-`smoke`.
+See `.github/workflows/ci.yml` for the supported Python test matrix, tool pins,
+and required CI checks. Pytest markers are `unit`, `integration`, `live_data`,
+and `smoke`. For this project's installation workflow, use pip only in a clean
+environment that validates the final wheel as a downstream consumer. This
+restriction does not apply to independent tools in isolated environments.
+
+## Validation
+
+- Run checks proportionate to the change, including relevant tests and Ruff for
+  Python changes. Use the full suite when the impact or agreed acceptance scope
+  calls for it.
+- Once relevant checks pass, expand or repeat validation only for new changes,
+  failures, or unresolved concerns. Fix failures introduced by the task and
+  report unrelated failures without expanding the task.
+- Use live data checks when a change affects an external interface contract or
+  available evidence is insufficient. Select a few representative probes rather
+  than running the entire cross-market suite by default. Report missing live
+  verification only where it matters to the change.
+
+## Data, model, and database access
+
+- Task-relevant public documentation and small, low-frequency live data queries
+  are allowed without separate confirmation. Existing data-service credentials
+  may be used within known quotas without incremental charges. Prefer temporary
+  caches for probes; reuse existing caches when appropriate while respecting the
+  database-write authorization below. Respect rate limits and stop expanding
+  requests on repeated failures, rate limiting, or uncertain cost.
+- Bulk downloads, historical backfills, continuous polling, material quota use,
+  and queries with additional or unclear charges require authorization covering
+  their scope and budget.
+- Paid LLM calls from project scripts, tests, or the application, including full
+  research runs, require explicit authorization. An explicit request to run an
+  analysis authorizes that run without a separate numeric budget. Respect any
+  stated budget or attempt limits and continue within the authorization without
+  asking for each request. Additional unrequested runs or material cost expansion
+  need further authorization. This rule concerns project-issued model calls,
+  not ordinary coding-agent interaction.
+- Read-only diagnosis of an existing application database is allowed when
+  relevant to the task. Use an explicit read-only connection, select only needed
+  fields and bounded results, and avoid application startup paths that may
+  initialize, migrate, or change database settings. Do not dump credentials or
+  expose secrets in logs or responses.
+- Writes, migrations, deletion, restoration, and other state-changing maintenance
+  of an existing application database require explicit authorization. Disposable
+  test databases may be created, migrated, and modified as needed for validation.
 
 ## Sandboxed environments
 
@@ -111,9 +168,6 @@ silently changing package sources.
 - Do not change global HTTP-library behavior to accommodate one source. Keep
   retries, timeouts, caching, and schema validation local to the adapter or its
   shared subsystem utility.
-- Normal development does not merge `upstream/main`. Monitor upstream
-  read-only and adapt a relevant security/correctness fix only after auditing
-  it against TradingAgentsX contracts; see ADR 0001.
 
 ## Dependencies and package data
 
@@ -121,8 +175,8 @@ Runtime imports belong in `[project.dependencies]`, user-facing optional
 features belong in PEP 621 `[project.optional-dependencies]`, and test or
 development tools belong in the PEP 735 `[dependency-groups].dev` group. Add
 them with `uv add <package>`, `uv add --optional <extra> <package>`, or
-`uv add --dev <package>` respectively, and commit the resulting `uv.lock`
-change.
+`uv add --dev <package>` respectively, and include the resulting `uv.lock`
+change in the same delivery.
 
 Register non-code runtime files in `[tool.setuptools.package-data]` and load
 them with `importlib.resources`. An editable install seeing a local file does
@@ -154,7 +208,9 @@ not publish them remotely unless explicitly requested. See
 ### Domain docs
 
 This is a single-context repo with `CONTEXT.md` and `docs/adr/` at the root.
-See `docs/agents/domain.md`.
+Consult the glossary and relevant ADRs when working on domain terminology or
+design decisions. Read `docs/agents/domain.md` for that workflow; domain docs
+are not prerequisites for unrelated exploration or mechanical edits.
 
 ### TDD applicability gate
 
