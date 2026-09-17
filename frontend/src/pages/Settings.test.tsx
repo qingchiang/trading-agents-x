@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { api, ApiError } from "../api/client";
 import i18n from "../i18n";
+import { Router } from "../router";
 import Settings from "./Settings";
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/client")>()),
@@ -21,6 +22,7 @@ const view = {
   values: { output_language: "en", providers: {} },
   sources: { output_language: "default" },
   credentials: { OPENAI_API_KEY: true },
+  connections: { main: { connection: { id: "main", name: "OpenAI", enabled: true, transport: { kind: "responses", base_url: "https://api.openai.com/v1" } }, credentials: { api_key: true }, missing_fields: [], selectable: true } },
   deployment: { host: "127.0.0.1" },
 };
 const schema = {
@@ -67,7 +69,7 @@ test("edits one group and reveals credentials only on demand", async () => {
     revision: 2,
   } as never);
   vi.mocked(api.revealCredential).mockResolvedValue({ value: "private-key" });
-  render(<Settings />);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
   fireEvent.change(await screen.findByLabelText("Report language"), {
     target: { value: "ja" },
   });
@@ -81,6 +83,8 @@ test("edits one group and reveals credentials only on demand", async () => {
     ),
   );
   expect(screen.queryByDisplayValue("private-key")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Model connections" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
   fireEvent.click(screen.getByRole("button", { name: "Show key" }));
   expect(await screen.findByDisplayValue("private-key")).toBeVisible();
 });
@@ -88,7 +92,7 @@ test("retains unsaved values after a failed save and can search by environment n
   vi.mocked(api.saveSettings).mockRejectedValue(
     new ApiError(409, "configuration_revision_conflict", "Conflict"),
   );
-  render(<Settings />);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
   const input = await screen.findByLabelText("Report language");
   fireEvent.change(input, { target: { value: "ja" } });
   fireEvent.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
@@ -100,7 +104,7 @@ test("retains unsaved values after a failed save and can search by environment n
     target: { value: "TRADINGAGENTS_OUTPUT_LANGUAGE" },
   });
   expect(screen.getByLabelText("Report language")).toBeVisible();
-  expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "OpenAI" })).not.toBeInTheDocument();
 });
 
 test("shows field validation beside the setting without losing edits", async () => {
@@ -119,7 +123,7 @@ test("shows field validation beside the setting without losing edits", async () 
       ],
     ),
   );
-  render(<Settings />);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
   fireEvent.change(await screen.findByLabelText("Report language"), {
     target: { value: "" },
   });
@@ -146,7 +150,7 @@ test("requires an import preview before applying and never displays credential v
     initialized: true,
     revision: 2,
   } as never);
-  render(<Settings />);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
   fireEvent.click(
     await screen.findByRole("button", { name: "Preview import" }),
   );
@@ -160,4 +164,45 @@ test("requires an import preview before applying and never displays credential v
     }),
   );
   expect(api.revealCredential).not.toHaveBeenCalled();
+});
+
+test("category navigation preserves drafts and does not expand every section", async () => {
+  render(<Router initialPath="/settings"><Settings /></Router>);
+  expect(await screen.findByRole("heading", { name: "OpenAI" })).toBeVisible();
+  expect(screen.queryByLabelText("Report language")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Research defaults" }));
+  fireEvent.change(await screen.findByLabelText("Report language"), { target: { value: "ja" } });
+  fireEvent.click(screen.getByRole("link", { name: "Model connections" }));
+  expect(screen.queryByLabelText("Report language")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Research defaults" }));
+  expect(screen.getByLabelText("Report language")).toHaveValue("ja");
+  expect(api.saveSettings).not.toHaveBeenCalled();
+});
+
+test("creates and deletes a custom connection with scoped credentials", async () => {
+  const preset = { id: "preset", name: "Compatible endpoint", preset: "openai_compatible", enabled: true, compatibility: "openai_compatible", discovery: "openai_compatible", key_required: false, transport: { kind: "chat_completions", base_url: null }, template: {}, reasoning_defaults: {} };
+  vi.mocked(api.settingsSchema).mockResolvedValue({ ...schema, presets: { openai_compatible: preset } } as never);
+  let current = structuredClone(view);
+  vi.mocked(api.saveSettings).mockImplementation(async patch => {
+    const change = patch.connection_changes![0];
+    const entries = current.connections as Record<string, unknown>;
+    if (change.action === "delete") delete entries[change.id];
+    else entries[change.id] = { connection: { ...preset, ...change, credentials: undefined }, credentials: { api_key: true }, missing_fields: [], selectable: true };
+    current = { ...current, revision: current.revision + 1 };
+    return structuredClone(current) as never;
+  });
+  const confirmation = vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<Router initialPath="/settings"><Settings /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
+  fireEvent.change(screen.getByLabelText("Connection name"), { target: { value: "My relay" } });
+  fireEvent.change(screen.getByLabelText("API base URL"), { target: { value: "https://relay.example/v1" } });
+  fireEvent.change(screen.getByPlaceholderText("New credential"), { target: { value: "custom-private-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ connection_changes: [expect.objectContaining({ action: "create", name: "My relay", credentials: { api_key: "custom-private-key" } })] })));
+  await screen.findByRole("button", { name: "Delete connection" });
+  expect(JSON.stringify(localStorage)).not.toContain("custom-private-key");
+  fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "My relay" })).not.toBeInTheDocument());
+  expect(confirmation).toHaveBeenCalled();
+  confirmation.mockRestore();
 });

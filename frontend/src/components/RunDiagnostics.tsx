@@ -1,3 +1,4 @@
+import ConnectionHistory from "./ConnectionHistory";
 import { useTranslation } from "react-i18next";
 import type { RunDetail, RunEvent, ResearchArtifact, EvidenceBundle } from "../api/client";
 import { formatResearchDate } from "../researchDate";
@@ -51,6 +52,7 @@ export default function RunDiagnostics({ detail, events, artifacts, evidence }: 
       </article>) : <p>{t('noRecoveries')}</p>}
     </section>
     <DiagnosticSnapshot label={t('diagnosticConfiguration')} snapshot={run.config_snapshot} />
+    <ConnectionHistory snapshot={run.method_snapshot} language={i18n.language} />
     <DiagnosticSnapshot label={t('diagnosticMethod')} snapshot={run.method_snapshot} />
     <section className="diagnostic-block" aria-labelledby="diagnostic-records">
       <h2 id="diagnostic-records">{t('diagnosticRecords')}</h2>

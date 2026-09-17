@@ -295,6 +295,7 @@ export function RouteEditor({
 
 export function CredentialEditor({
   name,
+  connectionId,
   configured,
   pending,
   onChange,
@@ -302,6 +303,7 @@ export function CredentialEditor({
   onError,
 }: {
   name: string;
+  connectionId?: string;
   configured: boolean;
   pending: string | null | undefined;
   onChange: (value: string | null | undefined) => void;
@@ -312,7 +314,7 @@ export function CredentialEditor({
   const [copied, setCopied] = useState(false);
   async function reveal(copy = false) {
     try {
-      const result = await api.revealCredential(name);
+      const result = await api.revealCredential(name, connectionId);
       if (copy) {
         await navigator.clipboard.writeText(result.value ?? "");
         setCopied(true);

@@ -193,3 +193,42 @@
   min-width: 32px;
   min-height: 36px;
 }
+
+/* Settings use bounded categories and responsive working areas. */
+.configuration-page { max-width: 1440px; width: 100%; min-width: 0; }
+.configuration-page [hidden] { display: none !important; }
+.configuration-nav { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: .4rem; padding: .65rem; background: var(--surface, #fff); border: 1px solid var(--border, #ddd); border-radius: .75rem; }
+.configuration-nav a { padding: .6rem .9rem; border-radius: .5rem; text-decoration: none; }
+.configuration-nav a[aria-current="page"] { background: var(--accent-soft, #e9eefb); color: var(--text, #18243e); font-weight: 650; }
+.configuration-grid, .connection-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; margin: 1rem 0; }
+.configuration-grid > *, .connection-card, .connection-editor { min-width: 0; }
+.connection-toolbar { display: flex; align-items: end; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+.connection-toolbar h2 { margin-right: auto; }
+.connection-toolbar label, .configuration-grid label, .role-connections label { display: flex; flex-direction: column; gap: .45rem; }
+.configuration-grid label.checkbox-label, .role-connections label.checkbox-label { flex-direction: row; align-items: center; }
+.connection-card { display: grid; gap: .4rem; padding: 1.2rem; }
+.connection-card h3, .connection-card p { margin: 0; }
+.connection-card .button { justify-self: start; margin-top: .7rem; }
+.connection-address { overflow-wrap: anywhere; font-size: .9rem; color: var(--muted, #666); }
+.configuration-page input:not([type="checkbox"]), .configuration-page select { width: 100%; min-width: 0; }
+.configuration-page pre { max-height: 18rem; overflow: auto; }
+.configuration-page .sticky-save { position: sticky; bottom: .5rem; padding: .8rem; background: var(--surface, #fff); border: 1px solid var(--border, #ddd); border-radius: .7rem; z-index: 2; box-shadow: 0 4px 20px #0001; }
+.configuration-subnav { display: flex; gap: .5rem; margin-top: 1rem; }
+.configuration-subnav [aria-pressed="true"] { font-weight: bold; background: var(--accent-soft, #e9eefb); }
+.configuration-search-results { display: grid; gap: .5rem; }
+.configuration-search-results a { display: flex; gap: 1rem; justify-content: space-between; }
+@media (max-width: 760px) {
+  .configuration-grid, .connection-cards { grid-template-columns: minmax(0, 1fr); }
+  .configuration-nav { position: static; }
+  .connection-toolbar { align-items: stretch; flex-direction: column; }
+  .configuration-search-results a { flex-direction: column; gap: .2rem; }
+}
+.configuration-grid { align-items: start; }
+.configuration-credential { align-content: start; }
+.route-section { grid-column: 1 / -1; }
+.route-settings { border: 1px solid var(--border); border-radius: .6rem; padding: .8rem 1rem; margin: 0; }
+.route-settings > summary { cursor: pointer; font-weight: 600; }
+.route-settings .configuration-routes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: .8rem; align-items: start; }
+.route-settings .configuration-routes > .configuration-list-row { grid-column: 1 / -1; }
+.route-settings .configuration-routes fieldset { margin: .5rem 0; }
+.route-settings .configuration-routes .configuration-list > .button { justify-self: start; }

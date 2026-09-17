@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import ModelConnections from "../components/ModelConnections";
+import RoleConnections from "../components/RoleConnections";
+import { connectionCopy } from "../connectionCopy";
+import { Link, useLocation } from "../router";
 import i18n from "../i18n";
 import {
   api,
   ApiError,
-  type Capabilities,
   type ConfigurationField,
   type ConfigurationSchema,
   type ConfigurationValues,
@@ -14,11 +17,10 @@ import {
 } from "../api/client";
 import {
   CredentialEditor,
-  ProviderEditor,
   RouteEditor,
   SettingField,
 } from "../components/SettingsFields";
-import { settingsCopy, providerReasons } from "../settingsCopy";
+import { settingsCopy } from "../settingsCopy";
 
 type Values = Record<string, unknown>;
 const groups = [
@@ -38,9 +40,14 @@ export default function Settings() {
       ? "ja"
       : "en";
   const text = settingsCopy[language];
+  const c = connectionCopy(language);
+  const location = useLocation();
+  const category = location.pathname.split("/")[2] || "connections";
+  const [dataTab, setDataTab] = useState("sources");
+  const [connectionsDirty, setConnectionsDirty] = useState(false);
+  const [latest, setLatest] = useState<ConfigurationView | null>(null);
   const [view, setView] = useState<ConfigurationView | null>(null);
   const [schema, setSchema] = useState<ConfigurationSchema | null>(null);
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [draft, setDraft] = useState<Values>({});
   const [credentials, setCredentials] = useState<
     Record<string, string | null | undefined>
@@ -50,8 +57,6 @@ export default function Settings() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [reloadVersion, setReloadVersion] = useState(0);
-  const [models, setModels] = useState<string[]>([]);
   const [importInput, setImportInput] = useState<ImportRequest>({});
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [collapsed, setCollapsed] = useState(
@@ -80,18 +85,12 @@ export default function Settings() {
     void Promise.all([
       api.settings(),
       api.settingsSchema(),
-      api.capabilities(),
     ]).then(
-      ([data, metadata, caps]) => {
+      ([data, metadata]) => {
         if (!active) return;
         setView(data);
         setSchema(metadata);
-        setCapabilities(caps);
-        setDraft((old) =>
-          reloadVersion && Object.keys(old).length
-            ? old
-            : (structuredClone(data.values) as Values),
-        );
+        setDraft(structuredClone(data.values) as Values);
         setError("");
       },
       (cause) => {
@@ -101,7 +100,32 @@ export default function Settings() {
     return () => {
       active = false;
     };
-  }, [reloadVersion]);
+  }, []);
+  const dirty = connectionsDirty || (view !== null && Object.keys(draft).some(key => JSON.stringify(draft[key]) !== JSON.stringify((view.values as Values)[key]))) || Object.keys(credentials).length > 0;
+  useEffect(() => {
+    if (!dirty) return;
+    const unload = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    const leaving = (event: Event) => {
+      const detail = (event as CustomEvent<{ path: string }>).detail;
+      if (!new URL(detail.path, window.location.origin).pathname.startsWith("/settings") && !window.confirm(c.leave)) event.preventDefault();
+    };
+    window.addEventListener("beforeunload", unload);
+    window.addEventListener("tradingagents:before-navigate", leaving);
+    return () => { window.removeEventListener("beforeunload", unload); window.removeEventListener("tradingagents:before-navigate", leaving); };
+  }, [dirty, c.leave]);
+  useEffect(() => {
+    if (!location.hash) return;
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(location.hash.slice(1)) ?? (location.hash === "#setting-quick_connection_id" ? document.getElementById("setting-deep_connection_id") : null);
+      if (!element) return;
+      if (element instanceof HTMLDetailsElement) element.open = true;
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      element.scrollIntoView?.({ block: "center" }); element.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, location.pathname, view]);
   const update = (key: string, value: unknown) => {
     setDraft((old) => ({ ...old, [key]: value }));
     setNotice("");
@@ -111,17 +135,6 @@ export default function Settings() {
       .join(" ")
       .toLowerCase()
       .includes(query.toLowerCase());
-  const providerMatches = (provider: string) =>
-    !query ||
-    `${provider} ${schema?.providers[provider]} ${Object.entries(
-      schema?.credential_owners ?? {},
-    )
-      .filter(([, owner]) => owner === provider)
-      .map(([name]) => name)
-      .join(" ")}`
-      .toLowerCase()
-      .includes(query.toLowerCase()) ||
-    query.toLowerCase().includes("providers");
   async function operation(action: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -149,7 +162,7 @@ export default function Settings() {
     const fields = schema.fields.filter((field) => field.group === group);
     await operation(async () => {
       const values = Object.fromEntries(
-        fields.map((field) => [field.key, draft[field.key]]),
+        fields.filter(field => field.key !== "llm_provider").map((field) => [field.key, draft[field.key]]),
       );
       const changes = Object.fromEntries(
         keysFor(group)
@@ -178,10 +191,6 @@ export default function Settings() {
         ),
       );
       setNotice(text.saved);
-      void api
-        .capabilities()
-        .then(setCapabilities)
-        .catch(() => {});
     });
   }
   function cancel(group: string) {
@@ -233,70 +242,15 @@ export default function Settings() {
       setPreview(null);
       setImportInput({});
       setNotice(text.saved);
-      void api
-        .capabilities()
-        .then(setCapabilities)
-        .catch(() => {});
     });
   }
   function renderField(field: ConfigurationField) {
     const value = draft[field.key];
     if (!schema) return null;
-    if (field.kind === "providers")
-      return (
-        <div className="configuration-providers">
-          {Object.entries(schema.providers)
-            .filter(
-              ([provider]) =>
-                !query || fieldMatches(field) || providerMatches(provider),
-            )
-            .map(([provider, label]) => {
-              const connections = (draft.providers ??
-                {}) as ConfigurationValues["providers"];
-              const connection =
-                connections?.[provider] ?? schema.provider_defaults[provider];
-              return (
-                <article className="configuration-provider" key={provider}>
-                  <h3>
-                    {label}{" "}
-                    <small>
-                      {capabilities?.providers[provider]?.configured
-                        ? text.configured
-                        : text.unavailable}
-                    </small>
-                  </h3>
-                  {capabilities?.providers[provider]?.unavailable_reason && (
-                    <p className="configuration-help">
-                      {providerReasons[language][
-                        capabilities.providers[provider].unavailable_reason!
-                      ] ?? text.unavailable}
-                    </p>
-                  )}
-                  <ProviderEditor
-                    name={provider}
-                    label={label}
-                    connection={connection}
-                    schema={schema}
-                    text={text}
-                    onChange={(connection) =>
-                      update("providers", {
-                        ...connections,
-                        [provider]: connection,
-                      })
-                    }
-                  />
-                  {Object.entries(schema.credential_owners)
-                    .filter(([, owner]) => owner === provider)
-                    .map(([name]) => credentialEditor(name))}
-                </article>
-              );
-            })}
-        </div>
-      );
     if (field.kind === "routes")
       return (
-        <div className="configuration-field">
-          <h3>{field.label[language] ?? field.label.en}</h3>
+        <details id={`setting-${field.key}`} className="configuration-field route-settings" tabIndex={-1}>
+          <summary>{field.label[language] ?? field.label.en}</summary>
           <p className="configuration-help">
             {field.description[language] ?? field.description.en}
           </p>
@@ -335,7 +289,7 @@ export default function Settings() {
               onChange={(routes) => update(field.key, routes)}
             />
           )}
-        </div>
+        </details>
       );
     return (
       <>
@@ -345,7 +299,7 @@ export default function Settings() {
           onChange={(value) => update(field.key, value)}
           language={language}
           text={text}
-          models={models}
+          models={[]}
         />
         <small className="configuration-source">
           {text.source}:{" "}
@@ -364,7 +318,7 @@ export default function Settings() {
           <p className="subtitle">{text.subtitle}</p>
         </div>
       </header>
-      <section className="interface-preferences">
+      <section className="interface-preferences" hidden={category !== "interface"}>
         <h2>{text.interface}</h2>
         <label>
           {text.language}
@@ -399,15 +353,18 @@ export default function Settings() {
       {error && (
         <div role="alert" className="alert">
           {error}
+          {Object.entries(fieldErrors).filter(([key]) => key === "connection_changes" || key === "connections" || key.endsWith("connection_id") || key.endsWith("reasoning_effort")).map(([key, message]) => <p key={key}><code>{key}</code>: {message}</p>)}
           <button
             className="button"
-            onClick={() => setReloadVersion((value) => value + 1)}
+            onClick={() => void api.settings().then(setLatest).catch(fail)}
           >
-            {text.reload}
+            {c.latest}
           </button>
         </div>
       )}
+      {latest && <div className="panel"><h3>{c.server}</h3><pre>{JSON.stringify({ values: latest.values, connections: latest.connections }, null, 2)}</pre><h3>{c.local}</h3><pre>{JSON.stringify(draft, null, 2)}</pre><button className="button" onClick={() => { setView(latest); setLatest(null); setError(""); }}>{c.reapply}</button></div>}
       {notice && <p role="status">{notice}</p>}
+      {dirty && <p role="status">{c.dirty}</p>}
       {!view && !error && <p role="status">{text.loading}</p>}
       {view && schema && (
         <>
@@ -424,6 +381,7 @@ export default function Settings() {
             </div>
           )}
           <details
+            hidden={category !== "storage" && view.initialized}
             className="configuration-import"
             open={!view.initialized || undefined}
           >
@@ -490,6 +448,7 @@ export default function Settings() {
                     </div>
                   ))}
                 </dl>
+                <h3>{c.connections}</h3>{Object.entries(preview.connection_targets ?? {}).map(([name, target]) => <p key={name}><code>{name}</code> → <code>{target}</code></p>)}
                 <h3>{text.credentials}</h3>
                 {Object.keys(preview.credentials).map((name) => (
                   <p key={name}>
@@ -529,21 +488,22 @@ export default function Settings() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <nav className="configuration-nav">
-            {groups.map((group) => (
-              <a key={group} href={`#configuration-${group}`}>
-                {text[group]}
-              </a>
-            ))}
+          <nav className="configuration-nav" aria-label={text.title}>
+            {(["connections", "research", "data", "storage", "interface"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
           </nav>
-          {groups.map((group) => {
+          {query && <div className="panel configuration-search-results"><h2>{c.results}</h2>{schema.fields.filter(fieldMatches).map(field => {
+            const target = ["llm_provider", "providers"].includes(field.key) || field.group === "providers" || field.group === "compatibility" ? "connections" : field.group === "news" || field.group === "sources" ? "data" : field.group === "cache" ? "storage" : "research";
+            return <Link key={field.key} to={`/settings/${target}#setting-${field.key}`} onClick={() => { setDataTab(field.group); setQuery("");  }}>{field.label[language] ?? field.label.en} <code>{field.key}</code></Link>;
+          })}{Object.entries(schema.credential_owners).filter(([name, owner]) => `${name} ${owner}`.toLowerCase().includes(query.toLowerCase())).map(([name, owner]) => {
+            const match = Object.values(view.connections ?? {}).find(entry => entry.connection.preset === owner);
+            return <Link key={name} to={match ? `/settings/connections?connection=${match.connection.id}` : "/settings/data"} onClick={() => { setQuery(""); setDataTab("sources"); }}>{name}</Link>;
+          })}{Object.values(view.connections ?? {}).filter(entry => `${entry.connection.name} ${entry.connection.id}`.toLowerCase().includes(query.toLowerCase())).map(entry => <Link key={entry.connection.id} to={`/settings/connections?connection=${entry.connection.id}`} onClick={() => setQuery("")}>{entry.connection.name}</Link>)}</div>}
+          <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onSaved={saved => { setView(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
+          {category === "data" && <nav className="configuration-subnav">{["sources", "news"].map(key => <button className="button" key={key} aria-pressed={dataTab === key} onClick={() => setDataTab(key)}>{key === "sources" ? c.sources : c.news}</button>)}</nav>}
+          {groups.filter(group => category === "research" ? group === "research" : category === "data" ? group === dataTab : category === "storage" ? group === "cache" : false).map((group) => {
             const fields = schema.fields.filter(
               (field) =>
-                field.group === group &&
-                (!query ||
-                  fieldMatches(field) ||
-                  (field.kind === "providers" &&
-                    Object.keys(schema.providers).some(providerMatches))),
+                !["llm_provider", "quick_connection_id", "deep_connection_id", "quick_think_llm", "deep_think_llm", "quick_reasoning_effort", "deep_reasoning_effort"].includes(field.key) && field.group === group,
             );
             const secretKeys =
               group === "sources"
@@ -564,8 +524,9 @@ export default function Settings() {
               >
                 <h2>{text[group]}</h2>
                 {group === "providers" && <p>{text.keyHint}</p>}
-                {fields.map((field) => (
-                  <div key={field.key} data-invalid={!!fieldErrors[field.key]}>
+                {group === "research" && <RoleConnections language={language} connections={view.connections ?? {}} value={{ quick: { connection: String(draft.quick_connection_id ?? ""), model: String(draft.quick_think_llm ?? ""), reasoning: String(draft.quick_reasoning_effort ?? "") }, deep: { connection: String(draft.deep_connection_id ?? ""), model: String(draft.deep_think_llm ?? ""), reasoning: String(draft.deep_reasoning_effort ?? "") } }} onChange={roles => setDraft(old => ({ ...old, quick_connection_id: roles.quick.connection, deep_connection_id: roles.deep.connection, quick_think_llm: roles.quick.model, deep_think_llm: roles.deep.model, quick_reasoning_effort: roles.quick.reasoning || null, deep_reasoning_effort: roles.deep.reasoning || null }))} />}
+                <div className="configuration-grid">{fields.map((field) => (
+                  <div key={field.key} className={field.kind === "routes" ? "route-section" : undefined} data-invalid={!!fieldErrors[field.key]}>
                     {renderField(field)}
                     {["providers", "routes"].includes(field.kind) && (
                       <details className="configuration-details">
@@ -594,30 +555,8 @@ export default function Settings() {
                     )}
                   </div>
                 ))}
-                {secretKeys.map(credentialEditor)}
-                {group === "research" && (
-                  <div>
-                    <button
-                      className="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void operation(async () => {
-                          const catalog = await api.providerModels(
-                            String(draft.llm_provider),
-                            true,
-                          );
-                          setModels(catalog.models.map((model) => model.id));
-                          if (catalog.warning)
-                            setNotice(catalog.warning.message);
-                        })
-                      }
-                    >
-                      {text.models}
-                    </button>
-                    <small>{text.manualModel}</small>
-                  </div>
-                )}
-                <div className="configuration-actions">
+                {secretKeys.map(credentialEditor)}</div>
+                <div className="configuration-actions sticky-save">
                   <button
                     disabled={busy}
                     className="button primary"
@@ -643,7 +582,7 @@ export default function Settings() {
               </section>
             );
           })}
-          <section className="panel configuration-group">
+          <section className="panel configuration-group" hidden={category !== "storage"}>
             <h2>{text.deployment}</h2>
             <p>{text.startup}</p>
             <dl>

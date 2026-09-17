@@ -2,15 +2,18 @@
 
 Start the application and open **Settings**. SQLite stores daily research
 configuration, provider connections and credentials. No `.env` file is required
-for a normal local installation. Each provider has one connection; provider
-addresses and credentials are independent. Anthropic and Google use an API
+for a normal local installation. Connections have stable IDs and independent addresses and credentials. Add as
+many connections of an existing interface type as needed; vendor presets are
+creation templates, not a fixed list of configured services. Anthropic and Google use an API
 origin (without `/v1` or `/v1beta`); OpenAI-compatible services use their API base
 URL, commonly ending in `/v1`. Model discovery adds each API's list path.
 
 The settings page supports Chinese, English and Japanese, searches labels,
 configuration keys and legacy environment names, and explains defaults, ranges,
-source and effect. Research defaults, model services, news, data routing,
-cache/retention and advanced compatibility settings save independently. Restore
+source and effect. Categories display one working area at a time: model connections, research
+defaults, data/news, storage/maintenance, and interface preferences. Each
+connection or settings group saves independently. Connection-specific advanced
+compatibility parameters are available inside its editor. Restore
 Defaults resets that group's non-secret settings; credentials are deleted only
 through the explicit credential action. Interface preferences remain local to
 the browser.
@@ -82,7 +85,8 @@ complete connection information use only retained fields and built-in provider
 defaults when that is unambiguous.
 
 Web capabilities, model discovery, CLI, Python and workers resolve through the
-same module. Model discovery caches include the configuration revision. It can
+same module. Model discovery caches are isolated by connection ID and its execution/discovery
+revision. Editing unrelated research defaults does not invalidate model lists. It can
 fall back to configured models/manual model IDs when live discovery is
 unavailable; Bedrock bearer authentication currently uses that fallback.
 Saving configuration does not call a paid model or start research.
@@ -131,3 +135,80 @@ A stale revision returns HTTP 409, preserving the browser's pending edits.
 import and initialization workflow. All settings responses use `Cache-Control:
 no-store`. Browser writes/reveal enforce same origin. Existing LAN authentication
 also applies; local loopback use remains login-free.
+
+
+## Model connections and role selection
+
+Quick and deep roles each retain a connection ID, model ID, and reasoning choice.
+The UI starts with a shared-connection editor when both IDs match. Switch to
+separate connections to mix services, including two accounts or gateways using
+the same API. Switching a role's connection clears its unconfirmed model and
+reasoning selection; merging roles asks which connection to keep. Model IDs can
+always be entered manually. Refreshing model lists is explicit and does not
+start a research/model-generation request.
+
+The connection owns its interface (Chat Completions, Responses, Anthropic,
+Google, Azure or Bedrock), discovery strategy and model compatibility policy.
+Ollama can use Chat Completions with native model discovery. DeepSeek/MiniMax
+compatibility rules remain available when changing the endpoint. Generic
+compatible endpoints do not automatically acquire vendor-specific behavior.
+Responses is explicit for new connections; legacy OpenAI endpoint inference is
+used only for compatibility and migration.
+
+Python/HTTP requests accept `connection_id` for both roles, with
+`quick_connection_id` and `deep_connection_id` overriding it individually.
+Omitted selections inherit each role's DB default. Model, reasoning, profile and
+other omitted parameters independently inherit their saved defaults. CLI uses
+`--connection`, `--quick-connection`, and `--deep-connection` with the same rules.
+Legacy `llm_provider` / `--provider` resolves the original migrated connection;
+it cannot be combined with the new connection selectors. It never selects an
+arbitrary connection by name or preset. A deleted original cannot be rebound by
+creating another connection with the same display name.
+
+Run snapshots and method records contain two versioned model bindings. The
+legacy single-provider field is empty for cross-connection research; consumers
+must use the role bindings to display or inspect it. Incremental research keeps
+its existing deep-only execution path and does not require an unused quick
+credential. Role reasoning overrides the connection's compatibility defaults;
+provider-default selection deliberately leaves the choice to the provider.
+
+Disable a connection to hide it from new research while retaining queued tasks,
+resumes and failed-task retries. Replace default references before disabling.
+Deletion removes credentials and is blocked while a default or unfinished Run
+references the connection. Finished reports remain readable after deletion,
+but a failed Run must be recreated with an available connection instead of
+retrying the removed one. A non-secret tombstone prevents identity reuse.
+
+The connection migration preserves initialization and maps existing provider
+settings, credentials and historical references to stable connection IDs.
+Unused vendor presets are not expanded into connection records. Historical
+research JSON is not rewritten. Already initialized installations do not need
+to reimport environment files. Back up and stop old processes before deploying
+this schema; databases with custom connections cannot safely downgrade to the
+single-provider schema.
+
+## Settings API changes
+
+`GET /api/v1/settings` includes safe connection views and credential-presence
+flags. `/settings/schema` includes creation presets. `PATCH /settings` accepts
+`connection_changes` with create/update/reset/delete actions, scoped credential
+changes and the current global revision. It can atomically replace role defaults
+and disable/delete their previous connection. Reset restores the connection's
+original template without changing credentials. Update `enabled` to disable or
+reenable; no additional authentication or account flow is required.
+
+`GET /api/v1/settings/connections/{id}/models` discovers that connection's
+models. The credential reveal request accepts `connection_id` plus a credential
+field such as `api_key`; legacy data-source names remain supported. Reveal and
+settings responses use `Cache-Control: no-store`. Mutation/reveal keeps the
+existing same-origin and LAN-token rules.
+
+Import previews include target connection IDs and credential field names,
+without secret values. Deleted legacy targets are reported as issues: exclude
+those imported fields and configure a new connection explicitly. A stale source
+fingerprint or revision still rejects application.
+
+Drafts survive category navigation in page memory. Leaving Settings prompts
+before discarding changes. Revision conflicts retain drafts and require an
+explicit comparison/reapply choice. Viewed keys are cleared when leaving the
+connection editor and are never written to browser persistent storage.

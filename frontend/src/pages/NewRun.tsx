@@ -1,3 +1,4 @@
+import RoleConnections from "../components/RoleConnections";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
@@ -89,6 +90,8 @@ export default function NewRun() {
   const [quickCustomModel, setQuickCustomModel] = useState("");
   const [deepCustomModel, setDeepCustomModel] = useState("");
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
+  const [quickConnection, setQuickConnection] = useState("");
+  const [deepConnection, setDeepConnection] = useState("");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
   const [sourceRunId, setSourceRunId] = useState("");
@@ -333,7 +336,17 @@ export default function NewRun() {
         } else if (sourceIsTerminal) {
           setTemplateWarning("");
         }
-        if (!nextProvider) setError(t("noConfiguredProviders"));
+        if (Object.keys(data.connections ?? {}).length) {
+          const q = sourceRequest?.quick_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.quick_connection_id ?? "";
+          const d = sourceRequest?.deep_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.deep_connection_id ?? "";
+          setQuickConnection(q); setDeepConnection(d); setProvider(d);
+          setQuickModel(sourceRequest?.quick_model ?? data.defaults.quick_model);
+          setDeepModel(sourceRequest?.deep_model ?? data.defaults.deep_model);
+          setQuickReasoning(sourceRequest?.quick_reasoning_effort ?? data.defaults.quick_reasoning_effort ?? "");
+          setDeepReasoning(sourceRequest?.deep_reasoning_effort ?? data.defaults.deep_reasoning_effort ?? "");
+          if (!data.connections?.[d]?.selectable || !data.connections?.[q]?.selectable) setTemplateWarning(t("templateProviderUnavailable", { provider: "connection" }));
+        }
+        if (!nextProvider && !Object.keys(data.connections ?? {}).length) setError(t("noConfiguredProviders"));
       } catch (cause) {
         if (!active) return;
         setError(cause instanceof Error ? cause.message : t("error"));
@@ -346,7 +359,7 @@ export default function NewRun() {
   }, [fromRun, lockedKind, t]);
 
   useEffect(() => {
-    if (!capabilities || !provider) return;
+    if (!capabilities || !provider || Object.keys(capabilities.connections ?? {}).length) return;
     let active = true;
     setModelsLoading(true);
     setModelCatalog(null);
@@ -510,7 +523,7 @@ export default function NewRun() {
         asset_type: "stock",
         profile,
         analysts: analysts as AnalysisRequest["analysts"],
-        llm_provider: provider,
+        ...(Object.keys(capabilities?.connections ?? {}).length ? { quick_connection_id: quickConnection, deep_connection_id: deepConnection } : { llm_provider: provider }),
         quick_model: resolvedQuickModel,
         deep_model: resolvedDeepModel,
         quick_reasoning_effort: quickReasoning || null,
@@ -557,6 +570,7 @@ export default function NewRun() {
     }
   };
 
+  const unavailableConnection = Object.keys(capabilities?.connections ?? {}).length > 0 && (!capabilities?.connections?.[deepConnection]?.selectable || (researchKind === "full" && !capabilities?.connections?.[quickConnection]?.selectable));
   const submitUnavailable = submitting ? t("loading")
     : capabilities?.configuration_initialized === false ? settingsCopy[i18n.language.startsWith("zh") ? "zh-CN" : i18n.language.startsWith("ja") ? "ja" : "en"].setup
     : !ticker.trim() ? t("enterInstrumentFirst")
@@ -564,6 +578,7 @@ export default function NewRun() {
     : !analysisContext ? analysisContextError || t("marketDateLoading")
     : !analysisDate ? t("selectAnalysisDate")
     : !capabilities || modelsLoading ? t("loading")
+    : unavailableConnection ? t("chooseResearchModels")
     : !provider || researchKind === "full" && !quickModel || !deepModel ? t("chooseResearchModels")
     : researchKind === "incremental" && !fullBaselineRunId ? t("selectResearchBaseline")
     : "";
@@ -831,6 +846,9 @@ export default function NewRun() {
               ))}
             </div>
             <h2>{t("modelsOutput")}</h2>
+            {Object.keys(capabilities?.connections ?? {}).length > 0 ? <RoleConnections language={i18n.language} connections={capabilities?.connections ?? {}} includeQuick={researchKind === "full"}
+              value={{ quick: { connection: quickConnection, model: quickModel, reasoning: quickReasoning }, deep: { connection: deepConnection, model: deepModel, reasoning: deepReasoning } }}
+              onChange={roles => { setQuickConnection(roles.quick.connection); setDeepConnection(roles.deep.connection); setProvider(roles.deep.connection); setQuickModel(roles.quick.model); setDeepModel(roles.deep.model); setQuickReasoning(roles.quick.reasoning); setDeepReasoning(roles.deep.reasoning); }} /> : <>
             <div className="model-provider">
               <label>
                 {t("provider")}
@@ -931,6 +949,7 @@ export default function NewRun() {
               />
               </fieldset>
             </div>
+            </>}
             {(modelsLoading || modelWarning) && (
               <p
                 className={`model-catalog-note ${

@@ -300,6 +300,17 @@ The Web login exchanges the token for a signed `HttpOnly`,
 same-origin check. This is a local single-user security boundary, not a
 multi-tenant identity system.
 
+
+### Model connections and settings
+
+Settings uses separate categories for model connections, research defaults,
+data/news, storage, and interface preferences. Add named service connections
+from a preset or a custom compatible endpoint; multiple connections can share
+the same API type. Quick and deep models can use one connection or separate
+services. Existing DB configuration migrates without reimporting environment
+files. See [configuration and migration](docs/configuration.md) before upgrading
+an existing installation.
+
 ## Markets, dates, and evidence
 
 Internally, instruments use canonical Yahoo-compatible symbols. Examples:

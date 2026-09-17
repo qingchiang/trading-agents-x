@@ -1,5 +1,743 @@
 {
+  "view": {
+    "connections": {
+      "200e8466-bf15-5c6f-a474-77dcc33f7f7a": {
+        "connection": {
+          "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+          "name": "OpenAI",
+          "enabled": true,
+          "deleted": false,
+          "preset": "openai",
+          "compatibility": "openai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "transport": {
+            "kind": "responses",
+            "base_url": "https://api.openai.com/v1"
+          },
+          "template": {
+            "compatibility": "openai",
+            "discovery": "openai_compatible",
+            "key_required": true,
+            "reasoning_defaults": {},
+            "transport": {
+              "base_url": "https://api.openai.com/v1",
+              "kind": "responses"
+            }
+          },
+          "reasoning_defaults": {
+            "google_thinking_level": null,
+            "openai_reasoning_effort": null,
+            "anthropic_effort": null
+          },
+          "revision": 2
+        },
+        "credentials": {
+          "api_key": true
+        },
+        "missing_fields": [],
+        "selectable": true,
+        "unavailable_reason": null,
+        "reasoning_efforts": [
+          "provider_default",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    "initialized": true,
+    "revision": 1,
+    "values": {
+      "profile": "standard",
+      "analysts": [
+        "market",
+        "social",
+        "news",
+        "fundamentals"
+      ],
+      "quick_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+      "deep_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+      "llm_provider": "openai",
+      "quick_think_llm": "gpt-5.4-mini",
+      "deep_think_llm": "gpt-5.5",
+      "quick_reasoning_effort": null,
+      "deep_reasoning_effort": null,
+      "google_thinking_level": null,
+      "openai_reasoning_effort": null,
+      "anthropic_effort": null,
+      "temperature": null,
+      "llm_max_retries": null,
+      "output_language": "en",
+      "news_article_limit": 30,
+      "yahoo_news_candidate_limit": 200,
+      "cn_news_candidate_limit": 100,
+      "sentiment_filing_limit": 20,
+      "ticker_news_lookback_days": 14,
+      "social_lookback_days": 7,
+      "global_news_article_limit": 10,
+      "global_news_candidate_limit": 10,
+      "global_news_query_limit": 5,
+      "global_news_lookback_days": 7,
+      "global_news_queries": [
+        "Federal Reserve interest rates inflation",
+        "S&P 500 earnings GDP economic outlook",
+        "geopolitical risk trade war sanctions",
+        "ECB Bank of England BOJ central bank policy",
+        "oil commodities supply chain energy"
+      ],
+      "news_cache_enabled": true,
+      "news_cache_refresh_seconds": 900,
+      "news_cache_retention_days": 90,
+      "news_cache_scope_limit": 2000,
+      "news_cache_total_limit": 50000,
+      "trash_retention_days": 30,
+      "data_vendors": {
+        "instrument_eligibility": "yfinance",
+        "core_stock_apis": "yfinance",
+        "technical_indicators": "yfinance",
+        "fundamental_data": "yfinance",
+        "news_data": "yfinance",
+        "macro_data": "macro",
+        "prediction_markets": "polymarket"
+      },
+      "tool_vendors": {},
+      "data_vendors_by_market": {
+        ".T": {
+          "core_stock_apis": "jquants,yfinance",
+          "technical_indicators": "jquants,yfinance",
+          "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
+          "news_data": "jp_news,yfinance"
+        },
+        ".SS": {
+          "core_stock_apis": "akshare,yfinance",
+          "technical_indicators": "akshare,yfinance",
+          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+          "news_data": "cn_news,yfinance"
+        },
+        ".SZ": {
+          "core_stock_apis": "akshare,yfinance",
+          "technical_indicators": "akshare,yfinance",
+          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+          "news_data": "cn_news,yfinance"
+        }
+      },
+      "providers": {}
+    },
+    "sources": {
+      "profile": "database",
+      "analysts": "database",
+      "quick_connection_id": "database",
+      "deep_connection_id": "database",
+      "llm_provider": "database",
+      "quick_think_llm": "database",
+      "deep_think_llm": "database",
+      "quick_reasoning_effort": "database",
+      "deep_reasoning_effort": "database",
+      "google_thinking_level": "database",
+      "openai_reasoning_effort": "database",
+      "anthropic_effort": "database",
+      "temperature": "database",
+      "llm_max_retries": "database",
+      "output_language": "database",
+      "news_article_limit": "database",
+      "yahoo_news_candidate_limit": "database",
+      "cn_news_candidate_limit": "database",
+      "sentiment_filing_limit": "database",
+      "ticker_news_lookback_days": "database",
+      "social_lookback_days": "database",
+      "global_news_article_limit": "database",
+      "global_news_candidate_limit": "database",
+      "global_news_query_limit": "database",
+      "global_news_lookback_days": "database",
+      "global_news_queries": "database",
+      "news_cache_enabled": "database",
+      "news_cache_refresh_seconds": "database",
+      "news_cache_retention_days": "database",
+      "news_cache_scope_limit": "database",
+      "news_cache_total_limit": "database",
+      "trash_retention_days": "database",
+      "data_vendors": "database",
+      "tool_vendors": "database",
+      "data_vendors_by_market": "database",
+      "providers": "database"
+    },
+    "credentials": {
+      "OPENAI_API_KEY": true,
+      "XAI_API_KEY": false,
+      "DEEPSEEK_API_KEY": false,
+      "DASHSCOPE_API_KEY": false,
+      "DASHSCOPE_CN_API_KEY": false,
+      "ZHIPU_API_KEY": false,
+      "ZHIPU_CN_API_KEY": false,
+      "MINIMAX_API_KEY": false,
+      "MINIMAX_CN_API_KEY": false,
+      "OPENROUTER_API_KEY": false,
+      "MISTRAL_API_KEY": false,
+      "MOONSHOT_API_KEY": false,
+      "GROQ_API_KEY": false,
+      "NVIDIA_API_KEY": false,
+      "OPENAI_COMPATIBLE_API_KEY": false,
+      "ANTHROPIC_API_KEY": false,
+      "GOOGLE_API_KEY": false,
+      "AZURE_OPENAI_API_KEY": false,
+      "ALPHA_VANTAGE_API_KEY": false,
+      "FRED_API_KEY": false,
+      "ESTAT_APP_ID": false,
+      "JQUANTS_API_KEY": false,
+      "EDINET_API_KEY": false,
+      "AWS_BEARER_TOKEN_BEDROCK": false,
+      "AWS_ACCESS_KEY_ID": false,
+      "AWS_SECRET_ACCESS_KEY": false,
+      "AWS_SESSION_TOKEN": false
+    },
+    "deployment": {
+      "database_path": "/tmp/tmpja79lzcr/tradingagents.db",
+      "data_cache_dir": "/tmp/tmpja79lzcr/cache",
+      "host": "127.0.0.1",
+      "port": "8000",
+      "lan_enabled": "False",
+      "worker_concurrency": "1",
+      "worker_poll_seconds": "1.0",
+      "lease_seconds": "300",
+      "busy_timeout_ms": "5000"
+    }
+  },
   "schema": {
+    "presets": {
+      "openai": {
+        "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+        "name": "OpenAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openai",
+        "compatibility": "openai",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "responses",
+          "base_url": "https://api.openai.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "responses",
+            "base_url": "https://api.openai.com/v1"
+          },
+          "compatibility": "openai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "xai": {
+        "id": "326d06e3-d782-54b1-9578-983e629484ad",
+        "name": "xAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "xai",
+        "compatibility": "xai",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.x.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.x.ai/v1"
+          },
+          "compatibility": "xai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "deepseek": {
+        "id": "835c21bf-9cdc-5609-9d61-f52a7169a5de",
+        "name": "DeepSeek",
+        "enabled": true,
+        "deleted": false,
+        "preset": "deepseek",
+        "compatibility": "deepseek",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.deepseek.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.deepseek.com"
+          },
+          "compatibility": "deepseek",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "qwen": {
+        "id": "639030c8-96d7-5be2-8d6c-ccf20d79505c",
+        "name": "Qwen (International)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "qwen",
+        "compatibility": "qwen",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+          },
+          "compatibility": "qwen",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "qwen-cn": {
+        "id": "4eab9ca5-f302-52e5-99d3-b302cfe83cf3",
+        "name": "Qwen (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "qwen-cn",
+        "compatibility": "qwen-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+          },
+          "compatibility": "qwen-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "glm": {
+        "id": "724b3de2-54ed-5a62-8c8a-d8d070e2c4d2",
+        "name": "Z.AI GLM",
+        "enabled": true,
+        "deleted": false,
+        "preset": "glm",
+        "compatibility": "glm",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.z.ai/api/paas/v4"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.z.ai/api/paas/v4"
+          },
+          "compatibility": "glm",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "glm-cn": {
+        "id": "0cf8a22c-4ebe-5111-87c4-44f109d31e6c",
+        "name": "BigModel GLM (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "glm-cn",
+        "compatibility": "glm-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://open.bigmodel.cn/api/paas/v4"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4"
+          },
+          "compatibility": "glm-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "minimax": {
+        "id": "25e93d8f-fb13-515c-aff5-4e81206786c9",
+        "name": "MiniMax (International)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "minimax",
+        "compatibility": "minimax",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.minimax.io/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.minimax.io/v1"
+          },
+          "compatibility": "minimax",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "minimax-cn": {
+        "id": "4bd876b8-ded9-50ad-80a3-fbd4752c8941",
+        "name": "MiniMax (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "minimax-cn",
+        "compatibility": "minimax-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.minimaxi.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.minimaxi.com/v1"
+          },
+          "compatibility": "minimax-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "openrouter": {
+        "id": "a90773dc-e40c-5d36-b0cc-c3876f27a8a5",
+        "name": "OpenRouter",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openrouter",
+        "compatibility": "openrouter",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://openrouter.ai/api/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1"
+          },
+          "compatibility": "openrouter",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "mistral": {
+        "id": "97d11dea-af22-521a-8500-4375d2b770af",
+        "name": "Mistral",
+        "enabled": true,
+        "deleted": false,
+        "preset": "mistral",
+        "compatibility": "mistral",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.mistral.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.mistral.ai/v1"
+          },
+          "compatibility": "mistral",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "kimi": {
+        "id": "4e9ed1e7-de26-5db3-acd9-742a983ea3ec",
+        "name": "Kimi / Moonshot",
+        "enabled": true,
+        "deleted": false,
+        "preset": "kimi",
+        "compatibility": "kimi",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.moonshot.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.moonshot.ai/v1"
+          },
+          "compatibility": "kimi",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "groq": {
+        "id": "16fe6d47-fece-51aa-be34-c236ec9da1e3",
+        "name": "Groq",
+        "enabled": true,
+        "deleted": false,
+        "preset": "groq",
+        "compatibility": "groq",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.groq.com/openai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.groq.com/openai/v1"
+          },
+          "compatibility": "groq",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "nvidia": {
+        "id": "ed7aa4e1-f7ca-5836-8105-0a4562efc913",
+        "name": "NVIDIA NIM",
+        "enabled": true,
+        "deleted": false,
+        "preset": "nvidia",
+        "compatibility": "nvidia",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://integrate.api.nvidia.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://integrate.api.nvidia.com/v1"
+          },
+          "compatibility": "nvidia",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "ollama": {
+        "id": "70ca418e-2c0e-552f-9393-bf96f4374006",
+        "name": "Ollama",
+        "enabled": true,
+        "deleted": false,
+        "preset": "ollama",
+        "compatibility": "ollama",
+        "discovery": "ollama",
+        "key_required": false,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "http://localhost:11434/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "http://localhost:11434/v1"
+          },
+          "compatibility": "ollama",
+          "discovery": "ollama",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "openai_compatible": {
+        "id": "0b85bee6-c046-51d0-bd77-0b15bc5bcd8a",
+        "name": "OpenAI-compatible",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openai_compatible",
+        "compatibility": "openai_compatible",
+        "discovery": "openai_compatible",
+        "key_required": false,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": null
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": null
+          },
+          "compatibility": "openai_compatible",
+          "discovery": "openai_compatible",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "anthropic": {
+        "id": "5b71fe60-aace-559f-9aa9-3493ee3f7e18",
+        "name": "Anthropic",
+        "enabled": true,
+        "deleted": false,
+        "preset": "anthropic",
+        "compatibility": "anthropic",
+        "discovery": "anthropic",
+        "key_required": true,
+        "transport": {
+          "kind": "anthropic",
+          "base_url": "https://api.anthropic.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "anthropic",
+            "base_url": "https://api.anthropic.com"
+          },
+          "compatibility": "anthropic",
+          "discovery": "anthropic",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "google": {
+        "id": "961e5e9a-9481-54b0-b086-c302b7f01397",
+        "name": "Google Gemini",
+        "enabled": true,
+        "deleted": false,
+        "preset": "google",
+        "compatibility": "google",
+        "discovery": "google",
+        "key_required": true,
+        "transport": {
+          "kind": "google",
+          "base_url": "https://generativelanguage.googleapis.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "google",
+            "base_url": "https://generativelanguage.googleapis.com"
+          },
+          "compatibility": "google",
+          "discovery": "google",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "azure": {
+        "id": "61c003fa-6fdb-5294-8dbf-6476e7aaa4fa",
+        "name": "Azure OpenAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "azure",
+        "compatibility": "azure",
+        "discovery": "custom",
+        "key_required": true,
+        "transport": {
+          "kind": "azure",
+          "base_url": null,
+          "deployment": null,
+          "api_version": null
+        },
+        "template": {
+          "transport": {
+            "kind": "azure",
+            "base_url": null,
+            "deployment": null,
+            "api_version": null
+          },
+          "compatibility": "azure",
+          "discovery": "custom",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "bedrock": {
+        "id": "32dd0801-9e5c-50fb-ace9-732b439a581e",
+        "name": "Amazon Bedrock",
+        "enabled": true,
+        "deleted": false,
+        "preset": "bedrock",
+        "compatibility": "bedrock",
+        "discovery": "bedrock",
+        "key_required": false,
+        "transport": {
+          "kind": "bedrock",
+          "region": "us-west-2",
+          "auth_mode": "system",
+          "aws_profile": null
+        },
+        "template": {
+          "transport": {
+            "kind": "bedrock",
+            "region": "us-west-2",
+            "auth_mode": "system",
+            "aws_profile": null
+          },
+          "compatibility": "bedrock",
+          "discovery": "bedrock",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "reasoning_defaults": {},
+        "revision": 1
+      }
+    },
     "fields": [
       {
         "key": "profile",
@@ -55,6 +793,48 @@
           "news",
           "fundamentals"
         ],
+        "env_names": []
+      },
+      {
+        "key": "quick_connection_id",
+        "group": "research",
+        "label": {
+          "en": "Quick connection",
+          "zh-CN": "快速模型连接",
+          "ja": "高速モデル接続"
+        },
+        "description": {
+          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
+          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
+          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+        },
+        "kind": "text",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "env_names": []
+      },
+      {
+        "key": "deep_connection_id",
+        "group": "research",
+        "label": {
+          "en": "Deep connection",
+          "zh-CN": "深入模型连接",
+          "ja": "詳細モデル接続"
+        },
+        "description": {
+          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
+          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
+          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+        },
+        "kind": "text",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
         "env_names": []
       },
       {
@@ -1047,9 +1827,6 @@
     },
     "credential_owners": {
       "OPENAI_API_KEY": "openai",
-      "ANTHROPIC_API_KEY": "anthropic",
-      "GOOGLE_API_KEY": "google",
-      "AZURE_OPENAI_API_KEY": "azure",
       "XAI_API_KEY": "xai",
       "DEEPSEEK_API_KEY": "deepseek",
       "DASHSCOPE_API_KEY": "qwen",
@@ -1064,6 +1841,9 @@
       "GROQ_API_KEY": "groq",
       "NVIDIA_API_KEY": "nvidia",
       "OPENAI_COMPATIBLE_API_KEY": "openai_compatible",
+      "ANTHROPIC_API_KEY": "anthropic",
+      "GOOGLE_API_KEY": "google",
+      "AZURE_OPENAI_API_KEY": "azure",
       "ALPHA_VANTAGE_API_KEY": "alpha_vantage",
       "FRED_API_KEY": "fred",
       "ESTAT_APP_ID": "estat",
@@ -1190,153 +1970,6 @@
       "get_prediction_markets": [
         "polymarket"
       ]
-    }
-  },
-  "view": {
-    "initialized": false,
-    "revision": 0,
-    "values": {
-      "profile": "standard",
-      "analysts": [
-        "market",
-        "social",
-        "news",
-        "fundamentals"
-      ],
-      "llm_provider": "openai",
-      "quick_think_llm": "gpt-5.4-mini",
-      "deep_think_llm": "gpt-5.5",
-      "quick_reasoning_effort": null,
-      "deep_reasoning_effort": null,
-      "google_thinking_level": null,
-      "openai_reasoning_effort": null,
-      "anthropic_effort": null,
-      "temperature": null,
-      "llm_max_retries": null,
-      "output_language": "en",
-      "news_article_limit": 30,
-      "yahoo_news_candidate_limit": 200,
-      "cn_news_candidate_limit": 100,
-      "sentiment_filing_limit": 20,
-      "ticker_news_lookback_days": 14,
-      "social_lookback_days": 7,
-      "global_news_article_limit": 10,
-      "global_news_candidate_limit": 10,
-      "global_news_query_limit": 5,
-      "global_news_lookback_days": 7,
-      "global_news_queries": [
-        "Federal Reserve interest rates inflation",
-        "S&P 500 earnings GDP economic outlook",
-        "geopolitical risk trade war sanctions",
-        "ECB Bank of England BOJ central bank policy",
-        "oil commodities supply chain energy"
-      ],
-      "news_cache_enabled": true,
-      "news_cache_refresh_seconds": 900,
-      "news_cache_retention_days": 90,
-      "news_cache_scope_limit": 2000,
-      "news_cache_total_limit": 50000,
-      "trash_retention_days": 30,
-      "data_vendors": {
-        "instrument_eligibility": "yfinance",
-        "core_stock_apis": "yfinance",
-        "technical_indicators": "yfinance",
-        "fundamental_data": "yfinance",
-        "news_data": "yfinance",
-        "macro_data": "macro",
-        "prediction_markets": "polymarket"
-      },
-      "tool_vendors": {},
-      "data_vendors_by_market": {
-        ".T": {
-          "core_stock_apis": "jquants,yfinance",
-          "technical_indicators": "jquants,yfinance",
-          "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
-          "news_data": "jp_news,yfinance"
-        },
-        ".SS": {
-          "core_stock_apis": "akshare,yfinance",
-          "technical_indicators": "akshare,yfinance",
-          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
-          "news_data": "cn_news,yfinance"
-        },
-        ".SZ": {
-          "core_stock_apis": "akshare,yfinance",
-          "technical_indicators": "akshare,yfinance",
-          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
-          "news_data": "cn_news,yfinance"
-        }
-      },
-      "providers": {}
-    },
-    "sources": {
-      "profile": "default",
-      "analysts": "default",
-      "llm_provider": "default",
-      "quick_think_llm": "default",
-      "deep_think_llm": "default",
-      "quick_reasoning_effort": "default",
-      "deep_reasoning_effort": "default",
-      "google_thinking_level": "default",
-      "openai_reasoning_effort": "default",
-      "anthropic_effort": "default",
-      "temperature": "default",
-      "llm_max_retries": "default",
-      "output_language": "default",
-      "news_article_limit": "default",
-      "yahoo_news_candidate_limit": "default",
-      "cn_news_candidate_limit": "default",
-      "sentiment_filing_limit": "default",
-      "ticker_news_lookback_days": "default",
-      "social_lookback_days": "default",
-      "global_news_article_limit": "default",
-      "global_news_candidate_limit": "default",
-      "global_news_query_limit": "default",
-      "global_news_lookback_days": "default",
-      "global_news_queries": "default",
-      "news_cache_enabled": "default",
-      "news_cache_refresh_seconds": "default",
-      "news_cache_retention_days": "default",
-      "news_cache_scope_limit": "default",
-      "news_cache_total_limit": "default",
-      "trash_retention_days": "default",
-      "data_vendors": "default",
-      "tool_vendors": "default",
-      "data_vendors_by_market": "default",
-      "providers": "default"
-    },
-    "credentials": {
-      "OPENAI_API_KEY": false,
-      "ANTHROPIC_API_KEY": false,
-      "GOOGLE_API_KEY": false,
-      "AZURE_OPENAI_API_KEY": false,
-      "XAI_API_KEY": false,
-      "DEEPSEEK_API_KEY": false,
-      "DASHSCOPE_API_KEY": false,
-      "DASHSCOPE_CN_API_KEY": false,
-      "ZHIPU_API_KEY": false,
-      "ZHIPU_CN_API_KEY": false,
-      "MINIMAX_API_KEY": false,
-      "MINIMAX_CN_API_KEY": false,
-      "OPENROUTER_API_KEY": false,
-      "MISTRAL_API_KEY": false,
-      "MOONSHOT_API_KEY": false,
-      "GROQ_API_KEY": false,
-      "NVIDIA_API_KEY": false,
-      "OPENAI_COMPATIBLE_API_KEY": false,
-      "ALPHA_VANTAGE_API_KEY": false,
-      "FRED_API_KEY": false,
-      "ESTAT_APP_ID": false,
-      "JQUANTS_API_KEY": false,
-      "EDINET_API_KEY": false,
-      "AWS_BEARER_TOKEN_BEDROCK": false,
-      "AWS_ACCESS_KEY_ID": false,
-      "AWS_SECRET_ACCESS_KEY": false,
-      "AWS_SESSION_TOKEN": false
-    },
-    "deployment": {
-      "host": "127.0.0.1",
-      "port": 8000
     }
   }
 }

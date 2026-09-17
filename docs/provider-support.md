@@ -100,3 +100,14 @@ endpoint, deployment and API version there; Bedrock exposes its authentication
 mode, region and profile. Existing environment files require an explicit import.
 See [Application configuration](configuration.md). Configuration migration does
 not promote a provider or model to a higher validation level.
+
+
+## Connection configuration
+
+Configure named connections in Settings, using presets or a custom compatible
+endpoint. Multiple connections may share an interface or preset while keeping
+independent addresses and credentials. Quick/deep may use different connections.
+The support levels above describe model/adapter behavior, not connection names;
+creating a connection or combining providers does not raise either provider's
+support level. See [Application configuration](configuration.md) for migration,
+role defaults, credential rotation, disabling and deletion.

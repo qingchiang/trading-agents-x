@@ -38,7 +38,7 @@ export default function App() {
       <Timeline />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (
       <RunDetail />
-    ) : pathname === "/settings" ? (
+    ) : (pathname === "/settings" || pathname.startsWith("/settings/")) ? (
       <Settings />
     ) : pathname === "/" ? (
       <Dashboard />

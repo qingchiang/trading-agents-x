@@ -154,7 +154,13 @@ execution fields do not belong in this contract.
 are never loaded as a package-import side effect. Daily defaults, provider connections and credentials live in SQLite and are
 resolved by the shared configuration module. Environment files supply startup
 settings and explicit import candidates; they never override initialized daily
-configuration. Provider keys are excluded from Run configuration snapshots.
+configuration. Provider keys are excluded from Run configuration snapshots. Model connections
+have stable IDs independent of vendor presets. Each quick/deep binding retains
+a typed transport, compatibility policy, model and reasoning selection; the
+application layer delegates vendor-specific behavior to the LLM subsystem.
+Connection credentials are scoped by ID and bound once per attempt. Admission
+and retry recheck connection references under their SQLite write transaction,
+so deletion cannot race a new queued reference.
 See [Application configuration](configuration.md) for migration and precedence.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
