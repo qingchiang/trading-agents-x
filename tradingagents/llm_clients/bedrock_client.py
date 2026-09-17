@@ -54,23 +54,39 @@ class BedrockClient(BaseLLMClient):
         chat_cls = _bedrock_class()
 
         connection = self.kwargs.get("connection") or {}
+        auth = self.kwargs.get("auth")
+
+        def read_secret(field, legacy):
+            return auth.get(field) if auth is not None else credential(legacy)
+
         region = connection.get("region") or _DEFAULT_REGION
         mode = connection.get("auth_mode", "system")
         llm_kwargs = {"model": self.model, "region_name": region}
         if mode == "bearer":
-            token = credential("AWS_BEARER_TOKEN_BEDROCK")
+            token = read_secret("bearer_token", "AWS_BEARER_TOKEN_BEDROCK")
             if not token:
                 raise ValueError("Configure the Bedrock bearer credential in Settings")
             llm_kwargs["api_key"] = token
+        elif auth is not None:
+            from .connections import aws_client
+
+            llm_kwargs["client"] = aws_client(connection, auth, "bedrock-runtime")
         else:
             import boto3
+
             session_kwargs = {}
             if mode == "static":
-                key, secret = credential("AWS_ACCESS_KEY_ID"), credential("AWS_SECRET_ACCESS_KEY")
+                key, secret = (
+                    read_secret("access_key_id", "AWS_ACCESS_KEY_ID"),
+                    read_secret("secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+                )
                 if not key or not secret:
                     raise ValueError("Configure AWS access credentials in Settings")
-                session_kwargs = {"aws_access_key_id": key, "aws_secret_access_key": secret,
-                                  "aws_session_token": credential("AWS_SESSION_TOKEN")}
+                session_kwargs = {
+                    "aws_access_key_id": key,
+                    "aws_secret_access_key": secret,
+                    "aws_session_token": read_secret("session_token", "AWS_SESSION_TOKEN"),
+                }
             else:
                 session_kwargs["profile_name"] = connection.get("aws_profile")
             session = boto3.Session(**session_kwargs)

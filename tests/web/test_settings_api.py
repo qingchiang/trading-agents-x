@@ -96,3 +96,32 @@ async def test_web_and_python_inherit_database_defaults_and_queued_snapshot_is_i
             ).request.profile.value
             == "fast"
         )
+
+
+@pytest.mark.anyio
+async def test_connection_api_reveals_only_requested_key_and_preserves_conflicting_edits(tmp_path):
+    import httpx2 as httpx
+
+    from tradingagents.application.settings import AppSettings
+    from tradingagents.web import create_app
+
+    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(settings)), base_url="http://testserver") as client:
+        created = await client.patch("/api/v1/settings", json={"revision": 0, "connection_changes": [
+            {"action": "create", "id": "connection-a", "name": "A", "preset": "openai_compatible",
+             "transport": {"kind": "chat_completions", "base_url": "https://a.example/v1"},
+             "credentials": {"api_key": "private-a"}},
+            {"action": "create", "id": "connection-b", "name": "B", "preset": "openai_compatible",
+             "transport": {"kind": "chat_completions", "base_url": "https://b.example/v1"},
+             "credentials": {"api_key": "private-b"}},
+        ]})
+        assert created.status_code == 200
+        assert "private-a" not in created.text and "private-b" not in created.text
+        revealed = await client.post("/api/v1/settings/credentials/reveal", json={"connection_id": "connection-b", "name": "api_key"})
+        assert revealed.json() == {"value": "private-b"}
+        assert revealed.headers["cache-control"] == "no-store"
+        conflict = await client.patch("/api/v1/settings", json={"revision": 0, "connection_changes": [{"action": "update", "id": "connection-a", "name": "Changed"}]})
+        assert conflict.status_code == 409
+        assert (await client.get("/api/v1/settings")).json()["connections"]["connection-a"]["connection"]["name"] == "A"
+        denied = await client.post("/api/v1/settings/credentials/reveal", headers={"Origin": "https://other.example"}, json={"connection_id": "connection-a", "name": "api_key"})
+        assert denied.status_code == 403

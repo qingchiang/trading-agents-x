@@ -16,7 +16,7 @@ from tradingagents.application.settings import AppSettings
 from tradingagents.credentials import credential
 
 from .api_key_env import PROVIDER_API_KEY_ENV
-from .openai_client import OPENAI_COMPATIBLE_PROVIDERS
+from .provider_presets import OPENAI_COMPATIBLE_PROVIDERS
 
 DiscoveryAdapter = Literal[
     "openai_compatible",
@@ -54,31 +54,13 @@ class ProviderAvailability:
 
 
 def _openai_compatible_definitions() -> dict[str, ProviderDefinition]:
-    labels = {
-        "openai": "OpenAI",
-        "xai": "xAI",
-        "deepseek": "DeepSeek",
-        "qwen": "Qwen (International)",
-        "qwen-cn": "Qwen (China)",
-        "glm": "Z.AI GLM",
-        "glm-cn": "BigModel GLM (China)",
-        "minimax": "MiniMax (International)",
-        "minimax-cn": "MiniMax (China)",
-        "openrouter": "OpenRouter",
-        "mistral": "Mistral",
-        "kimi": "Kimi / Moonshot",
-        "groq": "Groq",
-        "nvidia": "NVIDIA NIM",
-        "ollama": "Ollama",
-        "openai_compatible": "OpenAI-compatible",
-    }
     definitions: dict[str, ProviderDefinition] = {}
     for name, spec in OPENAI_COMPATIBLE_PROVIDERS.items():
         definitions[name] = ProviderDefinition(
             name=name,
-            label=labels[name],
+            label=spec.label,
             adapter="ollama" if name == "ollama" else "openai_compatible",
-            api_key_env=PROVIDER_API_KEY_ENV.get(name),
+            api_key_env=spec.api_key_env,
             api_key_required=not spec.key_optional,
             default_base_url=(
                 "https://api.openai.com/v1"

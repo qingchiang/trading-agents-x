@@ -75,6 +75,38 @@ def test_no_bearer_token_omits_api_key(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("explicit_auth", [False, True])
+def test_static_credentials_include_session_token_without_environment_fallback(
+    monkeypatch, explicit_auth
+):
+    captured = _capture_kwargs(monkeypatch)
+    session_kwargs = {}
+
+    def session(**kwargs):
+        session_kwargs.update(kwargs)
+        return SimpleNamespace(client=lambda *args, **kwargs: "static-client")
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(Session=session))
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "ambient-unused")
+    auth = {"access_key_id": "saved-id", "secret_access_key": "saved-secret", "session_token": "saved-token"}
+    with use_credentials({
+        "AWS_ACCESS_KEY_ID": auth["access_key_id"],
+        "AWS_SECRET_ACCESS_KEY": auth["secret_access_key"],
+        "AWS_SESSION_TOKEN": auth["session_token"],
+    }):
+        create_llm_client(
+            "bedrock", "model-id", connection={"auth_mode": "static", "region": "us-east-1"},
+            **({"auth": auth} if explicit_auth else {}),
+        ).get_llm()
+    assert session_kwargs == {
+        "aws_access_key_id": "saved-id",
+        "aws_secret_access_key": "saved-secret",
+        "aws_session_token": "saved-token",
+    }
+    assert captured["client"] == "static-client"
+
+
+@pytest.mark.unit
 def test_construction_when_extra_installed(monkeypatch):
     pytest.importorskip("langchain_aws")
     import tradingagents.llm_clients.bedrock_client as bc

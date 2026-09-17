@@ -160,7 +160,7 @@ def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
 def _sanitize_payload(value: Any, key: str = "") -> Any:
     if key in _SAFE_METRIC_KEYS and isinstance(value, int | float):
         return value
-    if any(
+    if not (key == "key_required" and isinstance(value, bool)) and any(
         fragment in key.casefold()
         for fragment in ("key", "secret", "token", "password", "authorization")
     ):
@@ -282,6 +282,9 @@ class RunRepository:
                             "source run must be terminal before it can be "
                             "used as a research template"
                         )
+                from .connection_store import validate_run_connections
+
+                validate_run_connections(session, config_snapshot)
                 run_id = str(uuid4())
                 record = RunRecord(
                     id=run_id,
@@ -1541,10 +1544,14 @@ class RunRepository:
         fingerprint: str | None = None
         try:
             with self.sessions.begin() as session:
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 record = session.get(RunRecord, run_id)
                 if record is None:
                     raise RunNotFoundError(run_id)
                 self._require_retryable(record)
+                from .connection_store import validate_run_connections
+
+                validate_run_connections(session, record.config_json, retry=True)
                 if (
                     record.research_kind == "incremental"
                     and record.full_baseline_run_id is not None

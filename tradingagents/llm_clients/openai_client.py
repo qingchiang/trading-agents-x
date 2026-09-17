@@ -1,6 +1,4 @@
-from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
@@ -10,6 +8,7 @@ from tradingagents.credentials import credential
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
 from .capabilities import ModelCapabilities, ThinkingMode, get_capabilities
+from .provider_presets import OPENAI_COMPATIBLE_PROVIDERS, _is_native_openai_base_url
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
@@ -228,57 +227,6 @@ _PASSTHROUGH_KWARGS = (
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
-@dataclass(frozen=True)
-class ProviderSpec:
-    """Declarative config for one OpenAI-compatible provider.
-
-    The OpenAI-compatible family (OpenAI, xAI, DeepSeek, Qwen, GLM, MiniMax,
-    OpenRouter, Ollama, and any user endpoint) all speak the same Chat
-    Completions API and differ only by these fields — so one row here replaces
-    the former per-provider base-URL dict, auth handling, and client-class
-    branches. Native Anthropic / Google use their own clients (genuinely
-    different APIs) and are intentionally NOT in this registry.
-
-    The API-key env var stays in ``api_key_env.PROVIDER_API_KEY_ENV`` (the single
-    source consulted by both this client and the CLI prompt); only behavior that
-    is provider-specific (base URL, key optionality, wire-format quirks via
-    ``chat_class``) lives here.
-    """
-
-    chat_class: type = NormalizedChatOpenAI   # provider quirks live in the subclass
-    base_url: str | None = None            # default endpoint (None -> SDK default)
-    base_url_env: str | None = None        # legacy import alias (e.g. OLLAMA_BASE_URL)
-    key_optional: bool = False                # don't require/prompt; send a placeholder if unset
-    placeholder_key: str = "EMPTY"            # sent when no key is available (keyless local servers)
-    require_base_url: bool = False            # error if no base_url is resolved (generic endpoint)
-    use_responses_api: bool = False           # native OpenAI Responses API
-
-
-# Single source of truth for the OpenAI-compatible provider family. Dual-region
-# providers (qwen/glm/minimax) keep separate endpoints because international and
-# China accounts cannot share credentials (#758).
-OPENAI_COMPATIBLE_PROVIDERS: dict[str, ProviderSpec] = {
-    "openai":     ProviderSpec(use_responses_api=True),
-    "xai":        ProviderSpec(base_url="https://api.x.ai/v1"),
-    "deepseek":   ProviderSpec(base_url="https://api.deepseek.com", chat_class=DeepSeekChatOpenAI),
-    "qwen":       ProviderSpec(base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
-    "qwen-cn":    ProviderSpec(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"),
-    "glm":        ProviderSpec(base_url="https://api.z.ai/api/paas/v4/"),
-    "glm-cn":     ProviderSpec(base_url="https://open.bigmodel.cn/api/paas/v4/"),
-    "minimax":    ProviderSpec(base_url="https://api.minimax.io/v1", chat_class=MinimaxChatOpenAI),
-    "minimax-cn": ProviderSpec(base_url="https://api.minimaxi.com/v1", chat_class=MinimaxChatOpenAI),
-    "openrouter": ProviderSpec(base_url="https://openrouter.ai/api/v1"),
-    "mistral":    ProviderSpec(base_url="https://api.mistral.ai/v1"),
-    "kimi":       ProviderSpec(base_url="https://api.moonshot.ai/v1"),
-    "groq":       ProviderSpec(base_url="https://api.groq.com/openai/v1"),
-    "nvidia":     ProviderSpec(base_url="https://integrate.api.nvidia.com/v1"),
-    "ollama":     ProviderSpec(base_url="http://localhost:11434/v1", base_url_env="OLLAMA_BASE_URL",
-                               key_optional=True, placeholder_key="ollama"),
-    # Generic endpoint: user supplies base_url; key optional (keyless local).
-    "openai_compatible": ProviderSpec(
-        require_base_url=True, key_optional=True, chat_class=LocalCompatibleChatOpenAI
-    ),
-}
 
 
 def is_openai_compatible(provider: str) -> bool:
@@ -286,20 +234,6 @@ def is_openai_compatible(provider: str) -> bool:
     return provider.lower() in OPENAI_COMPATIBLE_PROVIDERS
 
 
-def _is_native_openai_base_url(base_url: str | None) -> bool:
-    """True when ``base_url`` is unset or points at api.openai.com.
-
-    The Responses API (/v1/responses) only exists on native OpenAI. A custom
-    base_url on the ``openai`` provider (a proxy, gateway, or local server)
-    speaks only Chat Completions, so the Responses API must stay off there even
-    though the provider spec enables it (#1024).
-    """
-    if not base_url:
-        return True
-    if "://" not in base_url:
-        base_url = "https://" + base_url
-    host = urlparse(base_url).hostname or ""
-    return host == "api.openai.com" or host.endswith(".openai.com")
 
 
 class OpenAIClient(BaseLLMClient):
@@ -378,6 +312,9 @@ class OpenAIClient(BaseLLMClient):
                 if value is None:
                     continue
             llm_kwargs[key] = value
+
+        if "use_responses_api" in self.kwargs:
+            llm_kwargs["use_responses_api"] = self.kwargs["use_responses_api"]
 
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)

@@ -28,6 +28,7 @@ from .contracts import (
     normalize_report_language,
     report_language_prompt_label,
 )
+from .model_connections import ModelBinding
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
 
@@ -59,6 +60,10 @@ class RunSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    binding_version: int = 2
+    quick_binding: ModelBinding | None = None
+    deep_binding: ModelBinding | None = None
+    research_kind: str = "full"
     profile: RunProfile = RunProfile.STANDARD
     llm_provider: str = "openai"
     quick_model: str = "gpt-5.4-mini"
@@ -264,7 +269,9 @@ class AppSettings(BaseModel):
 
 
 def _redact(value: Any, key: str = "") -> Any:
-    if any(fragment in key.casefold() for fragment in _SECRET_FRAGMENTS):
+    if not (key == "key_required" and isinstance(value, bool)) and any(
+        fragment in key.casefold() for fragment in _SECRET_FRAGMENTS
+    ):
         return "[REDACTED]"
     if isinstance(value, dict):
         return {str(k): _redact(v, str(k)) for k, v in value.items()}

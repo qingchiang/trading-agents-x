@@ -5,6 +5,8 @@ from .configuration_models import ConfigurationField, ConfigurationSchema, Confi
 
 # English, simplified Chinese, Japanese. Technical names remain searchable.
 LABELS = {
+    "quick_connection_id": ("Quick connection", "快速模型连接", "高速モデル接続"),
+    "deep_connection_id": ("Deep connection", "深入模型连接", "詳細モデル接続"),
     "profile": ("Research depth", "研究档位", "リサーチの深さ"),
     "analysts": ("Analysts", "分析师", "アナリスト"),
     "llm_provider": ("Default provider", "默认模型服务", "既定のプロバイダー"),
@@ -253,7 +255,10 @@ def configuration_schema() -> ConfigurationSchema:
                 env_names=env_names,
             )
         )
+    from .model_connections import preset_connection
+
     return ConfigurationSchema(
+        presets={name: preset_connection(name) for name in PROVIDER_REGISTRY},
         fields=fields,
         providers={key: value.label for key, value in PROVIDER_REGISTRY.items()},
         provider_defaults={

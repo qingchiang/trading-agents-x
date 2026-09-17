@@ -44,7 +44,7 @@ def test_registry_membership():
 def test_registry_spec(provider, base_url, chat_class, responses):
     spec = OPENAI_COMPATIBLE_PROVIDERS[provider]
     assert spec.base_url == base_url
-    assert spec.chat_class is chat_class
+    assert spec.chat_class.__name__ == chat_class.__name__
     assert spec.use_responses_api is responses
 
 

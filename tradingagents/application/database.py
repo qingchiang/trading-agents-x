@@ -45,6 +45,14 @@ class CredentialRecord(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class ModelConnectionRecord(Base):
+    __tablename__ = "model_connections"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    legacy_provider: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True)
+
+
 class RunRecord(Base):
     __tablename__ = "runs"
 

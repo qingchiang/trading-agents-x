@@ -27,6 +27,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: components["schemas"]["AssetType"] | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -34,6 +36,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
@@ -82,6 +85,18 @@ export interface components {
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       value: number;
     };
+    AzureTransport: {
+      api_version?: string | null;
+      base_url?: string | null;
+      deployment?: string | null;
+      kind?: "azure";
+    };
+    BedrockTransport: {
+      auth_mode?: "system" | "static" | "bearer";
+      aws_profile?: string | null;
+      kind?: "bedrock";
+      region?: string;
+    };
     BenchmarkContext: {
       component: components["schemas"]["PerformanceComponent"];
       name: string;
@@ -103,19 +118,23 @@ export interface components {
     CapabilitiesResponse: {
       analysts: string[];
       configuration_initialized?: boolean;
+      connections?: Record<string, components["schemas"]["ConnectionView"]>;
       defaults: components["schemas"]["CapabilityDefaults"];
+      legacy_connections?: Record<string, string>;
       output_languages: string[];
       profiles: string[];
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
       analysts?: string[];
+      deep_connection_id?: string | null;
       deep_model: string;
       deep_reasoning_effort: string | null;
       lan_enabled: boolean;
       llm_provider: string;
       output_language: string;
       profile: string;
+      quick_connection_id?: string | null;
       quick_model: string;
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
@@ -163,6 +182,7 @@ export interface components {
       options?: string[];
     };
     ConfigurationPatch: {
+      connection_changes?: components["schemas"]["ConnectionChange"][];
       credentials?: Record<string, string | null>;
       reset_fields?: string[];
       revision: number;
@@ -171,6 +191,7 @@ export interface components {
     ConfigurationSchema: {
       credential_owners: Record<string, string>;
       fields: components["schemas"]["ConfigurationField"][];
+      presets?: Record<string, components["schemas"]["ModelConnection"]>;
       provider_defaults: Record<string, components["schemas"]["ProviderConnection"]>;
       providers: Record<string, string>;
       route_options: Record<string, string[]>;
@@ -182,6 +203,7 @@ export interface components {
       cn_news_candidate_limit?: number;
       data_vendors?: Record<string, string>;
       data_vendors_by_market?: Record<string, Record<string, string>>;
+      deep_connection_id?: string | null;
       deep_reasoning_effort?: string | null;
       deep_think_llm?: string;
       global_news_article_limit?: number;
@@ -202,6 +224,7 @@ export interface components {
       output_language?: string;
       profile?: "fast" | "standard" | "deep";
       providers?: Record<string, components["schemas"]["ProviderConnection"]>;
+      quick_connection_id?: string | null;
       quick_reasoning_effort?: string | null;
       quick_think_llm?: string;
       sentiment_filing_limit?: number;
@@ -213,6 +236,7 @@ export interface components {
       yahoo_news_candidate_limit?: number;
     };
     ConfigurationView: {
+      connections?: Record<string, components["schemas"]["ConnectionView"]>;
       credentials: Record<string, boolean>;
       deployment: Record<string, string | number | boolean>;
       initialized: boolean;
@@ -220,7 +244,29 @@ export interface components {
       sources: Record<string, "database" | "default">;
       values: components["schemas"]["ConfigurationValues"];
     };
+    ConnectionChange: {
+      action: "create" | "update" | "delete" | "reset";
+      compatibility?: string | null;
+      credentials?: Record<string, string | null>;
+      discovery?: "openai_compatible" | "anthropic" | "google" | "ollama" | "bedrock" | "custom" | null;
+      enabled?: boolean | null;
+      id: string;
+      key_required?: boolean | null;
+      name?: string | null;
+      preset?: string | null;
+      reasoning_defaults?: Record<string, string | null> | null;
+      transport?: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"] | null;
+    };
+    ConnectionView: {
+      connection: components["schemas"]["ModelConnection"];
+      credentials: Record<string, boolean>;
+      missing_fields: string[];
+      reasoning_efforts?: string[];
+      selectable: boolean;
+      unavailable_reason?: string | null;
+    };
     CredentialRequest: {
+      connection_id?: string | null;
       name: string;
     };
     CredentialView: {
@@ -258,6 +304,10 @@ export interface components {
       label: string;
       reasoning_efforts: string[];
     };
+    EndpointTransport: {
+      base_url?: string | null;
+      kind?: "chat_completions" | "responses" | "anthropic" | "google";
+    };
     EvidenceBundle: {
       analysis_date: string;
       digest?: string | null;
@@ -265,7 +315,7 @@ export interface components {
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
       tables?: components["schemas"]["EvidenceTable"][];
-      version?: string;
+      version?: "8";
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -375,6 +425,7 @@ export interface components {
     };
     ImportPreview: {
       conflicts: string[];
+      connection_targets?: Record<string, string>;
       credentials: Record<string, boolean>;
       fingerprint: string;
       issues: components["schemas"]["ImportIssue"][];
@@ -391,9 +442,9 @@ export interface components {
     };
     IncrementalAnalysisBrief: {
       evidence_refs?: string[];
-      generation_method?: string;
+      generation_method?: "markdown_audited";
       markdown: string;
-      prompt_version?: string;
+      prompt_version?: "incremental-analysis-brief-v1";
       report_sections: components["schemas"]["ReportSection"][];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
@@ -459,6 +510,20 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
+    ModelConnection: {
+      compatibility?: string;
+      deleted?: boolean;
+      discovery?: "openai_compatible" | "anthropic" | "google" | "ollama" | "bedrock" | "custom";
+      enabled?: boolean;
+      id: string;
+      key_required?: boolean;
+      name: string;
+      preset?: string | null;
+      reasoning_defaults?: Record<string, string | null>;
+      revision?: number;
+      template?: Record<string, unknown>;
+      transport: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"];
+    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -487,7 +552,7 @@ export interface components {
     NumericAuditSnapshot: {
       candidate?: Record<string, unknown> | null;
       candidate_digest?: string | null;
-      candidate_omitted?: string | null;
+      candidate_omitted?: "oversize" | null;
       method: components["schemas"]["ArtifactGenerationMethod"];
       phase: components["schemas"]["NumericAuditPhase"];
       reason_code: string;
@@ -527,7 +592,7 @@ export interface components {
       end_session: string;
       end_value: number;
       fallback?: boolean;
-      formula?: string;
+      formula?: "(end_value / start_value) - 1";
       provider: string;
       retrieved_at: string;
       start_session: string;
@@ -631,7 +696,7 @@ export interface components {
       role: string;
       round?: number;
       run_id: string;
-      schema_version?: string;
+      schema_version?: "2";
       stage: string;
     };
     ResearchAvailability: {
@@ -712,7 +777,7 @@ export interface components {
       value?: unknown;
     };
     ResearchNodeComparisonWarning: {
-      code: string;
+      code: "method_changed";
       message: string;
     };
     ResearchNodeDecisionSection: {
@@ -846,6 +911,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: components["schemas"]["AssetType"] | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -853,6 +920,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
@@ -945,6 +1013,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: string | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -952,6 +1022,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";

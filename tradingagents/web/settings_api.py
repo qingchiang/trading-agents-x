@@ -68,7 +68,11 @@ def register_settings_routes(app: FastAPI, store: ConfigurationStore):
     @app.post("/api/v1/settings/credentials/reveal", response_model=CredentialView)
     def reveal(payload: CredentialRequest, response: Response):
         response.headers["Cache-Control"] = "no-store"
-        return CredentialView(value=store.reveal(payload.name))
+        return CredentialView(
+            value=store.reveal_connection(payload.connection_id, payload.name)
+            if payload.connection_id
+            else store.reveal(payload.name)
+        )
 
     @app.post("/api/v1/settings/import/preview", response_model=ImportPreview)
     def preview(payload: ImportRequest):

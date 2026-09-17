@@ -1,5 +1,9 @@
 import type { components } from "./types.generated";
 
+export type ModelConnection = components["schemas"]["ModelConnection"];
+export type ConnectionChange = components["schemas"]["ConnectionChange"];
+export type ConnectionView = components["schemas"]["ConnectionView"];
+
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
 export type AnalysisCutoffContext =
   components["schemas"]["AnalysisCutoffContext"];
@@ -143,7 +147,7 @@ export const api = {
   settings: () => request<ConfigurationView>("/api/v1/settings"),
   settingsSchema: () => request<ConfigurationSchema>("/api/v1/settings/schema"),
   saveSettings: (patch: ConfigurationPatch) => request<ConfigurationView>("/api/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }),
-  revealCredential: (name: string) => request<{ value: string | null }>("/api/v1/settings/credentials/reveal", { method: "POST", body: JSON.stringify({ name }) }),
+  revealCredential: (name: string, connection_id?: string) => request<{ value: string | null }>("/api/v1/settings/credentials/reveal", { method: "POST", body: JSON.stringify({ name, connection_id }) }),
   previewSettingsImport: (input: ImportRequest) => request<ImportPreview>("/api/v1/settings/import/preview", { method: "POST", body: JSON.stringify(input) }),
   applySettingsImport: (input: ImportRequest) => request<ConfigurationView>("/api/v1/settings/import/apply", { method: "POST", body: JSON.stringify(input) }),
   analysisCutoffContext: (instrument: string) =>
@@ -153,6 +157,7 @@ export const api = {
   health: () => request<Health>("/api/v1/health"),
   capabilities: () =>
     request<Capabilities>("/api/v1/capabilities"),
+  connectionModels: (id: string, refresh = false) => request<ProviderModelCatalog>(`/api/v1/settings/connections/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`),
   providerModels: (provider: string, refresh = false) =>
     request<ProviderModelCatalog>(
       `/api/v1/providers/${encodeURIComponent(provider)}/models${

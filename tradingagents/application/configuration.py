@@ -14,6 +14,7 @@ from pydantic import SecretStr, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import connection_store as connections
 from .configuration_models import (
     ConfigurationPatch,
     ConfigurationValues,
@@ -24,7 +25,21 @@ from .configuration_models import (
     ProviderConnection,
 )
 from .contracts import AnalysisRequest, report_language_value
-from .database import ConfigurationRecord, CredentialRecord, create_sqlite_engine
+from .database import (
+    ConfigurationRecord,
+    CredentialRecord,
+    ModelConnectionRecord,
+    create_sqlite_engine,
+)
+from .model_connections import (
+    ModelBinding,
+    ModelConnection,
+    connection_view,
+    credential_name,
+    legacy_connection_id,
+    legacy_credential_fields,
+    preset_connection,
+)
 from .settings import AppSettings, RunSettings
 
 
@@ -73,11 +88,26 @@ class ConfigurationStore:
             names = {
                 row[0] for row in connection.execute("SELECT name FROM configuration_credentials")
             }
+            models = {}
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='model_connections'"
+            ).fetchone():
+                for (retained,) in connection.execute("SELECT definition FROM model_connections"):
+                    conn = ModelConnection.model_validate_json(retained)
+                    if not conn.deleted:
+                        models[conn.id] = connection_view(
+                            conn,
+                            {
+                                field: credential_name(conn.id, field) in names
+                                for field in conn.credential_fields()
+                            },
+                        )
             return self._document(
                 json.loads(row[0]) if row else {},
                 names,
                 row[1] if row else 0,
                 bool(row[2]) if row else False,
+                models,
             )
 
     def _view(self, session):
@@ -89,15 +119,31 @@ class ConfigurationStore:
             configured,
             record.revision if record else 0,
             record.initialized if record else False,
+            connections.views(session),
         )
 
-    def _document(self, raw, configured, revision, initialized):
+    def _document(self, raw, configured, revision, initialized, models=None):
+        stored_keys = set(raw)
+        models = models or {}
+        if (
+            not raw.get("quick_connection_id")
+            and legacy_connection_id(raw.get("llm_provider", "openai")) in models
+        ):
+            raw = {
+                **raw,
+                "quick_connection_id": legacy_connection_id(raw.get("llm_provider", "openai")),
+                "deep_connection_id": legacy_connection_id(raw.get("llm_provider", "openai")),
+            }
+        for alias, (owner, field) in legacy_credential_fields().items():
+            if credential_name(legacy_connection_id(owner), field) in configured:
+                configured.add(alias)
         return ConfigurationView(
+            connections=models,
             initialized=initialized,
             revision=revision,
             values=ConfigurationValues.model_validate(raw),
             sources={
-                key: "database" if key in raw else "default"
+                key: "database" if key in stored_keys else "default"
                 for key in ConfigurationValues.model_fields
             },
             credentials={name: name in configured for name in credential_owners()},
@@ -143,9 +189,18 @@ class ConfigurationStore:
                     "Invalid configuration value",
                     fields=[".".join(str(part) for part in error["loc"]) for error in exc.errors()],
                 ) from exc
-            for name, value in patch.credentials.items():
-                if name not in credential_owners():
-                    raise ConfigurationError("Unknown credential field")
+            if set(patch.credentials) - set(credential_owners()):
+                raise ConfigurationError("Unknown credential field")
+            try:
+                translated = connections.sync_legacy(session, raw, updates, patch.credentials)
+                connections.apply_changes(session, patch.connection_changes, raw)
+            except ValueError as exc:
+                if isinstance(exc, ConfigurationError):
+                    raise
+                raise ConfigurationError(
+                    "Invalid connection configuration", fields=["connections"]
+                ) from exc
+            for name, value in translated.items():
                 existing = session.get(CredentialRecord, name)
                 if value is None or not value.get_secret_value():
                     if existing:
@@ -167,13 +222,26 @@ class ConfigurationStore:
     def reveal(self, name: str) -> str | None:
         if name not in credential_owners():
             raise ConfigurationError("Unknown credential field")
+        alias = legacy_credential_fields().get(name)
+        if alias:
+            name = credential_name(legacy_connection_id(alias[0]), alias[1])
         with Session(self.engine) as session:
             record = session.get(CredentialRecord, name)
             return record.value if record else None
 
+    def reveal_connection(self, connection_id, field):
+        with Session(self.engine) as session:
+            row = session.get(ModelConnectionRecord, connection_id)
+            if row is None or row.definition.get("deleted"):
+                raise ConfigurationError("Connection does not exist")
+            conn = ModelConnection.model_validate(row.definition)
+            if field not in conn.credential_fields():
+                raise ConfigurationError("Unknown credential field")
+            return connections.connection_secrets(session, conn).get(field)
+
     def credentials(self) -> dict[str, str]:
         with Session(self.engine) as session:
-            return {row.name: row.value for row in session.scalars(select(CredentialRecord))}
+            return self._credential_snapshot(session)
 
     def execution_credentials(self, run: RunSettings | None = None) -> dict[str, str]:
         with Session(self.engine) as session:
@@ -185,54 +253,60 @@ class ConfigurationStore:
                     "Complete configuration in Settings before starting research"
                 )
             if run is not None:
-                current = effective_connection(view.values, run.llm_provider)
-                retained = run.connection
-                if retained is None:
-                    retained = effective_connection(ConfigurationValues(), run.llm_provider)
-                    if run.backend_url:
-                        retained["base_url"] = run.backend_url.rstrip("/")
-                    if not retained.get("base_url") and run.llm_provider != "bedrock":
-                        raise ProviderConfigurationChanged(
-                            "Legacy connection cannot be resolved; create a new Run"
+                roles = ("deep",) if run.research_kind == "incremental" else ("quick", "deep")
+                for role in roles:
+                    binding = getattr(run, f"{role}_binding")
+                    if binding:
+                        row = session.get(ModelConnectionRecord, binding.connection.id)
+                        if row is None or row.definition.get("deleted"):
+                            raise ProviderConfigurationChanged(
+                                "Connection deleted; create a new Run"
+                            )
+                        current = ModelConnection.model_validate(row.definition)
+                        if current.execution_identity() != binding.connection.execution_identity():
+                            raise ProviderConfigurationChanged(
+                                "Connection changed; create a new Run"
+                            )
+                        missing = current.missing_fields(
+                            connections.connection_secrets(session, current)
                         )
-                if current != retained:
-                    raise ProviderConfigurationChanged(
-                        "Provider connection changed; create a new Run with current settings"
-                    )
-            return {row.name: row.value for row in session.scalars(select(CredentialRecord))}
+                        if missing:
+                            raise ConfigurationError("Connection requires: " + ", ".join(missing))
+                    else:
+                        row = session.get(
+                            ModelConnectionRecord, legacy_connection_id(run.llm_provider)
+                        )
+                        if row is None or row.definition.get("deleted"):
+                            raise ProviderConfigurationChanged(
+                                "Legacy connection deleted; create a new Run"
+                            )
+                        current = ModelConnection.model_validate(row.definition)
+                        retained = preset_connection(
+                            run.llm_provider, legacy=run.connection or {"base_url": run.backend_url}
+                        )
+                        if current.execution_identity() != retained.execution_identity():
+                            raise ProviderConfigurationChanged(
+                                "Provider connection changed; create a new Run"
+                            )
+            return self._credential_snapshot(session)
 
-    def discovery_snapshot(self):
+    def _credential_snapshot(self, session):
+        values = {row.name: row.value for row in session.scalars(select(CredentialRecord))}
+        # Compatibility clients resolve only the immutable migrated identity.
+        for alias, (owner, field) in legacy_credential_fields().items():
+            value = values.get(credential_name(legacy_connection_id(owner), field))
+            if value:
+                values[alias] = value
+        return values
+
+    def connection_discovery_snapshot(self, identity):
         with Session(self.engine) as session:
             session.connection().exec_driver_sql("BEGIN")
-            view = self._view(session)
-            secrets = {row.name: row.value for row in session.scalars(select(CredentialRecord))}
-            from tradingagents.llm_clients.provider_registry import PROVIDER_REGISTRY
-
-            connections = {
-                provider: effective_connection(view.values, provider)
-                for provider in PROVIDER_REGISTRY
-            }
-            bedrock = connections["bedrock"]
-            secrets.update(
-                {"AWS_REGION": bedrock["region"], "BEDROCK_AUTH_MODE": bedrock["auth_mode"]}
-            )
-            if bedrock["aws_profile"]:
-                secrets["AWS_PROFILE"] = bedrock["aws_profile"]
-            defaults = view.values
-            app = self.settings.model_copy(
-                update={
-                    "default_run_settings": RunSettings(
-                        profile=defaults.profile,
-                        llm_provider=defaults.llm_provider,
-                        quick_model=defaults.quick_think_llm,
-                        deep_model=defaults.deep_think_llm,
-                        output_language=defaults.output_language,
-                        backend_url=connections[defaults.llm_provider]["base_url"],
-                        data_config=defaults.model_dump(exclude={"providers"}),
-                    )
-                }
-            )
-            return app, secrets, connections, view.revision
+            row = session.get(ModelConnectionRecord, identity)
+            if row is None or row.definition.get("deleted"):
+                raise ConfigurationError("Connection does not exist")
+            conn = ModelConnection.model_validate(row.definition)
+            return conn, connections.connection_secrets(session, conn), self._view(session).values
 
     def resolve_request(self, request: AnalysisRequest, *, require_initialized=True):
         view = self.read()
@@ -241,6 +315,14 @@ class ConfigurationStore:
                 "Complete configuration in Settings before starting research"
             )
         values = view.values
+        explicit_connections = any(
+            getattr(request, field) is not None
+            for field in ("connection_id", "quick_connection_id", "deep_connection_id")
+        )
+        if request.llm_provider is not None and explicit_connections:
+            raise ConfigurationError(
+                "Use connection IDs or legacy provider, not both", fields=["llm_provider"]
+            )
         payload = request.model_dump(mode="python", exclude_unset=True)
         for field in ("profile", "analysts"):
             if field not in payload:
@@ -256,6 +338,54 @@ class ConfigurationStore:
         ):
             if payload.get(field) is None:
                 payload[field] = getattr(values, aliases.get(field, field))
+        bindings = {}
+        for role in ("quick", "deep"):
+            identity = (
+                getattr(request, f"{role}_connection_id")
+                or request.connection_id
+                or (legacy_connection_id(request.llm_provider) if request.llm_provider else None)
+                or getattr(values, f"{role}_connection_id")
+                or legacy_connection_id(values.llm_provider)
+            )
+            entry = view.connections.get(identity)
+            if entry is None:
+                if not require_initialized:
+                    conn = preset_connection(values.llm_provider)
+                else:
+                    raise ConfigurationError(
+                        "Connection does not exist", fields=[f"{role}_connection_id"]
+                    )
+            else:
+                conn = entry.connection
+                if require_initialized and not conn.enabled:
+                    raise ConfigurationError(
+                        "Connection is disabled", fields=[f"{role}_connection_id"]
+                    )
+            bindings[role] = ModelBinding(
+                connection=conn,
+                model=payload[f"{role}_model"],
+                reasoning_effort=payload[f"{role}_reasoning_effort"],
+            )
+            from tradingagents.llm_clients.reasoning_effort import resolve_reasoning_effort
+
+            try:
+                resolve_reasoning_effort(
+                    {
+                        **conn.reasoning_defaults,
+                        "llm_provider": conn.compatibility,
+                        "quick_think_llm": bindings[role].model,
+                        "quick_reasoning_effort": bindings[role].reasoning_effort,
+                    },
+                    "quick",
+                )
+            except ValueError as exc:
+                raise ConfigurationError(
+                    "Unsupported reasoning setting for this role",
+                    fields=[f"{role}_reasoning_effort"],
+                ) from exc
+            payload[f"{role}_connection_id"] = conn.id
+        # Materialized requests carry identities; legacy input is consumed above.
+        payload["llm_provider"] = None
         materialized = AnalysisRequest.model_validate(payload)
         data = values.model_dump(
             exclude={"providers", "profile", "analysts", "trash_retention_days"}
@@ -263,14 +393,25 @@ class ConfigurationStore:
         from tradingagents.default_config import build_default_config
 
         data = {**build_default_config(), **data}
-        connection = effective_connection(values, materialized.llm_provider)
+        connection = bindings["deep"].connection.transport.model_dump(exclude={"kind"})
         resolved = RunSettings(
             profile=materialized.profile,
-            llm_provider=materialized.llm_provider,
+            llm_provider=(
+                bindings["deep"].connection.compatibility
+                if bindings["quick"].connection.id == bindings["deep"].connection.id
+                else ""
+            ),
+            quick_binding=bindings["quick"],
+            deep_binding=bindings["deep"],
+            research_kind=materialized.research_kind,
             quick_model=materialized.quick_model,
             deep_model=materialized.deep_model,
-            backend_url=connection.get("base_url"),
-            connection=connection,
+            backend_url=connection.get("base_url")
+            if bindings["quick"].connection.id == bindings["deep"].connection.id
+            else None,
+            connection=connection
+            if bindings["quick"].connection.id == bindings["deep"].connection.id
+            else None,
             quick_reasoning_effort=materialized.quick_reasoning_effort,
             deep_reasoning_effort=materialized.deep_reasoning_effort,
             temperature=values.temperature,
@@ -292,7 +433,38 @@ class ConfigurationStore:
         patch, issues, fingerprint = self._import(request)
         view = self.read()
         updates = patch.values.model_dump(mode="json", exclude_unset=True)
+        targets = {}
+        for name in patch.credentials:
+            alias = legacy_credential_fields().get(name)
+            if alias:
+                targets[name] = f"{legacy_connection_id(alias[0])}.{alias[1]}"
+        for owner in updates.get("providers", {}):
+            targets[f"providers.{owner}"] = legacy_connection_id(owner)
+        if "llm_provider" in updates:
+            targets["llm_provider"] = legacy_connection_id(updates["llm_provider"])
+        if self.settings.database_path.exists():
+            with closing(
+                sqlite3.connect(self.settings.database_path.as_uri() + "?mode=ro", uri=True)
+            ) as connection:
+                if connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='model_connections'"
+                ).fetchone():
+                    deleted = {
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT id FROM model_connections WHERE json_extract(definition, '$.deleted')=1"
+                        )
+                    }
+                    for name, target in targets.items():
+                        if target.split(".")[0] in deleted:
+                            issues.append(
+                                ImportIssue(
+                                    name=name,
+                                    message="Original connection was deleted; exclude this field and configure a new connection manually",
+                                )
+                            )
         return ImportPreview(
+            connection_targets=targets,
             revision=view.revision,
             fingerprint=fingerprint,
             values=updates,
@@ -306,6 +478,7 @@ class ConfigurationStore:
         if request.use_defaults:
             return self.save(ConfigurationPatch(revision=request.revision), initialize=True)
         patch, issues, fingerprint = self._import(request)
+        issues = self.preview_import(request).issues
         if issues:
             raise ConfigurationError(
                 "Correct or exclude the reported import fields before applying"
@@ -466,6 +639,8 @@ def validate_values(values):
             fields=["data_vendors", "data_vendors_by_market", "tool_vendors"],
         ) from exc
     for role in ("quick", "deep"):
+        if getattr(values, f"{role}_connection_id"):
+            continue
         try:
             resolve_reasoning_effort(config, role)
         except ValueError as exc:

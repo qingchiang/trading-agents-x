@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from tradingagents.default_config import DEFAULT_CONFIG as D
 
+from .model_connections import ConnectionChange, ConnectionView, ModelConnection
+
 
 class ConfigurationModel(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
@@ -43,6 +45,8 @@ class ConfigurationValues(ConfigurationModel):
     analysts: list[Literal["market", "social", "news", "fundamentals"]] = Field(
         default_factory=lambda: ["market", "social", "news", "fundamentals"], min_length=1
     )
+    quick_connection_id: str | None = None
+    deep_connection_id: str | None = None
     llm_provider: str = D["llm_provider"]
     quick_think_llm: str = Field(default=D["quick_think_llm"], min_length=1)
     deep_think_llm: str = Field(default=D["deep_think_llm"], min_length=1)
@@ -101,6 +105,7 @@ class ConfigurationValues(ConfigurationModel):
 
 
 class ConfigurationPatch(ConfigurationModel):
+    connection_changes: list[ConnectionChange] = Field(default_factory=list)
     revision: int = Field(ge=0)
     values: ConfigurationValues = Field(default_factory=ConfigurationValues)
     reset_fields: list[str] = Field(default_factory=list)
@@ -108,6 +113,7 @@ class ConfigurationPatch(ConfigurationModel):
 
 
 class ConfigurationView(ConfigurationModel):
+    connections: dict[str, ConnectionView] = Field(default_factory=dict)
     initialized: bool
     revision: int
     values: ConfigurationValues
@@ -118,6 +124,7 @@ class ConfigurationView(ConfigurationModel):
 
 class CredentialRequest(ConfigurationModel):
     name: str
+    connection_id: str | None = None
 
 
 class CredentialView(ConfigurationModel):
@@ -139,6 +146,7 @@ class ImportIssue(ConfigurationModel):
 
 
 class ImportPreview(ConfigurationModel):
+    connection_targets: dict[str, str] = Field(default_factory=dict)
     revision: int
     fingerprint: str
     values: dict[str, Any]
@@ -162,6 +170,7 @@ class ConfigurationField(ConfigurationModel):
 
 
 class ConfigurationSchema(ConfigurationModel):
+    presets: dict[str, ModelConnection] = Field(default_factory=dict)
     fields: list[ConfigurationField]
     providers: dict[str, str]
     provider_defaults: dict[str, ProviderConnection]

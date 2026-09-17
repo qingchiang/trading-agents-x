@@ -698,7 +698,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0011_application_configuration",
+                "0012_model_connections",
             )
             assert (
                 upgraded.execute(
@@ -747,3 +747,21 @@ def test_cli_omissions_inherit_db_defaults_and_explicit_standard_wins(cli_servic
     assert result.exit_code == 0, result.output
     assert captured[0].profile.value == expected
     assert captured[0].analysts == ("news",)
+
+
+def test_run_accepts_independent_role_connections_without_filling_omitted_defaults(monkeypatch):
+    captured = {}
+    class Application:
+        def run(self, request, **kwargs):
+            captured["request"] = request
+            return AnalysisResult(run_id="roles", status=RunStatus.SUCCEEDED,
+                                  instrument=request.ticker, reports={}, decision=research_decision())
+    monkeypatch.setattr(cli, "_application", Application)
+    result = runner.invoke(cli.app, ["run", "GOOG", "--date", "2026-09-10",
+        "--quick-connection", "quick", "--deep-connection", "deep", "--quiet", "--json"])
+    assert result.exit_code == 0, result.output
+    request = captured["request"]
+    assert request.quick_connection_id == "quick" and request.deep_connection_id == "deep"
+    assert request.llm_provider is None
+    assert "profile" not in request.model_fields_set
+    assert "analysts" not in request.model_fields_set
