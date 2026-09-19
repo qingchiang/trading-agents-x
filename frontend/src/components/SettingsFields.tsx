@@ -111,8 +111,11 @@ export function SettingField({
       )}
       <details className="configuration-details">
         <summary>
-          {text.technical}: <code>{field.key}</code>
+          {text.technical}
         </summary>
+        <div>
+          <code>{field.key}</code>
+        </div>
         <div>
           {text.defaultValue}: <code>{JSON.stringify(field.default)}</code>
         </div>
@@ -326,7 +329,7 @@ export function CredentialEditor({
   return (
     <div className="configuration-credential">
       <label htmlFor={`credential-${name}`}>
-        <code>{name}</code> ·{" "}
+        <span>{name === "api_key" ? "API Key" : name}</span> ·{" "}
         {pending === null
           ? text.pendingDelete
           : configured
@@ -346,6 +349,7 @@ export function CredentialEditor({
       )}
       <div className="configuration-actions">
         <button
+          className="button"
           type="button"
           disabled={!configured}
           onClick={() =>
@@ -355,6 +359,7 @@ export function CredentialEditor({
           {revealed === null ? text.reveal : text.hide}
         </button>
         <button
+          className="button"
           type="button"
           disabled={!configured}
           onClick={() => void reveal(true)}
@@ -362,6 +367,7 @@ export function CredentialEditor({
           {copied ? text.copied : text.copy}
         </button>
         <button
+          className="button"
           type="button"
           disabled={!configured && pending === undefined}
           onClick={() => {

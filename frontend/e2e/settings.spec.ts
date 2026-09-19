@@ -52,6 +52,26 @@ async function settingsServer(page: Page, conflict = false) {
   return { view, secrets, id, saved: () => saved };
 }
 
+test("connection editors have interior spacing and usable controls", async ({ page }) => {
+  await settingsServer(page);
+  await page.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = page.locator(".connection-editor");
+    await page.screenshot({ path: test.info().outputPath(`connection-editor-${width}.png`), fullPage: true });
+    const layout = await editor.evaluate(element => {
+      const style = getComputedStyle(element);
+      const button = element.querySelector('.configuration-credential button')!;
+      return { padding: parseFloat(style.paddingLeft), buttonHeight: button.getBoundingClientRect().height, overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    expect(layout.padding).toBeGreaterThanOrEqual(16);
+    expect(layout.buttonHeight).toBeGreaterThanOrEqual(36);
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+  }
+});
+
 for (const locale of ["en", "zh-CN", "ja"] as const) {
   test(`categorized settings and private credentials (${locale})`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem("tradingagents-locale", value), locale);

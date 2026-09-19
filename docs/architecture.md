@@ -212,6 +212,11 @@ queued → running → succeeded
 
 The worker atomically claims one queued run and sets a lease. A process crash
 leaves the run recoverable after lease expiry. Heartbeats extend active leases.
+Starting an attempt means preparation, not result submission. Incremental
+collection emits a start event and per-domain progress before synthesis; the
+application emits `run.commit_started` immediately before persisting the final
+result. Dataflow progress is scoped to the attempt, with event persistence and
+logging owned by `AnalysisService`.
 `tradingagents start` is a local foreground supervisor that health-gates and
 monitors the otherwise independent Web and worker processes; production-style
 and Docker deployments continue to manage those processes separately. Its
@@ -617,7 +622,10 @@ Missing optional inputs do not by themselves require a new Full Research Run.
 
 Stock Vendor-adjusted Return is the deterministic v1 Performance requirement.
 Its two endpoints come from one disclosed provider/adjustment/retrieval series;
-that series may also supply market Evidence. Named benchmark returns are
+that series may also supply market Evidence. The price Evidence's own origin
+binds its retrieval timestamp and fallback status to the calculation; the
+domain's source summary may include later observations from the same provider.
+Named benchmark returns are
 independent optional context and never block a calculated stock return or an
 otherwise valid Incremental Node. The stock component itself is always recorded
 but may be Not Yet Observable or unavailable; an unavailable result does not

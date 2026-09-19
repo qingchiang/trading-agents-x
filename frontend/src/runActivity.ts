@@ -1,6 +1,7 @@
 import type { RunEvent } from "./api/client";
 
 export type ActivityStage =
+  | "preparation"
   | "collection"
   | "analyst_reports"
   | "research_cases"
@@ -96,18 +97,26 @@ export function aggregateRunActivity(
       }
       const terminal = terminalEvent(attemptEvents);
       const workUnits = [...units.entries()]
-        .map(([node, unitEvents]) => ({
-          key: `${attempt}:${node}`,
-          node,
-          stage: activityStage(node, researchKind),
-          role: activityRole(node),
-          action: activityAction(node),
-          state: terminalUnitState(node, unitState(unitEvents), terminal),
-          signals: unitSignals(unitEvents),
-          events: unitEvents,
-          firstSequence: unitEvents[0].sequence,
-          lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
-        }))
+        .map(([node, unitEvents]): ActivityWorkUnit => {
+          const lifecycle = node === "run.lifecycle";
+          const stage = lifecycle
+            ? lifecycleStage(unitEvents, attemptEvents, researchKind)
+            : activityStage(node, researchKind);
+          const preparationFinished = lifecycle && !terminal && stage === "preparation"
+            && attemptEvents.some(event => !event.event_type.startsWith("run."));
+          return {
+            key: `${attempt}:${node}`,
+            node,
+            stage,
+            role: activityRole(node),
+            action: lifecycle && stage !== "commit" ? "prepare" : activityAction(node),
+            state: preparationFinished ? "completed" : terminalUnitState(node, unitState(unitEvents), terminal),
+            signals: unitSignals(unitEvents),
+            events: unitEvents,
+            firstSequence: unitEvents[0].sequence,
+            lastSequence: unitEvents.at(-1)?.sequence ?? unitEvents[0].sequence,
+          };
+        })
         .sort((left, right) =>
           activityUnitOrder(left, researchKind) - activityUnitOrder(right, researchKind) ||
           left.firstSequence - right.firstSequence,
@@ -121,12 +130,21 @@ export function aggregateRunActivity(
         events: attemptEvents,
         workUnits,
         currentStage:
-          authoritative && ["succeeded", "failed", "cancelled"].includes(authoritative)
+          authoritative === "succeeded"
             ? "commit"
             : currentUnit?.stage ?? "workflow",
         stageStates: aggregateStageStates(workUnits),
       };
     });
+}
+
+function lifecycleStage(events: RunEvent[], allEvents: RunEvent[], kind: "full" | "incremental"): ActivityStage {
+  if (events.some(event => ["run.commit_started", "run.succeeded"].includes(event.event_type))) return "commit";
+  if (events.some(event => ["run.failed", "run.cancelled"].includes(event.event_type))) {
+    const lastWork = [...allEvents].reverse().find(event => !event.event_type.startsWith("run."));
+    if (lastWork) return activityStage(activityNode(lastWork), kind);
+  }
+  return "preparation";
 }
 
 function currentWorkUnit(
@@ -292,7 +310,7 @@ function activityUnitOrder(
   unit: Pick<ActivityWorkUnit, "node" | "stage">,
   kind: "full" | "incremental",
 ): number {
-  if (unit.node === "run.lifecycle") return Number.MAX_SAFE_INTEGER;
+  if (unit.node === "run.lifecycle") return unit.stage === "preparation" ? -1 : Number.MAX_SAFE_INTEGER;
   const stages: ActivityStage[] = kind === "incremental"
     ? ["collection", "incremental_semantic", "incremental_serialization", "commit", "workflow"]
     : ["collection", "analyst_reports", "research_cases", "debate", "research_judgment", "risk_review", "final_decision", "commit", "workflow"];

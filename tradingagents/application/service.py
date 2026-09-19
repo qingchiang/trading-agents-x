@@ -703,7 +703,17 @@ class AnalysisService:
                                             instrument_local_name,
                                         )
                     baseline_evidence = self.repository.get_evidence(baseline.id)
-                    with use_config(dataflow_config, merge=False):
+                    from tradingagents.dataflows.collection_progress import collection_progress
+
+                    def progress(domain, phase):
+                        logger.info("run %s incremental collection %s %s", run.id, domain, phase)
+                        self._emit(
+                            run.id, f"phase.{phase}", node=f"incremental.collection.{domain}",
+                            payload={}, on_event=on_event,
+                        )
+
+                    self._emit(run.id, "incremental.collection_started", payload={}, on_event=on_event)
+                    with use_config(dataflow_config, merge=False), collection_progress(progress):
                         collection, evidence_items, performance, sealed_at = (
                             self._collect_incremental_preflight(
                                 instrument=request.ticker,
@@ -860,11 +870,12 @@ class AnalysisService:
                         payload={"metrics": result.metrics.model_dump(mode="json")},
                         on_event=on_event,
                     )
-                    last_event = self.repository.list_events(run.id)[-1]
                     self._validate_instrument_eligibility(
                         request,
                         dataflow_config=dataflow_config,
                     )
+                    self._emit(run.id, "run.commit_started", payload={}, on_event=on_event)
+                    last_event = self.repository.list_events(run.id)[-1]
                     aggregate_metrics = self.repository.complete_incremental(
                         run.id,
                         result,
@@ -1004,6 +1015,7 @@ class AnalysisService:
                         instrument_name=instrument_name,
                         instrument_local_name=instrument_local_name,
                     )
+                    self._emit(run.id, "run.commit_started", payload={}, on_event=on_event)
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
@@ -1155,17 +1167,31 @@ class AnalysisService:
             admitted_by_ref = {item.ref: item for item in evidence_items}
             linked_item = admitted_by_ref.get(linked_ref)
             calculation = performance.stock.calculation
+            # Domain sources aggregate multiple observations from the same provider.
+            # Match the price item's own retrieval, not a later snapshot's timestamp.
             if (
                 linked_item is None
                 or linked_ref not in market_result.evidence_refs
                 or collected.stock_series is None
                 or calculation is None
-                or not any(
-                    source.source == collected.stock_series.source
-                    and source.retrieved_at == collected.stock_series.retrieved_at
-                    and source.fallback == collected.stock_series.fallback
-                    for source in market_result.sources
+                or not (
+                    any(
+                        origin.source == collected.stock_series.source
+                        and origin.retrieved_at is not None
+                        and datetime.fromisoformat(origin.retrieved_at.replace("Z", "+00:00"))
+                        == collected.stock_series.retrieved_at
+                        and origin.fallback == collected.stock_series.fallback
+                        for origin in linked_item.origins
+                    )
+                    if linked_item.origins
+                    else any(
+                        source.source == collected.stock_series.source
+                        and source.retrieved_at == collected.stock_series.retrieved_at
+                        and source.fallback == collected.stock_series.fallback
+                        for source in market_result.sources
+                    )
                 )
+                or linked_item.fallback != collected.stock_series.fallback
                 or linked_item.source != collected.stock_series.source
                 or linked_item.evidence_type != "adjusted_close"
                 or linked_item.effective_date != calculation.end_session

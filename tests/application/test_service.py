@@ -1071,6 +1071,7 @@ def test_service_persists_events_before_callback_and_result(
         "run.started",
         "node.completed",
         "evidence.sealed",
+        "run.commit_started",
         "run.succeeded",
     ]
     events = repository.list_events(result.run_id)

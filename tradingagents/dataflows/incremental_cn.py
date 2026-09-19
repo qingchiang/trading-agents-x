@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     MarketSeriesResult,
 )
 from tradingagents.dataflows.cn import calendar
+from tradingagents.dataflows.collection_progress import report_collection_progress
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.incremental_inputs import (
     append_financials,
@@ -88,6 +89,7 @@ def collect_mainland_china_incremental(
     stock_series_evidence_ref: str | None = None
 
     for domain in request.enabled_domains:
+        report_collection_progress(domain, "started")
         if domain == "market":
             result, candidate, stock_series = _collect_market(request, routed, now)
             result, extra = append_market_context(request, result, stock_series, routed)
@@ -113,6 +115,8 @@ def collect_mainland_china_incremental(
             evidence.extend(candidates)
         else:
             raise ValueError(f"unsupported mainland-China collection domain: {domain}")
+
+        report_collection_progress(domain, "completed")
 
     from .incremental_inputs import dedupe_news_domains
 

@@ -200,7 +200,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 
 .workspace-reader .report-reading-layout { display: block; }
 .workspace-reader:not(.comparison-reader), .run-reader > :is(.reading-toolbar, .report-panel, .decision-panel-v2, .reader-panel, .incremental-reassessment-panel) { max-width: var(--reading-width); width: 100%; }
-.timeline-page:has(.workspace-judgment) .workspace-reader .decision-hero > .decision-rating-v2 { display: none; }
 .workspace-judgment { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .workspace-actions-container { display: flex; flex-wrap: wrap; gap: 8px; align-self: end; align-items: center; }
 .workspace-header-actions .action-row { gap: 8px; flex-wrap: wrap; }

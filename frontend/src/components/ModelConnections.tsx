@@ -5,6 +5,7 @@ import { connectionCopy, connectionField } from "../connectionCopy";
 import type { SettingsText } from "../settingsCopy";
 
 type Draft = { connection: ModelConnection; credentials: Record<string, string | null | undefined>; fresh: boolean };
+const interfaceNames: Record<string, string> = { chat_completions: "Chat Completions", responses: "Responses API", anthropic: "Anthropic", google: "Google Gemini", azure: "Azure OpenAI", bedrock: "Amazon Bedrock" };
 export default function ModelConnections({ view, schema, language, text, active, requestedId, focusField, onSaved, onError, onDirty }: {
   view: ConfigurationView; schema: ConfigurationSchema; language: string; text: SettingsText; active: boolean; requestedId?: string | null; focusField?: string;
   onSaved: (view: ConfigurationView) => void; onError: (cause: unknown) => void; onDirty: (dirty: boolean) => void;
@@ -59,20 +60,19 @@ export default function ModelConnections({ view, schema, language, text, active,
   const transport = conn?.transport as Record<string, unknown> | undefined;
   const setTransport = (key: string, value: unknown) => update({ transport: { ...conn!.transport, [key]: value } as ModelConnection["transport"] });
   return <section className="connections-workspace">
-    <div className="connection-toolbar"><h2>{c.connections}</h2><label>{c.preset}<select value={preset} onChange={e => setPreset(e.target.value)}>
+    <div className="connection-toolbar"><h2>{c.connections}</h2>{(!selected || !conn) && <><label>{c.preset}<select value={preset} onChange={e => setPreset(e.target.value)}>
       {Object.entries(schema.presets ?? {}).map(([id, p]) => <option key={id} value={id}>{p.name}</option>)}
-    </select></label><button className="button primary" onClick={create}>{c.add}</button></div>
+    </select></label><button className="button primary" onClick={create}>{c.add}</button></>}</div>
     {!selected || !conn ? <div className="connection-cards">
       {!Object.keys(entries).length && <p>{c.empty}</p>}
       {Object.entries(entries).map(([id, item]) => <article className="panel connection-card" key={id}>
-        <h3>{item.name}</h3><p>{item.transport.kind}</p><p className="connection-address">{"base_url" in item.transport ? item.transport.base_url : ("region" in item.transport ? item.transport.region : "")}</p>
+        <h3>{item.name}</h3><p>{interfaceNames[item.transport.kind ?? ""]}</p><p className="connection-address">{"base_url" in item.transport ? item.transport.base_url : ("region" in item.transport ? item.transport.region : "")}</p>
         <small>{item.enabled === false ? c.disabled : view.connections?.[id]?.selectable ? c.ready : text.unavailable}</small>
         {drafts[id] && <p>{c.dirty}</p>}<button className="button" onClick={() => setSelected(id)}>{c.edit}</button>
       </article>)}
     </div> : <div className="panel connection-editor">
-      <button className="button" onClick={() => setSelected("")}>{c.back}</button>
-      <h3>{conn.name}</h3>
-      {!!saved?.missing_fields.length && <p className="alert">{c.missing}: {saved.missing_fields.join(", ")}</p>}
+      <header className="connection-editor-heading"><div><h3>{conn.name}</h3><p className="connection-address">{interfaceNames[conn.transport.kind ?? ""]}</p></div><button className="button" onClick={() => setSelected("")}>{c.back}</button></header>
+      {!!saved?.missing_fields.length && <p className="alert">{c.missing}: {saved.missing_fields.map(field => connectionField(language, field)).join(", ")}</p>}
       <div className="configuration-grid">
         <label>{c.name}<input value={conn.name} onChange={e => update({ name: e.target.value })} /></label>
         <label className="checkbox-label"><input type="checkbox" checked={conn.enabled !== false} onChange={e => update({ enabled: e.target.checked })} />{c.enabled}</label>
@@ -80,11 +80,11 @@ export default function ModelConnections({ view, schema, language, text, active,
           {key === "auth_mode" ? <select value={String(value)} onChange={e => setTransport(key, e.target.value)}>{["system", "static", "bearer"].map(mode => <option key={mode}>{mode}</option>)}</select>
             : <input value={String(value ?? "")} onChange={e => setTransport(key, e.target.value || null)} />}</label>)}
       </div>
-      <h3>{c.credentials}</h3><div className="configuration-grid">
+      <section className="connection-credentials"><h3>{c.credentials}</h3><p className="configuration-help">{text.keyHint}</p><div className="configuration-grid">
         {(conn.transport.kind === "bedrock" ? ["access_key_id", "secret_access_key", "session_token", "bearer_token"] : ["api_key"]).map(field => <CredentialEditor
           key={`${selected}-${field}-${view.revision}`} connectionId={selected} name={field} configured={saved?.credentials[field] ?? false}
           pending={draft?.credentials[field]} onChange={value => update({}, { ...draft?.credentials, [field]: value })} text={text} onError={onError} />)}
-      </div>
+      </div></section>
       <details open={!!focusField || undefined}><summary>{c.advanced}</summary><div className="configuration-grid">
         {(["chat_completions", "responses"].includes(conn.transport.kind ?? "")) && <>
           <label>{c.protocol}<select value={conn.transport.kind} onChange={e => setTransport("kind", e.target.value)}><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>

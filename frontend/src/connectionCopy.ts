@@ -9,6 +9,7 @@ export function connectionCopy(language: string) {
 
 export function connectionField(language: string, key: string) {
   const labels: Record<string, [string, string, string]> = {
+    api_key: ["API key", "API Key", "API キー"],
     base_url: ["API base URL", "API 服务地址", "API ベース URL"],
     deployment: ["Azure deployment (optional; otherwise use model ID)", "Azure 部署名（可选，留空使用模型 ID）", "Azure デプロイ名（省略時はモデル ID）"],
     api_version: ["Azure API version", "Azure API 版本", "Azure API バージョン"],

@@ -318,6 +318,56 @@ export default function Settings() {
           <p className="subtitle">{text.subtitle}</p>
         </div>
       </header>
+      {error && (
+        <div role="alert" className="alert">
+          {error}
+          {Object.entries(fieldErrors).filter(([key]) => key === "connection_changes" || key === "connections" || key.endsWith("connection_id") || key.endsWith("reasoning_effort")).map(([key, message]) => <p key={key}><code>{key}</code>: {message}</p>)}
+          <button
+            className="button"
+            onClick={() => void api.settings().then(setLatest).catch(fail)}
+          >
+            {c.latest}
+          </button>
+        </div>
+      )}
+      {latest && <div className="panel"><h3>{c.server}</h3><pre>{JSON.stringify({ values: latest.values, connections: latest.connections }, null, 2)}</pre><h3>{c.local}</h3><pre>{JSON.stringify(draft, null, 2)}</pre><button className="button" onClick={() => { setView(latest); setLatest(null); setError(""); }}>{c.reapply}</button></div>}
+      {notice && <p role="status">{notice}</p>}
+      {dirty && <p role="status">{c.dirty}</p>}
+      {!view && !error && <p role="status">{text.loading}</p>}
+      {view && schema && (
+        <>
+          {!view.initialized && (
+            <div className="alert">
+              <p>{text.setup}</p>
+              <button
+                disabled={busy}
+                className="button primary"
+                onClick={() => void applyImport(true)}
+              >
+                {text.initialize}
+              </button>
+            </div>
+          )}
+          <label className="configuration-search">
+            {text.search}
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <nav className="configuration-nav" aria-label={text.title}>
+            {(["connections", "research", "data", "storage", "interface"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
+          </nav>
+          {query && <div className="panel configuration-search-results"><h2>{c.results}</h2>{schema.fields.filter(fieldMatches).map(field => {
+            const target = ["llm_provider", "providers"].includes(field.key) || field.group === "providers" || field.group === "compatibility" ? "connections" : field.group === "news" || field.group === "sources" ? "data" : field.group === "cache" ? "storage" : "research";
+            return <Link key={field.key} to={`/settings/${target}#setting-${field.key}`} onClick={() => { setDataTab(field.group); setQuery("");  }}>{field.label[language] ?? field.label.en} <code>{field.key}</code></Link>;
+          })}{Object.entries(schema.credential_owners).filter(([name, owner]) => `${name} ${owner}`.toLowerCase().includes(query.toLowerCase())).map(([name, owner]) => {
+            const match = Object.values(view.connections ?? {}).find(entry => entry.connection.preset === owner);
+            return <Link key={name} to={match ? `/settings/connections?connection=${match.connection.id}` : "/settings/data"} onClick={() => { setQuery(""); setDataTab("sources"); }}>{name}</Link>;
+          })}{Object.values(view.connections ?? {}).filter(entry => `${entry.connection.name} ${entry.connection.id}`.toLowerCase().includes(query.toLowerCase())).map(entry => <Link key={entry.connection.id} to={`/settings/connections?connection=${entry.connection.id}`} onClick={() => setQuery("")}>{entry.connection.name}</Link>)}</div>}
+          <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onSaved={saved => { setView(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
+          {category === "data" && <nav className="configuration-subnav">{["sources", "news"].map(key => <button className="button" key={key} aria-pressed={dataTab === key} onClick={() => setDataTab(key)}>{key === "sources" ? c.sources : c.news}</button>)}</nav>}
       <section className="interface-preferences" hidden={category !== "interface"}>
         <h2>{text.interface}</h2>
         <label>
@@ -350,36 +400,6 @@ export default function Settings() {
           {text.collapse}
         </label>
       </section>
-      {error && (
-        <div role="alert" className="alert">
-          {error}
-          {Object.entries(fieldErrors).filter(([key]) => key === "connection_changes" || key === "connections" || key.endsWith("connection_id") || key.endsWith("reasoning_effort")).map(([key, message]) => <p key={key}><code>{key}</code>: {message}</p>)}
-          <button
-            className="button"
-            onClick={() => void api.settings().then(setLatest).catch(fail)}
-          >
-            {c.latest}
-          </button>
-        </div>
-      )}
-      {latest && <div className="panel"><h3>{c.server}</h3><pre>{JSON.stringify({ values: latest.values, connections: latest.connections }, null, 2)}</pre><h3>{c.local}</h3><pre>{JSON.stringify(draft, null, 2)}</pre><button className="button" onClick={() => { setView(latest); setLatest(null); setError(""); }}>{c.reapply}</button></div>}
-      {notice && <p role="status">{notice}</p>}
-      {dirty && <p role="status">{c.dirty}</p>}
-      {!view && !error && <p role="status">{text.loading}</p>}
-      {view && schema && (
-        <>
-          {!view.initialized && (
-            <div className="alert">
-              <p>{text.setup}</p>
-              <button
-                disabled={busy}
-                className="button primary"
-                onClick={() => void applyImport(true)}
-              >
-                {text.initialize}
-              </button>
-            </div>
-          )}
           <details
             hidden={category !== "storage" && view.initialized}
             className="configuration-import"
@@ -480,26 +500,6 @@ export default function Settings() {
               </div>
             )}
           </details>
-          <label className="configuration-search">
-            {text.search}
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          <nav className="configuration-nav" aria-label={text.title}>
-            {(["connections", "research", "data", "storage", "interface"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
-          </nav>
-          {query && <div className="panel configuration-search-results"><h2>{c.results}</h2>{schema.fields.filter(fieldMatches).map(field => {
-            const target = ["llm_provider", "providers"].includes(field.key) || field.group === "providers" || field.group === "compatibility" ? "connections" : field.group === "news" || field.group === "sources" ? "data" : field.group === "cache" ? "storage" : "research";
-            return <Link key={field.key} to={`/settings/${target}#setting-${field.key}`} onClick={() => { setDataTab(field.group); setQuery("");  }}>{field.label[language] ?? field.label.en} <code>{field.key}</code></Link>;
-          })}{Object.entries(schema.credential_owners).filter(([name, owner]) => `${name} ${owner}`.toLowerCase().includes(query.toLowerCase())).map(([name, owner]) => {
-            const match = Object.values(view.connections ?? {}).find(entry => entry.connection.preset === owner);
-            return <Link key={name} to={match ? `/settings/connections?connection=${match.connection.id}` : "/settings/data"} onClick={() => { setQuery(""); setDataTab("sources"); }}>{name}</Link>;
-          })}{Object.values(view.connections ?? {}).filter(entry => `${entry.connection.name} ${entry.connection.id}`.toLowerCase().includes(query.toLowerCase())).map(entry => <Link key={entry.connection.id} to={`/settings/connections?connection=${entry.connection.id}`} onClick={() => setQuery("")}>{entry.connection.name}</Link>)}</div>}
-          <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onSaved={saved => { setView(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
-          {category === "data" && <nav className="configuration-subnav">{["sources", "news"].map(key => <button className="button" key={key} aria-pressed={dataTab === key} onClick={() => setDataTab(key)}>{key === "sources" ? c.sources : c.news}</button>)}</nav>}
           {groups.filter(group => category === "research" ? group === "research" : category === "data" ? group === dataTab : category === "storage" ? group === "cache" : false).map((group) => {
             const fields = schema.fields.filter(
               (field) =>

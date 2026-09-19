@@ -91,6 +91,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           }
         }
         if (label === 'full') {
+          await expect(page.locator('.decision-hero > .decision-rating-v2')).toBeVisible();
           const range = page.locator('.scenario-range-name').first();
           await expect(range).toHaveText(rangeName);
           const available = (await page.locator('.scenario-reference-heading').first().boundingBox())!.width;

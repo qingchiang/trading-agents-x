@@ -1463,9 +1463,12 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     )
 
 
+@pytest.mark.parametrize("later_market_snapshot,series_minute", [(False, 0), (True, 0), (True, 1)])
 def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     app_settings,
     repository,
+    later_market_snapshot,
+    series_minute,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
@@ -1479,11 +1482,26 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             value=110,
             content="The completed 2026-07-24 adjusted close.",
             fallback=True,
+            origins=(EvidenceOrigin(
+                source="fixture.market", evidence_type="adjusted_close",
+                retrieved_at="2026-07-24T21:00:00Z", fallback=True,
+                temporal_scope="point_in_time",
+            ),) if later_market_snapshot else (),
         ),
         available_on=date(2026, 7, 24),
     )
 
     def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+        extra = IncrementalEvidenceCandidate(evidence=EvidenceItem.create(
+            source="fixture.market", evidence_type="market_snapshot",
+            requested_date=date(2026, 7, 24), available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+            content="A separate snapshot from the same provider, retrieved one minute later.",
+            fallback=True, origins=(EvidenceOrigin(
+                source="fixture.market", evidence_type="market_snapshot",
+                retrieved_at="2026-07-24T21:01:00Z", fallback=True,
+                temporal_scope="point_in_time",
+            ),),
+        ))
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1491,11 +1509,11 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             state="data",
             sources=_sources(
                 "fixture.market",
-                datetime(2026, 7, 24, 21, tzinfo=UTC),
+                datetime(2026, 7, 24, 21, int(later_market_snapshot), tzinfo=UTC),
                 fallback=True,
             ),
             temporal_bases=("pit",),
-            evidence_refs=(market_evidence.evidence.ref,),
+            evidence_refs=(market_evidence.evidence.ref,) + ((extra.evidence.ref,) if later_market_snapshot else ()),
         )
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
@@ -1503,13 +1521,13 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
                 market=request.market,
                 domains=tuple(domains),
             ),
-            evidence=(market_evidence,),
+            evidence=(market_evidence,) + ((extra,) if later_market_snapshot else ()),
             stock_series=MarketSeriesResult(
                 instrument=request.instrument,
                 source="fixture.market",
                 fallback=True,
                 adjustment_basis="adjusted_close",
-                retrieved_at=datetime(2026, 7, 24, 21, tzinfo=UTC),
+                retrieved_at=datetime(2026, 7, 24, 21, series_minute, tzinfo=UTC),
                 points=(
                     MarketSeriesPoint(
                         session="2026-07-20",
@@ -1549,19 +1567,26 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             ),
         )
 
-    result = _incremental_service(
+    service = _incremental_service(
         app_settings,
         repository,
         collector=collect,
         now=lambda: datetime(2026, 7, 25, 5, tzinfo=UTC),
-    ).run(
-        AnalysisRequest(
-            ticker="NVDA",
-            analysis_date=date(2026, 7, 24),
-            research_kind="incremental",
-            full_baseline_run_id=baseline.run_id,
-        )
     )
+    request = AnalysisRequest(
+        ticker="NVDA", analysis_date=date(2026, 7, 24), research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    if series_minute:
+        with pytest.raises(ValueError, match="requires admitted current market Evidence"):
+            service.run(request)
+        return
+    result = service.run(request)
+    events = [event.event_type for event in repository.list_events(result.run_id)]
+    assert events.index("run.started") < events.index("incremental.collection_started")
+    assert events.index("incremental.collection_started") < events.index("incremental.collection_completed")
+    assert events.index("incremental.synthesis_completed") < events.index("run.commit_started")
+    assert events.index("run.commit_started") < events.index("run.succeeded")
 
     node = next(
         item for item in repository.get_timeline("NVDA").all_nodes if item.id == result.run_id

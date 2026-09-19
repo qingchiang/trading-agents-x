@@ -5,6 +5,7 @@ const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const eventNames = [
   "run.queued",
   "run.started",
+  "run.commit_started",
   "run.resumed",
   "node.started",
   "node.completed",
@@ -28,6 +29,7 @@ const eventNames = [
   "run.cancel_requested",
   "run.retry_queued",
   "incremental.collection_completed",
+  "incremental.collection_started",
   "incremental.no_advancement",
   "incremental.synthesis_started",
   "incremental.synthesis_completed",

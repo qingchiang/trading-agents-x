@@ -36,6 +36,7 @@ from tradingagents.application.contracts import (
     MarketSeriesPoint,
     MarketSeriesResult,
 )
+from tradingagents.dataflows.collection_progress import report_collection_progress
 from tradingagents.dataflows.errors import VendorRateLimitError
 from tradingagents.dataflows.incremental_inputs import (
     append_financials,
@@ -89,6 +90,7 @@ def collect_us_incremental(
     stock_series_evidence_ref: str | None = None
 
     for domain in request.enabled_domains:
+        report_collection_progress(domain, "started")
         if domain == "market":
             result, candidate, stock_series = _collect_market(
                 request,
@@ -131,8 +133,11 @@ def collect_us_incremental(
         else:  # The request contract keeps this defensive branch unreachable.
             raise ValueError(f"unsupported US collection domain: {domain}")
 
+        report_collection_progress(domain, "completed")
+
     benchmarks = ()
     if "market" in request.enabled_domains:
+        report_collection_progress("benchmarks", "started")
         benchmarks = tuple(
             _collect_benchmark(
                 request,
@@ -143,6 +148,7 @@ def collect_us_incremental(
             )
             for name, symbol in _BENCHMARKS
         )
+        report_collection_progress("benchmarks", "completed")
     return IncrementalCollectionResult(
         collection_summary=CollectionSummary(
             version=request.version,
