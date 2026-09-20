@@ -200,7 +200,7 @@ def test_evidence_bundle_rejects_future_information() -> None:
         )
 
 
-def test_environment_is_loaded_only_from_explicit_mapping(tmp_path) -> None:
+def test_environment_is_imported_only_from_explicit_mapping(tmp_path) -> None:
     settings = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path),
@@ -217,7 +217,8 @@ def test_environment_is_loaded_only_from_explicit_mapping(tmp_path) -> None:
         output_language="zh-Hans",
     )
 
-    resolved = settings.resolve_run(request)
+    from tests.configuration_helpers import import_configuration
+    _, resolved = import_configuration(settings).resolve_request(request)
 
     assert settings.host == "0.0.0.0"
     assert resolved.llm_provider == "deepseek"
@@ -255,35 +256,25 @@ def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
         load_env_files=False,
     )
 
-    assert defaults.trash_retention_days == 30
-    assert disabled.trash_retention_days == 0
-    with pytest.raises(ValueError, match="must be >= 0"):
-        AppSettings.from_env(
-            environ={
-                "TRADINGAGENTS_HOME": str(tmp_path / "invalid"),
-                "TRADINGAGENTS_TRASH_RETENTION_DAYS": "-1",
-            },
-            load_env_files=False,
-        )
+    from tests.configuration_helpers import import_configuration
+    from tradingagents.application.configuration_models import ConfigurationPatch
+    assert import_configuration(defaults).read().values.trash_retention_days == 30
+    assert import_configuration(disabled).read().values.trash_retention_days == 0
+    with pytest.raises(ValueError):
+        ConfigurationPatch(revision=0, values={"trash_retention_days": -1})
 
 
-def test_legacy_archive_retention_setting_fails_with_rename_guidance(
-    tmp_path,
-) -> None:
-    with pytest.raises(
-        ValueError,
-        match="TRADINGAGENTS_TRASH_RETENTION_DAYS",
-    ):
-        AppSettings.from_env(
-            environ={
-                "TRADINGAGENTS_HOME": str(tmp_path),
-                "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "30",
-            },
-            load_env_files=False,
-        )
+def test_legacy_archive_retention_is_reported_during_import(tmp_path):
+    from tradingagents.application.configuration import ConfigurationStore
+    from tradingagents.application.configuration_models import ImportRequest
+    from tradingagents.persistence import upgrade_database
+    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path), "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "30"})
+    upgrade_database(settings)
+    preview = ConfigurationStore(settings).preview_import(ImportRequest())
+    assert [issue.name for issue in preview.issues] == ["TRADINGAGENTS_ARCHIVE_RETENTION_DAYS"]
 
 
-def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
+def test_request_overrides_role_specific_imported_defaults(tmp_path) -> None:
     settings = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path),
@@ -302,7 +293,8 @@ def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
         deep_reasoning_effort="max",
     )
 
-    resolved = settings.resolve_run(request)
+    from tests.configuration_helpers import import_configuration
+    _, resolved = import_configuration(settings).resolve_request(request)
 
     assert resolved.quick_model == "quick-default"
     assert resolved.deep_model == "deep-request"
@@ -358,7 +350,7 @@ def test_empty_output_language_is_rejected() -> None:
         )
 
 
-def test_omitted_request_values_inherit_and_materialize_environment_defaults(
+def test_omitted_request_values_inherit_and_materialize_imported_defaults(
     tmp_path,
 ) -> None:
     custom_language = "Simplified Chinese (简体中文, zh-CN)"
@@ -373,7 +365,8 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
     )
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
 
-    resolved = settings.resolve_run(request)
+    from tests.configuration_helpers import import_configuration
+    _, resolved = import_configuration(settings).resolve_request(request)
     materialized = settings.materialize_request(
         request,
         run_settings=resolved,

@@ -1,13 +1,14 @@
-import os
 from typing import Any
 
 from langchain_openai import AzureChatOpenAI
+
+from tradingagents.credentials import credential
 
 from .base_client import BaseLLMClient, normalize_content
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "reasoning_effort", "temperature",
+    "timeout", "max_retries", "reasoning_effort", "temperature",
     "callbacks", "http_client", "http_async_client",
 )
 
@@ -22,11 +23,8 @@ class NormalizedAzureChatOpenAI(AzureChatOpenAI):
 class AzureOpenAIClient(BaseLLMClient):
     """Client for Azure OpenAI deployments.
 
-    Requires environment variables:
-        AZURE_OPENAI_API_KEY: API key
-        AZURE_OPENAI_ENDPOINT: Endpoint URL (e.g. https://<resource>.openai.azure.com/)
-        AZURE_OPENAI_DEPLOYMENT_NAME: Deployment name
-        OPENAI_API_VERSION: API version (e.g. 2025-03-01-preview)
+    Receives the endpoint, deployment and API version from the retained
+    connection snapshot, and a credential from the execution context.
     """
 
     def __init__(self, model: str, base_url: str | None = None, **kwargs):
@@ -36,9 +34,17 @@ class AzureOpenAIClient(BaseLLMClient):
         """Return configured AzureChatOpenAI instance."""
         self.warn_if_unknown_model()
 
+        key = self.kwargs.get("api_key") or credential("AZURE_OPENAI_API_KEY")
+        if not key:
+            raise ValueError("Configure the Azure credential in Settings")
+        connection = self.kwargs.get("connection") or {}
+        if not self.base_url or not connection.get("api_version"):
+            raise ValueError("Configure Azure endpoint and API version in Settings")
         llm_kwargs = {
-            "model": self.model,
-            "azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", self.model),
+            "model": self.model, "api_key": key,
+            "azure_endpoint": self.base_url, "base_url": None,
+            "azure_deployment": connection.get("deployment") or self.model,
+            "api_version": connection["api_version"], "azure_ad_token": None,
         }
 
         for key in _PASSTHROUGH_KWARGS:

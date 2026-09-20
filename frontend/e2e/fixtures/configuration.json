@@ -1,0 +1,2322 @@
+{
+  "view": {
+    "connections": {
+      "200e8466-bf15-5c6f-a474-77dcc33f7f7a": {
+        "connection": {
+          "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+          "name": "OpenAI",
+          "enabled": true,
+          "deleted": false,
+          "preset": "openai",
+          "compatibility": "openai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "transport": {
+            "kind": "responses",
+            "base_url": "https://api.openai.com/v1"
+          },
+          "template": {
+            "compatibility": "openai",
+            "discovery": "openai_compatible",
+            "key_required": true,
+            "reasoning_defaults": {},
+            "transport": {
+              "base_url": "https://api.openai.com/v1",
+              "kind": "responses"
+            }
+          },
+          "reasoning_defaults": {
+            "google_thinking_level": null,
+            "openai_reasoning_effort": null,
+            "anthropic_effort": null
+          },
+          "revision": 2
+        },
+        "credentials": {
+          "api_key": true
+        },
+        "missing_fields": [],
+        "selectable": true,
+        "unavailable_reason": null,
+        "reasoning_efforts": [
+          "provider_default",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    "initialized": true,
+    "revision": 1,
+    "values": {
+      "profile": "standard",
+      "analysts": [
+        "market",
+        "social",
+        "news",
+        "fundamentals"
+      ],
+      "quick_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+      "deep_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+      "llm_provider": "openai",
+      "quick_think_llm": "gpt-5.4-mini",
+      "deep_think_llm": "gpt-5.5",
+      "quick_reasoning_effort": null,
+      "deep_reasoning_effort": null,
+      "google_thinking_level": null,
+      "openai_reasoning_effort": null,
+      "anthropic_effort": null,
+      "temperature": null,
+      "llm_max_retries": null,
+      "output_language": "en",
+      "news_article_limit": 30,
+      "yahoo_news_candidate_limit": 200,
+      "cn_news_candidate_limit": 100,
+      "sentiment_filing_limit": 20,
+      "ticker_news_lookback_days": 14,
+      "social_lookback_days": 7,
+      "global_news_article_limit": 10,
+      "global_news_candidate_limit": 10,
+      "global_news_query_limit": 5,
+      "global_news_lookback_days": 7,
+      "global_news_queries": [
+        "Federal Reserve interest rates inflation",
+        "S&P 500 earnings GDP economic outlook",
+        "geopolitical risk trade war sanctions",
+        "ECB Bank of England BOJ central bank policy",
+        "oil commodities supply chain energy"
+      ],
+      "news_cache_enabled": true,
+      "news_cache_refresh_seconds": 900,
+      "news_cache_retention_days": 90,
+      "news_cache_scope_limit": 2000,
+      "news_cache_total_limit": 50000,
+      "trash_retention_days": 30,
+      "data_vendors": {
+        "instrument_eligibility": "yfinance",
+        "core_stock_apis": "yfinance",
+        "technical_indicators": "yfinance",
+        "fundamental_data": "yfinance",
+        "news_data": "yfinance",
+        "macro_data": "macro",
+        "prediction_markets": "polymarket"
+      },
+      "tool_vendors": {},
+      "data_vendors_by_market": {
+        ".T": {
+          "core_stock_apis": "jquants,yfinance",
+          "technical_indicators": "jquants,yfinance",
+          "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
+          "news_data": "jp_news,yfinance"
+        },
+        ".SS": {
+          "core_stock_apis": "akshare,yfinance",
+          "technical_indicators": "akshare,yfinance",
+          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+          "news_data": "cn_news,yfinance"
+        },
+        ".SZ": {
+          "core_stock_apis": "akshare,yfinance",
+          "technical_indicators": "akshare,yfinance",
+          "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+          "news_data": "cn_news,yfinance"
+        }
+      },
+      "providers": {}
+    },
+    "sources": {
+      "profile": "database",
+      "analysts": "database",
+      "quick_connection_id": "database",
+      "deep_connection_id": "database",
+      "llm_provider": "database",
+      "quick_think_llm": "database",
+      "deep_think_llm": "database",
+      "quick_reasoning_effort": "database",
+      "deep_reasoning_effort": "database",
+      "google_thinking_level": "database",
+      "openai_reasoning_effort": "database",
+      "anthropic_effort": "database",
+      "temperature": "database",
+      "llm_max_retries": "database",
+      "output_language": "database",
+      "news_article_limit": "database",
+      "yahoo_news_candidate_limit": "database",
+      "cn_news_candidate_limit": "database",
+      "sentiment_filing_limit": "database",
+      "ticker_news_lookback_days": "database",
+      "social_lookback_days": "database",
+      "global_news_article_limit": "database",
+      "global_news_candidate_limit": "database",
+      "global_news_query_limit": "database",
+      "global_news_lookback_days": "database",
+      "global_news_queries": "database",
+      "news_cache_enabled": "database",
+      "news_cache_refresh_seconds": "database",
+      "news_cache_retention_days": "database",
+      "news_cache_scope_limit": "database",
+      "news_cache_total_limit": "database",
+      "trash_retention_days": "database",
+      "data_vendors": "database",
+      "tool_vendors": "database",
+      "data_vendors_by_market": "database",
+      "providers": "database"
+    },
+    "credentials": {
+      "OPENAI_API_KEY": true,
+      "XAI_API_KEY": false,
+      "DEEPSEEK_API_KEY": false,
+      "DASHSCOPE_API_KEY": false,
+      "DASHSCOPE_CN_API_KEY": false,
+      "ZHIPU_API_KEY": false,
+      "ZHIPU_CN_API_KEY": false,
+      "MINIMAX_API_KEY": false,
+      "MINIMAX_CN_API_KEY": false,
+      "OPENROUTER_API_KEY": false,
+      "MISTRAL_API_KEY": false,
+      "MOONSHOT_API_KEY": false,
+      "GROQ_API_KEY": false,
+      "NVIDIA_API_KEY": false,
+      "OPENAI_COMPATIBLE_API_KEY": false,
+      "ANTHROPIC_API_KEY": false,
+      "GOOGLE_API_KEY": false,
+      "AZURE_OPENAI_API_KEY": false,
+      "ALPHA_VANTAGE_API_KEY": false,
+      "FRED_API_KEY": false,
+      "ESTAT_APP_ID": false,
+      "JQUANTS_API_KEY": false,
+      "EDINET_API_KEY": false,
+      "AWS_BEARER_TOKEN_BEDROCK": false,
+      "AWS_ACCESS_KEY_ID": false,
+      "AWS_SECRET_ACCESS_KEY": false,
+      "AWS_SESSION_TOKEN": false
+    },
+    "deployment": {
+      "database_path": "/tmp/tmpja79lzcr/tradingagents.db",
+      "data_cache_dir": "/tmp/tmpja79lzcr/cache",
+      "host": "127.0.0.1",
+      "port": "8000",
+      "lan_enabled": "False",
+      "worker_concurrency": "1",
+      "worker_poll_seconds": "1.0",
+      "lease_seconds": "300",
+      "busy_timeout_ms": "5000"
+    }
+  },
+  "schema": {
+    "group_descriptions": {
+      "research": {
+        "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
+        "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
+        "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+      },
+      "news": {
+        "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
+        "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
+        "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+      },
+      "cache": {
+        "en": "Changes apply to new research; the cache retains only previously observed material.",
+        "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
+        "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+      },
+      "sources": {
+        "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
+        "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
+        "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
+      },
+      "compatibility": {
+        "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
+        "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
+        "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
+      },
+      "providers": {
+        "en": "Each connection has independent credentials, read at execution start.",
+        "zh-CN": "每个连接独立管理凭据，在执行开始时读取。",
+        "ja": "接続ごとに認証情報を管理し、実行開始時に読み込みます。"
+      }
+    },
+    "credential_metadata": {
+      "ALPHA_VANTAGE_API_KEY": {
+        "label": "Alpha Vantage",
+        "description": {
+          "en": "Market prices and company data",
+          "zh-CN": "行情与公司数据",
+          "ja": "株価と企業データ"
+        }
+      },
+      "FRED_API_KEY": {
+        "label": "FRED",
+        "description": {
+          "en": "US economic indicators",
+          "zh-CN": "美国经济指标",
+          "ja": "米国経済指標"
+        }
+      },
+      "ESTAT_APP_ID": {
+        "label": "e-Stat",
+        "description": {
+          "en": "Japanese official statistics",
+          "zh-CN": "日本官方统计",
+          "ja": "日本の公的統計"
+        }
+      },
+      "JQUANTS_API_KEY": {
+        "label": "J-Quants",
+        "description": {
+          "en": "Japanese equity data",
+          "zh-CN": "日本股票数据",
+          "ja": "日本株データ"
+        }
+      },
+      "EDINET_API_KEY": {
+        "label": "EDINET",
+        "description": {
+          "en": "Japanese company disclosures",
+          "zh-CN": "日本公司披露",
+          "ja": "日本企業の開示"
+        }
+      }
+    },
+    "presets": {
+      "openai": {
+        "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+        "name": "OpenAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openai",
+        "compatibility": "openai",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "responses",
+          "base_url": "https://api.openai.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "responses",
+            "base_url": "https://api.openai.com/v1"
+          },
+          "compatibility": "openai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "xai": {
+        "id": "326d06e3-d782-54b1-9578-983e629484ad",
+        "name": "xAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "xai",
+        "compatibility": "xai",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.x.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.x.ai/v1"
+          },
+          "compatibility": "xai",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "deepseek": {
+        "id": "835c21bf-9cdc-5609-9d61-f52a7169a5de",
+        "name": "DeepSeek",
+        "enabled": true,
+        "deleted": false,
+        "preset": "deepseek",
+        "compatibility": "deepseek",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.deepseek.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.deepseek.com"
+          },
+          "compatibility": "deepseek",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "qwen": {
+        "id": "639030c8-96d7-5be2-8d6c-ccf20d79505c",
+        "name": "Qwen (International)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "qwen",
+        "compatibility": "qwen",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+          },
+          "compatibility": "qwen",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "qwen-cn": {
+        "id": "4eab9ca5-f302-52e5-99d3-b302cfe83cf3",
+        "name": "Qwen (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "qwen-cn",
+        "compatibility": "qwen-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+          },
+          "compatibility": "qwen-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "glm": {
+        "id": "724b3de2-54ed-5a62-8c8a-d8d070e2c4d2",
+        "name": "Z.AI GLM",
+        "enabled": true,
+        "deleted": false,
+        "preset": "glm",
+        "compatibility": "glm",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.z.ai/api/paas/v4"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.z.ai/api/paas/v4"
+          },
+          "compatibility": "glm",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "glm-cn": {
+        "id": "0cf8a22c-4ebe-5111-87c4-44f109d31e6c",
+        "name": "BigModel GLM (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "glm-cn",
+        "compatibility": "glm-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://open.bigmodel.cn/api/paas/v4"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4"
+          },
+          "compatibility": "glm-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "minimax": {
+        "id": "25e93d8f-fb13-515c-aff5-4e81206786c9",
+        "name": "MiniMax (International)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "minimax",
+        "compatibility": "minimax",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.minimax.io/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.minimax.io/v1"
+          },
+          "compatibility": "minimax",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "minimax-cn": {
+        "id": "4bd876b8-ded9-50ad-80a3-fbd4752c8941",
+        "name": "MiniMax (China)",
+        "enabled": true,
+        "deleted": false,
+        "preset": "minimax-cn",
+        "compatibility": "minimax-cn",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.minimaxi.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.minimaxi.com/v1"
+          },
+          "compatibility": "minimax-cn",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "openrouter": {
+        "id": "a90773dc-e40c-5d36-b0cc-c3876f27a8a5",
+        "name": "OpenRouter",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openrouter",
+        "compatibility": "openrouter",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://openrouter.ai/api/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1"
+          },
+          "compatibility": "openrouter",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "mistral": {
+        "id": "97d11dea-af22-521a-8500-4375d2b770af",
+        "name": "Mistral",
+        "enabled": true,
+        "deleted": false,
+        "preset": "mistral",
+        "compatibility": "mistral",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.mistral.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.mistral.ai/v1"
+          },
+          "compatibility": "mistral",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "kimi": {
+        "id": "4e9ed1e7-de26-5db3-acd9-742a983ea3ec",
+        "name": "Kimi / Moonshot",
+        "enabled": true,
+        "deleted": false,
+        "preset": "kimi",
+        "compatibility": "kimi",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.moonshot.ai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.moonshot.ai/v1"
+          },
+          "compatibility": "kimi",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "groq": {
+        "id": "16fe6d47-fece-51aa-be34-c236ec9da1e3",
+        "name": "Groq",
+        "enabled": true,
+        "deleted": false,
+        "preset": "groq",
+        "compatibility": "groq",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://api.groq.com/openai/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://api.groq.com/openai/v1"
+          },
+          "compatibility": "groq",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "nvidia": {
+        "id": "ed7aa4e1-f7ca-5836-8105-0a4562efc913",
+        "name": "NVIDIA NIM",
+        "enabled": true,
+        "deleted": false,
+        "preset": "nvidia",
+        "compatibility": "nvidia",
+        "discovery": "openai_compatible",
+        "key_required": true,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "https://integrate.api.nvidia.com/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "https://integrate.api.nvidia.com/v1"
+          },
+          "compatibility": "nvidia",
+          "discovery": "openai_compatible",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "ollama": {
+        "id": "70ca418e-2c0e-552f-9393-bf96f4374006",
+        "name": "Ollama",
+        "enabled": true,
+        "deleted": false,
+        "preset": "ollama",
+        "compatibility": "ollama",
+        "discovery": "ollama",
+        "key_required": false,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": "http://localhost:11434/v1"
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": "http://localhost:11434/v1"
+          },
+          "compatibility": "ollama",
+          "discovery": "ollama",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "openai_compatible": {
+        "id": "0b85bee6-c046-51d0-bd77-0b15bc5bcd8a",
+        "name": "OpenAI-compatible",
+        "enabled": true,
+        "deleted": false,
+        "preset": "openai_compatible",
+        "compatibility": "openai_compatible",
+        "discovery": "openai_compatible",
+        "key_required": false,
+        "transport": {
+          "kind": "chat_completions",
+          "base_url": null
+        },
+        "template": {
+          "transport": {
+            "kind": "chat_completions",
+            "base_url": null
+          },
+          "compatibility": "openai_compatible",
+          "discovery": "openai_compatible",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "anthropic": {
+        "id": "5b71fe60-aace-559f-9aa9-3493ee3f7e18",
+        "name": "Anthropic",
+        "enabled": true,
+        "deleted": false,
+        "preset": "anthropic",
+        "compatibility": "anthropic",
+        "discovery": "anthropic",
+        "key_required": true,
+        "transport": {
+          "kind": "anthropic",
+          "base_url": "https://api.anthropic.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "anthropic",
+            "base_url": "https://api.anthropic.com"
+          },
+          "compatibility": "anthropic",
+          "discovery": "anthropic",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "google": {
+        "id": "961e5e9a-9481-54b0-b086-c302b7f01397",
+        "name": "Google Gemini",
+        "enabled": true,
+        "deleted": false,
+        "preset": "google",
+        "compatibility": "google",
+        "discovery": "google",
+        "key_required": true,
+        "transport": {
+          "kind": "google",
+          "base_url": "https://generativelanguage.googleapis.com"
+        },
+        "template": {
+          "transport": {
+            "kind": "google",
+            "base_url": "https://generativelanguage.googleapis.com"
+          },
+          "compatibility": "google",
+          "discovery": "google",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "azure": {
+        "id": "61c003fa-6fdb-5294-8dbf-6476e7aaa4fa",
+        "name": "Azure OpenAI",
+        "enabled": true,
+        "deleted": false,
+        "preset": "azure",
+        "compatibility": "azure",
+        "discovery": "custom",
+        "key_required": true,
+        "transport": {
+          "kind": "azure",
+          "base_url": null,
+          "deployment": null,
+          "api_version": null
+        },
+        "template": {
+          "transport": {
+            "kind": "azure",
+            "base_url": null,
+            "deployment": null,
+            "api_version": null
+          },
+          "compatibility": "azure",
+          "discovery": "custom",
+          "key_required": true,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      },
+      "bedrock": {
+        "id": "32dd0801-9e5c-50fb-ace9-732b439a581e",
+        "name": "Amazon Bedrock",
+        "enabled": true,
+        "deleted": false,
+        "preset": "bedrock",
+        "compatibility": "bedrock",
+        "discovery": "bedrock",
+        "key_required": false,
+        "transport": {
+          "kind": "bedrock",
+          "region": "us-west-2",
+          "auth_mode": "system",
+          "aws_profile": null
+        },
+        "template": {
+          "transport": {
+            "kind": "bedrock",
+            "region": "us-west-2",
+            "auth_mode": "system",
+            "aws_profile": null
+          },
+          "compatibility": "bedrock",
+          "discovery": "bedrock",
+          "key_required": false,
+          "reasoning_defaults": {}
+        },
+        "template_origin": "creation",
+        "reasoning_defaults": {},
+        "revision": 1
+      }
+    },
+    "fields": [
+      {
+        "key": "profile",
+        "group": "research",
+        "label": {
+          "en": "Research depth",
+          "zh-CN": "研究档位",
+          "ja": "リサーチの深さ"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": "standard",
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "fast",
+          "standard",
+          "deep"
+        ],
+        "option_labels": {
+          "fast": {
+            "en": "Fast",
+            "zh-CN": "快速",
+            "ja": "高速"
+          },
+          "standard": {
+            "en": "Standard",
+            "zh-CN": "标准",
+            "ja": "標準"
+          },
+          "deep": {
+            "en": "Deep",
+            "zh-CN": "深入",
+            "ja": "詳細"
+          }
+        },
+        "env_names": []
+      },
+      {
+        "key": "analysts",
+        "group": "research",
+        "label": {
+          "en": "Analysts",
+          "zh-CN": "分析师",
+          "ja": "アナリスト"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "list",
+        "default": [
+          "market",
+          "social",
+          "news",
+          "fundamentals"
+        ],
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "market",
+          "social",
+          "news",
+          "fundamentals"
+        ],
+        "option_labels": {
+          "market": {
+            "en": "Market",
+            "zh-CN": "市场",
+            "ja": "市場"
+          },
+          "social": {
+            "en": "Sentiment",
+            "zh-CN": "情绪",
+            "ja": "センチメント"
+          },
+          "news": {
+            "en": "News",
+            "zh-CN": "新闻",
+            "ja": "ニュース"
+          },
+          "fundamentals": {
+            "en": "Fundamentals",
+            "zh-CN": "基本面",
+            "ja": "ファンダメンタルズ"
+          }
+        },
+        "env_names": []
+      },
+      {
+        "key": "quick_connection_id",
+        "group": "research",
+        "label": {
+          "en": "Quick connection",
+          "zh-CN": "快速模型连接",
+          "ja": "高速モデル接続"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "text",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "deep_connection_id",
+        "group": "research",
+        "label": {
+          "en": "Deep connection",
+          "zh-CN": "深入模型连接",
+          "ja": "詳細モデル接続"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "text",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "llm_provider",
+        "group": "research",
+        "label": {
+          "en": "Default provider",
+          "zh-CN": "默认模型服务",
+          "ja": "既定のプロバイダー"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": "openai",
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "openai",
+          "xai",
+          "deepseek",
+          "qwen",
+          "qwen-cn",
+          "glm",
+          "glm-cn",
+          "minimax",
+          "minimax-cn",
+          "openrouter",
+          "mistral",
+          "kimi",
+          "groq",
+          "nvidia",
+          "ollama",
+          "openai_compatible",
+          "anthropic",
+          "google",
+          "azure",
+          "bedrock"
+        ],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_LLM_PROVIDER"
+        ]
+      },
+      {
+        "key": "quick_think_llm",
+        "group": "research",
+        "label": {
+          "en": "Quick model",
+          "zh-CN": "快速模型",
+          "ja": "高速モデル"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "text",
+        "default": "gpt-5.4-mini",
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_QUICK_THINK_LLM"
+        ]
+      },
+      {
+        "key": "deep_think_llm",
+        "group": "research",
+        "label": {
+          "en": "Deep model",
+          "zh-CN": "深入模型",
+          "ja": "詳細モデル"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "text",
+        "default": "gpt-5.5",
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_DEEP_THINK_LLM"
+        ]
+      },
+      {
+        "key": "quick_reasoning_effort",
+        "group": "research",
+        "label": {
+          "en": "Quick reasoning effort",
+          "zh-CN": "快速模型推理强度",
+          "ja": "高速モデルの推論強度"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "provider_default",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
+        "env_names": [
+          "TRADINGAGENTS_QUICK_REASONING_EFFORT"
+        ]
+      },
+      {
+        "key": "deep_reasoning_effort",
+        "group": "research",
+        "label": {
+          "en": "Deep reasoning effort",
+          "zh-CN": "深入模型推理强度",
+          "ja": "詳細モデルの推論強度"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "provider_default",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
+        "env_names": [
+          "TRADINGAGENTS_DEEP_REASONING_EFFORT"
+        ]
+      },
+      {
+        "key": "google_thinking_level",
+        "group": "compatibility",
+        "label": {
+          "en": "Google shared thinking level",
+          "zh-CN": "Google 共享思考强度",
+          "ja": "Google 共通思考強度"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "provider_default",
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          }
+        },
+        "env_names": [
+          "TRADINGAGENTS_GOOGLE_THINKING_LEVEL"
+        ]
+      },
+      {
+        "key": "openai_reasoning_effort",
+        "group": "compatibility",
+        "label": {
+          "en": "OpenAI shared reasoning effort",
+          "zh-CN": "OpenAI 共享推理强度",
+          "ja": "OpenAI 共通推論強度"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "provider_default",
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
+        "env_names": [
+          "TRADINGAGENTS_OPENAI_REASONING_EFFORT"
+        ]
+      },
+      {
+        "key": "anthropic_effort",
+        "group": "compatibility",
+        "label": {
+          "en": "Anthropic shared effort",
+          "zh-CN": "Anthropic 共享推理强度",
+          "ja": "Anthropic 共通推論強度"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "choice",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [
+          "provider_default",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
+        "env_names": [
+          "TRADINGAGENTS_ANTHROPIC_EFFORT"
+        ]
+      },
+      {
+        "key": "temperature",
+        "group": "research",
+        "label": {
+          "en": "Sampling temperature",
+          "zh-CN": "采样温度",
+          "ja": "サンプリング温度"
+        },
+        "description": {
+          "en": "Unset uses the provider default. Some reasoning models ignore temperature.",
+          "zh-CN": "留空使用服务默认值；部分推理模型会忽略温度。",
+          "ja": "未設定ではプロバイダーの既定値。一部の推論モデルは温度を無視します。"
+        },
+        "kind": "number",
+        "default": null,
+        "nullable": true,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_TEMPERATURE"
+        ]
+      },
+      {
+        "key": "llm_max_retries",
+        "group": "research",
+        "label": {
+          "en": "LLM retry budget",
+          "zh-CN": "模型请求重试次数",
+          "ja": "モデルの再試行回数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": null,
+        "nullable": true,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_LLM_MAX_RETRIES"
+        ]
+      },
+      {
+        "key": "output_language",
+        "group": "research",
+        "label": {
+          "en": "Report language",
+          "zh-CN": "报告语言",
+          "ja": "レポート言語"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "text",
+        "default": "en",
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_OUTPUT_LANGUAGE"
+        ]
+      },
+      {
+        "key": "news_article_limit",
+        "group": "news",
+        "label": {
+          "en": "Ticker news output limit",
+          "zh-CN": "个股新闻输出条数",
+          "ja": "銘柄ニュースの出力件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 30,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "yahoo_news_candidate_limit",
+        "group": "news",
+        "label": {
+          "en": "Yahoo news candidate limit",
+          "zh-CN": "Yahoo 新闻候选条数",
+          "ja": "Yahoo ニュース候補件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 200,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": 200.0,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "cn_news_candidate_limit",
+        "group": "news",
+        "label": {
+          "en": "China news candidate limit",
+          "zh-CN": "中国新闻候选条数",
+          "ja": "中国ニュース候補件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 100,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": 100.0,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "sentiment_filing_limit",
+        "group": "news",
+        "label": {
+          "en": "Ownership filing output limit",
+          "zh-CN": "持股与收购披露输出条数",
+          "ja": "保有・買収開示の出力件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 20,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "ticker_news_lookback_days",
+        "group": "news",
+        "label": {
+          "en": "Ticker news lookback offset (days)",
+          "zh-CN": "个股新闻回溯偏移（天）",
+          "ja": "銘柄ニュース遡及日数"
+        },
+        "description": {
+          "en": "Calendar offset before the cutoff, inclusive at both ends: 14 means 15 dates. Does not guarantee available coverage.",
+          "zh-CN": "截止日前的日历偏移，含首尾：14 表示 15 个日期；不保证来源具备该范围。",
+          "ja": "基準日からの暦日オフセット。両端を含み、14 は 15 日付を意味します。取得範囲は保証されません。"
+        },
+        "kind": "number",
+        "default": 14,
+        "nullable": false,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS"
+        ]
+      },
+      {
+        "key": "social_lookback_days",
+        "group": "news",
+        "label": {
+          "en": "Social lookback offset (days)",
+          "zh-CN": "社交信息回溯偏移（天）",
+          "ja": "ソーシャル情報遡及日数"
+        },
+        "description": {
+          "en": "Calendar offset before the cutoff, inclusive at both ends: 14 means 15 dates. Does not guarantee available coverage.",
+          "zh-CN": "截止日前的日历偏移，含首尾：14 表示 15 个日期；不保证来源具备该范围。",
+          "ja": "基準日からの暦日オフセット。両端を含み、14 は 15 日付を意味します。取得範囲は保証されません。"
+        },
+        "kind": "number",
+        "default": 7,
+        "nullable": false,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS"
+        ]
+      },
+      {
+        "key": "global_news_article_limit",
+        "group": "news",
+        "label": {
+          "en": "Global news output limit",
+          "zh-CN": "全球新闻输出条数",
+          "ja": "世界ニュースの出力件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 10,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "global_news_candidate_limit",
+        "group": "news",
+        "label": {
+          "en": "Global news candidates per query",
+          "zh-CN": "全球新闻每次查询候选条数",
+          "ja": "世界ニュースのクエリ当たり候補件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 10,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "global_news_query_limit",
+        "group": "news",
+        "label": {
+          "en": "Global news query budget",
+          "zh-CN": "全球新闻查询预算",
+          "ja": "世界ニュースのクエリ上限"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 5,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": 5.0,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "global_news_lookback_days",
+        "group": "news",
+        "label": {
+          "en": "Global news lookback offset (days)",
+          "zh-CN": "全球新闻回溯偏移（天）",
+          "ja": "世界ニュース遡及日数"
+        },
+        "description": {
+          "en": "Calendar offset before the cutoff, inclusive at both ends: 14 means 15 dates. Does not guarantee available coverage.",
+          "zh-CN": "截止日前的日历偏移，含首尾：14 表示 15 个日期；不保证来源具备该范围。",
+          "ja": "基準日からの暦日オフセット。両端を含み、14 は 15 日付を意味します。取得範囲は保証されません。"
+        },
+        "kind": "number",
+        "default": 7,
+        "nullable": false,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "global_news_queries",
+        "group": "news",
+        "label": {
+          "en": "Global news search queries",
+          "zh-CN": "全球新闻查询词",
+          "ja": "世界ニュースの検索語"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "list",
+        "default": [
+          "Federal Reserve interest rates inflation",
+          "S&P 500 earnings GDP economic outlook",
+          "geopolitical risk trade war sanctions",
+          "ECB Bank of England BOJ central bank policy",
+          "oil commodities supply chain energy"
+        ],
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "news_cache_enabled",
+        "group": "cache",
+        "label": {
+          "en": "Reuse observed news",
+          "zh-CN": "复用已观察的新闻",
+          "ja": "取得済みニュースの再利用"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "boolean",
+        "default": true,
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "news_cache_refresh_seconds",
+        "group": "cache",
+        "label": {
+          "en": "News refresh interval (seconds)",
+          "zh-CN": "新闻刷新间隔（秒）",
+          "ja": "ニュース更新間隔（秒）"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 900,
+        "nullable": false,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "news_cache_retention_days",
+        "group": "cache",
+        "label": {
+          "en": "News cache retention (days)",
+          "zh-CN": "新闻缓存保留天数",
+          "ja": "ニュースキャッシュ保持日数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 90,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "news_cache_scope_limit",
+        "group": "cache",
+        "label": {
+          "en": "Cached items per scope",
+          "zh-CN": "每个范围的缓存条数",
+          "ja": "範囲ごとのキャッシュ件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 2000,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "news_cache_total_limit",
+        "group": "cache",
+        "label": {
+          "en": "Total cached items",
+          "zh-CN": "缓存总条数",
+          "ja": "キャッシュ総件数"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "number",
+        "default": 50000,
+        "nullable": false,
+        "minimum": 1.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "trash_retention_days",
+        "group": "cache",
+        "label": {
+          "en": "Trash retention (days)",
+          "zh-CN": "回收站保留天数",
+          "ja": "ゴミ箱保持日数"
+        },
+        "description": {
+          "en": "0 disables automatic deletion. A shorter period affects existing trash at the next cleanup.",
+          "zh-CN": "0 关闭自动清理；缩短期限会在下次清理时作用于已有回收站记录。",
+          "ja": "0 は自動削除を無効化。短縮すると次回の清掃時に既存のゴミ箱にも適用されます。"
+        },
+        "kind": "number",
+        "default": 30,
+        "nullable": false,
+        "minimum": 0.0,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_TRASH_RETENTION_DAYS"
+        ]
+      },
+      {
+        "key": "data_vendors",
+        "group": "sources",
+        "label": {
+          "en": "Default source chains",
+          "zh-CN": "默认数据源顺序",
+          "ja": "既定のデータソース順序"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "routes",
+        "default": {
+          "instrument_eligibility": "yfinance",
+          "core_stock_apis": "yfinance",
+          "technical_indicators": "yfinance",
+          "fundamental_data": "yfinance",
+          "news_data": "yfinance",
+          "macro_data": "macro",
+          "prediction_markets": "polymarket"
+        },
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "tool_vendors",
+        "group": "sources",
+        "label": {
+          "en": "Tool source overrides",
+          "zh-CN": "工具数据源覆盖",
+          "ja": "ツール別ソース設定"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "routes",
+        "default": {},
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "data_vendors_by_market",
+        "group": "sources",
+        "label": {
+          "en": "Market source overrides",
+          "zh-CN": "市场数据源覆盖",
+          "ja": "市場別ソース設定"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "routes",
+        "default": {
+          ".T": {
+            "core_stock_apis": "jquants,yfinance",
+            "technical_indicators": "jquants,yfinance",
+            "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
+            "news_data": "jp_news,yfinance"
+          },
+          ".SS": {
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+            "news_data": "cn_news,yfinance"
+          },
+          ".SZ": {
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+            "news_data": "cn_news,yfinance"
+          }
+        },
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": []
+      },
+      {
+        "key": "providers",
+        "group": "providers",
+        "label": {
+          "en": "Model service connections",
+          "zh-CN": "模型服务连接",
+          "ja": "モデルサービス接続"
+        },
+        "description": {
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
+        },
+        "kind": "providers",
+        "default": {},
+        "nullable": false,
+        "minimum": null,
+        "maximum": null,
+        "options": [],
+        "option_labels": {},
+        "env_names": [
+          "TRADINGAGENTS_LLM_BACKEND_URL",
+          "AZURE_OPENAI_ENDPOINT",
+          "AZURE_OPENAI_DEPLOYMENT_NAME",
+          "OPENAI_API_VERSION",
+          "OLLAMA_BASE_URL",
+          "AWS_REGION",
+          "AWS_DEFAULT_REGION",
+          "AWS_PROFILE"
+        ]
+      }
+    ],
+    "providers": {
+      "openai": "OpenAI",
+      "xai": "xAI",
+      "deepseek": "DeepSeek",
+      "qwen": "Qwen (International)",
+      "qwen-cn": "Qwen (China)",
+      "glm": "Z.AI GLM",
+      "glm-cn": "BigModel GLM (China)",
+      "minimax": "MiniMax (International)",
+      "minimax-cn": "MiniMax (China)",
+      "openrouter": "OpenRouter",
+      "mistral": "Mistral",
+      "kimi": "Kimi / Moonshot",
+      "groq": "Groq",
+      "nvidia": "NVIDIA NIM",
+      "ollama": "Ollama",
+      "openai_compatible": "OpenAI-compatible",
+      "anthropic": "Anthropic",
+      "google": "Google Gemini",
+      "azure": "Azure OpenAI",
+      "bedrock": "Amazon Bedrock"
+    },
+    "provider_defaults": {
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "xai": {
+        "base_url": "https://api.x.ai/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "qwen": {
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "qwen-cn": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "glm": {
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "glm-cn": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "minimax": {
+        "base_url": "https://api.minimax.io/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "minimax-cn": {
+        "base_url": "https://api.minimaxi.com/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "kimi": {
+        "base_url": "https://api.moonshot.ai/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "nvidia": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "ollama": {
+        "base_url": "http://localhost:11434/v1",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "openai_compatible": {
+        "base_url": null,
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "anthropic": {
+        "base_url": "https://api.anthropic.com",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "google": {
+        "base_url": "https://generativelanguage.googleapis.com",
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "azure": {
+        "base_url": null,
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      },
+      "bedrock": {
+        "base_url": null,
+        "deployment": null,
+        "api_version": null,
+        "region": "us-west-2",
+        "auth_mode": "system",
+        "aws_profile": null
+      }
+    },
+    "credential_owners": {
+      "OPENAI_API_KEY": "openai",
+      "XAI_API_KEY": "xai",
+      "DEEPSEEK_API_KEY": "deepseek",
+      "DASHSCOPE_API_KEY": "qwen",
+      "DASHSCOPE_CN_API_KEY": "qwen-cn",
+      "ZHIPU_API_KEY": "glm",
+      "ZHIPU_CN_API_KEY": "glm-cn",
+      "MINIMAX_API_KEY": "minimax",
+      "MINIMAX_CN_API_KEY": "minimax-cn",
+      "OPENROUTER_API_KEY": "openrouter",
+      "MISTRAL_API_KEY": "mistral",
+      "MOONSHOT_API_KEY": "kimi",
+      "GROQ_API_KEY": "groq",
+      "NVIDIA_API_KEY": "nvidia",
+      "OPENAI_COMPATIBLE_API_KEY": "openai_compatible",
+      "ANTHROPIC_API_KEY": "anthropic",
+      "GOOGLE_API_KEY": "google",
+      "AZURE_OPENAI_API_KEY": "azure",
+      "ALPHA_VANTAGE_API_KEY": "alpha_vantage",
+      "FRED_API_KEY": "fred",
+      "ESTAT_APP_ID": "estat",
+      "JQUANTS_API_KEY": "jquants",
+      "EDINET_API_KEY": "edinet",
+      "AWS_BEARER_TOKEN_BEDROCK": "bedrock",
+      "AWS_ACCESS_KEY_ID": "bedrock",
+      "AWS_SECRET_ACCESS_KEY": "bedrock",
+      "AWS_SESSION_TOKEN": "bedrock"
+    },
+    "route_options": {
+      "instrument_eligibility": [
+        "yfinance"
+      ],
+      "core_stock_apis": [
+        "akshare",
+        "alpha_vantage",
+        "jquants",
+        "yfinance"
+      ],
+      "technical_indicators": [
+        "akshare",
+        "alpha_vantage",
+        "jquants",
+        "yfinance"
+      ],
+      "fundamental_data": [
+        "alpha_vantage",
+        "cn_fundamentals",
+        "cn_statements",
+        "jp_fundamentals",
+        "jp_statements",
+        "jquants",
+        "yfinance"
+      ],
+      "news_data": [
+        "alpha_vantage",
+        "cn_news",
+        "edinet_news",
+        "google_news",
+        "jp_news",
+        "tdnet_news",
+        "yfinance"
+      ],
+      "macro_data": [
+        "fred",
+        "macro"
+      ],
+      "prediction_markets": [
+        "polymarket"
+      ]
+    },
+    "tool_options": {
+      "resolve_instrument_eligibility": [
+        "yfinance"
+      ],
+      "get_stock_data": [
+        "akshare",
+        "alpha_vantage",
+        "jquants",
+        "yfinance"
+      ],
+      "get_indicators": [
+        "akshare",
+        "alpha_vantage",
+        "jquants",
+        "yfinance"
+      ],
+      "get_verified_market_snapshot": [
+        "akshare",
+        "alpha_vantage",
+        "jquants",
+        "yfinance"
+      ],
+      "get_fundamentals": [
+        "alpha_vantage",
+        "cn_fundamentals",
+        "jp_fundamentals",
+        "jquants",
+        "yfinance"
+      ],
+      "get_balance_sheet": [
+        "alpha_vantage",
+        "cn_statements",
+        "jp_statements",
+        "jquants",
+        "yfinance"
+      ],
+      "get_cashflow": [
+        "alpha_vantage",
+        "cn_statements",
+        "jp_statements",
+        "jquants",
+        "yfinance"
+      ],
+      "get_income_statement": [
+        "alpha_vantage",
+        "cn_statements",
+        "jp_statements",
+        "jquants",
+        "yfinance"
+      ],
+      "get_news": [
+        "alpha_vantage",
+        "cn_news",
+        "edinet_news",
+        "google_news",
+        "jp_news",
+        "tdnet_news",
+        "yfinance"
+      ],
+      "get_global_news": [
+        "alpha_vantage",
+        "yfinance"
+      ],
+      "get_insider_transactions": [
+        "alpha_vantage",
+        "yfinance"
+      ],
+      "get_macro_indicators": [
+        "fred",
+        "macro"
+      ],
+      "get_prediction_markets": [
+        "polymarket"
+      ]
+    }
+  }
+}

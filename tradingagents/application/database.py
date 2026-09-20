@@ -28,6 +28,31 @@ class Base(DeclarativeBase):
     pass
 
 
+class ConfigurationRecord(Base):
+    __tablename__ = "application_configuration"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    values_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    initialized: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CredentialRecord(Base):
+    __tablename__ = "configuration_credentials"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ModelConnectionRecord(Base):
+    __tablename__ = "model_connections"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    legacy_provider: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True)
+
+
 class RunRecord(Base):
     __tablename__ = "runs"
 
@@ -39,6 +64,7 @@ class RunRecord(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     instrument_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     instrument_local_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    submission_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     research_schema_version: Mapped[str | None] = mapped_column(String(20), nullable=True)

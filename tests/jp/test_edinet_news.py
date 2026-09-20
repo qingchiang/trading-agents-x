@@ -3,7 +3,6 @@ auth, and routing. All network calls are mocked — no key or connectivity."""
 import copy
 import gzip
 import json
-import os
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +15,7 @@ import pytest
 import requests
 
 import tradingagents.default_config as default_config
+from tradingagents.credentials import use_credentials
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import bind_config, get_config
 from tradingagents.dataflows.errors import (
@@ -270,7 +270,7 @@ class DocumentCacheTests(unittest.TestCase):
 @pytest.mark.unit
 class AuthTests(unittest.TestCase):
     def test_missing_key_raises_not_configured(self):
-        with mock.patch.dict(os.environ, {}, clear=True), \
+        with use_credentials({}), \
                 self.assertRaises(EDINETNotConfiguredError):
             edinet_common.get_api_key()
 
@@ -286,20 +286,20 @@ class AuthTests(unittest.TestCase):
             captured["params"] = params
             return FakeResp(200, {"results": []})
 
-        with mock.patch.dict(os.environ, {"EDINET_API_KEY": "KEY123"}, clear=True), \
+        with use_credentials({"EDINET_API_KEY": "KEY123"}), \
                 mock.patch.object(edinet_common.requests, "get", side_effect=fake_get):
             edinet_common.fetch_documents("2026-06-22")
         self.assertEqual(captured["headers"], {"Ocp-Apim-Subscription-Key": "KEY123"})
         self.assertEqual(captured["params"], {"date": "2026-06-22", "type": 2})
 
     def test_rate_limit_surfaces_typed_error(self):
-        with mock.patch.dict(os.environ, {"EDINET_API_KEY": "K"}, clear=True), \
+        with use_credentials({"EDINET_API_KEY": "K"}), \
                 mock.patch.object(edinet_common.requests, "get", return_value=FakeResp(429)), \
                 self.assertRaises(EDINETRateLimitError):
             edinet_common.fetch_documents("2026-06-22")
 
     def test_unauthorized_surfaces_not_configured(self):
-        with mock.patch.dict(os.environ, {"EDINET_API_KEY": "BAD"}, clear=True), \
+        with use_credentials({"EDINET_API_KEY": "BAD"}), \
                 mock.patch.object(edinet_common.requests, "get", return_value=FakeResp(403)), \
                 self.assertRaises(EDINETNotConfiguredError):
             edinet_common.fetch_documents("2026-06-22")

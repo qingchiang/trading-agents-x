@@ -9,6 +9,8 @@ from collections.abc import Callable
 from time import monotonic
 from uuid import uuid4
 
+from tradingagents.credentials import safe_failure_diagnostic
+
 from .maintenance import (
     TRASH_MAINTENANCE_INTERVAL_SECONDS,
     TRASH_MAINTENANCE_RETRY_SECONDS,
@@ -44,6 +46,8 @@ class AnalysisWorker:
         self.stop_event = threading.Event()
 
     def run_once(self) -> bool:
+        if not self.service.configuration.read().initialized:
+            return False
         self._run_maintenance_if_due()
         claimed = self.repository.claim_next(
             self.worker_id,
@@ -62,8 +66,8 @@ class AnalysisWorker:
                 "analysis run %s returned to queue during worker shutdown",
                 claimed.id,
             )
-        except Exception:
-            logger.exception("analysis run %s failed", claimed.id)
+        except Exception as exc:
+            logger.error("analysis run %s failed: %s", claimed.id, safe_failure_diagnostic(exc))
         return True
 
     def serve_forever(self) -> None:

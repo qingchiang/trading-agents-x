@@ -19,7 +19,7 @@ def _equity_resolver(ticker: str) -> dict[str, str]:
 
 @pytest.fixture
 def web_settings(tmp_path: Path) -> AppSettings:
-    return AppSettings.from_env(
+    settings = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path),
             "TRADINGAGENTS_DATABASE_PATH": str(tmp_path / "web.db"),
@@ -27,6 +27,10 @@ def web_settings(tmp_path: Path) -> AppSettings:
         },
         load_env_files=False,
     )
+
+    from tests.configuration_helpers import initialize_configuration
+    initialize_configuration(settings)
+    return settings
 
 
 @pytest.fixture

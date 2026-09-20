@@ -227,9 +227,9 @@ def test_trash_maintenance_honors_cutoff_restore_and_disabled_retention(
     assert repository.get_run(newer.id).trashed_at is not None
     assert repository.get_run(restored.id).trashed_at is None
 
-    disabled = app_settings.model_copy(
-        update={"trash_retention_days": 0}
-    )
+    from tests.configuration_helpers import save_configuration
+    save_configuration(app_settings, {"trash_retention_days": 0})
+    disabled = app_settings
     _set_trashed_at(repository, newer.id, now - timedelta(days=90))
     assert (
         TrashMaintenance(

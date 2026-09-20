@@ -2,7 +2,8 @@ x-app: &app
   build:
     context: .
   env_file:
-    - ${TRADINGAGENTS_ENV_FILE:-.env}
+    - path: ${TRADINGAGENTS_ENV_FILE:-.env}
+      required: false
   environment:
     TRADINGAGENTS_HOME: /data
     TRADINGAGENTS_DATABASE_PATH: /data/tradingagents.db

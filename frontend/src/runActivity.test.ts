@@ -21,6 +21,26 @@ function event(
 }
 
 describe("aggregateRunActivity", () => {
+  test("starting a run does not start result submission", () => {
+    const [attempt] = aggregateRunActivity([
+      event(1, 1, "run.queued", null),
+      event(2, 1, "run.started", null),
+    ], "incremental", { currentAttempt: 1, runStatus: "running" });
+    expect(attempt.stageStates.commit).toBeUndefined();
+    expect(attempt.workUnits[0]).toMatchObject({ stage: "preparation", action: "prepare", state: "running" });
+  });
+
+  test("submission starts only at the explicit commit event", () => {
+    const [attempt] = aggregateRunActivity([
+      event(1, 1, "run.started", null),
+      event(2, 1, "incremental.collection_started", null),
+      event(3, 1, "incremental.collection_completed", null),
+      event(4, 1, "run.commit_started", null),
+    ], "incremental", { currentAttempt: 1, runStatus: "running" });
+    expect(attempt.currentStage).toBe("commit");
+    expect(attempt.stageStates.commit).toBe("running");
+  });
+
   test("merges repeated node events and preserves parallel Full analyst units", () => {
     const attempts = aggregateRunActivity([
       event(1, 1, "node.started", "analyst.news.report"),
@@ -115,7 +135,7 @@ describe("aggregateRunActivity", () => {
 
     expect(attempts[0]).toMatchObject({
       state: "cancelled",
-      currentStage: "commit",
+      currentStage: "preparation",
     });
     expect(attempts[0].workUnits[0]).toMatchObject({
       node: "run.lifecycle",
@@ -177,11 +197,10 @@ describe("aggregateRunActivity", () => {
 
     expect(attempts[0]).toMatchObject({
       state: "failed",
-      currentStage: "commit",
+      currentStage: "incremental_serialization",
       stageStates: {
         incremental_semantic: "interrupted",
         incremental_serialization: "failed",
-        commit: "failed",
       },
     });
     expect(attempts[0].workUnits.map((unit) => unit.node)).toEqual([

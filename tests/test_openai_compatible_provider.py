@@ -8,6 +8,7 @@ model name is accepted, and the env backend URL precedence (#978).
 import pytest
 
 from tradingagents.application.settings import AppSettings
+from tradingagents.credentials import use_credentials
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.factory import create_llm_client
 from tradingagents.llm_clients.validators import validate_model
@@ -32,6 +33,7 @@ def test_base_url_required(monkeypatch):
 
 
 @pytest.mark.unit
+@use_credentials({})
 def test_keyless_local_uses_placeholder_and_chat_completions(monkeypatch):
     monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
     llm = create_llm_client(
@@ -47,7 +49,8 @@ def test_keyless_local_uses_placeholder_and_chat_completions(monkeypatch):
 
 
 @pytest.mark.unit
-def test_optional_key_from_env(monkeypatch):
+@use_credentials({"OPENAI_COMPATIBLE_API_KEY": "sk-relay-123"})
+def test_optional_key_from_execution_context(monkeypatch):
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-relay-123")
     llm = create_llm_client(
         provider="openai_compatible", model="m", base_url="https://relay.example/v1"
@@ -77,7 +80,9 @@ def test_env_backend_url_precedence(tmp_path):
         load_env_files=False,
     )
 
-    assert settings.default_run_settings.backend_url == "http://proxy/v1"
+    from tests.configuration_helpers import import_configuration
+    store = import_configuration(settings)
+    assert store.default_run_settings().backend_url == "http://proxy/v1"
 
 
 @pytest.mark.unit

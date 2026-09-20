@@ -27,6 +27,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: components["schemas"]["AssetType"] | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -34,6 +36,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
@@ -82,6 +85,18 @@ export interface components {
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       value: number;
     };
+    AzureTransport: {
+      api_version?: string | null;
+      base_url?: string | null;
+      deployment?: string | null;
+      kind?: "azure";
+    };
+    BedrockTransport: {
+      auth_mode?: "system" | "static" | "bearer";
+      aws_profile?: string | null;
+      kind?: "bedrock";
+      region?: string;
+    };
     BenchmarkContext: {
       component: components["schemas"]["PerformanceComponent"];
       name: string;
@@ -102,18 +117,24 @@ export interface components {
     };
     CapabilitiesResponse: {
       analysts: string[];
+      configuration_initialized?: boolean;
+      connections?: Record<string, components["schemas"]["ConnectionView"]>;
       defaults: components["schemas"]["CapabilityDefaults"];
+      legacy_connections?: Record<string, string>;
       output_languages: string[];
       profiles: string[];
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
+      analysts?: string[];
+      deep_connection_id?: string | null;
       deep_model: string;
       deep_reasoning_effort: string | null;
       lan_enabled: boolean;
       llm_provider: string;
       output_language: string;
       profile: string;
+      quick_connection_id?: string | null;
       quick_model: string;
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
@@ -147,6 +168,117 @@ export interface components {
     };
     CollectionTemporalBasis: "pit" | "near_live_advisory";
     ComparisonValueState: "recorded" | "null" | "empty" | "not_recorded_under_this_schema";
+    ConfigurationField: {
+      default?: unknown;
+      description: Record<string, string>;
+      env_names?: string[];
+      group: string;
+      key: string;
+      kind: "text" | "number" | "boolean" | "list" | "choice" | "routes" | "providers";
+      label: Record<string, string>;
+      maximum?: number | null;
+      minimum?: number | null;
+      nullable?: boolean;
+      option_labels?: Record<string, Record<string, string>>;
+      options?: string[];
+    };
+    ConfigurationPatch: {
+      connection_changes?: components["schemas"]["ConnectionChange"][];
+      credentials?: Record<string, string | null>;
+      reset_fields?: string[];
+      revision: number;
+      values?: components["schemas"]["ConfigurationValues"];
+    };
+    ConfigurationSchema: {
+      credential_metadata?: Record<string, components["schemas"]["CredentialMetadata"]>;
+      credential_owners: Record<string, string>;
+      fields: components["schemas"]["ConfigurationField"][];
+      group_descriptions?: Record<string, Record<string, string>>;
+      presets?: Record<string, components["schemas"]["ModelConnection"]>;
+      provider_defaults: Record<string, components["schemas"]["ProviderConnection"]>;
+      providers: Record<string, string>;
+      route_options: Record<string, string[]>;
+      tool_options: Record<string, string[]>;
+    };
+    ConfigurationValues: {
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      anthropic_effort?: string | null;
+      cn_news_candidate_limit?: number;
+      data_vendors?: Record<string, string>;
+      data_vendors_by_market?: Record<string, Record<string, string>>;
+      deep_connection_id?: string | null;
+      deep_reasoning_effort?: string | null;
+      deep_think_llm?: string;
+      global_news_article_limit?: number;
+      global_news_candidate_limit?: number;
+      global_news_lookback_days?: number;
+      global_news_queries?: string[];
+      global_news_query_limit?: number;
+      google_thinking_level?: string | null;
+      llm_max_retries?: number | null;
+      llm_provider?: string;
+      news_article_limit?: number;
+      news_cache_enabled?: boolean;
+      news_cache_refresh_seconds?: number;
+      news_cache_retention_days?: number;
+      news_cache_scope_limit?: number;
+      news_cache_total_limit?: number;
+      openai_reasoning_effort?: string | null;
+      output_language?: string;
+      profile?: "fast" | "standard" | "deep";
+      providers?: Record<string, components["schemas"]["ProviderConnection"]>;
+      quick_connection_id?: string | null;
+      quick_reasoning_effort?: string | null;
+      quick_think_llm?: string;
+      sentiment_filing_limit?: number;
+      social_lookback_days?: number;
+      temperature?: number | null;
+      ticker_news_lookback_days?: number;
+      tool_vendors?: Record<string, string>;
+      trash_retention_days?: number;
+      yahoo_news_candidate_limit?: number;
+    };
+    ConfigurationView: {
+      connections?: Record<string, components["schemas"]["ConnectionView"]>;
+      credentials: Record<string, boolean>;
+      deployment: Record<string, string | number | boolean>;
+      initialized: boolean;
+      revision: number;
+      sources: Record<string, "database" | "default">;
+      values: components["schemas"]["ConfigurationValues"];
+    };
+    ConnectionChange: {
+      action: "create" | "update" | "delete" | "reset";
+      compatibility?: string | null;
+      credentials?: Record<string, string | null>;
+      discovery?: "openai_compatible" | "anthropic" | "google" | "ollama" | "bedrock" | "custom" | null;
+      enabled?: boolean | null;
+      id: string;
+      key_required?: boolean | null;
+      name?: string | null;
+      preset?: string | null;
+      reasoning_defaults?: Record<string, string | null> | null;
+      transport?: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"] | null;
+    };
+    ConnectionView: {
+      connection: components["schemas"]["ModelConnection"];
+      credentials: Record<string, boolean>;
+      missing_fields: string[];
+      reasoning_efforts?: string[];
+      selectable: boolean;
+      unavailable_reason?: string | null;
+    };
+    CredentialMetadata: {
+      description: Record<string, string>;
+      label: string;
+    };
+    CredentialRequest: {
+      connection_id?: string | null;
+      name: string;
+    };
+    CredentialView: {
+      value: string | null;
+    };
     DebateAgenda: {
       issues: components["schemas"]["DebateIssue"][];
       summary: string;
@@ -179,6 +311,10 @@ export interface components {
       label: string;
       reasoning_efforts: string[];
     };
+    EndpointTransport: {
+      base_url?: string | null;
+      kind?: "chat_completions" | "responses" | "anthropic" | "google";
+    };
     EvidenceBundle: {
       analysis_date: string;
       digest?: string | null;
@@ -186,7 +322,7 @@ export interface components {
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
       tables?: components["schemas"]["EvidenceTable"][];
-      version?: string;
+      version?: "8";
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -290,11 +426,32 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    ImportIssue: {
+      message: string;
+      name: string;
+    };
+    ImportPreview: {
+      conflicts: string[];
+      connection_targets?: Record<string, string>;
+      credentials: Record<string, boolean>;
+      fingerprint: string;
+      issues: components["schemas"]["ImportIssue"][];
+      revision: number;
+      values: Record<string, unknown>;
+    };
+    ImportRequest: {
+      enterprise?: string | null;
+      exclude?: string[];
+      fingerprint?: string | null;
+      primary?: string | null;
+      revision?: number;
+      use_defaults?: boolean;
+    };
     IncrementalAnalysisBrief: {
       evidence_refs?: string[];
-      generation_method?: string;
+      generation_method?: "markdown_audited";
       markdown: string;
-      prompt_version?: string;
+      prompt_version?: "incremental-analysis-brief-v1";
       report_sections: components["schemas"]["ReportSection"][];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
@@ -360,6 +517,21 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
+    ModelConnection: {
+      compatibility?: string;
+      deleted?: boolean;
+      discovery?: "openai_compatible" | "anthropic" | "google" | "ollama" | "bedrock" | "custom";
+      enabled?: boolean;
+      id: string;
+      key_required?: boolean;
+      name: string;
+      preset?: string | null;
+      reasoning_defaults?: Record<string, string | null>;
+      revision?: number;
+      template?: Record<string, unknown>;
+      template_origin?: "creation" | "upgrade";
+      transport: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"];
+    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -388,7 +560,7 @@ export interface components {
     NumericAuditSnapshot: {
       candidate?: Record<string, unknown> | null;
       candidate_digest?: string | null;
-      candidate_omitted?: string | null;
+      candidate_omitted?: "oversize" | null;
       method: components["schemas"]["ArtifactGenerationMethod"];
       phase: components["schemas"]["NumericAuditPhase"];
       reason_code: string;
@@ -428,7 +600,7 @@ export interface components {
       end_session: string;
       end_value: number;
       fallback?: boolean;
-      formula?: string;
+      formula?: "(end_value / start_value) - 1";
       provider: string;
       retrieved_at: string;
       start_session: string;
@@ -464,6 +636,14 @@ export interface components {
       model_discovery_supported: boolean;
       selectable: boolean;
       unavailable_reason?: string | null;
+    };
+    ProviderConnection: {
+      api_version?: string | null;
+      auth_mode?: "bearer" | "system" | "static";
+      aws_profile?: string | null;
+      base_url?: string | null;
+      deployment?: string | null;
+      region?: string;
     };
     ProviderModelCatalog: {
       fetched_at: string;
@@ -524,7 +704,7 @@ export interface components {
       role: string;
       round?: number;
       run_id: string;
-      schema_version?: string;
+      schema_version?: "2";
       stage: string;
     };
     ResearchAvailability: {
@@ -605,7 +785,7 @@ export interface components {
       value?: unknown;
     };
     ResearchNodeComparisonWarning: {
-      code: string;
+      code: "method_changed";
       message: string;
     };
     ResearchNodeDecisionSection: {
@@ -739,6 +919,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: components["schemas"]["AssetType"] | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -746,6 +928,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
@@ -838,6 +1021,8 @@ export interface components {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
       asset_type?: string | null;
+      connection_id?: string | null;
+      deep_connection_id?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
@@ -845,6 +1030,7 @@ export interface components {
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
+      quick_connection_id?: string | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";

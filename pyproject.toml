@@ -33,6 +33,7 @@ dependencies = [
     "alembic>=1.14",
     "pydantic>=2.10",
     "exchange-calendars>=4.13.2",
+    "google-genai>=2.9.0,<3",
 ]
 
 [project.optional-dependencies]

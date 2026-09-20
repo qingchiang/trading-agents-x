@@ -149,11 +149,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .advanced-configuration .form-section-body { display: block; }
 .advanced-configuration .check-grid { margin-bottom: 28px; }
 .request-summary { padding: 24px; }
-.interface-preferences { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 20px 24px; margin-bottom: 24px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
-.interface-preferences h2 { flex-basis: 100%; }
-.interface-preferences label { display: flex; gap: 12px; align-items: center; max-width: 100%; }
-.interface-preferences select { width: auto; max-width: 100%; }
-.interface-preferences input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 18px; margin: 0; }
 @media (max-width: 700px) {
   .workbench-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
   .workbench-list li > a { grid-column: 1 / -1; }
@@ -200,7 +195,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 
 .workspace-reader .report-reading-layout { display: block; }
 .workspace-reader:not(.comparison-reader), .run-reader > :is(.reading-toolbar, .report-panel, .decision-panel-v2, .reader-panel, .incremental-reassessment-panel) { max-width: var(--reading-width); width: 100%; }
-.timeline-page:has(.workspace-judgment) .workspace-reader .decision-hero > .decision-rating-v2 { display: none; }
 .workspace-judgment { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .workspace-actions-container { display: flex; flex-wrap: wrap; gap: 8px; align-self: end; align-items: center; }
 .workspace-header-actions .action-row { gap: 8px; flex-wrap: wrap; }
@@ -222,7 +216,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .research-library-table td { padding: 12px 16px; }
 .table-wrap { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .form-section-body { background: #fff; }
-.interface-preferences { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-bottom: 24px; }
 @media (max-width: 640px) {
   :root { --reading-padding: 16px; }
   .workspace-reader .report-reading-layout { padding: var(--reading-padding); }
@@ -395,7 +388,7 @@ input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 
 .model-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 24px; }
 .model-group { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: grid; gap: 16px; }
 .model-group legend { padding: 0 6px; font-weight: 600; }
-.research-summary a .instrument-primary-name, .research-library-table a .instrument-primary-name, .workbench-list a .instrument-primary-name { color: var(--blue-dark); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.research-summary a .instrument-primary-name, .research-library-table a .instrument-primary-name, .workbench-list a .instrument-primary-name { color: var(--blue-dark); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; padding-bottom: 3px; }
 .text-button, .text-link { text-decoration: underline; text-underline-offset: 3px; }
 .view-tabs a, .tabs a { display: inline-flex; padding: 12px 16px; border-bottom: 2px solid transparent; }
 .view-tabs a[aria-current], .tabs a[aria-current] { color: var(--blue-dark); background: #e8f0fc; border-bottom-color: var(--blue); }

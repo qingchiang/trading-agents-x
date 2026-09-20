@@ -89,18 +89,28 @@ def test_social_observed_range_describes_messages_not_requested_window():
 
 
 def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -> None:
+    from tradingagents.dataflows.collection_progress import (
+        collection_progress,
+        report_collection_progress,
+    )
+
     calls = []
+    progress = []
 
     def route(method, *args, **kwargs):
         calls.append((method, args, kwargs))
         return _market_response()
 
-    result = collect_us_incremental(
-        _request(),
-        route_to_vendor=route,
-        fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
-        now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
-    )
+    with collection_progress(lambda domain, phase: progress.append((domain, phase))):
+        result = collect_us_incremental(
+            _request(),
+            route_to_vendor=route,
+            fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
+            now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        )
+    report_collection_progress("unrelated", "started")
+    assert progress == [("market", "started"), ("market", "completed"),
+                        ("benchmarks", "started"), ("benchmarks", "completed")]
 
     assert result.stock_series is not None
     assert [point.session.isoformat() for point in result.stock_series.points] == [

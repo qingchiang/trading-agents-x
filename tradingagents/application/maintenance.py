@@ -33,7 +33,11 @@ class TrashMaintenance:
 
     def run_once(self) -> int:
         """Purge all trashed runs expired at this maintenance cycle's cutoff."""
-        retention_days = self.settings.trash_retention_days
+        from .configuration import ConfigurationStore
+        configuration = ConfigurationStore(self.settings).read()
+        if not configuration.initialized:
+            return 0
+        retention_days = configuration.values.trash_retention_days
         if retention_days == 0:
             return 0
         now = self.utc_clock()

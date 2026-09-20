@@ -56,10 +56,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
 uv sync --locked --no-dev
-cp .env.example .env
 ```
 
-在 `.env` 中配置一个 LLM provider，然后一键启动本地 Web 和 worker：
+启动本地 Web 和 worker，再到设置页初始化配置并填写模型服务凭据：
 
 ```bash
 uv run --locked --no-dev tradingagents start
@@ -91,14 +90,12 @@ uv run --locked --no-dev tradingagents run 7203.T \
 ### Docker Compose
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
 `web` 与 `worker` 共用一个本机 named volume；端口默认只发布到
-`127.0.0.1`。需要捆绑 Ollama 时，先在 `.env` 中设置
-`TRADINGAGENTS_LLM_PROVIDER=ollama` 和
-`OLLAMA_BASE_URL=http://ollama:11434/v1`，然后运行：
+`127.0.0.1`。需要捆绑 Ollama 时，运行以下命令，随后在设置页选择 Ollama，
+并将服务地址设为 `http://ollama:11434/v1`：
 
 ```bash
 docker compose --profile ollama up --build
@@ -207,8 +204,10 @@ capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
 避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
 `source_run_id`。OpenAPI 位于 `/openapi.json`。
 
-API key 只从进程环境读取，不写入 SQLite、SSE 或浏览器存储。默认服务只绑定
-loopback。显式开启 LAN 时需要：
+日常配置和凭据由 SQLite 保存，在设置页搜索、修改、导入和管理；凭据可按需显示或复制，
+不进入研究快照、SSE、研究导出或浏览器持久存储，整库备份包含凭据。`.env` 仅用于启动
+和部署配置。旧环境配置需要显式预览、导入，初始化前 worker 保持等待。
+详见[配置与迁移说明](../configuration.md)。默认服务只绑定 loopback。显式开启 LAN 时需要：
 
 ```dotenv
 TRADINGAGENTS_LAN_ENABLED=true

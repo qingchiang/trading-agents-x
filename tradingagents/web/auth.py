@@ -72,6 +72,6 @@ class LanSessionManager:
         if not origin:
             return True
         parsed = urlsplit(origin)
-        return parsed.netloc.casefold() == request.headers.get(
+        return parsed.scheme == request.url.scheme and parsed.netloc.casefold() == request.headers.get(
             "host", ""
         ).casefold()

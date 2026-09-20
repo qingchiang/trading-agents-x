@@ -7,6 +7,28 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", route => route.fulfill({ json: respond(new URL(route.request().url()), route.request().method()) }));
 });
 
+test("library company names remain recognizable links", async ({ page }, info) => {
+  const respond = workspaceFixture();
+  await page.route("**/api/v1/timelines?*", route => {
+    const original = respond(new URL(route.request().url()), "GET") as { items: Record<string, unknown>[] };
+    return route.fulfill({ json: { ...original, items: [
+      { ...original.items[0], instrument: "AVGO", instrument_name: "Broadcom Inc.", instrument_local_name: null },
+      { ...original.items[0], instrument: "GOOG", instrument_name: "Alphabet Inc.", instrument_local_name: null },
+    ] } });
+  });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/timelines");
+    const names = page.locator(".research-library-table .instrument-primary-name");
+    await expect(names).toHaveCount(2);
+    for (const name of await names.all()) {
+      await expect(name).toBeVisible();
+      await expect(name).toHaveCSS("text-decoration-line", "underline");
+    }
+    await page.screenshot({ path: info.outputPath(`library-company-links-${width}.png`) });
+  }
+});
+
 test("keeps mobile controls sized, named and outside the closed navigation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/timelines");

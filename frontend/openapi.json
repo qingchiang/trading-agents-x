@@ -130,6 +130,28 @@
               }
             ]
           },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "deep_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Connection Id"
+          },
           "deep_model": {
             "anyOf": [
               {
@@ -204,6 +226,17 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
+          },
+          "quick_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Connection Id"
           },
           "quick_model": {
             "anyOf": [
@@ -577,6 +610,91 @@
         "title": "AuditedRangeEndpoint",
         "type": "object"
       },
+      "AzureTransport": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Version"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "deployment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment"
+          },
+          "kind": {
+            "const": "azure",
+            "default": "azure",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "AzureTransport",
+        "type": "object"
+      },
+      "BedrockTransport": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_mode": {
+            "default": "system",
+            "enum": [
+              "system",
+              "static",
+              "bearer"
+            ],
+            "title": "Auth Mode",
+            "type": "string"
+          },
+          "aws_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aws Profile"
+          },
+          "kind": {
+            "const": "bedrock",
+            "default": "bedrock",
+            "title": "Kind",
+            "type": "string"
+          },
+          "region": {
+            "default": "us-west-2",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "title": "BedrockTransport",
+        "type": "object"
+      },
       "BenchmarkContext": {
         "additionalProperties": false,
         "properties": {
@@ -719,8 +837,27 @@
             "title": "Analysts",
             "type": "array"
           },
+          "configuration_initialized": {
+            "default": false,
+            "title": "Configuration Initialized",
+            "type": "boolean"
+          },
+          "connections": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConnectionView"
+            },
+            "title": "Connections",
+            "type": "object"
+          },
           "defaults": {
             "$ref": "#/components/schemas/CapabilityDefaults"
+          },
+          "legacy_connections": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Legacy Connections",
+            "type": "object"
           },
           "output_languages": {
             "items": {
@@ -757,6 +894,24 @@
       "CapabilityDefaults": {
         "additionalProperties": false,
         "properties": {
+          "analysts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "deep_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Connection Id"
+          },
           "deep_model": {
             "title": "Deep Model",
             "type": "string"
@@ -787,6 +942,17 @@
           "profile": {
             "title": "Profile",
             "type": "string"
+          },
+          "quick_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Connection Id"
           },
           "quick_model": {
             "title": "Quick Model",
@@ -1038,6 +1204,898 @@
         "title": "ComparisonValueState",
         "type": "string"
       },
+      "ConfigurationField": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "title": "Default"
+          },
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Description",
+            "type": "object"
+          },
+          "env_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Names",
+            "type": "array"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "number",
+              "boolean",
+              "list",
+              "choice",
+              "routes",
+              "providers"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Label",
+            "type": "object"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "option_labels": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Option Labels",
+            "type": "object"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "group",
+          "label",
+          "description",
+          "kind"
+        ],
+        "title": "ConfigurationField",
+        "type": "object"
+      },
+      "ConfigurationPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionChange"
+            },
+            "title": "Connection Changes",
+            "type": "array"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "format": "password",
+                  "type": "string",
+                  "writeOnly": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "reset_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reset Fields",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ConfigurationValues"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ConfigurationPatch",
+        "type": "object"
+      },
+      "ConfigurationSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CredentialMetadata"
+            },
+            "title": "Credential Metadata",
+            "type": "object"
+          },
+          "credential_owners": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credential Owners",
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "group_descriptions": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Group Descriptions",
+            "type": "object"
+          },
+          "presets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelConnection"
+            },
+            "title": "Presets",
+            "type": "object"
+          },
+          "provider_defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConnection"
+            },
+            "title": "Provider Defaults",
+            "type": "object"
+          },
+          "providers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "object"
+          },
+          "route_options": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Route Options",
+            "type": "object"
+          },
+          "tool_options": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Tool Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields",
+          "providers",
+          "provider_defaults",
+          "credential_owners",
+          "route_options",
+          "tool_options"
+        ],
+        "title": "ConfigurationSchema",
+        "type": "object"
+      },
+      "ConfigurationValues": {
+        "additionalProperties": false,
+        "properties": {
+          "analysts": {
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Analysts",
+            "type": "array"
+          },
+          "anthropic_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anthropic Effort"
+          },
+          "cn_news_candidate_limit": {
+            "default": 100,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Cn News Candidate Limit",
+            "type": "integer"
+          },
+          "data_vendors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Data Vendors",
+            "type": "object"
+          },
+          "data_vendors_by_market": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Data Vendors By Market",
+            "type": "object"
+          },
+          "deep_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Connection Id"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "deep_think_llm": {
+            "default": "gpt-5.5",
+            "minLength": 1,
+            "title": "Deep Think Llm",
+            "type": "string"
+          },
+          "global_news_article_limit": {
+            "default": 10,
+            "minimum": 1.0,
+            "title": "Global News Article Limit",
+            "type": "integer"
+          },
+          "global_news_candidate_limit": {
+            "default": 10,
+            "minimum": 1.0,
+            "title": "Global News Candidate Limit",
+            "type": "integer"
+          },
+          "global_news_lookback_days": {
+            "default": 7,
+            "minimum": 0.0,
+            "title": "Global News Lookback Days",
+            "type": "integer"
+          },
+          "global_news_queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Global News Queries",
+            "type": "array"
+          },
+          "global_news_query_limit": {
+            "default": 5,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Global News Query Limit",
+            "type": "integer"
+          },
+          "google_thinking_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Thinking Level"
+          },
+          "llm_max_retries": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Max Retries"
+          },
+          "llm_provider": {
+            "default": "openai",
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "news_article_limit": {
+            "default": 30,
+            "minimum": 1.0,
+            "title": "News Article Limit",
+            "type": "integer"
+          },
+          "news_cache_enabled": {
+            "default": true,
+            "title": "News Cache Enabled",
+            "type": "boolean"
+          },
+          "news_cache_refresh_seconds": {
+            "default": 900,
+            "minimum": 0.0,
+            "title": "News Cache Refresh Seconds",
+            "type": "integer"
+          },
+          "news_cache_retention_days": {
+            "default": 90,
+            "minimum": 1.0,
+            "title": "News Cache Retention Days",
+            "type": "integer"
+          },
+          "news_cache_scope_limit": {
+            "default": 2000,
+            "minimum": 1.0,
+            "title": "News Cache Scope Limit",
+            "type": "integer"
+          },
+          "news_cache_total_limit": {
+            "default": 50000,
+            "minimum": 1.0,
+            "title": "News Cache Total Limit",
+            "type": "integer"
+          },
+          "openai_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openai Reasoning Effort"
+          },
+          "output_language": {
+            "default": "en",
+            "minLength": 1,
+            "title": "Output Language",
+            "type": "string"
+          },
+          "profile": {
+            "default": "standard",
+            "enum": [
+              "fast",
+              "standard",
+              "deep"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "providers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConnection"
+            },
+            "title": "Providers",
+            "type": "object"
+          },
+          "quick_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Connection Id"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "quick_think_llm": {
+            "default": "gpt-5.4-mini",
+            "minLength": 1,
+            "title": "Quick Think Llm",
+            "type": "string"
+          },
+          "sentiment_filing_limit": {
+            "default": 20,
+            "minimum": 1.0,
+            "title": "Sentiment Filing Limit",
+            "type": "integer"
+          },
+          "social_lookback_days": {
+            "default": 7,
+            "minimum": 0.0,
+            "title": "Social Lookback Days",
+            "type": "integer"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "ticker_news_lookback_days": {
+            "default": 14,
+            "minimum": 0.0,
+            "title": "Ticker News Lookback Days",
+            "type": "integer"
+          },
+          "tool_vendors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tool Vendors",
+            "type": "object"
+          },
+          "trash_retention_days": {
+            "default": 30,
+            "minimum": 0.0,
+            "title": "Trash Retention Days",
+            "type": "integer"
+          },
+          "yahoo_news_candidate_limit": {
+            "default": 200,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Yahoo News Candidate Limit",
+            "type": "integer"
+          }
+        },
+        "title": "ConfigurationValues",
+        "type": "object"
+      },
+      "ConfigurationView": {
+        "additionalProperties": false,
+        "properties": {
+          "connections": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConnectionView"
+            },
+            "title": "Connections",
+            "type": "object"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "deployment": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Deployment",
+            "type": "object"
+          },
+          "initialized": {
+            "title": "Initialized",
+            "type": "boolean"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sources": {
+            "additionalProperties": {
+              "enum": [
+                "database",
+                "default"
+              ],
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "object"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ConfigurationValues"
+          }
+        },
+        "required": [
+          "initialized",
+          "revision",
+          "values",
+          "sources",
+          "credentials",
+          "deployment"
+        ],
+        "title": "ConfigurationView",
+        "type": "object"
+      },
+      "ConnectionChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "delete",
+              "reset"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "compatibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compatibility"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "format": "password",
+                  "type": "string",
+                  "writeOnly": true
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "discovery": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "anthropic",
+                  "google",
+                  "ollama",
+                  "bedrock",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "key_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Required"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "reasoning_defaults": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Defaults"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "anthropic": "#/components/schemas/EndpointTransport",
+                    "azure": "#/components/schemas/AzureTransport",
+                    "bedrock": "#/components/schemas/BedrockTransport",
+                    "chat_completions": "#/components/schemas/EndpointTransport",
+                    "google": "#/components/schemas/EndpointTransport",
+                    "responses": "#/components/schemas/EndpointTransport"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/EndpointTransport"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AzureTransport"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BedrockTransport"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
+          }
+        },
+        "required": [
+          "action",
+          "id"
+        ],
+        "title": "ConnectionChange",
+        "type": "object"
+      },
+      "ConnectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ModelConnection"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Efforts",
+            "type": "array"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "connection",
+          "credentials",
+          "missing_fields",
+          "selectable"
+        ],
+        "title": "ConnectionView",
+        "type": "object"
+      },
+      "CredentialMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Description",
+            "type": "object"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description"
+        ],
+        "title": "CredentialMetadata",
+        "type": "object"
+      },
+      "CredentialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CredentialRequest",
+        "type": "object"
+      },
+      "CredentialView": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CredentialView",
+        "type": "object"
+      },
       "DebateAgenda": {
         "additionalProperties": false,
         "description": "Prioritized shallow agenda derived from the two readable cases.",
@@ -1238,6 +2296,35 @@
           "default_roles"
         ],
         "title": "DiscoveredModelView",
+        "type": "object"
+      },
+      "EndpointTransport": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "kind": {
+            "default": "chat_completions",
+            "enum": [
+              "chat_completions",
+              "responses",
+              "anthropic",
+              "google"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "EndpointTransport",
         "type": "object"
       },
       "EvidenceBundle": {
@@ -2042,6 +3129,143 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ImportIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "message"
+        ],
+        "title": "ImportIssue",
+        "type": "object"
+      },
+      "ImportPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "connection_targets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Connection Targets",
+            "type": "object"
+          },
+          "credentials": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "revision",
+          "fingerprint",
+          "values",
+          "credentials",
+          "issues",
+          "conflicts"
+        ],
+        "title": "ImportPreview",
+        "type": "object"
+      },
+      "ImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enterprise": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enterprise"
+          },
+          "exclude": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exclude",
+            "type": "array"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          },
+          "revision": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "use_defaults": {
+            "default": false,
+            "title": "Use Defaults",
+            "type": "boolean"
+          }
+        },
+        "title": "ImportRequest",
+        "type": "object"
+      },
       "IncrementalAnalysisBrief": {
         "additionalProperties": false,
         "description": "User-readable Incremental analysis produced by the semantic synthesis pass.",
@@ -2492,6 +3716,134 @@
         ],
         "title": "MeasurementKind",
         "type": "string"
+      },
+      "ModelConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "compatibility": {
+            "default": "openai_compatible",
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "deleted": {
+            "default": false,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "discovery": {
+            "default": "openai_compatible",
+            "enum": [
+              "openai_compatible",
+              "anthropic",
+              "google",
+              "ollama",
+              "bedrock",
+              "custom"
+            ],
+            "title": "Discovery",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "key_required": {
+            "default": true,
+            "title": "Key Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "reasoning_defaults": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Reasoning Defaults",
+            "type": "object"
+          },
+          "revision": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "template": {
+            "additionalProperties": true,
+            "title": "Template",
+            "type": "object"
+          },
+          "template_origin": {
+            "default": "creation",
+            "enum": [
+              "creation",
+              "upgrade"
+            ],
+            "title": "Template Origin",
+            "type": "string"
+          },
+          "transport": {
+            "discriminator": {
+              "mapping": {
+                "anthropic": "#/components/schemas/EndpointTransport",
+                "azure": "#/components/schemas/AzureTransport",
+                "bedrock": "#/components/schemas/BedrockTransport",
+                "chat_completions": "#/components/schemas/EndpointTransport",
+                "google": "#/components/schemas/EndpointTransport",
+                "responses": "#/components/schemas/EndpointTransport"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EndpointTransport"
+              },
+              {
+                "$ref": "#/components/schemas/AzureTransport"
+              },
+              {
+                "$ref": "#/components/schemas/BedrockTransport"
+              }
+            ],
+            "title": "Transport"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "transport"
+        ],
+        "title": "ModelConnection",
+        "type": "object"
       },
       "ModelDiscoveryWarningView": {
         "additionalProperties": false,
@@ -3239,6 +4591,72 @@
           "model_discovery_supported"
         ],
         "title": "ProviderCapabilities",
+        "type": "object"
+      },
+      "ProviderConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Version"
+          },
+          "auth_mode": {
+            "default": "system",
+            "enum": [
+              "bearer",
+              "system",
+              "static"
+            ],
+            "title": "Auth Mode",
+            "type": "string"
+          },
+          "aws_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aws Profile"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "deployment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment"
+          },
+          "region": {
+            "default": "us-west-2",
+            "title": "Region",
+            "type": "string"
+          }
+        },
+        "title": "ProviderConnection",
         "type": "object"
       },
       "ProviderModelCatalog": {
@@ -5159,6 +6577,28 @@
               }
             ]
           },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "deep_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Connection Id"
+          },
           "deep_model": {
             "anyOf": [
               {
@@ -5233,6 +6673,17 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
+          },
+          "quick_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Connection Id"
           },
           "quick_model": {
             "anyOf": [
@@ -5895,6 +7346,28 @@
             ],
             "title": "Asset Type"
           },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "deep_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Connection Id"
+          },
           "deep_model": {
             "anyOf": [
               {
@@ -5967,6 +7440,17 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
+          },
+          "quick_connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Connection Id"
           },
           "quick_model": {
             "anyOf": [
@@ -7873,6 +9357,241 @@
           }
         },
         "summary": "Retry Run"
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "read_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Settings"
+      },
+      "patch": {
+        "operationId": "save_settings_api_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigurationPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Settings"
+      }
+    },
+    "/api/v1/settings/connections/{identity}/models": {
+      "get": {
+        "operationId": "connection_models_api_v1_settings_connections__identity__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connection Models"
+      }
+    },
+    "/api/v1/settings/credentials/reveal": {
+      "post": {
+        "operationId": "reveal_api_v1_settings_credentials_reveal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal"
+      }
+    },
+    "/api/v1/settings/import/apply": {
+      "post": {
+        "operationId": "apply_api_v1_settings_import_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply"
+      }
+    },
+    "/api/v1/settings/import/preview": {
+      "post": {
+        "operationId": "preview_api_v1_settings_import_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview"
+      }
+    },
+    "/api/v1/settings/schema": {
+      "get": {
+        "operationId": "schema_api_v1_settings_schema_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Schema"
       }
     },
     "/api/v1/timelines": {

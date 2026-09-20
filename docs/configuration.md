@@ -1,0 +1,264 @@
+# Application configuration
+
+Start the application and open **Settings**. SQLite stores daily research
+configuration, provider connections and credentials. No `.env` file is required
+for a normal local installation. Connections have stable IDs and independent addresses and credentials. Add as
+many connections of an existing interface type as needed; vendor presets are
+creation templates, not a fixed list of configured services. Anthropic and Google use an API
+origin (without `/v1` or `/v1beta`); OpenAI-compatible services use their API base
+URL, commonly ending in `/v1`. Model discovery adds each API's list path.
+
+The settings page supports Chinese, English and Japanese, searches labels,
+configuration keys and legacy environment names, and explains defaults, ranges,
+source and effect. Categories display one working area at a time: model connections, research
+defaults, data/news, and storage/maintenance. Each
+connection or settings group saves independently. Connection-specific advanced
+compatibility parameters are available inside its editor. Restore
+Defaults resets that group's non-secret settings; credentials are deleted only
+through the explicit credential action. Interface language and sidebar collapse
+are controlled in the sidebar and remain local to the browser.
+
+## First start and migration
+
+The Web UI and historical research remain available before initialization.
+Workers wait without claiming queued Runs, and new research requires completing
+configuration. Choose **Use program defaults** to start configuring manually,
+or preview an import from existing environment configuration. Importing is
+explicit, including on subsequent launches.
+
+An import can use the startup environment and existing or uploaded `.env` and
+`.env.enterprise` files. Priority is process environment, primary `.env`, then
+`.env.enterprise`. The preview shows non-secret values, credential presence,
+conflicts and invalid or unsupported fields. Exclude named fields or correct the
+source and preview again before applying. Credentials never appear in the
+preview. Application of the reviewed preview is atomic and checks both the
+source fingerprint and the database revision.
+
+The old `TRADINGAGENTS_LLM_BACKEND_URL` belongs only to the imported default
+provider. Provider-specific addresses such as `OLLAMA_BASE_URL` and
+`AZURE_OPENAI_ENDPOINT` import into their respective connections. Azure now
+uses Settings for its key, endpoint, deployment and API version; no separate
+enterprise file is necessary. Bedrock offers bearer token, static AWS access
+keys, or an explicitly selected system AWS credential chain with region and
+optional profile. System authentication can use SDK-supported roles/profiles;
+it is not a fallback for a missing DB-managed bearer token or access key.
+
+After initialization, daily environment variables do not override or supply
+missing DB values. Editing an old `.env` does not update a running application.
+Original files are preserved. After a successful import, you can delete `.env`
+if it contains only daily configuration and credentials. Keep any startup
+variables you still need (such as custom database paths, host/port or LAN
+authentication), or move them to your process environment before deleting the
+file. Startup variables continue to apply after restart. An explicitly selected
+Bedrock system credential chain also continues to use its AWS environment or
+profile configuration.
+
+Headless setup uses the same configuration module:
+
+```bash
+# Read-only previews; do not create or migrate a database.
+tradingagents config initialize
+tradingagents config import-env --file .env --enterprise-file .env.enterprise
+
+# Explicitly apply the selected operation.
+tradingagents config initialize --apply
+tradingagents config import-env --file .env --apply
+tradingagents config import-env --file .env --exclude OLD_VARIABLE --apply
+```
+
+Back up the existing database before upgrading. Stop old Web/worker processes,
+upgrade, complete the settings import, and then allow workers to continue.
+The new migration adds configuration tables without rewriting retained Runs or
+research products. An entire database backup now includes credentials.
+
+## Resolution and execution
+
+Daily parameter precedence is explicit Run request, saved DB default, program
+default. CLI flags omitted by the user inherit DB defaults, including research
+depth and analysts; an explicit `standard` still overrides a saved `deep`.
+`TradingAgents.from_env()` retains its public entry point but now uses the
+environment for startup and import candidates, not daily runtime overrides.
+
+Creation freezes research parameters and non-secret connection information on
+the Run. Queued Runs, retries and checkpoint resumes retain those parameters.
+At each execution start, the application reads the current credentials once,
+and binds them to an isolated in-memory execution context. Key rotation affects
+the next execution, not clients already running. Endpoint/connection changes
+reject execution of incompatible older Runs with a prompt to create a new Run;
+new credentials are never silently sent to an old address. Legacy Runs without
+complete connection information use only retained fields and built-in provider
+defaults when that is unambiguous.
+
+Web capabilities, model discovery, CLI, Python and workers resolve through the
+same module. Model discovery caches are isolated by connection ID and its execution/discovery
+revision. Editing unrelated research defaults does not invalidate model lists. It can
+fall back to configured models/manual model IDs when live discovery is
+unavailable; Bedrock bearer authentication currently uses that fallback.
+Saving configuration does not call a paid model or start research.
+
+News windows are calendar offsets inclusive of both endpoints: a 14-day offset
+covers 15 dates. Candidate budgets, output budgets and provider hard limits are
+different: Yahoo candidates cap at 200, China candidates at 100, and global news
+queries at 5. Increasing a window or budget does not prove historical coverage.
+The source cache retains observed material only. Routing retains the existing
+tool, market, default-category precedence and ordered fallback semantics.
+
+Trash retention is read at the next cleanup. Reducing it can remove older items
+already in the trash; zero disables automatic deletion. News cache changes apply
+to newly created research.
+
+## Startup settings and internal values
+
+Keep paths (`TRADINGAGENTS_HOME`, `TRADINGAGENTS_DATABASE_PATH`,
+`TRADINGAGENTS_CACHE_DIR`), host/port, worker poll/lease and SQLite timeout in
+startup configuration. Docker publication variables and LAN token/session secret
+also stay there. The settings page displays deployment information read-only.
+Compose accepts an absent optional `.env` file. For bundled Ollama, set the
+Ollama connection address to `http://ollama:11434/v1` in Settings.
+
+Project paths and the news-selection algorithm version are internal values, not
+editable research preferences. Configuration catalog tests require every default
+field to be classified so a new configuration does not become undiscoverable.
+
+## Credentials and administrative API
+
+Credentials are ordinary local SQLite data protected by local file access, just
+as a local `.env` was. No accounts or encryption service are introduced. Keys
+are masked by default, with explicit reveal/copy, replacement and deletion.
+They are excluded from Run snapshots, graph state/checkpoints, events, research
+exports and browser persistent storage. Whole-database backups include them.
+
+`GET /api/v1/settings` returns effective settings, origins, credential presence,
+initialization and revision. `GET /api/v1/settings/schema` describes the editable
+catalog. `PATCH /api/v1/settings` atomically updates values and credentials and
+supports explicit `reset_fields`; omitted fields remain unchanged and legal
+null values retain their field meaning. Credentials set to null are deleted.
+A stale revision returns HTTP 409, preserving the browser's pending edits.
+
+`POST /api/v1/settings/credentials/reveal` returns only the requested credential.
+`POST /api/v1/settings/import/preview` and `/import/apply` implement the reviewed
+import and initialization workflow. All settings responses use `Cache-Control:
+no-store`. Browser writes/reveal enforce same origin. Existing LAN authentication
+also applies; local loopback use remains login-free.
+
+
+## Model connections and role selection
+
+Quick and deep roles each retain a connection ID, model ID, and reasoning choice.
+The UI starts with a shared-connection editor when both IDs match. Switch to
+separate connections to mix services, including two accounts or gateways using
+the same API. Switching a role's connection clears its unconfirmed model and
+reasoning selection; merging roles asks which connection to keep. Model IDs can
+always be entered manually. Refreshing model lists is explicit and does not
+start a research/model-generation request.
+
+The connection owns its interface (Chat Completions, Responses, Anthropic,
+Google, Azure or Bedrock), discovery strategy and model compatibility policy.
+Ollama can use Chat Completions with native model discovery. DeepSeek/MiniMax
+compatibility rules remain available when changing the endpoint. Generic
+compatible endpoints do not automatically acquire vendor-specific behavior.
+Responses is explicit for new connections; legacy OpenAI endpoint inference is
+used only for compatibility and migration.
+
+Python/HTTP requests accept `connection_id` for both roles, with
+`quick_connection_id` and `deep_connection_id` overriding it individually.
+Omitted selections inherit each role's DB default. Model, reasoning, profile and
+other omitted parameters independently inherit their saved defaults. CLI uses
+`--connection`, `--quick-connection`, and `--deep-connection` with the same rules.
+Legacy `llm_provider` / `--provider` resolves the original migrated connection;
+it cannot be combined with the new connection selectors. It never selects an
+arbitrary connection by name or preset. A deleted original cannot be rebound by
+creating another connection with the same display name.
+
+Run snapshots and method records contain two versioned model bindings. The
+legacy single-provider field is empty for cross-connection research; consumers
+must use the role bindings to display or inspect it. Incremental research keeps
+its existing deep-only execution path and does not require an unused quick
+credential. Role reasoning overrides the connection's compatibility defaults;
+provider-default selection deliberately leaves the choice to the provider.
+
+Disable a connection to hide it from new research while retaining queued tasks,
+resumes and failed-task retries. Replace default references before disabling.
+Deletion removes credentials and is blocked while a default or unfinished Run
+references the connection. Finished reports remain readable after deletion,
+but a failed Run must be recreated with an available connection instead of
+retrying the removed one. A non-secret tombstone prevents identity reuse.
+
+The connection migration preserves initialization and maps existing provider
+settings, credentials and historical references to stable connection IDs.
+Unused vendor presets are not expanded into connection records. Historical
+research JSON is not rewritten. Already initialized installations do not need
+to reimport environment files. Back up and stop old processes before deploying
+this schema; databases with custom connections cannot safely downgrade to the
+single-provider schema.
+
+## Settings API changes
+
+`GET /api/v1/settings` includes safe connection views and credential-presence
+flags. `/settings/schema` includes creation presets. `PATCH /settings` accepts
+`connection_changes` with create/update/reset/delete actions, scoped credential
+changes and the current global revision. It can atomically replace role defaults
+and disable/delete their previous connection. Reset restores the connection's
+original template without changing credentials. Update `enabled` to disable or
+reenable; no additional authentication or account flow is required.
+
+`GET /api/v1/settings/connections/{id}/models` discovers that connection's
+models. The credential reveal request accepts `connection_id` plus a credential
+field such as `api_key`; legacy data-source names remain supported. Reveal and
+settings responses use `Cache-Control: no-store`. Mutation/reveal keeps the
+existing same-origin and LAN-token rules.
+
+Import previews include target connection IDs and credential field names,
+without secret values. Deleted legacy targets are reported as issues: exclude
+those imported fields and configure a new connection explicitly. A stale source
+fingerprint or revision still rejects application.
+
+Drafts survive category navigation in page memory. Leaving Settings prompts
+before discarding changes. Revision conflicts retain drafts and require an
+explicit comparison/reapply choice. Viewed keys are cleared when leaving the
+connection editor and are never written to browser persistent storage.
+
+### Concurrent editing and restoration
+
+Settings retain a baseline and an in-memory draft for each editing unit. Saving
+sends only changed fields. A revision conflict loads the latest values and
+shows field-level differences: unrelated edits are merged, while overlapping
+edits require an explicit choice. Pending credential replacements and deletions
+must also be confirmed; comparison never displays plaintext keys. Save again
+after reviewing the merged draft. A second concurrent update requires another
+review. Deleted connection identities cannot be restored by reapplying a draft.
+
+A connection's restore action previews changes to non-sensitive parameters and
+places them in the draft for review and saving. It preserves credentials, name,
+and enabled state. New connections use **Restore creation settings**. Existing
+legacy-provider connections repaired by migration `0013_submission_identity` use
+**Restore upgrade settings**: their current saved parameters at that upgrade
+become the baseline. The migration does not change their current endpoint,
+credentials, enabled state, or historical Run snapshots. It increments the
+configuration revision when repairing a baseline. Tests use temporary databases;
+upgrading an existing installation remains a separate deployment operation.
+
+### Submission replay and Incremental compatibility
+
+An idempotency key identifies the normalized original submission, including
+explicit research overrides and `source_run_id`, separately from its resolved
+request and execution snapshot. Repeating the same submission returns the
+original Run before resolving current defaults, checking connections, or querying
+data sources. Changing an explicit override returns 409. Omitting a setting and
+explicitly selecting its default remain different submissions; `null` on a field
+whose meaning is inheritance is equivalent to omission. Legacy rows have no
+invented submission identity: replay compares retained request and connection
+snapshot information, and rejects comparisons that cannot establish equivalence.
+The internal identity is excluded from research exports.
+
+New Incremental submissions resolve and validate only their deep connection,
+model and reasoning settings. Legacy callers may still send quick fields; these
+are ignored. The stored dual-binding representation uses a copy of the deep
+binding as its quick placeholder. Method records and the interface display only
+the actual deep role. Old snapshots remain unchanged, and execution/retry reads
+only the credentials it needs. Full Research continues to validate both roles.
+
+Google connections always use the Gemini Developer API with the configured
+endpoint and DB key. Ambient Google keys or Vertex backend selection variables
+do not change that authentication mode. Bedrock's explicitly selected system
+credential chain retains its existing behavior.

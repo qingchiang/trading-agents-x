@@ -106,7 +106,7 @@ def create_app(
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
-    model_discovery = model_discovery or ModelDiscoveryService(settings)
+    model_discovery = model_discovery or ModelDiscoveryService(settings, configuration=service.configuration)
     maintenance = maintenance or TrashMaintenance(settings, repository)
     auth = LanSessionManager(settings)
 
@@ -127,6 +127,8 @@ def create_app(
         description="Local evidence-first investment research run center.",
         lifespan=lifespan,
     )
+    from .settings_api import register_settings_routes
+    register_settings_routes(app, service.configuration)
     app.state.settings = settings
     app.state.service = service
     app.state.model_discovery = model_discovery
@@ -748,13 +750,25 @@ def create_app(
                 "unavailable_reason": availability.reason,
                 "model_discovery_supported": definition.adapter != "custom",
             }
-        defaults = settings.default_run_settings
+        from tradingagents.application.model_connections import legacy_connection_id
+
+        configuration = service.configuration.read()
+        defaults = service.configuration.default_run_settings()
         return CapabilitiesResponse(
+            configuration_initialized=configuration.initialized,
+            connections=configuration.connections,
+            legacy_connections={name: legacy_connection_id(name) for name in providers},
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
             output_languages=["en", "zh-CN", "ja"],
             providers=providers,
             defaults={
+                "quick_connection_id": (
+                    defaults.quick_binding.connection.id if defaults.quick_binding else None
+                ),
+                "deep_connection_id": (
+                    defaults.deep_binding.connection.id if defaults.deep_binding else None
+                ),
                 "profile": defaults.profile.value,
                 "llm_provider": defaults.llm_provider,
                 "quick_model": defaults.quick_model,
@@ -763,7 +777,8 @@ def create_app(
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
                 "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
-                "trash_retention_days": settings.trash_retention_days,
+                "trash_retention_days": configuration.values.trash_retention_days,
+                "analysts": configuration.values.analysts,
             },
         )
 
@@ -782,6 +797,13 @@ def create_app(
                 status_code=404,
                 detail="Unknown model provider",
             ) from exc
+
+    @app.get(
+        f"{API_PREFIX}/settings/connections/{{identity}}/models",
+        response_model=ProviderModelCatalog,
+    )
+    def connection_models(identity: str, refresh: bool = False):
+        return model_discovery.discover_connection(identity, refresh=refresh)
 
     @app.get(f"{API_PREFIX}/health", response_model=HealthResponse)
     def health():

@@ -1,10 +1,11 @@
 import json
-import os
 from datetime import datetime
 from io import StringIO
 
 import pandas as pd
 import requests
+
+from tradingagents.credentials import credential
 
 from .errors import VendorNotConfiguredError, VendorRateLimitError
 
@@ -27,10 +28,10 @@ class AlphaVantageNotConfiguredError(VendorNotConfiguredError):
 
 def get_api_key() -> str:
     """Retrieve the API key for Alpha Vantage from environment variables."""
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    api_key = credential("ALPHA_VANTAGE_API_KEY")
     if not api_key:
         raise AlphaVantageNotConfiguredError(
-            "ALPHA_VANTAGE_API_KEY environment variable is not set."
+            "ALPHA_VANTAGE_API_KEY credential is not configured in Settings."
         )
     return api_key
 

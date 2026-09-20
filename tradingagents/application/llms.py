@@ -23,12 +23,37 @@ class RunLLMs:
     quick_serializer: Any
     deep_serializer: Any
 
+
 def create_run_llms(
     settings: RunSettings,
     *,
     callbacks: list[Any] | None = None,
     purpose: Literal["full", "incremental"] = "full",
 ) -> RunLLMs:
+    from tradingagents.llm_clients.connections import build_model, serializer_overrides
+
+    if settings.deep_binding is not None and settings.quick_binding is not None:
+
+        def pair(binding):
+            options = {
+                "temperature": settings.temperature,
+                "max_retries": settings.llm_max_retries,
+                "callbacks": callbacks,
+            }
+            model = build_model(binding, **options)
+            serial = (
+                build_model(binding, serializer=True, **options)
+                if serializer_overrides(binding.connection.compatibility, binding.model)
+                else model
+            )
+            return model, serial
+
+        deep, deep_serializer = pair(settings.deep_binding)
+        quick, quick_serializer = (
+            (deep, deep_serializer) if purpose == "incremental" else pair(settings.quick_binding)
+        )
+        return RunLLMs(quick, deep, quick_serializer, deep_serializer)
+
     config = {
         **dict(settings.data_config),
         "llm_provider": settings.llm_provider,
@@ -40,7 +65,7 @@ def create_run_llms(
         "temperature": settings.temperature,
         "llm_max_retries": settings.llm_max_retries,
     }
-    common: dict[str, Any] = {}
+    common: dict[str, Any] = {"connection": settings.connection or {}}
     if settings.temperature is not None:
         common["temperature"] = float(settings.temperature)
     if settings.llm_max_retries is not None:
@@ -57,18 +82,11 @@ def create_run_llms(
         return kwargs
 
     def serializer(model: str, fallback: Any) -> Any:
-        if (
-            settings.llm_provider != "deepseek"
-            or model not in {"deepseek-v4-flash", "deepseek-v4-pro"}
-        ):
+        overrides = serializer_overrides(settings.llm_provider, model)
+        if overrides is None:
             return fallback
-        kwargs = {
-            key: value
-            for key, value in common.items()
-            if key != "temperature"
-        }
-        kwargs["temperature"] = 0.0
-        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        kwargs = {key: value for key, value in common.items() if key != "temperature"}
+        kwargs.update(overrides)
         return create_llm_client(
             provider=settings.llm_provider,
             model=model,

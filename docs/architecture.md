@@ -151,8 +151,20 @@ execution fields do not belong in this contract.
 
 `AppSettings` and `RunSettings` are immutable Pydantic models.
 `AppSettings.from_env()` is called at an application entry point; dotenv files
-are never loaded as a package-import side effect. Provider keys remain in the
-process environment and are excluded from persisted configuration snapshots.
+are never loaded as a package-import side effect. Daily defaults, provider connections and credentials live in SQLite and are
+resolved by the shared configuration module. Environment files supply startup
+settings and explicit import candidates; they never override initialized daily
+configuration. Provider keys are excluded from Run configuration snapshots. Model connections
+have stable IDs independent of vendor presets. Each quick/deep binding retains
+a typed transport, compatibility policy, model and reasoning selection; the
+application layer delegates vendor-specific behavior to the LLM subsystem.
+Connection credentials are scoped by ID and bound once per attempt. Admission
+and retry recheck connection references under their SQLite write transaction,
+so deletion cannot race a new queued reference.
+Incremental creation resolves only the deep role; its new quick binding is a
+compatibility placeholder copied from deep. Internal submission identity retains
+explicit overrides separately from resolved snapshots and is not exported.
+See [Application configuration](configuration.md) for migration and precedence.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
@@ -171,8 +183,8 @@ settings must remain isolated even if worker concurrency changes in the future.
 `AnalysisService` is the lifecycle owner. It:
 
 1. normalizes and validates `AnalysisRequest`;
-2. resolves and redacts run configuration;
-3. creates or idempotently returns a run;
+2. returns a matching original submission before consulting mutable defaults;
+3. resolves and redacts configuration for a new submission and creates it atomically;
 4. builds an independent Full run without retrieving historical review state;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
@@ -203,6 +215,11 @@ queued → running → succeeded
 
 The worker atomically claims one queued run and sets a lease. A process crash
 leaves the run recoverable after lease expiry. Heartbeats extend active leases.
+Starting an attempt means preparation, not result submission. Incremental
+collection emits a start event and per-domain progress before synthesis; the
+application emits `run.commit_started` immediately before persisting the final
+result. Dataflow progress is scoped to the attempt, with event persistence and
+logging owned by `AnalysisService`.
 `tradingagents start` is a local foreground supervisor that health-gates and
 monitors the otherwise independent Web and worker processes; production-style
 and Docker deployments continue to manage those processes separately. Its
@@ -608,7 +625,10 @@ Missing optional inputs do not by themselves require a new Full Research Run.
 
 Stock Vendor-adjusted Return is the deterministic v1 Performance requirement.
 Its two endpoints come from one disclosed provider/adjustment/retrieval series;
-that series may also supply market Evidence. Named benchmark returns are
+that series may also supply market Evidence. The price Evidence's own origin
+binds its retrieval timestamp and fallback status to the calculation; the
+domain's source summary may include later observations from the same provider.
+Named benchmark returns are
 independent optional context and never block a calculated stock return or an
 otherwise valid Incremental Node. The stock component itself is always recorded
 but may be Not Yet Observable or unavailable; an unavailable result does not
@@ -638,9 +658,9 @@ symbols that are also real equity tickers continue to the strict eligibility
 stage.
 
 After deterministic candidate validation, `AnalysisService` performs strict
-instrument eligibility through one injected resolver before idempotent Run
-creation. Only a single exact canonical-symbol result classified as equity is
-admitted. A known non-equity raises `unsupported_instrument` (HTTP 422); an
+instrument eligibility through one injected resolver before new Run
+creation. Idempotent replay returns the retained Run before this lookup. Only a
+single exact canonical-symbol result classified as equity is admitted. A known non-equity raises `unsupported_instrument` (HTTP 422); an
 empty, ambiguous, mismatched, unknown, or failed classification raises
 `instrument_eligibility_unavailable` (HTTP 503). Execution repeats this check
 before graph construction and data routing so queued legacy candidates cannot
@@ -750,10 +770,17 @@ The normal server binds to loopback and needs no login. LAN mode requires one
 environment token; the login endpoint exchanges it for a signed, expiring,
 `HttpOnly`, `SameSite=Strict` cookie. Mutating requests validate same origin.
 
-Provider keys, authorization headers, LAN tokens, session secrets, raw provider
-exceptions, and sensitive tool arguments must not be stored in application
-tables, events, SSE, API errors, or browser logs. Settings/capability endpoints
-expose only whether a key is configured.
+Provider and data-service keys are stored only in the dedicated configuration
+credential table and are bound to execution-scoped memory at attempt start. They
+must not enter Run tables, graph state/checkpoints, events, SSE, research exports,
+API errors, application logs or browser persistent storage. Credential-scoped
+logging redacts records before handlers receive them; terminal worker diagnostics
+are captured before the execution context exits, including exception cause chains.
+Ordinary settings/capability endpoints
+expose only presence; an explicit same-origin reveal endpoint returns the selected
+key with caching disabled. Whole-database backups contain credentials. LAN tokens
+and session secrets remain startup-only. Raw provider exceptions and sensitive
+tool arguments remain excluded from events, API errors and browser logs.
 
 This is a single-user local boundary. It does not provide TLS, user accounts,
 roles, tenant isolation, or Internet-facing hardening.

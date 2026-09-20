@@ -1,6 +1,8 @@
+import RoleConnections from "../components/RoleConnections";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../i18n";
+import { settingsCopy } from "../settingsCopy";
 import {
   api,
   ApiError,
@@ -47,7 +49,7 @@ function reconcileAnalysisDate(
 }
 
 export default function NewRun() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const entry = useMemo(() => {
@@ -88,6 +90,8 @@ export default function NewRun() {
   const [quickCustomModel, setQuickCustomModel] = useState("");
   const [deepCustomModel, setDeepCustomModel] = useState("");
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
+  const [quickConnection, setQuickConnection] = useState("");
+  const [deepConnection, setDeepConnection] = useState("");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
   const [sourceRunId, setSourceRunId] = useState("");
@@ -285,26 +289,26 @@ export default function NewRun() {
         setAnalysts(
           sourceIsTerminal
             ? [...(sourceRequest?.analysts ?? analystKeys)]
-            : [...analystKeys],
+            : [...(data.defaults.analysts ?? analystKeys)] as typeof analystKeys[number][],
         );
         setProvider(nextProvider);
         if (sourceIsTerminal && sourceProviderAvailable) {
           setQuickModel(sourceRequest?.quick_model ?? "");
           setDeepModel(sourceRequest?.deep_model ?? "");
           setQuickReasoning(
-            sourceRequest?.quick_reasoning_effort ?? "provider_default",
+            sourceRequest?.quick_reasoning_effort ?? "",
           );
           setDeepReasoning(
-            sourceRequest?.deep_reasoning_effort ?? "provider_default",
+            sourceRequest?.deep_reasoning_effort ?? "",
           );
         } else if (nextProvider === data.defaults.llm_provider) {
           setQuickModel(data.defaults.quick_model);
           setDeepModel(data.defaults.deep_model);
           setQuickReasoning(
-            data.defaults.quick_reasoning_effort ?? "provider_default",
+            data.defaults.quick_reasoning_effort ?? "",
           );
           setDeepReasoning(
-            data.defaults.deep_reasoning_effort ?? "provider_default",
+            data.defaults.deep_reasoning_effort ?? "",
           );
         } else {
           setQuickModel("");
@@ -332,7 +336,17 @@ export default function NewRun() {
         } else if (sourceIsTerminal) {
           setTemplateWarning("");
         }
-        if (!nextProvider) setError(t("noConfiguredProviders"));
+        if (Object.keys(data.connections ?? {}).length) {
+          const q = sourceRequest?.quick_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.quick_connection_id ?? "";
+          const d = sourceRequest?.deep_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.deep_connection_id ?? "";
+          setQuickConnection(q); setDeepConnection(d); setProvider(d);
+          setQuickModel(sourceRequest?.quick_model ?? data.defaults.quick_model);
+          setDeepModel(sourceRequest?.deep_model ?? data.defaults.deep_model);
+          setQuickReasoning(sourceRequest?.quick_reasoning_effort ?? data.defaults.quick_reasoning_effort ?? "");
+          setDeepReasoning(sourceRequest?.deep_reasoning_effort ?? data.defaults.deep_reasoning_effort ?? "");
+          if (!data.connections?.[d]?.selectable || !data.connections?.[q]?.selectable) setTemplateWarning(t("templateProviderUnavailable", { provider: "connection" }));
+        }
+        if (!nextProvider && !Object.keys(data.connections ?? {}).length) setError(t("noConfiguredProviders"));
       } catch (cause) {
         if (!active) return;
         setError(cause instanceof Error ? cause.message : t("error"));
@@ -345,7 +359,7 @@ export default function NewRun() {
   }, [fromRun, lockedKind, t]);
 
   useEffect(() => {
-    if (!capabilities || !provider) return;
+    if (!capabilities || !provider || Object.keys(capabilities.connections ?? {}).length) return;
     let active = true;
     setModelsLoading(true);
     setModelCatalog(null);
@@ -509,11 +523,10 @@ export default function NewRun() {
         asset_type: "stock",
         profile,
         analysts: analysts as AnalysisRequest["analysts"],
-        llm_provider: provider,
-        quick_model: resolvedQuickModel,
+        ...(Object.keys(capabilities?.connections ?? {}).length ? { ...(researchKind === "full" ? { quick_connection_id: quickConnection } : {}), deep_connection_id: deepConnection } : { llm_provider: provider }),
+        ...(researchKind === "full" ? { quick_model: resolvedQuickModel, quick_reasoning_effort: quickReasoning || null } : {}),
         deep_model: resolvedDeepModel,
-        quick_reasoning_effort: quickReasoning,
-        deep_reasoning_effort: deepReasoning,
+        deep_reasoning_effort: deepReasoning || null,
         output_language: outputLanguage,
         research_kind: researchKind,
         full_baseline_run_id:
@@ -556,18 +569,22 @@ export default function NewRun() {
     }
   };
 
+  const unavailableConnection = Object.keys(capabilities?.connections ?? {}).length > 0 && (!capabilities?.connections?.[deepConnection]?.selectable || (researchKind === "full" && !capabilities?.connections?.[quickConnection]?.selectable));
   const submitUnavailable = submitting ? t("loading")
+    : capabilities?.configuration_initialized === false ? settingsCopy[i18n.language.startsWith("zh") ? "zh-CN" : i18n.language.startsWith("ja") ? "ja" : "en"].setup
     : !ticker.trim() ? t("enterInstrumentFirst")
     : analysisContextLoading ? t("marketDateLoading")
     : !analysisContext ? analysisContextError || t("marketDateLoading")
     : !analysisDate ? t("selectAnalysisDate")
     : !capabilities || modelsLoading ? t("loading")
+    : unavailableConnection ? t("chooseResearchModels")
     : !provider || researchKind === "full" && !quickModel || !deepModel ? t("chooseResearchModels")
     : researchKind === "incremental" && !fullBaselineRunId ? t("selectResearchBaseline")
     : "";
 
   return (
     <section>
+      {capabilities?.configuration_initialized === false && <div className="alert"><Link to="/settings">{settingsCopy[i18n.language.startsWith("zh") ? "zh-CN" : i18n.language.startsWith("ja") ? "ja" : "en"].setup}</Link></div>}
       <header className="page-header">
         <div>
           <h1>{t("newRun")}</h1>
@@ -828,6 +845,9 @@ export default function NewRun() {
               ))}
             </div>
             <h2>{t("modelsOutput")}</h2>
+            {Object.keys(capabilities?.connections ?? {}).length > 0 ? <RoleConnections language={i18n.language} connections={capabilities?.connections ?? {}} includeQuick={researchKind === "full"}
+              value={{ quick: { connection: quickConnection, model: quickModel, reasoning: quickReasoning }, deep: { connection: deepConnection, model: deepModel, reasoning: deepReasoning } }}
+              onChange={roles => { setQuickConnection(roles.quick.connection); setDeepConnection(roles.deep.connection); setProvider(roles.deep.connection); setQuickModel(roles.quick.model); setDeepModel(roles.deep.model); setQuickReasoning(roles.quick.reasoning); setDeepReasoning(roles.deep.reasoning); }} /> : <>
             <div className="model-provider">
               <label>
                 {t("provider")}
@@ -928,6 +948,7 @@ export default function NewRun() {
               />
               </fieldset>
             </div>
+            </>}
             {(modelsLoading || modelWarning) && (
               <p
                 className={`model-catalog-note ${
@@ -1058,9 +1079,8 @@ function reasoningOptions(
       ? ["provider_default"]
       : (catalog?.models.find((option) => option.id === model)
           ?.reasoning_efforts ?? ["provider_default"]);
-  return current && !options.includes(current)
-    ? [...options, current]
-    : options;
+  const inherited = ["", ...options];
+  return current && !inherited.includes(current) ? [...inherited, current] : inherited;
 }
 
 function ReasoningSelect({
@@ -1076,6 +1096,7 @@ function ReasoningSelect({
   onChange: (value: string) => void;
   providerDefault: string;
 }) {
+  const { t } = useTranslation();
   return (
     <label>
       {label}
@@ -1085,7 +1106,7 @@ function ReasoningSelect({
       >
         {options.map((option) => (
           <option key={option} value={option}>
-            {option === "provider_default" ? providerDefault : option}
+            {option === "" ? t("defaults") : option === "provider_default" ? providerDefault : option}
           </option>
         ))}
       </select>

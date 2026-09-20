@@ -49,13 +49,21 @@ export function Router({
     const previousRestoration = window.history.scrollRestoration;
     window.history.scrollRestoration = "manual";
     window.history.replaceState({ ...window.history.state, researchNavigation: locationRef.current }, "");
-    const syncLocation = () => setLocation({ ...parseLocation(browserLocation()), ...window.history.state?.researchNavigation, ...parseBrowserPath() });
+    const syncLocation = () => {
+      const path = browserLocation();
+      if (!window.dispatchEvent(new CustomEvent("tradingagents:before-navigate", { cancelable: true, detail: { path } }))) {
+        window.history.pushState({ researchNavigation: locationRef.current }, "", locationPath(locationRef.current));
+        return;
+      }
+      setLocation({ ...parseLocation(path), ...window.history.state?.researchNavigation, ...parseBrowserPath() });
+    };
     window.addEventListener("popstate", syncLocation);
     return () => { window.history.scrollRestoration = previousRestoration; window.removeEventListener("popstate", syncLocation); };
   }, [browserBacked]);
 
   const navigate = useCallback(
     (to: string, options?: NavigateOptions) => {
+      if (!window.dispatchEvent(new CustomEvent("tradingagents:before-navigate", { cancelable: true, detail: { path: to } }))) return;
       const current = locationRef.current;
       const next = parseLocation(to);
       if (options?.replace) next.key = current.key;

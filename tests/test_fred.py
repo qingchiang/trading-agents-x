@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 
 import tradingagents.default_config as default_config
+from tradingagents.credentials import use_credentials
 from tradingagents.dataflows import fred, interface, macro_common
 from tradingagents.dataflows.config import bind_config
 
@@ -90,7 +91,7 @@ class FredResolutionTests(unittest.TestCase):
 @pytest.mark.unit
 class FredConfigTests(unittest.TestCase):
     def test_missing_key_raises_not_configured(self):
-        with mock.patch.dict("os.environ", {}, clear=True), \
+        with use_credentials({}), \
                 self.assertRaises(fred.FredNotConfiguredError):
             fred.get_api_key()
 

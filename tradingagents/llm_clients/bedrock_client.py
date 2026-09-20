@@ -1,5 +1,6 @@
-import os
 from typing import Any
+
+from tradingagents.credentials import credential
 
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
@@ -42,12 +43,9 @@ def _bedrock_class():
 class BedrockClient(BaseLLMClient):
     """Client for Amazon Bedrock via the Converse API (langchain-aws).
 
-    Authentication is either a Bedrock API key (bearer token) via
-    ``AWS_BEARER_TOKEN_BEDROCK`` — no AWS access keys required — or the standard
-    AWS credential chain (env vars, ``~/.aws/credentials``, or an IAM role) with
-    optional ``AWS_PROFILE``. Set ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` either
-    way (the token carries no region). The model name is a Bedrock model ID or
-    cross-region inference profile ID, e.g. ``us.anthropic.claude-opus-4-8-v1:0``.
+    The saved connection explicitly selects DB bearer/static credentials or the
+    system AWS credential chain. Region and optional profile come from the
+    retained connection snapshot. Model IDs may be inference profile IDs.
     """
 
     def get_llm(self) -> Any:
@@ -55,18 +53,44 @@ class BedrockClient(BaseLLMClient):
         self.warn_if_unknown_model()
         chat_cls = _bedrock_class()
 
-        region = (
-            os.environ.get("AWS_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or _DEFAULT_REGION
-        )
+        connection = self.kwargs.get("connection") or {}
+        auth = self.kwargs.get("auth")
+
+        def read_secret(field, legacy):
+            return auth.get(field) if auth is not None else credential(legacy)
+
+        region = connection.get("region") or _DEFAULT_REGION
+        mode = connection.get("auth_mode", "system")
         llm_kwargs = {"model": self.model, "region_name": region}
-        # A Bedrock API key authenticates without AWS access keys. Passing it as
-        # api_key makes langchain-aws prefer bearer auth, so an ambient
-        # AWS_PROFILE / SigV4 credentials can't override it (#1103).
-        bearer_token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
-        if bearer_token:
-            llm_kwargs["api_key"] = bearer_token
+        if mode == "bearer":
+            token = read_secret("bearer_token", "AWS_BEARER_TOKEN_BEDROCK")
+            if not token:
+                raise ValueError("Configure the Bedrock bearer credential in Settings")
+            llm_kwargs["api_key"] = token
+        elif auth is not None:
+            from .connections import aws_client
+
+            llm_kwargs["client"] = aws_client(connection, auth, "bedrock-runtime")
+        else:
+            import boto3
+
+            session_kwargs = {}
+            if mode == "static":
+                key, secret = (
+                    read_secret("access_key_id", "AWS_ACCESS_KEY_ID"),
+                    read_secret("secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+                )
+                if not key or not secret:
+                    raise ValueError("Configure AWS access credentials in Settings")
+                session_kwargs = {
+                    "aws_access_key_id": key,
+                    "aws_secret_access_key": secret,
+                    "aws_session_token": read_secret("session_token", "AWS_SESSION_TOKEN"),
+                }
+            else:
+                session_kwargs["profile_name"] = connection.get("aws_profile")
+            session = boto3.Session(**session_kwargs)
+            llm_kwargs["client"] = session.client("bedrock-runtime", region_name=region)
         for key in ("temperature", "max_tokens", "max_retries", "callbacks"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]

@@ -27,6 +27,8 @@ from datetime import datetime, timedelta
 
 import requests
 
+from tradingagents.credentials import credential
+
 from ..config import get_config
 from ..errors import VendorNotConfiguredError, VendorRateLimitError
 from .calendar import tokyo_today
@@ -62,10 +64,10 @@ class EDINETRateLimitError(VendorRateLimitError):
 
 def get_api_key() -> str:
     """Return the EDINET v2 subscription key from the environment."""
-    key = os.getenv("EDINET_API_KEY")
+    key = credential("EDINET_API_KEY")
     if not key:
         raise EDINETNotConfiguredError(
-            "EDINET_API_KEY environment variable is not set. Issue a subscription "
+            "EDINET_API_KEY credential is not configured in Settings. Issue a subscription "
             "key from the EDINET API registration page (https://api.edinet-fsa.go.jp)."
         )
     return key

@@ -9,9 +9,9 @@ so there is no token caching. Symbols are converted between the Yahoo-style
 
 from __future__ import annotations
 
-import os
-
 import requests
+
+from tradingagents.credentials import credential
 
 from ..errors import VendorNotConfiguredError, VendorRateLimitError
 from ..symbol_utils import tokyo_securities_base
@@ -50,10 +50,10 @@ class JQuantsRateLimitError(VendorRateLimitError):
 
 def get_api_key() -> str:
     """Return the J-Quants v2 API key (``x-api-key``) from the environment."""
-    key = os.getenv("JQUANTS_API_KEY")
+    key = credential("JQUANTS_API_KEY")
     if not key:
         raise JQuantsNotConfiguredError(
-            "JQUANTS_API_KEY environment variable is not set. Issue an API key "
+            "JQUANTS_API_KEY credential is not configured in Settings. Issue an API key "
             "from the J-Quants dashboard (Settings > API Key)."
         )
     return key

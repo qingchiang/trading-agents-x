@@ -1,5 +1,9 @@
 import type { components } from "./types.generated";
 
+export type ModelConnection = components["schemas"]["ModelConnection"];
+export type ConnectionChange = components["schemas"]["ConnectionChange"];
+export type ConnectionView = components["schemas"]["ConnectionView"];
+
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
 export type AnalysisCutoffContext =
   components["schemas"]["AnalysisCutoffContext"];
@@ -60,6 +64,14 @@ export type EvidenceTableCell = components["schemas"]["EvidenceTableCell"];
 export type EvidenceTableRow = components["schemas"]["EvidenceTableRow"];
 export type CalculationRecord = components["schemas"]["CalculationRecord"];
 export type Capabilities = components["schemas"]["CapabilitiesResponse"];
+export type ConfigurationView = components["schemas"]["ConfigurationView"];
+export type ConfigurationValues = components["schemas"]["ConfigurationValues"];
+export type ConfigurationSchema = components["schemas"]["ConfigurationSchema"];
+export type ConfigurationField = components["schemas"]["ConfigurationField"];
+export type ConfigurationPatch = components["schemas"]["ConfigurationPatch"];
+export type ImportRequest = components["schemas"]["ImportRequest"];
+export type ImportPreview = components["schemas"]["ImportPreview"];
+export type ProviderConnection = components["schemas"]["ProviderConnection"];
 export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
@@ -85,6 +97,7 @@ export class ApiError extends Error {
     message: string,
     public context?: AnalysisCutoffContext,
     public requestedAnalysisDate?: string,
+    public details?: { location: string[]; message: string }[],
   ) {
     super(message);
   }
@@ -104,12 +117,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let code: string | undefined;
     let context: AnalysisCutoffContext | undefined;
     let requestedAnalysisDate: string | undefined;
+    let details: { location: string[]; message: string }[] | undefined;
     try {
       const payload = await response.json();
       message = payload.error?.message || payload.detail || message;
       code = payload.error?.code;
       context = payload.context;
       requestedAnalysisDate = payload.requested_analysis_date;
+      details = payload.details;
     } catch {
       // Preserve the HTTP status text.
     }
@@ -122,12 +137,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message,
       context,
       requestedAnalysisDate,
+      details,
     );
   }
   return (await response.json()) as T;
 }
 
 export const api = {
+  settings: () => request<ConfigurationView>("/api/v1/settings"),
+  settingsSchema: () => request<ConfigurationSchema>("/api/v1/settings/schema"),
+  saveSettings: (patch: ConfigurationPatch) => request<ConfigurationView>("/api/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  revealCredential: (name: string, connection_id?: string) => request<{ value: string | null }>("/api/v1/settings/credentials/reveal", { method: "POST", body: JSON.stringify({ name, connection_id }) }),
+  previewSettingsImport: (input: ImportRequest) => request<ImportPreview>("/api/v1/settings/import/preview", { method: "POST", body: JSON.stringify(input) }),
+  applySettingsImport: (input: ImportRequest) => request<ConfigurationView>("/api/v1/settings/import/apply", { method: "POST", body: JSON.stringify(input) }),
   analysisCutoffContext: (instrument: string) =>
     request<AnalysisCutoffContext>(
       `/api/v1/instruments/${encodeURIComponent(instrument)}/analysis-cutoff-context`,
@@ -135,6 +157,7 @@ export const api = {
   health: () => request<Health>("/api/v1/health"),
   capabilities: () =>
     request<Capabilities>("/api/v1/capabilities"),
+  connectionModels: (id: string, refresh = false) => request<ProviderModelCatalog>(`/api/v1/settings/connections/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`),
   providerModels: (provider: string, refresh = false) =>
     request<ProviderModelCatalog>(
       `/api/v1/providers/${encodeURIComponent(provider)}/models${

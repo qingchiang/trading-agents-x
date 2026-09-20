@@ -1,3 +1,4 @@
+import configurationFixture from "./fixtures/configuration.json" with { type: "json" };
 import { expect, test } from "@playwright/test";
 import { makeRun, result, cycleTimeline } from "./fixtures/research";
 
@@ -41,6 +42,8 @@ for (const locale of ["en", "zh-CN", "ja"]) {
       }
       else if (path === "/api/v1/instruments/recent") json = [];
       else if (path.includes("/models")) json = { models: [], source: "fixture", fetched_at: "2026-07-25T00:00:00Z" };
+      else if (path === "/api/v1/settings") json = configurationFixture.view;
+      else if (path === "/api/v1/settings/schema") json = configurationFixture.schema;
       else if (path === "/api/v1/capabilities") json = { defaults: { trash_retention_days: 30, profile: "standard", llm_provider: "openai", quick_model: "quick", deep_model: "deep", quick_reasoning_effort: "provider_default", deep_reasoning_effort: "provider_default", output_language: "en", lan_enabled: false }, profiles: ["fast", "standard", "deep"], analysts: ["market", "news"], output_languages: ["en", "zh-CN", "ja"], providers: { openai: { label: "OpenAI", configured: true, selectable: true, api_key_configured: true } } };
       return route.fulfill({ json });
     });
@@ -54,7 +57,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
         ["runs", "/runs", ".task-group"],
         ["library", "/timelines", ".research-library-table"],
         ["new", "/runs/new", ".run-form"],
-        ["settings", "/settings", ".settings-grid"],
+        ["settings", "/settings", ".connections-workspace"],
         ["diagnostics", "/runs/full?view=diagnostics", ".diagnostic-block"],
       ]) {
         await page.goto(path);
@@ -87,6 +90,7 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           }
         }
         if (label === 'full') {
+          await expect(page.locator('.decision-hero > .decision-rating-v2')).toBeVisible();
           const range = page.locator('.scenario-range-name').first();
           await expect(range).toHaveText(rangeName);
           const available = (await page.locator('.scenario-reference-heading').first().boundingBox())!.width;
@@ -107,11 +111,6 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           }
           await page.locator(".model-groups").scrollIntoViewIfNeeded();
           expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-        }
-        if (label === "settings") {
-          const checkbox = await page.locator(".interface-preferences input[type=checkbox]").boundingBox();
-          expect(checkbox!.width).toBeLessThanOrEqual(24);
-          expect(checkbox!.height).toBeLessThanOrEqual(24);
         }
         await page.screenshot({ path: info.outputPath(`${locale}-${width}-${label}.png`), fullPage: false });
       }

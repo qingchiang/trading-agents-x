@@ -24,7 +24,8 @@ and versioned HTTP API.
 4. Record provider/model settings you still need without copying credentials
    into notes, issues, or logs.
 5. Install the new release into a separate virtual environment.
-6. Configure a local database path and provider keys through `.env`.
+6. Configure any custom database path through startup settings. Initialize daily
+   configuration and provider keys in Settings; see [configuration migration](configuration.md).
 
 The migration does not modify legacy report trees or old checkpoint databases.
 When an existing Branch 3 application database is opened, Alembic revision
@@ -132,8 +133,9 @@ limits, report paths, and the old checkpoint toggle. Profile choice now owns
 graph depth; the database/checkpoint lifecycle is always managed by the
 application service.
 
-API keys continue to come only from environment variables. They are not
-migrated into SQLite.
+Daily configuration and API keys now live in dedicated SQLite configuration
+tables after explicit initialization/import. They remain excluded from research
+snapshots, events, checkpoints and exports. See [configuration migration](configuration.md).
 
 ## Legacy Markdown memory
 

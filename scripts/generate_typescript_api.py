@@ -29,6 +29,8 @@ def _reference(value: str) -> str:
 def _schema_type(schema: dict[str, Any], level: int = 0) -> str:
     if "$ref" in schema:
         return _reference(str(schema["$ref"]))
+    if "const" in schema:
+        return json.dumps(schema["const"])
     if "enum" in schema:
         return " | ".join(json.dumps(value) for value in schema["enum"])
     for union_key in ("anyOf", "oneOf"):

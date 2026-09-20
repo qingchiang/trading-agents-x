@@ -4,6 +4,7 @@ import App from "./App";
 import "./i18n";
 import { Router } from "./router";
 import "./styles.css";
+import "./settings.css";
 import "./research.css";
 import "./workspace.css";
 import "./diagnostics.css";

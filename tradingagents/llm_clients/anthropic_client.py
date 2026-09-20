@@ -2,12 +2,15 @@ from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 
+from tradingagents.credentials import credential
+
 from .base_client import BaseLLMClient, normalize_content
+from .provider_registry import PROVIDER_REGISTRY
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "max_tokens", "temperature",
+    "timeout", "max_retries", "max_tokens", "temperature",
     "callbacks", "http_client", "http_async_client", "effort",
 )
 
@@ -32,10 +35,12 @@ class AnthropicClient(BaseLLMClient):
     def get_llm(self) -> Any:
         """Return configured ChatAnthropic instance."""
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        key = self.kwargs.get("api_key") or credential("ANTHROPIC_API_KEY")
+        if not key:
+            raise ValueError("Configure the Anthropic credential in Settings")
+        llm_kwargs = {"model": self.model, "api_key": key}
 
-        if self.base_url:
-            llm_kwargs["base_url"] = self.base_url
+        llm_kwargs["base_url"] = self.base_url or PROVIDER_REGISTRY["anthropic"].default_base_url
 
         for key in _PASSTHROUGH_KWARGS:
             if key not in self.kwargs:

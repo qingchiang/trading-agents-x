@@ -2159,6 +2159,8 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
         },
         load_env_files=False,
     )
+    from tests.configuration_helpers import import_configuration
+    import_configuration(settings)
     service = AnalysisService(
         settings,
         eligibility_resolver=lambda ticker: {
@@ -2191,9 +2193,10 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
 @pytest.mark.anyio
 async def test_model_catalog_falls_back_without_leaking_configuration(
     web_client: httpx.AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
+    web_settings,
 ) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tests.configuration_helpers import save_configuration
+    save_configuration(web_settings, credentials={"OPENAI_API_KEY": None})
 
     response = await web_client.get("/api/v1/providers/openai/models")
     unknown = await web_client.get("/api/v1/providers/not-real/models")

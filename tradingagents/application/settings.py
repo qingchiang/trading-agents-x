@@ -9,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import dotenv_values, find_dotenv
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -27,8 +27,8 @@ from .contracts import (
     RunProfile,
     normalize_report_language,
     report_language_prompt_label,
-    report_language_value,
 )
+from .model_connections import ModelBinding
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
 
@@ -60,6 +60,10 @@ class RunSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    binding_version: int = 2
+    quick_binding: ModelBinding | None = None
+    deep_binding: ModelBinding | None = None
+    research_kind: str = "full"
     profile: RunProfile = RunProfile.STANDARD
     llm_provider: str = "openai"
     quick_model: str = "gpt-5.4-mini"
@@ -70,6 +74,7 @@ class RunSettings(BaseModel):
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
+    connection: dict[str, Any] | None = None
     data_config: Mapping[str, Any]
 
     @field_validator("output_language", mode="before")
@@ -136,6 +141,9 @@ class AppSettings(BaseModel):
     busy_timeout_ms: int = Field(default=5000, ge=100)
     trash_retention_days: int = Field(default=30, ge=0)
     default_run_settings: RunSettings
+    import_environment: dict[str, SecretStr] = Field(default_factory=dict, exclude=True, repr=False)
+    import_primary: dict[str, SecretStr] = Field(default_factory=dict, exclude=True, repr=False)
+    import_enterprise: dict[str, SecretStr] = Field(default_factory=dict, exclude=True, repr=False)
 
     @field_validator("database_path", "data_cache_dir", mode="before")
     @classmethod
@@ -151,7 +159,10 @@ class AppSettings(BaseModel):
         cwd: Path | None = None,
     ) -> AppSettings:
         """Load dotenv files at an explicit application boundary, never on import."""
-        if load_env_files and environ is None:
+        env = dict(os.environ if environ is None else environ)
+        process_environment = dict(env)
+        primary_values, enterprise_values = {}, {}
+        if load_env_files and environ is None and not env.get("PYTHON_DOTENV_DISABLED"):
             if cwd is None:
                 primary = find_dotenv(".env", usecwd=True)
                 enterprise = find_dotenv(".env.enterprise", usecwd=True)
@@ -163,58 +174,14 @@ class AppSettings(BaseModel):
                 enterprise = (
                     str(enterprise_path) if enterprise_path.is_file() else ""
                 )
-            if primary:
-                load_dotenv(primary, override=False)
-            if enterprise:
-                load_dotenv(enterprise, override=False)
-        env = dict(os.environ if environ is None else environ)
-        if "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS" in env:
-            raise ValueError(
-                "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS was renamed to "
-                "TRADINGAGENTS_TRASH_RETENTION_DAYS"
-            )
+            primary_values = {k: v for k, v in dotenv_values(primary, interpolate=False).items() if v is not None} if primary else {}
+            enterprise_values = {k: v for k, v in dotenv_values(enterprise, interpolate=False).items() if v is not None} if enterprise else {}
+            env = {**enterprise_values, **primary_values, **env}
         home = Path(env.get("TRADINGAGENTS_HOME", "~/.tradingagents")).expanduser()
-        defaults = build_default_config(env)
-        provider = env.get("TRADINGAGENTS_LLM_PROVIDER", defaults["llm_provider"])
-        output_language = normalize_report_language(
-            env.get(
-                "TRADINGAGENTS_OUTPUT_LANGUAGE",
-                defaults.get("output_language", "en"),
-            )
-        )
-        data_config = deepcopy(defaults)
-        data_config["output_language"] = report_language_value(output_language)
+        defaults = build_default_config()
         run_settings = RunSettings(
-            llm_provider=provider,
-            quick_model=env.get(
-                "TRADINGAGENTS_QUICK_THINK_LLM", defaults["quick_think_llm"]
-            ),
-            deep_model=env.get(
-                "TRADINGAGENTS_DEEP_THINK_LLM", defaults["deep_think_llm"]
-            ),
-            backend_url=env.get(
-                "TRADINGAGENTS_LLM_BACKEND_URL", defaults.get("backend_url")
-            ),
-            quick_reasoning_effort=env.get(
-                "TRADINGAGENTS_QUICK_REASONING_EFFORT",
-                defaults.get("quick_reasoning_effort"),
-            ),
-            deep_reasoning_effort=env.get(
-                "TRADINGAGENTS_DEEP_REASONING_EFFORT",
-                defaults.get("deep_reasoning_effort"),
-            ),
-            temperature=(
-                float(env["TRADINGAGENTS_TEMPERATURE"])
-                if env.get("TRADINGAGENTS_TEMPERATURE")
-                else defaults.get("temperature")
-            ),
-            llm_max_retries=(
-                int(env["TRADINGAGENTS_LLM_MAX_RETRIES"])
-                if env.get("TRADINGAGENTS_LLM_MAX_RETRIES")
-                else defaults.get("llm_max_retries")
-            ),
-            output_language=output_language,
-            data_config=data_config,
+            llm_provider=defaults["llm_provider"], quick_model=defaults["quick_think_llm"],
+            deep_model=defaults["deep_think_llm"], data_config=defaults,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
         token = env.get("TRADINGAGENTS_LAN_TOKEN")
@@ -248,9 +215,9 @@ class AppSettings(BaseModel):
             busy_timeout_ms=_env_int(
                 env, "TRADINGAGENTS_SQLITE_BUSY_TIMEOUT_MS", 5000
             ),
-            trash_retention_days=_env_int(
-                env, "TRADINGAGENTS_TRASH_RETENTION_DAYS", 30
-            ),
+            import_environment={k: SecretStr(v) for k, v in process_environment.items()},
+            import_primary={k: SecretStr(v) for k, v in primary_values.items()},
+            import_enterprise={k: SecretStr(v) for k, v in enterprise_values.items()},
             default_run_settings=run_settings,
         )
 
@@ -302,7 +269,9 @@ class AppSettings(BaseModel):
 
 
 def _redact(value: Any, key: str = "") -> Any:
-    if any(fragment in key.casefold() for fragment in _SECRET_FRAGMENTS):
+    if not (key == "key_required" and isinstance(value, bool)) and any(
+        fragment in key.casefold() for fragment in _SECRET_FRAGMENTS
+    ):
         return "[REDACTED]"
     if isinstance(value, dict):
         return {str(k): _redact(v, str(k)) for k, v in value.items()}

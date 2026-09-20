@@ -1,22 +1,22 @@
 """Provider metadata shared by model discovery and Web capabilities.
 
 The registry deliberately stores only non-sensitive metadata. API key values
-remain in the process environment and are never returned by this module.
+come from a resolved credential snapshot and are never returned by this module.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
 from tradingagents.application.settings import AppSettings
+from tradingagents.credentials import credential
 
 from .api_key_env import PROVIDER_API_KEY_ENV
-from .openai_client import OPENAI_COMPATIBLE_PROVIDERS
+from .provider_presets import OPENAI_COMPATIBLE_PROVIDERS
 
 DiscoveryAdapter = Literal[
     "openai_compatible",
@@ -54,31 +54,13 @@ class ProviderAvailability:
 
 
 def _openai_compatible_definitions() -> dict[str, ProviderDefinition]:
-    labels = {
-        "openai": "OpenAI",
-        "xai": "xAI",
-        "deepseek": "DeepSeek",
-        "qwen": "Qwen (International)",
-        "qwen-cn": "Qwen (China)",
-        "glm": "Z.AI GLM",
-        "glm-cn": "BigModel GLM (China)",
-        "minimax": "MiniMax (International)",
-        "minimax-cn": "MiniMax (China)",
-        "openrouter": "OpenRouter",
-        "mistral": "Mistral",
-        "kimi": "Kimi / Moonshot",
-        "groq": "Groq",
-        "nvidia": "NVIDIA NIM",
-        "ollama": "Ollama",
-        "openai_compatible": "OpenAI-compatible",
-    }
     definitions: dict[str, ProviderDefinition] = {}
     for name, spec in OPENAI_COMPATIBLE_PROVIDERS.items():
         definitions[name] = ProviderDefinition(
             name=name,
-            label=labels[name],
+            label=spec.label,
             adapter="ollama" if name == "ollama" else "openai_compatible",
-            api_key_env=PROVIDER_API_KEY_ENV.get(name),
+            api_key_env=spec.api_key_env,
             api_key_required=not spec.key_optional,
             default_base_url=(
                 "https://api.openai.com/v1"
@@ -100,7 +82,7 @@ _definitions.update(
             adapter="anthropic",
             api_key_env=PROVIDER_API_KEY_ENV["anthropic"],
             api_key_required=True,
-            default_base_url="https://api.anthropic.com/v1",
+            default_base_url="https://api.anthropic.com",
         ),
         "google": ProviderDefinition(
             name="google",
@@ -108,7 +90,7 @@ _definitions.update(
             adapter="google",
             api_key_env=PROVIDER_API_KEY_ENV["google"],
             api_key_required=True,
-            default_base_url="https://generativelanguage.googleapis.com/v1beta",
+            default_base_url="https://generativelanguage.googleapis.com",
         ),
         "azure": ProviderDefinition(
             name="azure",
@@ -141,9 +123,12 @@ def resolve_provider_base_url(
     definition: ProviderDefinition,
     settings: AppSettings,
     environ: Mapping[str, str] | None = None,
+    connections: Mapping | None = None,
 ) -> str | None:
     """Resolve the endpoint using the same precedence as a configured run."""
-    env = os.environ if environ is None else environ
+    env = {} if environ is None else environ
+    if connections is not None:
+        return connections[definition.name].get("base_url")
     defaults = settings.default_run_settings
     if definition.name == defaults.llm_provider and defaults.backend_url:
         return defaults.backend_url
@@ -156,13 +141,14 @@ def provider_availability(
     definition: ProviderDefinition,
     settings: AppSettings,
     environ: Mapping[str, str] | None = None,
+    connections: Mapping | None = None,
 ) -> ProviderAvailability:
     """Determine whether a provider is configured without exposing credentials."""
-    env = os.environ if environ is None else environ
+    env = {} if environ is None else environ
     api_key_configured = (
         None
         if definition.api_key_env is None
-        else bool(env.get(definition.api_key_env))
+        else bool(env.get(definition.api_key_env) if environ is not None else credential(definition.api_key_env))
     )
     if definition.api_key_required and not api_key_configured:
         return ProviderAvailability(
@@ -174,7 +160,7 @@ def provider_availability(
     if definition.base_url_required and not resolve_provider_base_url(
         definition,
         settings,
-        env,
+        env, connections,
     ):
         return ProviderAvailability(
             configured=False,
@@ -182,7 +168,7 @@ def provider_availability(
             api_key_configured=api_key_configured,
             reason="endpoint_missing",
         )
-    if any(not env.get(name) for name in definition.required_env):
+    if (definition.name == "azure" and connections is not None and not connections["azure"].get("api_version")) or any(not env.get(name) for name in definition.required_env):
         return ProviderAvailability(
             configured=False,
             selectable=False,
@@ -198,7 +184,12 @@ def provider_availability(
             "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
             "AWS_CONTAINER_CREDENTIALS_FULL_URI",
         )
-        has_credentials = any(env.get(name) for name in credential_markers)
+        mode = env.get("BEDROCK_AUTH_MODE")
+        has_credentials = (
+            bool(env.get("AWS_BEARER_TOKEN_BEDROCK")) if mode == "bearer" else
+            bool(env.get("AWS_ACCESS_KEY_ID") and env.get("AWS_SECRET_ACCESS_KEY")) if mode == "static" else
+            True if mode == "system" else any(env.get(name) for name in credential_markers)
+        )
         has_adapter = importlib.util.find_spec("langchain_aws") is not None
         if not has_credentials or not has_adapter:
             return ProviderAvailability(

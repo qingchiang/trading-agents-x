@@ -1488,6 +1488,9 @@ class AnalysisRequest(FrozenModel):
         "news",
         "fundamentals",
     )
+    connection_id: str | None = None
+    quick_connection_id: str | None = None
+    deep_connection_id: str | None = None
     llm_provider: str | None = None
     quick_model: str | None = None
     deep_model: str | None = None
@@ -1586,6 +1589,9 @@ class RunRequestSnapshot(FrozenModel):
         "news",
         "fundamentals",
     )
+    connection_id: str | None = None
+    quick_connection_id: str | None = None
+    deep_connection_id: str | None = None
     llm_provider: str | None = None
     quick_model: str | None = None
     deep_model: str | None = None
