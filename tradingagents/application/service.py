@@ -354,7 +354,6 @@ class AnalysisService:
         """Compare retained Node products without starting research or writing state."""
         return self.repository.compare_research_nodes(instrument, selections)
 
-    @configuration_credentials
     def enqueue(
         self,
         request: AnalysisRequest,
@@ -368,6 +367,22 @@ class AnalysisService:
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
         request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False, exclude_unset=True))
+        from .submissions import submission_identity
+
+        identity = submission_identity(request, source_run_id)
+        if idempotency_key:
+            replay = self.repository.replay_submission(idempotency_key, identity)
+            if replay is not None:
+                return replay
+        return self._enqueue_new(
+            request, idempotency_key=idempotency_key, source_run_id=source_run_id, identity=identity
+        )
+
+    @configuration_credentials
+    def _enqueue_new(
+        self, request: AnalysisRequest, *, idempotency_key: str | None,
+        source_run_id: str | None, identity: dict[str, Any],
+    ) -> RunView:
         information_cutoff_at = self._information_cutoff_at(request)
         request, run_settings = self.configuration.resolve_request(request)
         request_dataflow_config = run_settings.dataflow_config(self.settings)
@@ -396,6 +411,7 @@ class AnalysisService:
         view, created = self.repository.create_run(
             request,
             run_settings.snapshot(),
+            submission_identity=identity,
             idempotency_key=idempotency_key,
             source_run_id=source_run_id,
             research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
@@ -486,15 +502,16 @@ class AnalysisService:
                 "final_committee_brief": "v3-input-evidence-binding",
                 "final_committee": "v14-dimensionless-display-scale",
             },
-            "quick_binding": snapshot.get("quick_binding"),
+            "research_kind": request.research_kind,
+            "quick_binding": snapshot.get("quick_binding") if request.research_kind == "full" else None,
             "deep_binding": snapshot.get("deep_binding"),
             "binding_version": snapshot.get("binding_version", 1),
             "llm_provider": snapshot["llm_provider"],
-            "quick_model": snapshot["quick_model"],
+            "quick_model": snapshot["quick_model"] if request.research_kind == "full" else None,
             "deep_model": snapshot["deep_model"],
             "backend_url": snapshot["backend_url"],
             "connection": snapshot["connection"],
-            "quick_reasoning_effort": snapshot["quick_reasoning_effort"],
+            "quick_reasoning_effort": snapshot["quick_reasoning_effort"] if request.research_kind == "full" else None,
             "deep_reasoning_effort": snapshot["deep_reasoning_effort"],
             "temperature": snapshot["temperature"],
             "llm_max_retries": snapshot["llm_max_retries"],

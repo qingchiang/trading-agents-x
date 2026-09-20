@@ -179,6 +179,7 @@ export interface components {
       maximum?: number | null;
       minimum?: number | null;
       nullable?: boolean;
+      option_labels?: Record<string, Record<string, string>>;
       options?: string[];
     };
     ConfigurationPatch: {
@@ -189,8 +190,10 @@ export interface components {
       values?: components["schemas"]["ConfigurationValues"];
     };
     ConfigurationSchema: {
+      credential_metadata?: Record<string, components["schemas"]["CredentialMetadata"]>;
       credential_owners: Record<string, string>;
       fields: components["schemas"]["ConfigurationField"][];
+      group_descriptions?: Record<string, Record<string, string>>;
       presets?: Record<string, components["schemas"]["ModelConnection"]>;
       provider_defaults: Record<string, components["schemas"]["ProviderConnection"]>;
       providers: Record<string, string>;
@@ -264,6 +267,10 @@ export interface components {
       reasoning_efforts?: string[];
       selectable: boolean;
       unavailable_reason?: string | null;
+    };
+    CredentialMetadata: {
+      description: Record<string, string>;
+      label: string;
     };
     CredentialRequest: {
       connection_id?: string | null;
@@ -522,6 +529,7 @@ export interface components {
       reasoning_defaults?: Record<string, string | null>;
       revision?: number;
       template?: Record<string, unknown>;
+      template_origin?: "creation" | "upgrade";
       transport: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"];
     };
     ModelDiscoveryWarningView: {

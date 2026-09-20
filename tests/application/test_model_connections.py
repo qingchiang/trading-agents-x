@@ -346,7 +346,7 @@ def test_migration_preserves_initialized_values_and_legacy_credentials(tmp_path)
     store = ConfigurationStore(settings)
     view = store.read()
     identity = legacy_connection_id("deepseek")
-    assert view.initialized and view.revision == 7
+    assert view.initialized and view.revision == 8
     assert view.values.quick_connection_id == view.values.deep_connection_id == identity
     assert view.connections[identity].connection.transport.base_url == "https://retained.example/v1"
     assert store.reveal_connection(identity, "api_key") == "migrated-secret"

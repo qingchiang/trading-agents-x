@@ -64,6 +64,7 @@ class ModelConnection(ConnectionModel):
     key_required: bool = True
     transport: Transport
     template: dict = Field(default_factory=dict)
+    template_origin: Literal["creation", "upgrade"] = "creation"
     reasoning_defaults: dict[str, str | None] = Field(default_factory=dict)
     revision: int = Field(default=1, ge=1)
 

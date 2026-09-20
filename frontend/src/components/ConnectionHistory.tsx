@@ -1,8 +1,8 @@
 import { connectionCopy } from "../connectionCopy";
 
-export default function ConnectionHistory({ snapshot, language }: { snapshot?: Record<string, unknown> | null; language: string }) {
+export default function ConnectionHistory({ snapshot, language, researchKind }: { researchKind?: string | null; snapshot?: Record<string, unknown> | null; language: string }) {
   const c = connectionCopy(language);
-  const roles = (["quick", "deep"] as const).flatMap(role => {
+  const roles = (((researchKind ?? snapshot?.research_kind) === "incremental" ? ["deep"] : ["quick", "deep"]) as ("quick" | "deep")[]).flatMap(role => {
     const binding = snapshot?.[`${role}_binding`] as { model?: string; connection?: { name?: string; transport?: { base_url?: string; region?: string } } } | undefined;
     return binding?.connection ? [{ role, binding }] : [];
   });

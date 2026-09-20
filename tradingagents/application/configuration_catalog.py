@@ -138,9 +138,41 @@ GROUP_DESCRIPTIONS = {
         "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。",
     ),
     "providers": (
-        "One connection per provider. Keys are managed separately and read at execution start.",
-        "每个服务一套连接；凭据单独管理，在执行开始时读取。",
-        "プロバイダーごとに一つの接続。認証情報は別管理し、実行開始時に読み込みます。",
+        "Each connection has independent credentials, read at execution start.",
+        "每个连接独立管理凭据，在执行开始时读取。",
+        "接続ごとに認証情報を管理し、実行開始時に読み込みます。",
+    ),
+}
+
+
+OPTION_LABELS = {
+    "fast": ("Fast", "快速", "高速"),
+    "standard": ("Standard", "标准", "標準"),
+    "deep": ("Deep", "深入", "詳細"),
+    "market": ("Market", "市场", "市場"),
+    "social": ("Sentiment", "情绪", "センチメント"),
+    "news": ("News", "新闻", "ニュース"),
+    "fundamentals": ("Fundamentals", "基本面", "ファンダメンタルズ"),
+    "provider_default": ("Service default", "服务默认", "サービス既定"),
+    "none": ("None", "不启用", "なし"),
+    "minimal": ("Minimal", "最低", "最小"),
+    "low": ("Low", "低", "低"),
+    "medium": ("Medium", "中", "中"),
+    "high": ("High", "高", "高"),
+    "xhigh": ("Extra high", "极高", "非常に高い"),
+    "max": ("Maximum", "最高", "最大"),
+}
+SOURCE_METADATA = {
+    "ALPHA_VANTAGE_API_KEY": (
+        "Alpha Vantage",
+        ("Market prices and company data", "行情与公司数据", "株価と企業データ"),
+    ),
+    "FRED_API_KEY": ("FRED", ("US economic indicators", "美国经济指标", "米国経済指標")),
+    "ESTAT_APP_ID": ("e-Stat", ("Japanese official statistics", "日本官方统计", "日本の公的統計")),
+    "JQUANTS_API_KEY": ("J-Quants", ("Japanese equity data", "日本股票数据", "日本株データ")),
+    "EDINET_API_KEY": (
+        "EDINET",
+        ("Japanese company disclosures", "日本公司披露", "日本企業の開示"),
     ),
 }
 
@@ -205,7 +237,7 @@ def configuration_schema() -> ConfigurationSchema:
             kind = "routes"
         if key == "providers":
             kind = "providers"
-        description = GROUP_DESCRIPTIONS[group]
+        description = ("", "", "")
         if key.endswith("lookback_days"):
             description = (
                 "Calendar offset before the cutoff, inclusive at both ends: 14 means 15 dates. Does not guarantee available coverage.",
@@ -252,12 +284,22 @@ def configuration_schema() -> ConfigurationSchema:
                 minimum=scalar.get("minimum"),
                 maximum=scalar.get("maximum"),
                 options=options,
+                option_labels={
+                    option: translated(OPTION_LABELS[option])
+                    for option in options
+                    if option in OPTION_LABELS
+                },
                 env_names=env_names,
             )
         )
     from .model_connections import preset_connection
 
     return ConfigurationSchema(
+        group_descriptions={key: translated(value) for key, value in GROUP_DESCRIPTIONS.items()},
+        credential_metadata={
+            key: {"label": name, "description": translated(description)}
+            for key, (name, description) in SOURCE_METADATA.items()
+        },
         presets={name: preset_connection(name) for name in PROVIDER_REGISTRY},
         fields=fields,
         providers={key: value.label for key, value in PROVIDER_REGISTRY.items()},

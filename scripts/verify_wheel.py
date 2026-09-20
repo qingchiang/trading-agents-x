@@ -14,6 +14,7 @@ _REQUIRED_FILES = {
     "tradingagents/application/configuration.py",
     "tradingagents/application/model_connections.py",
     "tradingagents/persistence/alembic/versions/0012_model_connections.py",
+    "tradingagents/persistence/alembic/versions/0013_submission_identity.py",
     "tradingagents/persistence/alembic/versions/0011_application_configuration.py",
     "tradingagents/client.py",
     "tradingagents/graph/research_graph.py",

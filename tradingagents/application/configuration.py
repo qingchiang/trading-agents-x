@@ -317,7 +317,11 @@ class ConfigurationStore:
         values = view.values
         explicit_connections = any(
             getattr(request, field) is not None
-            for field in ("connection_id", "quick_connection_id", "deep_connection_id")
+            for field in (
+                ("connection_id", "deep_connection_id")
+                if request.research_kind == "incremental"
+                else ("connection_id", "quick_connection_id", "deep_connection_id")
+            )
         )
         if request.llm_provider is not None and explicit_connections:
             raise ConfigurationError(
@@ -339,7 +343,7 @@ class ConfigurationStore:
             if payload.get(field) is None:
                 payload[field] = getattr(values, aliases.get(field, field))
         bindings = {}
-        for role in ("quick", "deep"):
+        for role in (("deep",) if request.research_kind == "incremental" else ("quick", "deep")):
             identity = (
                 getattr(request, f"{role}_connection_id")
                 or request.connection_id
@@ -384,6 +388,10 @@ class ConfigurationStore:
                     fields=[f"{role}_reasoning_effort"],
                 ) from exc
             payload[f"{role}_connection_id"] = conn.id
+        if request.research_kind == "incremental":
+            bindings["quick"] = bindings["deep"]
+            for field in ("connection_id", "model", "reasoning_effort"):
+                payload[f"quick_{field}"] = payload[f"deep_{field}"]
         # Materialized requests carry identities; legacy input is consumed above.
         payload["llm_provider"] = None
         materialized = AnalysisRequest.model_validate(payload)

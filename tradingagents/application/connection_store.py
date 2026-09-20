@@ -106,7 +106,7 @@ def sync_legacy(session, raw, updates, credential_updates):
 def referenced_ids(snapshot):
     ids = {
         binding["connection"]["id"]
-        for role in ("quick", "deep")
+        for role in (("deep",) if snapshot.get("research_kind") == "incremental" else ("quick", "deep"))
         if (binding := snapshot.get(f"{role}_binding"))
     }
     if not ids and snapshot.get("llm_provider"):
@@ -262,7 +262,7 @@ def validate_run_connections(session, snapshot, *, retry=False):
         current = ModelConnection.model_validate(row.definition)
         if current.deleted or (not retry and not current.enabled):
             raise ProviderConfigurationChanged("Connection unavailable; select another connection")
-        for role in ("quick", "deep"):
+        for role in (("deep",) if snapshot.get("research_kind") == "incremental" else ("quick", "deep")):
             binding = snapshot.get(f"{role}_binding")
             if binding and binding["connection"]["id"] == identity:
                 retained = ModelConnection.model_validate(binding["connection"])

@@ -214,6 +214,23 @@ class RunRepository:
         """Create the current schema for tests; production entry points run Alembic."""
         Base.metadata.create_all(self.engine)
 
+    def replay_submission(
+        self, idempotency_key: str, identity: dict[str, Any]
+    ) -> RunView | None:
+        from .submissions import matches_submission
+
+        with self.sessions() as session:
+            existing = session.scalar(
+                select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
+            )
+            if existing is None:
+                return None
+            if not matches_submission(existing, identity):
+                raise IdempotencyConflictError(
+                    "idempotency key was already used for a different request"
+                )
+            return self._view_for_session(session, existing)
+
     def create_run(
         self,
         request: AnalysisRequest,
@@ -227,11 +244,19 @@ class RunRepository:
         research_kind: str | None = None,
         full_baseline_run_id: str | None = None,
         incremental_input_fingerprint: str | None = None,
+        submission_identity: dict[str, Any] | None = None,
     ) -> tuple[RunView, bool]:
         if not isinstance(request, AnalysisRequest):
             raise TypeError("new Runs require an AnalysisRequest creation contract")
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
+        from .submissions import matches_submission
+
+        def matches(existing: RunRecord) -> bool:
+            if submission_identity is not None:
+                return matches_submission(existing, submission_identity)
+            return existing.request_json == request_json and existing.source_run_id == source_run_id
+
         try:
             with self.sessions.begin() as session:
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")
@@ -240,10 +265,7 @@ class RunRepository:
                         select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                     )
                     if existing is not None:
-                        if (
-                            existing.request_json != request_json
-                            or existing.source_run_id != source_run_id
-                        ):
+                        if not matches(existing):
                             raise IdempotencyConflictError(
                                 "idempotency key was already used for a different request"
                             )
@@ -292,6 +314,7 @@ class RunRepository:
                     idempotency_key=idempotency_key,
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
+                    submission_json=submission_identity,
                     config_json=_sanitize_payload(config_snapshot),
                     research_schema_version=research_schema_version,
                     information_cutoff_at=(
@@ -350,7 +373,7 @@ class RunRepository:
                 )
                 if existing is None:
                     raise
-                if existing.request_json != request_json or existing.source_run_id != source_run_id:
+                if not matches(existing):
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc

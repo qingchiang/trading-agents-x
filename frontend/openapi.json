@@ -1279,6 +1279,16 @@
             "title": "Nullable",
             "type": "boolean"
           },
+          "option_labels": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Option Labels",
+            "type": "object"
+          },
           "options": {
             "items": {
               "type": "string"
@@ -1348,6 +1358,13 @@
       "ConfigurationSchema": {
         "additionalProperties": false,
         "properties": {
+          "credential_metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CredentialMetadata"
+            },
+            "title": "Credential Metadata",
+            "type": "object"
+          },
           "credential_owners": {
             "additionalProperties": {
               "type": "string"
@@ -1361,6 +1378,16 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "group_descriptions": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Group Descriptions",
+            "type": "object"
           },
           "presets": {
             "additionalProperties": {
@@ -1999,6 +2026,28 @@
           "selectable"
         ],
         "title": "ConnectionView",
+        "type": "object"
+      },
+      "CredentialMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Description",
+            "type": "object"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description"
+        ],
+        "title": "CredentialMetadata",
         "type": "object"
       },
       "CredentialRequest": {
@@ -3752,6 +3801,15 @@
             "additionalProperties": true,
             "title": "Template",
             "type": "object"
+          },
+          "template_origin": {
+            "default": "creation",
+            "enum": [
+              "creation",
+              "upgrade"
+            ],
+            "title": "Template Origin",
+            "type": "string"
           },
           "transport": {
             "discriminator": {

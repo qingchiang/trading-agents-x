@@ -81,7 +81,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0012_model_connections"
+    assert revision == "0013_submission_identity"
     assert {
         "id",
         "run_id",
@@ -146,7 +146,7 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
     numeric_confidence: float,
     expected_level: str,
 ) -> None:
-    upgrade_database(app_settings, "0009_cycle_aware_trash")
+    upgrade_database(app_settings)
     repository = RunRepository(app_settings)
     run, _ = repository.create_run(
         AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"),
@@ -157,6 +157,7 @@ def test_decision_confidence_migration_updates_all_canonical_copies(
         research_kind="full",
     )
     repository.engine.dispose()
+    command.downgrade(_alembic_config(app_settings), "0009_cycle_aware_trash")
     decision_json = research_decision().model_dump(mode="json")
     decision_json["confidence"] = numeric_confidence
     legacy_artifact_hash = _canonical_content_hash(decision_json)

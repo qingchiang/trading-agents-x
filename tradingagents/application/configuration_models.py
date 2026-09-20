@@ -166,10 +166,18 @@ class ConfigurationField(ConfigurationModel):
     minimum: float | None = None
     maximum: float | None = None
     options: list[str] = Field(default_factory=list)
+    option_labels: dict[str, dict[str, str]] = Field(default_factory=dict)
     env_names: list[str] = Field(default_factory=list)
 
 
+class CredentialMetadata(ConfigurationModel):
+    label: str
+    description: dict[str, str]
+
+
 class ConfigurationSchema(ConfigurationModel):
+    group_descriptions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    credential_metadata: dict[str, CredentialMetadata] = Field(default_factory=dict)
     presets: dict[str, ModelConnection] = Field(default_factory=dict)
     fields: list[ConfigurationField]
     providers: dict[str, str]

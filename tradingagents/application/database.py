@@ -64,6 +64,7 @@ class RunRecord(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     instrument_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     instrument_local_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    submission_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     research_schema_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
