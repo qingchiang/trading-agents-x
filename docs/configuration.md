@@ -11,12 +11,12 @@ URL, commonly ending in `/v1`. Model discovery adds each API's list path.
 The settings page supports Chinese, English and Japanese, searches labels,
 configuration keys and legacy environment names, and explains defaults, ranges,
 source and effect. Categories display one working area at a time: model connections, research
-defaults, data/news, storage/maintenance, and interface preferences. Each
+defaults, data/news, and storage/maintenance. Each
 connection or settings group saves independently. Connection-specific advanced
 compatibility parameters are available inside its editor. Restore
 Defaults resets that group's non-secret settings; credentials are deleted only
-through the explicit credential action. Interface preferences remain local to
-the browser.
+through the explicit credential action. Interface language and sidebar collapse
+are controlled in the sidebar and remain local to the browser.
 
 ## First start and migration
 
@@ -45,8 +45,13 @@ it is not a fallback for a missing DB-managed bearer token or access key.
 
 After initialization, daily environment variables do not override or supply
 missing DB values. Editing an old `.env` does not update a running application.
-Original files are preserved; remove obsolete daily values yourself when they
-are no longer needed. Startup variables continue to apply after restart.
+Original files are preserved. After a successful import, you can delete `.env`
+if it contains only daily configuration and credentials. Keep any startup
+variables you still need (such as custom database paths, host/port or LAN
+authentication), or move them to your process environment before deleting the
+file. Startup variables continue to apply after restart. An explicitly selected
+Bedrock system credential chain also continues to use its AWS environment or
+profile configuration.
 
 Headless setup uses the same configuration module:
 

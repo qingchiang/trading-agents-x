@@ -63,6 +63,14 @@ beforeEach(async () => {
     providers: { openai: { configured: true } },
   } as never);
 });
+test("retired interface category opens connections without duplicate browser preferences", async () => {
+  render(<Router initialPath="/settings/interface"><Settings /></Router>);
+  expect(await screen.findByRole("button", { name: "Edit" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Model connections" })).toHaveAttribute("aria-current", "page");
+  expect(screen.queryByRole("link", { name: "Interface" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Interface language")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Collapse sidebar")).not.toBeInTheDocument();
+});
 test("edits one group and reveals credentials only on demand", async () => {
   vi.mocked(api.saveSettings).mockResolvedValue({
     ...view,

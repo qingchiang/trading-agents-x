@@ -58,7 +58,6 @@ for (const locale of ["en", "zh-CN", "ja"]) {
         ["library", "/timelines", ".research-library-table"],
         ["new", "/runs/new", ".run-form"],
         ["settings", "/settings", ".connections-workspace"],
-        ["settings-interface", "/settings/interface", ".interface-preferences"],
         ["diagnostics", "/runs/full?view=diagnostics", ".diagnostic-block"],
       ]) {
         await page.goto(path);
@@ -112,11 +111,6 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           }
           await page.locator(".model-groups").scrollIntoViewIfNeeded();
           expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-        }
-        if (label === "settings-interface") {
-          const checkbox = await page.locator(".interface-preferences input[type=checkbox]").boundingBox();
-          expect(checkbox!.width).toBeLessThanOrEqual(24);
-          expect(checkbox!.height).toBeLessThanOrEqual(24);
         }
         await page.screenshot({ path: info.outputPath(`${locale}-${width}-${label}.png`), fullPage: false });
       }

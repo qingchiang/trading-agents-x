@@ -27,11 +27,11 @@
 .configuration-nav a { padding: 11px 16px; border-radius: 7px; color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
 .configuration-nav a:hover { background: var(--surface-soft); color: var(--ink); }
 .configuration-nav a[aria-current="page"] { background: var(--blue-soft); color: var(--blue-dark); }
-.configuration-group, .connection-editor, .interface-preferences {
+.configuration-group, .connection-editor {
   padding: 28px; margin: 0 0 24px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 12px;
 }
-.configuration-group > h2, .interface-preferences > h2 { margin: 0 0 24px; font-size: 20px; }
+.configuration-group > h2 { margin: 0 0 24px; font-size: 20px; }
 .configuration-grid, .connection-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; margin: 24px 0; align-items: start; }
 .configuration-grid > *, .connection-card, .connection-editor { min-width: 0; }
 .configuration-field { display: grid; gap: 8px; margin: 0; }
@@ -116,14 +116,13 @@
 .configuration-search-results h2 { margin: 0 0 8px; }
 .configuration-search-results a { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; overflow-wrap: anywhere; }
 .configuration-page pre { max-height: 18rem; overflow: auto; }
-.interface-preferences > label { max-width: 480px; margin-top: 20px; }
 .configuration-field-error { color: var(--red); font-size: 13px; }
 .configuration-page [data-invalid="true"] { border-inline-start: 3px solid var(--red); padding-inline-start: 12px; }
 @media (max-width: 760px) {
   .configuration-grid, .connection-cards { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .configuration-nav { position: static; margin-bottom: 20px; flex-wrap: nowrap; overflow-x: auto; }
   .configuration-nav a { flex: 0 0 auto; white-space: nowrap; padding: 10px 12px; }
-  .configuration-group, .connection-editor, .interface-preferences, .configuration-import { padding: 20px; }
+  .configuration-group, .connection-editor, .configuration-import { padding: 20px; }
   .connection-toolbar { align-items: stretch; }
   .connection-toolbar h2 { flex-basis: 100%; margin-bottom: 4px; }
   .connection-toolbar label { flex: 1 1 200px; min-width: 0; }

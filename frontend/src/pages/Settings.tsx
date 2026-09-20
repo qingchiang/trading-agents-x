@@ -4,7 +4,6 @@ import ModelConnections from "../components/ModelConnections";
 import RoleConnections from "../components/RoleConnections";
 import { connectionCopy } from "../connectionCopy";
 import { Link, useLocation } from "../router";
-import i18n from "../i18n";
 import {
   api,
   ApiError,
@@ -42,7 +41,9 @@ export default function Settings() {
   const text = settingsCopy[language];
   const c = connectionCopy(language);
   const location = useLocation();
-  const category = location.pathname.split("/")[2] || "connections";
+  const requestedCategory = location.pathname.split("/")[2];
+  const category = ["connections", "research", "data", "storage"].includes(requestedCategory)
+    ? requestedCategory : "connections";
   const [dataTab, setDataTab] = useState("sources");
   const [connectionsDirty, setConnectionsDirty] = useState(false);
   const [latest, setLatest] = useState<ConfigurationView | null>(null);
@@ -59,9 +60,6 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [importInput, setImportInput] = useState<ImportRequest>({});
   const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem("tradingagents-sidebar-collapsed") === "true",
-  );
   const fail = (cause: unknown) => {
     if (cause instanceof ApiError)
       setFieldErrors(
@@ -357,7 +355,7 @@ export default function Settings() {
             />
           </label>
           <nav className="configuration-nav" aria-label={text.title}>
-            {(["connections", "research", "data", "storage", "interface"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
+            {(["connections", "research", "data", "storage"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
           </nav>
           {query && <div className="panel configuration-search-results"><h2>{c.results}</h2>{schema.fields.filter(fieldMatches).map(field => {
             const target = ["llm_provider", "providers"].includes(field.key) || field.group === "providers" || field.group === "compatibility" ? "connections" : field.group === "news" || field.group === "sources" ? "data" : field.group === "cache" ? "storage" : "research";
@@ -368,38 +366,6 @@ export default function Settings() {
           })}{Object.values(view.connections ?? {}).filter(entry => `${entry.connection.name} ${entry.connection.id}`.toLowerCase().includes(query.toLowerCase())).map(entry => <Link key={entry.connection.id} to={`/settings/connections?connection=${entry.connection.id}`} onClick={() => setQuery("")}>{entry.connection.name}</Link>)}</div>}
           <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onSaved={saved => { setView(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
           {category === "data" && <nav className="configuration-subnav">{["sources", "news"].map(key => <button className="button" key={key} aria-pressed={dataTab === key} onClick={() => setDataTab(key)}>{key === "sources" ? c.sources : c.news}</button>)}</nav>}
-      <section className="interface-preferences" hidden={category !== "interface"}>
-        <h2>{text.interface}</h2>
-        <label>
-          {text.language}
-          <select
-            value={language}
-            onChange={(event) => {
-              localStorage.setItem("tradingagents-locale", event.target.value);
-              void i18n.changeLanguage(event.target.value);
-            }}
-          >
-            <option value="zh-CN">简体中文</option>
-            <option value="en">English</option>
-            <option value="ja">日本語</option>
-          </select>
-        </label>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={collapsed}
-            onChange={(event) => {
-              setCollapsed(event.target.checked);
-              localStorage.setItem(
-                "tradingagents-sidebar-collapsed",
-                String(event.target.checked),
-              );
-              window.dispatchEvent(new Event("tradingagents:preferences"));
-            }}
-          />
-          {text.collapse}
-        </label>
-      </section>
           <details
             hidden={category !== "storage" && view.initialized}
             className="configuration-import"
