@@ -773,7 +773,10 @@ environment token; the login endpoint exchanges it for a signed, expiring,
 Provider and data-service keys are stored only in the dedicated configuration
 credential table and are bound to execution-scoped memory at attempt start. They
 must not enter Run tables, graph state/checkpoints, events, SSE, research exports,
-API errors or browser persistent storage. Ordinary settings/capability endpoints
+API errors, application logs or browser persistent storage. Credential-scoped
+logging redacts records before handlers receive them; terminal worker diagnostics
+are captured before the execution context exits, including exception cause chains.
+Ordinary settings/capability endpoints
 expose only presence; an explicit same-origin reveal endpoint returns the selected
 key with caching disabled. Whole-database backups contain credentials. LAN tokens
 and session secrets remain startup-only. Raw provider exceptions and sensitive
