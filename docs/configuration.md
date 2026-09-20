@@ -217,3 +217,48 @@ Drafts survive category navigation in page memory. Leaving Settings prompts
 before discarding changes. Revision conflicts retain drafts and require an
 explicit comparison/reapply choice. Viewed keys are cleared when leaving the
 connection editor and are never written to browser persistent storage.
+
+### Concurrent editing and restoration
+
+Settings retain a baseline and an in-memory draft for each editing unit. Saving
+sends only changed fields. A revision conflict loads the latest values and
+shows field-level differences: unrelated edits are merged, while overlapping
+edits require an explicit choice. Pending credential replacements and deletions
+must also be confirmed; comparison never displays plaintext keys. Save again
+after reviewing the merged draft. A second concurrent update requires another
+review. Deleted connection identities cannot be restored by reapplying a draft.
+
+A connection's restore action previews changes to non-sensitive parameters and
+places them in the draft for review and saving. It preserves credentials, name,
+and enabled state. New connections use **Restore creation settings**. Existing
+legacy-provider connections repaired by migration `0013_submission_identity` use
+**Restore upgrade settings**: their current saved parameters at that upgrade
+become the baseline. The migration does not change their current endpoint,
+credentials, enabled state, or historical Run snapshots. It increments the
+configuration revision when repairing a baseline. Tests use temporary databases;
+upgrading an existing installation remains a separate deployment operation.
+
+### Submission replay and Incremental compatibility
+
+An idempotency key identifies the normalized original submission, including
+explicit research overrides and `source_run_id`, separately from its resolved
+request and execution snapshot. Repeating the same submission returns the
+original Run before resolving current defaults, checking connections, or querying
+data sources. Changing an explicit override returns 409. Omitting a setting and
+explicitly selecting its default remain different submissions; `null` on a field
+whose meaning is inheritance is equivalent to omission. Legacy rows have no
+invented submission identity: replay compares retained request and connection
+snapshot information, and rejects comparisons that cannot establish equivalence.
+The internal identity is excluded from research exports.
+
+New Incremental submissions resolve and validate only their deep connection,
+model and reasoning settings. Legacy callers may still send quick fields; these
+are ignored. The stored dual-binding representation uses a copy of the deep
+binding as its quick placeholder. Method records and the interface display only
+the actual deep role. Old snapshots remain unchanged, and execution/retry reads
+only the credentials it needs. Full Research continues to validate both roles.
+
+Google connections always use the Gemini Developer API with the configured
+endpoint and DB key. Ambient Google keys or Vertex backend selection variables
+do not change that authentication mode. Bedrock's explicitly selected system
+credential chain retains its existing behavior.

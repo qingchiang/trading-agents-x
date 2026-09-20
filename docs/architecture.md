@@ -161,6 +161,9 @@ application layer delegates vendor-specific behavior to the LLM subsystem.
 Connection credentials are scoped by ID and bound once per attempt. Admission
 and retry recheck connection references under their SQLite write transaction,
 so deletion cannot race a new queued reference.
+Incremental creation resolves only the deep role; its new quick binding is a
+compatibility placeholder copied from deep. Internal submission identity retains
+explicit overrides separately from resolved snapshots and is not exported.
 See [Application configuration](configuration.md) for migration and precedence.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
@@ -180,8 +183,8 @@ settings must remain isolated even if worker concurrency changes in the future.
 `AnalysisService` is the lifecycle owner. It:
 
 1. normalizes and validates `AnalysisRequest`;
-2. resolves and redacts run configuration;
-3. creates or idempotently returns a run;
+2. returns a matching original submission before consulting mutable defaults;
+3. resolves and redacts configuration for a new submission and creates it atomically;
 4. builds an independent Full run without retrieving historical review state;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
@@ -655,9 +658,9 @@ symbols that are also real equity tickers continue to the strict eligibility
 stage.
 
 After deterministic candidate validation, `AnalysisService` performs strict
-instrument eligibility through one injected resolver before idempotent Run
-creation. Only a single exact canonical-symbol result classified as equity is
-admitted. A known non-equity raises `unsupported_instrument` (HTTP 422); an
+instrument eligibility through one injected resolver before new Run
+creation. Idempotent replay returns the retained Run before this lookup. Only a
+single exact canonical-symbol result classified as equity is admitted. A known non-equity raises `unsupported_instrument` (HTTP 422); an
 empty, ambiguous, mismatched, unknown, or failed classification raises
 `instrument_eligibility_unavailable` (HTTP 503). Execution repeats this check
 before graph construction and data routing so queued legacy candidates cannot

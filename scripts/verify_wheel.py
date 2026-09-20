@@ -12,6 +12,7 @@ from zipfile import ZipFile
 _REQUIRED_FILES = {
     "cli/main.py",
     "tradingagents/application/configuration.py",
+    "tradingagents/application/submissions.py",
     "tradingagents/application/model_connections.py",
     "tradingagents/persistence/alembic/versions/0012_model_connections.py",
     "tradingagents/persistence/alembic/versions/0013_submission_identity.py",
