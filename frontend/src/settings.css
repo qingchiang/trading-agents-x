@@ -46,13 +46,6 @@
 .configuration-details[open] summary { margin-bottom: 8px; }
 .configuration-details code { margin-right: 8px; font-size: 12px; }
 .configuration-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
-.configuration-page .sticky-save {
-  position: sticky; bottom: 12px; z-index: 2; margin-top: 28px; padding: 14px 16px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-  box-shadow: 0 4px 18px rgb(16 24 40 / 7%);
-}
-.sticky-save > span { color: var(--muted); font-size: 13px; }
-.sticky-save > span:empty { display: none; }
 .connection-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin: 0 0 24px; }
 .connection-toolbar h2 { margin: 0 auto 8px 0; font-size: 20px; }
 .connection-toolbar label { min-width: 220px; font-size: 13px; }
@@ -65,19 +58,19 @@
 .connection-editor-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--line-soft); }
 .connection-editor-heading h3 { margin: 0 0 6px; font-size: 22px; }
 .connection-editor-heading p { margin: 0; }
-.connection-editor > .configuration-grid { align-items: center; }
-.connection-editor > .configuration-grid > label:has(input[type="checkbox"]) { align-self: end; }
+.connection-editor .settings-edit-fields > .configuration-grid { align-items: center; }
+.connection-editor .settings-edit-fields > .configuration-grid > label:has(input[type="checkbox"]) { align-self: end; }
 .connection-credentials { padding-block: 24px; border-block: 1px solid var(--line-soft); margin-top: 28px; }
 .connection-credentials h3 { font-size: 16px; margin: 0 0 8px; }
 .connection-credentials > .configuration-grid { margin: 20px 0 0; }
-.connection-editor > details { padding: 20px 0 0; }
-.connection-editor > details > summary { font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.connection-editor .settings-edit-fields > details { padding: 20px 0 0; }
+.connection-editor .settings-edit-fields > details > summary { font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
 .configuration-credential { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .configuration-credential > label { display: flex; flex-wrap: wrap; flex-direction: row; align-items: baseline; gap: 6px; font-size: 13px; }
 .configuration-credential code { overflow-wrap: anywhere; }
 .configuration-credential .configuration-actions { margin: 0; }
 .configuration-credential .configuration-actions .button { padding: 8px 12px; font-size: 13px; }
-.configuration-group > .role-connections { padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 28px; }
+.configuration-group .role-connections { padding-bottom: 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 28px; }
 .role-connections > label:not(.checkbox-label) { max-width: 560px; margin-block: 20px; }
 .role-connections .model-group { width: 100%; margin: 0; padding: 20px; display: grid; gap: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .role-connections .model-group legend { padding-inline: 8px; font-size: 14px; }
@@ -128,7 +121,31 @@
   .connection-toolbar label { flex: 1 1 200px; min-width: 0; }
   .connection-toolbar > .button { align-self: end; }
   .configuration-preview dl > div, .configuration-group dl > div { grid-template-columns: 1fr; gap: 6px; }
-  .configuration-page .sticky-save { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); bottom: 8px; gap: 8px; padding: 12px; }
-  .sticky-save > span { grid-column: 1 / -1; }
-  .sticky-save .button { min-width: 0; padding: 8px 10px; }
 }
+
+/* Save actions remain reachable before scrolling, within the main workspace. */
+.configuration-page .settings-save-bar {
+  position: fixed; bottom: 0; z-index: 8; box-sizing: border-box; margin: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px 12px 0 0;
+  box-shadow: 0 -4px 24px rgb(16 24 40 / 8%);
+}
+.settings-save-bar > span { margin-right: auto; color: var(--muted); font-size: 13px; }
+.settings-conflict { margin-block: 24px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.settings-conflict h3 { margin: 0 0 12px; }
+.settings-conflict p { font-size: 14px; line-height: 1.6; }
+.settings-conflict fieldset { min-width: 0; margin-block: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
+.settings-conflict legend { padding-inline: 6px; }
+.conflict-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block: 12px; overflow-wrap: anywhere; }
+.conflict-values > div { display: grid; align-content: start; gap: 8px; font-size: 13px; }
+.configuration-page :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.configuration-deployment summary { cursor: pointer; font-weight: 600; }
+.draft-dot { color: var(--blue); }
+@media (max-width: 760px) {
+  .configuration-page .settings-save-bar { padding-inline: 12px; gap: 8px; }
+  .settings-save-bar > span { flex-basis: 100%; }
+  .settings-save-bar .button { flex: 1 1 auto; padding: 8px 10px; }
+  .conflict-values { grid-template-columns: minmax(0, 1fr); }
+}
+
+.settings-edit-fields { border: 0; margin: 0; padding: 0; min-width: 0; }

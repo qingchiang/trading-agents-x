@@ -208,6 +208,80 @@
     }
   },
   "schema": {
+    "group_descriptions": {
+      "research": {
+        "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
+        "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
+        "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+      },
+      "news": {
+        "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
+        "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
+        "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+      },
+      "cache": {
+        "en": "Changes apply to new research; the cache retains only previously observed material.",
+        "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
+        "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+      },
+      "sources": {
+        "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
+        "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
+        "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
+      },
+      "compatibility": {
+        "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
+        "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
+        "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
+      },
+      "providers": {
+        "en": "Each connection has independent credentials, read at execution start.",
+        "zh-CN": "每个连接独立管理凭据，在执行开始时读取。",
+        "ja": "接続ごとに認証情報を管理し、実行開始時に読み込みます。"
+      }
+    },
+    "credential_metadata": {
+      "ALPHA_VANTAGE_API_KEY": {
+        "label": "Alpha Vantage",
+        "description": {
+          "en": "Market prices and company data",
+          "zh-CN": "行情与公司数据",
+          "ja": "株価と企業データ"
+        }
+      },
+      "FRED_API_KEY": {
+        "label": "FRED",
+        "description": {
+          "en": "US economic indicators",
+          "zh-CN": "美国经济指标",
+          "ja": "米国経済指標"
+        }
+      },
+      "ESTAT_APP_ID": {
+        "label": "e-Stat",
+        "description": {
+          "en": "Japanese official statistics",
+          "zh-CN": "日本官方统计",
+          "ja": "日本の公的統計"
+        }
+      },
+      "JQUANTS_API_KEY": {
+        "label": "J-Quants",
+        "description": {
+          "en": "Japanese equity data",
+          "zh-CN": "日本股票数据",
+          "ja": "日本株データ"
+        }
+      },
+      "EDINET_API_KEY": {
+        "label": "EDINET",
+        "description": {
+          "en": "Japanese company disclosures",
+          "zh-CN": "日本公司披露",
+          "ja": "日本企業の開示"
+        }
+      }
+    },
     "presets": {
       "openai": {
         "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
@@ -232,6 +306,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -258,6 +333,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -284,6 +360,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -310,6 +387,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -336,6 +414,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -362,6 +441,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -388,6 +468,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -414,6 +495,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -440,6 +522,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -466,6 +549,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -492,6 +576,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -518,6 +603,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -544,6 +630,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -570,6 +657,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -596,6 +684,7 @@
           "key_required": false,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -622,6 +711,7 @@
           "key_required": false,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -648,6 +738,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -674,6 +765,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -704,6 +796,7 @@
           "key_required": true,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       },
@@ -734,6 +827,7 @@
           "key_required": false,
           "reasoning_defaults": {}
         },
+        "template_origin": "creation",
         "reasoning_defaults": {},
         "revision": 1
       }
@@ -748,9 +842,9 @@
           "ja": "リサーチの深さ"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": "standard",
@@ -762,6 +856,23 @@
           "standard",
           "deep"
         ],
+        "option_labels": {
+          "fast": {
+            "en": "Fast",
+            "zh-CN": "快速",
+            "ja": "高速"
+          },
+          "standard": {
+            "en": "Standard",
+            "zh-CN": "标准",
+            "ja": "標準"
+          },
+          "deep": {
+            "en": "Deep",
+            "zh-CN": "深入",
+            "ja": "詳細"
+          }
+        },
         "env_names": []
       },
       {
@@ -773,9 +884,9 @@
           "ja": "アナリスト"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "list",
         "default": [
@@ -793,6 +904,28 @@
           "news",
           "fundamentals"
         ],
+        "option_labels": {
+          "market": {
+            "en": "Market",
+            "zh-CN": "市场",
+            "ja": "市場"
+          },
+          "social": {
+            "en": "Sentiment",
+            "zh-CN": "情绪",
+            "ja": "センチメント"
+          },
+          "news": {
+            "en": "News",
+            "zh-CN": "新闻",
+            "ja": "ニュース"
+          },
+          "fundamentals": {
+            "en": "Fundamentals",
+            "zh-CN": "基本面",
+            "ja": "ファンダメンタルズ"
+          }
+        },
         "env_names": []
       },
       {
@@ -804,9 +937,9 @@
           "ja": "高速モデル接続"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "text",
         "default": null,
@@ -814,6 +947,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -825,9 +959,9 @@
           "ja": "詳細モデル接続"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "text",
         "default": null,
@@ -835,6 +969,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -846,9 +981,9 @@
           "ja": "既定のプロバイダー"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": "openai",
@@ -877,6 +1012,7 @@
           "azure",
           "bedrock"
         ],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_LLM_PROVIDER"
         ]
@@ -890,9 +1026,9 @@
           "ja": "高速モデル"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "text",
         "default": "gpt-5.4-mini",
@@ -900,6 +1036,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_QUICK_THINK_LLM"
         ]
@@ -913,9 +1050,9 @@
           "ja": "詳細モデル"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "text",
         "default": "gpt-5.5",
@@ -923,6 +1060,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_DEEP_THINK_LLM"
         ]
@@ -936,9 +1074,9 @@
           "ja": "高速モデルの推論強度"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": null,
@@ -955,6 +1093,48 @@
           "xhigh",
           "max"
         ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
         "env_names": [
           "TRADINGAGENTS_QUICK_REASONING_EFFORT"
         ]
@@ -968,9 +1148,9 @@
           "ja": "詳細モデルの推論強度"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": null,
@@ -987,6 +1167,48 @@
           "xhigh",
           "max"
         ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
         "env_names": [
           "TRADINGAGENTS_DEEP_REASONING_EFFORT"
         ]
@@ -1000,9 +1222,9 @@
           "ja": "Google 共通思考強度"
         },
         "description": {
-          "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
-          "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
-          "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": null,
@@ -1016,6 +1238,33 @@
           "medium",
           "high"
         ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          }
+        },
         "env_names": [
           "TRADINGAGENTS_GOOGLE_THINKING_LEVEL"
         ]
@@ -1029,9 +1278,9 @@
           "ja": "OpenAI 共通推論強度"
         },
         "description": {
-          "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
-          "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
-          "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": null,
@@ -1048,6 +1297,48 @@
           "xhigh",
           "max"
         ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "none": {
+            "en": "None",
+            "zh-CN": "不启用",
+            "ja": "なし"
+          },
+          "minimal": {
+            "en": "Minimal",
+            "zh-CN": "最低",
+            "ja": "最小"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
         "env_names": [
           "TRADINGAGENTS_OPENAI_REASONING_EFFORT"
         ]
@@ -1061,9 +1352,9 @@
           "ja": "Anthropic 共通推論強度"
         },
         "description": {
-          "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
-          "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
-          "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "choice",
         "default": null,
@@ -1078,6 +1369,38 @@
           "xhigh",
           "max"
         ],
+        "option_labels": {
+          "provider_default": {
+            "en": "Service default",
+            "zh-CN": "服务默认",
+            "ja": "サービス既定"
+          },
+          "low": {
+            "en": "Low",
+            "zh-CN": "低",
+            "ja": "低"
+          },
+          "medium": {
+            "en": "Medium",
+            "zh-CN": "中",
+            "ja": "中"
+          },
+          "high": {
+            "en": "High",
+            "zh-CN": "高",
+            "ja": "高"
+          },
+          "xhigh": {
+            "en": "Extra high",
+            "zh-CN": "极高",
+            "ja": "非常に高い"
+          },
+          "max": {
+            "en": "Maximum",
+            "zh-CN": "最高",
+            "ja": "最大"
+          }
+        },
         "env_names": [
           "TRADINGAGENTS_ANTHROPIC_EFFORT"
         ]
@@ -1101,6 +1424,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_TEMPERATURE"
         ]
@@ -1114,9 +1438,9 @@
           "ja": "モデルの再試行回数"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": null,
@@ -1124,6 +1448,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_LLM_MAX_RETRIES"
         ]
@@ -1137,9 +1462,9 @@
           "ja": "レポート言語"
         },
         "description": {
-          "en": "Applies to newly created research. A Run's explicit selection takes precedence.",
-          "zh-CN": "对新建研究生效；本次研究的显式选择优先。",
-          "ja": "新規リサーチに適用。各リサーチの明示的な指定が優先されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "text",
         "default": "en",
@@ -1147,6 +1472,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_OUTPUT_LANGUAGE"
         ]
@@ -1160,9 +1486,9 @@
           "ja": "銘柄ニュースの出力件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 30,
@@ -1170,6 +1496,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1181,9 +1508,9 @@
           "ja": "Yahoo ニュース候補件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 200,
@@ -1191,6 +1518,7 @@
         "minimum": 1.0,
         "maximum": 200.0,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1202,9 +1530,9 @@
           "ja": "中国ニュース候補件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 100,
@@ -1212,6 +1540,7 @@
         "minimum": 1.0,
         "maximum": 100.0,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1223,9 +1552,9 @@
           "ja": "保有・買収開示の出力件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 20,
@@ -1233,6 +1562,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1254,6 +1584,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS"
         ]
@@ -1277,6 +1608,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS"
         ]
@@ -1290,9 +1622,9 @@
           "ja": "世界ニュースの出力件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 10,
@@ -1300,6 +1632,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1311,9 +1644,9 @@
           "ja": "世界ニュースのクエリ当たり候補件数"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 10,
@@ -1321,6 +1654,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1332,9 +1666,9 @@
           "ja": "世界ニュースのクエリ上限"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 5,
@@ -1342,6 +1676,7 @@
         "minimum": 1.0,
         "maximum": 5.0,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1363,6 +1698,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1374,9 +1710,9 @@
           "ja": "世界ニュースの検索語"
         },
         "description": {
-          "en": "Controls requested coverage or output, not historical completeness. Source limits still apply.",
-          "zh-CN": "控制请求范围或输出量，不代表历史覆盖完整；仍受数据源限制。",
-          "ja": "要求範囲・出力を制御します。過去データの網羅性は保証せず、取得元の制限が適用されます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "list",
         "default": [
@@ -1390,6 +1726,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1401,9 +1738,9 @@
           "ja": "取得済みニュースの再利用"
         },
         "description": {
-          "en": "Changes apply to new research; the cache retains only previously observed material.",
-          "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
-          "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "boolean",
         "default": true,
@@ -1411,6 +1748,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1422,9 +1760,9 @@
           "ja": "ニュース更新間隔（秒）"
         },
         "description": {
-          "en": "Changes apply to new research; the cache retains only previously observed material.",
-          "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
-          "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 900,
@@ -1432,6 +1770,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1443,9 +1782,9 @@
           "ja": "ニュースキャッシュ保持日数"
         },
         "description": {
-          "en": "Changes apply to new research; the cache retains only previously observed material.",
-          "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
-          "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 90,
@@ -1453,6 +1792,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1464,9 +1804,9 @@
           "ja": "範囲ごとのキャッシュ件数"
         },
         "description": {
-          "en": "Changes apply to new research; the cache retains only previously observed material.",
-          "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
-          "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 2000,
@@ -1474,6 +1814,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1485,9 +1826,9 @@
           "ja": "キャッシュ総件数"
         },
         "description": {
-          "en": "Changes apply to new research; the cache retains only previously observed material.",
-          "zh-CN": "对新建研究生效；缓存只保留曾经观察到的资料。",
-          "ja": "新規リサーチに適用。キャッシュは取得済み資料のみを保持します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "number",
         "default": 50000,
@@ -1495,6 +1836,7 @@
         "minimum": 1.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1516,6 +1858,7 @@
         "minimum": 0.0,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_TRASH_RETENTION_DAYS"
         ]
@@ -1529,9 +1872,9 @@
           "ja": "既定のデータソース順序"
         },
         "description": {
-          "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
-          "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
-          "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "routes",
         "default": {
@@ -1547,6 +1890,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1558,9 +1902,9 @@
           "ja": "ツール別ソース設定"
         },
         "description": {
-          "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
-          "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
-          "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "routes",
         "default": {},
@@ -1568,6 +1912,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1579,9 +1924,9 @@
           "ja": "市場別ソース設定"
         },
         "description": {
-          "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
-          "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
-          "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "routes",
         "default": {
@@ -1608,6 +1953,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": []
       },
       {
@@ -1619,9 +1965,9 @@
           "ja": "モデルサービス接続"
         },
         "description": {
-          "en": "One connection per provider. Keys are managed separately and read at execution start.",
-          "zh-CN": "每个服务一套连接；凭据单独管理，在执行开始时读取。",
-          "ja": "プロバイダーごとに一つの接続。認証情報は別管理し、実行開始時に読み込みます。"
+          "en": "",
+          "zh-CN": "",
+          "ja": ""
         },
         "kind": "providers",
         "default": {},
@@ -1629,6 +1975,7 @@
         "minimum": null,
         "maximum": null,
         "options": [],
+        "option_labels": {},
         "env_names": [
           "TRADINGAGENTS_LLM_BACKEND_URL",
           "AZURE_OPENAI_ENDPOINT",

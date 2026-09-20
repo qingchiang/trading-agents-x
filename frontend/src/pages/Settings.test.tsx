@@ -214,3 +214,100 @@ test("creates and deletes a custom connection with scoped credentials", async ()
   expect(confirmation).toHaveBeenCalled();
   confirmation.mockRestore();
 });
+
+test("409 merges independent fields and submits only local changes", async () => {
+  const initial = { ...view, values: { ...view.values, temperature: 0.5 } };
+  const latest = { ...initial, revision: 2, values: { ...initial.values, temperature: 0.9 } };
+  vi.mocked(api.settings).mockResolvedValueOnce(initial as never).mockResolvedValue(latest as never);
+  vi.mocked(api.settingsSchema).mockResolvedValue({ ...schema, fields: [...schema.fields, { ...schema.fields[0], key: "temperature", kind: "number", label: { en: "Temperature" } }] } as never);
+  vi.mocked(api.saveSettings).mockRejectedValueOnce(new ApiError(409, "configuration_revision_conflict", "Conflict")).mockResolvedValue({ ...latest, revision: 3, values: { ...latest.values, output_language: "ja" } } as never);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
+  fireEvent.change(await screen.findByLabelText("Report language"), { target: { value: "ja" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Apply choices to draft" }));
+  expect(screen.getByLabelText("Temperature")).toHaveValue(0.9);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith({ revision: 2, values: { output_language: "ja" }, credentials: {} }));
+});
+
+test("same-field conflicts need a choice on every changed revision", async () => {
+  vi.mocked(api.settings).mockResolvedValueOnce(view as never).mockResolvedValueOnce({ ...view, revision: 2, values: { ...view.values, output_language: "zh-CN" } } as never).mockResolvedValue({ ...view, revision: 3, values: { ...view.values, output_language: "fr" } } as never);
+  vi.mocked(api.saveSettings).mockRejectedValue(new ApiError(409, "configuration_revision_conflict", "Conflict"));
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
+  fireEvent.change(await screen.findByLabelText("Report language"), { target: { value: "ja" } });
+  for (const remote of ["zh-CN", "fr"]) {
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("button", { name: "Apply choices to draft" })).toBeDisabled();
+    expect(screen.getByText(remote)).toBeVisible();
+    fireEvent.click(screen.getByRole("radio", { name: "Keep my change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply choices to draft" }));
+    expect(screen.getByLabelText("Report language")).toHaveValue("ja");
+  }
+});
+
+test("connection saves refresh unedited fields in another category's draft", async () => {
+  const initial = { ...view, values: { ...view.values, temperature: 0.5 } };
+  vi.mocked(api.settings).mockResolvedValue(initial as never);
+  vi.mocked(api.settingsSchema).mockResolvedValue({ ...schema, fields: [...schema.fields, { ...schema.fields[0], key: "temperature", kind: "number", label: { en: "Temperature" } }] } as never);
+  vi.mocked(api.saveSettings).mockResolvedValue({ ...initial, revision: 2, values: { ...initial.values, temperature: 0.9 } } as never);
+  render(<Router initialPath="/settings/research"><Settings /></Router>);
+  fireEvent.change(await screen.findByLabelText("Report language"), { target: { value: "ja" } });
+  fireEvent.click(screen.getByRole("link", { name: "Model connections" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Connection name"), { target: { value: "Renamed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Saved");
+  fireEvent.click(screen.getByRole("link", { name: "Research defaults" }));
+  expect(screen.getByLabelText("Temperature")).toHaveValue(0.9);
+  expect(screen.getByLabelText("Report language")).toHaveValue("ja");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith({ revision: 2, values: { output_language: "ja" }, credentials: {} }));
+});
+
+test("connection conflicts merge nested transport and explicitly confirm secret operations", async () => {
+  const connection = { ...view.connections.main.connection, transport: { kind: "azure", base_url: "https://azure.example", deployment: "a", api_version: "2024-10-21" } };
+  const initial = { ...view, connections: { main: { ...view.connections.main, connection } } };
+  const latest = { ...initial, revision: 2, connections: { main: { ...initial.connections.main, connection: { ...connection, transport: { ...connection.transport, deployment: "b" } } } } };
+  vi.mocked(api.settings).mockResolvedValueOnce(initial as never).mockResolvedValue(latest as never);
+  vi.mocked(api.saveSettings).mockRejectedValueOnce(new ApiError(409, "configuration_revision_conflict", "Conflict")).mockResolvedValue({ ...latest, revision: 3 } as never);
+  render(<Router initialPath="/settings"><Settings /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("API base URL"), { target: { value: "https://mine.example" } });
+  fireEvent.change(screen.getByPlaceholderText("New credential"), { target: { value: "private-conflict-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByRole("button", { name: "Apply choices to draft" })).toBeDisabled();
+  expect(screen.getByRole("alert")).not.toHaveTextContent("private-conflict-key");
+  fireEvent.click(screen.getByRole("radio", { name: "Keep pending operation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply choices to draft" }));
+  expect(screen.getByLabelText(/Azure deployment/)).toHaveValue("b");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith({ revision: 2, connection_changes: [{ action: "update", id: "main", transport: { ...connection.transport, base_url: "https://mine.example", deployment: "b" }, credentials: { api_key: "private-conflict-key" } }] }));
+});
+
+test("deleted connections keep drafts without recreating the identity", async () => {
+  vi.mocked(api.settings).mockResolvedValueOnce(view as never).mockResolvedValue({ ...view, revision: 2, connections: {} } as never);
+  vi.mocked(api.saveSettings).mockRejectedValue(new ApiError(409, "configuration_revision_conflict", "Conflict"));
+  render(<Router initialPath="/settings"><Settings /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Connection name"), { target: { value: "My draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("This connection was deleted");
+  expect(screen.getByLabelText("Connection name")).toHaveValue("My draft");
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+});
+
+test("upgrade baseline restoration is previewed and preserves name, state and secrets", async () => {
+  const current = view.connections.main.connection;
+  vi.mocked(api.settings).mockResolvedValue({ ...view, connections: { main: { ...view.connections.main, connection: { ...current, template_origin: "upgrade", template: { transport: { ...current.transport, base_url: "https://upgrade.example" } } } } } } as never);
+  render(<Router initialPath="/settings"><Settings /></Router>);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Connection name"), { target: { value: "My name" } });
+  fireEvent.change(screen.getByPlaceholderText("New credential"), { target: { value: "retained-private" } });
+  fireEvent.click(screen.getByRole("button", { name: "Restore upgrade settings" }));
+  expect(screen.getByRole("region", { name: "Review settings to restore" })).not.toHaveTextContent("retained-private");
+  expect(api.saveSettings).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Restore these settings" }));
+  expect(screen.getByLabelText("API base URL")).toHaveValue("https://upgrade.example");
+  expect(screen.getByLabelText("Connection name")).toHaveValue("My name");
+  expect(screen.getByPlaceholderText("New credential")).toHaveValue("retained-private");
+});

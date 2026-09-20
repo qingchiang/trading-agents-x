@@ -3,8 +3,8 @@ import fixture from "./fixtures/configuration.json" with { type: "json" };
 type ConfigurationView = Omit<typeof fixture.view, "connections"> & { connections: Record<string, (typeof fixture.view.connections)[keyof typeof fixture.view.connections]> };
 type ConfigurationSchema = typeof fixture.schema;
 
-async function settingsServer(page: Page, conflict = false) {
-  const view = structuredClone(fixture.view) as ConfigurationView;
+async function settingsServer(page: Page, conflict = false, shared?: ConfigurationView) {
+  const view = shared ?? structuredClone(fixture.view) as ConfigurationView;
   const schema = fixture.schema as ConfigurationSchema;
   const secrets: Record<string, string> = {};
   let saved: Record<string, unknown> = {};
@@ -32,8 +32,8 @@ async function settingsServer(page: Page, conflict = false) {
       return route.fulfill({ json: view });
     }
     if (path === "/api/v1/settings" && route.request().method() === "PATCH") {
-      if (conflict) { conflict = false; view.revision++; return route.fulfill({ status: 409, json: { error: { code: "configuration_revision_conflict", message: "Conflict" } } }); }
       const payload = route.request().postDataJSON();
+      if (conflict || payload.revision !== view.revision) { if (conflict) view.revision++; conflict = false; return route.fulfill({ status: 409, json: { error: { code: "configuration_revision_conflict", message: "Conflict" } } }); }
       expect(payload.revision).toBe(view.revision);
       saved = payload.values ?? {}; Object.assign(view.values, saved);
       for (const change of payload.connection_changes ?? []) {
@@ -92,7 +92,7 @@ for (const locale of ["en", "zh-CN", "ja"] as const) {
     await page.locator(".configuration-search-results a").filter({ hasText: "OPENAI_API_KEY" }).first().click();
     const editor = page.locator(".connection-editor");
     await editor.locator("#credential-api_key").fill("browser-test-secret");
-    await editor.locator(".sticky-save button").first().click();
+    await editor.locator(".settings-save-bar button").first().click();
     await expect.poll(() => server.secrets[`${server.id}:api_key`]).toBe("browser-test-secret");
     await editor.locator(".configuration-credential .configuration-actions button").first().click();
     await expect(editor.locator('input[value="browser-test-secret"]')).toBeVisible();
@@ -126,8 +126,7 @@ test("reviewed import, conflict resolution and clipboard remain explicit", async
   await page.locator("#setting-output_language").fill("zh-CN");
   await page.locator("#configuration-research > .configuration-actions button").first().click();
   await expect(page.getByRole("alert")).toContainText("Your edits are retained");
-  await page.getByRole("button", { name: "Load latest values for comparison" }).click();
-  await page.getByRole("button", { name: "Keep my edits and use the latest revision" }).click();
+  await page.getByRole("button", { name: "Apply choices to draft" }).click();
   await expect(page.locator("#setting-output_language")).toHaveValue("zh-CN");
   await page.locator("#configuration-research > .configuration-actions button").first().click();
   await expect.poll(() => server.view.values.output_language).toBe("zh-CN");
@@ -136,4 +135,69 @@ test("reviewed import, conflict resolution and clipboard remain explicit", async
   await page.getByRole("button", { name: "Copy", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("offline-import-key");
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("offline-import-key");
+});
+
+for (const locale of ["en", "zh-CN", "ja"]) {
+  test(`search focus, fixed save actions and active navigation (${locale})`, async ({ page }) => {
+    const server = await settingsServer(page);
+    server.view.connections.second = structuredClone(server.view.connections[server.id]);
+    server.view.connections.second.connection.id = "second";
+    server.view.connections.second.connection.name = "Second endpoint";
+    await page.addInitScript(value => localStorage.setItem("tradingagents-locale", value), locale);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/settings/research");
+      const bar = page.locator(".settings-save-bar");
+      await expect(bar).toBeVisible();
+      await expect(bar.getByRole("button").first()).toBeDisabled();
+      await expect.poll(async () => bar.evaluate(el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight + 1; })).toBe(true);
+      await page.getByRole("searchbox").fill("analysts");
+      await page.locator('.configuration-search-results a[href$="#setting-analysts"]').click();
+      await expect(page.locator("#setting-analysts")).toBeFocused();
+      await page.getByRole("searchbox").fill("global_news_queries");
+      await page.locator('.configuration-search-results a[href$="#setting-global_news_queries"]').click();
+      await expect(page.locator("#setting-global_news_queries")).toBeFocused();
+      await page.getByRole("searchbox").fill("FRED_API_KEY");
+      await page.locator('.configuration-search-results a[href$="#credential-FRED_API_KEY"]').click();
+      await expect(page.locator("#credential-FRED_API_KEY")).toBeFocused();
+      await page.getByRole("searchbox").fill("openai_reasoning_effort");
+      await expect(page.locator(".configuration-search-results a")).toHaveCount(2);
+      await page.locator('.configuration-search-results a[href*="connection=second"]').click();
+      await expect(page.locator("#connection-name")).toHaveValue("Second endpoint");
+      await expect(page.locator("#setting-openai_reasoning_effort")).toBeFocused();
+      // Keyboard operation keeps a visible focus target and enables save.
+      await page.locator("#connection-name").focus();
+      await page.keyboard.press("End"); await page.keyboard.type(" edited");
+      await expect(bar.getByRole("button").first()).toBeEnabled();
+      await page.keyboard.press("Tab");
+      await expect(page.locator("#connection-enabled")).toBeFocused();
+      await page.locator('.configuration-nav a[href="/settings/storage"]').click();
+      const active = page.locator('.configuration-nav [aria-current="page"]');
+      await expect.poll(async () => active.evaluate(el => { const item = el.getBoundingClientRect(); const nav = el.parentElement!.getBoundingClientRect(); return item.left >= nav.left - 1 && item.right <= nav.right + 1; })).toBe(true);
+      await expect(page.locator(".configuration-deployment")).not.toHaveAttribute("open");
+      await page.locator("#setting-trash_retention_days").focus();
+      await expect.poll(async () => page.locator("#setting-trash_retention_days").evaluate(el => el.getBoundingClientRect().bottom <= document.querySelector(".settings-save-bar")!.getBoundingClientRect().top)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: test.info().outputPath(`settings-save-${locale}-${width}.png`), fullPage: false });
+    }
+  });
+}
+
+
+test("two pages save independent fields without overwriting each other", async ({ page, context }) => {
+  await context.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
+  const server = await settingsServer(page);
+  const other = await context.newPage();
+  await settingsServer(other, false, server.view);
+  await Promise.all([page.goto("/settings/research"), other.goto("/settings/research")]);
+  await page.locator("#setting-output_language").fill("ja");
+  await other.locator("#setting-temperature").fill("0.4");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => server.view.values.output_language).toBe("ja");
+  await other.getByRole("button", { name: "Save changes" }).click();
+  await other.getByRole("button", { name: "Apply choices to draft" }).click();
+  await expect(other.locator("#setting-output_language")).toHaveValue("ja");
+  await other.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => server.view.values.temperature).toBe(0.4);
+  expect(server.view.values.output_language).toBe("ja");
 });

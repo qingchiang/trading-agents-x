@@ -9,6 +9,16 @@ export function connectionCopy(language: string) {
 
 export function connectionField(language: string, key: string) {
   const labels: Record<string, [string, string, string]> = {
+    name: ["Connection name", "连接名称", "接続名"],
+    enabled: ["Enabled for new research", "允许新研究使用", "新規調査で有効"],
+    kind: ["API interface", "接口类型", "API 形式"],
+    compatibility: ["Model compatibility", "模型兼容策略", "モデル互換性"],
+    key_required: ["Require API key", "需要 API Key", "API キーを必須にする"],
+    discovery: ["Model discovery", "模型发现方式", "モデル検出方式"],
+    access_key_id: ["AWS access key ID", "AWS 访问 Key ID", "AWS アクセスキー ID"],
+    secret_access_key: ["AWS secret access key", "AWS 访问密钥", "AWS シークレットキー"],
+    session_token: ["AWS session token", "AWS 会话令牌", "AWS セッショントークン"],
+    bearer_token: ["Bedrock bearer token", "Bedrock 令牌", "Bedrock トークン"],
     api_key: ["API key", "API Key", "API キー"],
     base_url: ["API base URL", "API 服务地址", "API ベース URL"],
     deployment: ["Azure deployment (optional; otherwise use model ID)", "Azure 部署名（可选，留空使用模型 ID）", "Azure デプロイ名（省略時はモデル ID）"],
@@ -18,4 +28,15 @@ export function connectionField(language: string, key: string) {
     aws_profile: ["AWS profile (system authentication)", "AWS profile（系统认证模式）", "AWS プロファイル（システム認証）"],
   };
   return labels[key]?.[language.startsWith("zh") ? 1 : language.startsWith("ja") ? 2 : 0] ?? key;
+}
+
+export function reasoningLabel(language: string, value: string) {
+  const labels: Record<string, [string, string, string]> = {
+    provider_default: ["Service default", "服务默认", "サービス既定"],
+    none: ["None", "不启用", "なし"], minimal: ["Minimal", "最低", "最小"],
+    low: ["Low", "低", "低"], medium: ["Medium", "中", "中"],
+    high: ["High", "高", "高"], xhigh: ["Extra high", "极高", "非常に高い"],
+    max: ["Maximum", "最高", "最大"],
+  };
+  return labels[value]?.[language.startsWith("zh") ? 1 : language.startsWith("ja") ? 2 : 0] ?? value;
 }

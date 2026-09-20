@@ -14,6 +14,7 @@ type FieldProps = {
   language: string;
   text: SettingsText;
   models: string[];
+  source?: string;
 };
 export function SettingField({
   field,
@@ -22,11 +23,12 @@ export function SettingField({
   language,
   text,
   models,
+  source,
 }: FieldProps) {
   const label = field.label[language] ?? field.label.en;
   const id = `setting-${field.key}`;
   return (
-    <div className="configuration-field">
+    <div className="configuration-field" id={field.kind === "list" ? id : undefined} tabIndex={field.kind === "list" ? -1 : undefined} role={field.kind === "list" ? "group" : undefined} aria-label={field.kind === "list" ? label : undefined}>
       <label htmlFor={id}>{label}</label>
       {field.kind === "boolean" ? (
         <input
@@ -51,7 +53,7 @@ export function SettingField({
                     )
                   }
                 />
-                {option}
+                {field.option_labels?.[option]?.[language] ?? option}
               </label>
             ))}
           </div>
@@ -72,7 +74,7 @@ export function SettingField({
           {field.nullable && <option value="">{text.unset}</option>}
           {field.options?.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {field.option_labels?.[option]?.[language] ?? option}
             </option>
           ))}
         </select>
@@ -99,9 +101,10 @@ export function SettingField({
           }
         />
       )}
-      <p className="configuration-help" id={`${id}-help`}>
+      {!!(field.description[language] ?? field.description.en) && <p className="configuration-help" id={`${id}-help`}>
         {field.description[language] ?? field.description.en}
-      </p>
+      </p>}
+      {(field.minimum != null || field.maximum != null) && <small className="configuration-help">{text.range}: {field.minimum ?? "−∞"} … {field.maximum ?? "∞"}</small>}
       {field.key === "quick_think_llm" && (
         <datalist id="configuration-models">
           {models.map((model) => (
@@ -113,6 +116,7 @@ export function SettingField({
         <summary>
           {text.technical}
         </summary>
+        <div>{text.source}: {source}</div>
         <div>
           <code>{field.key}</code>
         </div>
@@ -299,6 +303,8 @@ export function RouteEditor({
 export function CredentialEditor({
   name,
   connectionId,
+  label,
+  description,
   configured,
   pending,
   onChange,
@@ -307,6 +313,8 @@ export function CredentialEditor({
 }: {
   name: string;
   connectionId?: string;
+  label?: string;
+  description?: string;
   configured: boolean;
   pending: string | null | undefined;
   onChange: (value: string | null | undefined) => void;
@@ -329,7 +337,7 @@ export function CredentialEditor({
   return (
     <div className="configuration-credential">
       <label htmlFor={`credential-${name}`}>
-        <span>{name === "api_key" ? "API Key" : name}</span> ·{" "}
+        <span>{label ?? (name === "api_key" ? "API Key" : name)}</span> ·{" "}
         {pending === null
           ? text.pendingDelete
           : configured
@@ -344,6 +352,8 @@ export function CredentialEditor({
         value={pending ?? ""}
         onChange={(e) => onChange(e.target.value || undefined)}
       />
+      {description && <p className="configuration-help">{description}</p>}
+      {label && <details className="configuration-details"><summary>{text.technical}</summary><code>{name}</code></details>}
       {revealed !== null && (
         <input readOnly aria-label={name} value={revealed} />
       )}

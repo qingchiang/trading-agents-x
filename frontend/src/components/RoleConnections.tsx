@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type ConnectionView, type ProviderModelCatalog } from "../api/client";
-import { connectionCopy } from "../connectionCopy";
+import { connectionCopy, reasoningLabel } from "../connectionCopy";
 
 export type RoleSelection = { connection: string; model: string; reasoning: string };
 export type RoleSelections = { quick: RoleSelection; deep: RoleSelection };
@@ -49,7 +49,7 @@ export default function RoleConnections({ connections, value, onChange, language
           {(split || !includeQuick) && selector(role)}
           <label>{c.manual}<input id={`setting-${role}_think_llm`} list={`role-models-${role}`} value={selection.model} onChange={e => onChange({ ...value, [role]: { ...selection, model: e.target.value, reasoning: "provider_default" } })} /></label>
           <datalist id={`role-models-${role}`}>{catalog?.models.map(model => <option key={model.id} value={model.id} />)}</datalist>
-          <label>{language.startsWith("zh") ? "推理强度" : language.startsWith("ja") ? "推論強度" : "Reasoning effort"}<select id={`setting-${role}_reasoning_effort`} value={selection.reasoning} onChange={e => onChange({ ...value, [role]: { ...selection, reasoning: e.target.value } })}><option value="">{language.startsWith("zh") ? "继承连接设置" : language.startsWith("ja") ? "接続設定を継承" : "Inherit connection"}</option>{Array.from(new Set([...options, selection.reasoning])).filter(Boolean).map(option => <option key={option}>{option}</option>)}</select></label>
+          <label>{language.startsWith("zh") ? "推理强度" : language.startsWith("ja") ? "推論強度" : "Reasoning effort"}<select id={`setting-${role}_reasoning_effort`} value={selection.reasoning} onChange={e => onChange({ ...value, [role]: { ...selection, reasoning: e.target.value } })}><option value="">{language.startsWith("zh") ? "继承连接设置" : language.startsWith("ja") ? "接続設定を継承" : "Inherit connection"}</option>{Array.from(new Set([...options, selection.reasoning])).filter(Boolean).map(option => <option key={option} value={option}>{reasoningLabel(language, option)}</option>)}</select></label>
           <button className="button" type="button" disabled={!selection.connection || loading !== null} onClick={() => void refresh(selection.connection)}>{c.refresh}</button>
           {selection.connection && !connections[selection.connection]?.selectable && <p role="alert">{c.unavailable}</p>}
         </fieldset>;

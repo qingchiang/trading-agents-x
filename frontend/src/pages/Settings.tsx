@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import SettingsSearch from "../components/SettingsSearch";
 import ModelConnections from "../components/ModelConnections";
 import RoleConnections from "../components/RoleConnections";
 import { connectionCopy } from "../connectionCopy";
@@ -21,6 +22,11 @@ import {
 } from "../components/SettingsFields";
 import { settingsCopy } from "../settingsCopy";
 
+import { changedValues, equal, mergeDraft, refreshDraft } from "../settingsDraft";
+import SettingsConflict from "../components/SettingsConflict";
+import SettingsSaveBar from "../components/SettingsSaveBar";
+import { editingCopy } from "../settingsEditingCopy";
+
 type Values = Record<string, unknown>;
 const groups = [
   "research",
@@ -40,19 +46,23 @@ export default function Settings() {
       : "en";
   const text = settingsCopy[language];
   const c = connectionCopy(language);
+  const editing = editingCopy(language);
+  const navRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const requestedCategory = location.pathname.split("/")[2];
   const category = ["connections", "research", "data", "storage"].includes(requestedCategory)
     ? requestedCategory : "connections";
   const [dataTab, setDataTab] = useState("sources");
   const [connectionsDirty, setConnectionsDirty] = useState(false);
-  const [latest, setLatest] = useState<ConfigurationView | null>(null);
+  const [baseline, setBaseline] = useState<Values>({});
+  const [conflict, setConflict] = useState<{ group: string; server: ConfigurationView; base: Values; local: Values } | null>(null);
   const [view, setView] = useState<ConfigurationView | null>(null);
   const [schema, setSchema] = useState<ConfigurationSchema | null>(null);
   const [draft, setDraft] = useState<Values>({});
   const [credentials, setCredentials] = useState<
     Record<string, string | null | undefined>
   >({});
+  const [credentialRevisions, setCredentialRevisions] = useState<Record<string, number>>({});
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -89,6 +99,7 @@ export default function Settings() {
         setView(data);
         setSchema(metadata);
         setDraft(structuredClone(data.values) as Values);
+        setBaseline(structuredClone(data.values) as Values);
         setError("");
       },
       (cause) => {
@@ -99,7 +110,7 @@ export default function Settings() {
       active = false;
     };
   }, []);
-  const dirty = connectionsDirty || (view !== null && Object.keys(draft).some(key => JSON.stringify(draft[key]) !== JSON.stringify((view.values as Values)[key]))) || Object.keys(credentials).length > 0;
+  const dirty = connectionsDirty || (view !== null && Object.keys(draft).some(key => !equal(draft[key], baseline[key]))) || Object.values(credentials).some(value => value !== undefined);
   useEffect(() => {
     if (!dirty) return;
     const unload = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -113,26 +124,35 @@ export default function Settings() {
   }, [dirty, c.leave]);
   useEffect(() => {
     if (!location.hash) return;
-    const frame = requestAnimationFrame(() => {
+    let frame = 0;
+    let attempts = 0;
+    const locate = () => {
       const element = document.getElementById(location.hash.slice(1)) ?? (location.hash === "#setting-quick_connection_id" ? document.getElementById("setting-deep_connection_id") : null);
-      if (!element) return;
+      if (!element) { if (++attempts < 30) frame = requestAnimationFrame(locate); return; }
       if (element instanceof HTMLDetailsElement) element.open = true;
       for (let parent = element.parentElement; parent; parent = parent.parentElement) {
         if (parent instanceof HTMLDetailsElement) parent.open = true;
       }
-      element.scrollIntoView?.({ block: "center" }); element.focus();
-    });
+      element.scrollIntoView?.({ block: "center" }); element.focus({ preventScroll: true });
+    };
+    frame = requestAnimationFrame(locate);
     return () => cancelAnimationFrame(frame);
-  }, [location.hash, location.pathname, view]);
+  }, [location.hash, location.pathname, location.search, dataTab, view, schema]);
+  useEffect(() => {
+    const nav = navRef.current;
+    const item = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (nav && item) nav.scrollLeft = item.offsetLeft - nav.offsetLeft - (nav.clientWidth - item.offsetWidth) / 2;
+  }, [category, language, view]);
+  useEffect(() => {
+    const key = location.hash.replace("#setting-", "");
+    const group = schema?.fields.find(field => field.key === key)?.group;
+    if (category === "data" && (group === "sources" || group === "news")) setDataTab(group);
+    if (category === "data" && location.hash.startsWith("#credential-")) setDataTab("sources");
+  }, [category, location.hash, schema]);
   const update = (key: string, value: unknown) => {
     setDraft((old) => ({ ...old, [key]: value }));
     setNotice("");
   };
-  const fieldMatches = (field: ConfigurationField) =>
-    [field.key, ...Object.values(field.label), ...(field.env_names ?? [])]
-      .join(" ")
-      .toLowerCase()
-      .includes(query.toLowerCase());
   async function operation(action: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -155,68 +175,63 @@ export default function Settings() {
       )
       .map(([name]) => name);
   }
+  function groupValues(values: Values, group: string) {
+    return Object.fromEntries((schema?.fields ?? []).filter(field => field.group === group && field.key !== "llm_provider").map(field => [field.key, values[field.key]]));
+  }
+  function receive(result: ConfigurationView, savedGroup?: string) {
+    const next = refreshDraft(baseline, draft, result.values as Values);
+    if (savedGroup) {
+      Object.assign(next.base, groupValues(result.values as Values, savedGroup));
+      Object.assign(next.value, groupValues(result.values as Values, savedGroup));
+    }
+    setBaseline(next.base); setDraft(next.value); setView(result);
+  }
+  function groupDirty(group: string) {
+    return !equal(groupValues(baseline, group), groupValues(draft, group)) || keysFor(group).some(key => credentials[key] !== undefined);
+  }
   async function save(group: string, reset = false) {
     if (!view || !schema) return;
-    const fields = schema.fields.filter((field) => field.group === group);
+    const base = groupValues(baseline, group);
+    const local = reset ? Object.fromEntries(schema.fields.filter(f => f.group === group && f.key !== "llm_provider").map(f => [f.key, f.default])) : groupValues(draft, group);
+    const server = groupValues(view.values as Values, group);
+    const merged = mergeDraft(base, local, server);
+    if (merged.conflicts.length || (!reset && keysFor(group).some(key => credentials[key] !== undefined && credentialRevisions[key] !== view.revision))) { setConflict({ group, server: view, base, local }); return; }
     await operation(async () => {
-      const values = Object.fromEntries(
-        fields.filter(field => field.key !== "llm_provider").map((field) => [field.key, draft[field.key]]),
-      );
-      const changes = Object.fromEntries(
-        keysFor(group)
-          .filter((key) => credentials[key] !== undefined)
-          .map((key) => [key, credentials[key]!]),
-      );
-      const result = await api.saveSettings({
-        revision: view.revision,
-        ...(reset
-          ? { reset_fields: fields.map((field) => field.key) }
-          : { values: values as ConfigurationValues, credentials: changes }),
-      });
-      setView(result);
-      setDraft((old) => ({
-        ...old,
-        ...Object.fromEntries(
-          fields.map((field) => [
-            field.key,
-            (result.values as Values)[field.key],
-          ]),
-        ),
-      }));
-      setCredentials((old) =>
-        Object.fromEntries(
-          Object.entries(old).filter(([key]) => !keysFor(group).includes(key)),
-        ),
-      );
-      setNotice(text.saved);
+      try {
+        const changes = Object.fromEntries(keysFor(group).filter(key => credentials[key] !== undefined).map(key => [key, credentials[key]!]));
+        const result = await api.saveSettings({ revision: view.revision,
+          ...(reset ? { reset_fields: Object.keys(local) } : { values: changedValues(server, merged.value) as ConfigurationValues, credentials: changes }),
+        });
+        receive(result, group);
+        if (!reset) setCredentials(old => Object.fromEntries(Object.entries(old).filter(([key]) => !keysFor(group).includes(key))));
+        setConflict(null); setNotice(text.saved);
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 409) {
+          const latest = await api.settings();
+          setConflict({ group, server: latest, base, local });
+        } else throw cause;
+      }
     });
   }
   function cancel(group: string) {
-    if (!view || !schema) return;
-    setDraft((old) => ({
-      ...old,
-      ...Object.fromEntries(
-        schema.fields
-          .filter((field) => field.group === group)
-          .map((field) => [field.key, (view.values as Values)[field.key]]),
-      ),
-    }));
-    setCredentials((old) =>
-      Object.fromEntries(
-        Object.entries(old).filter(([key]) => !keysFor(group).includes(key)),
-      ),
-    );
+    if (!view) return;
+    receive(conflict?.group === group ? conflict.server : view, group);
+    setCredentials(old => Object.fromEntries(Object.entries(old).filter(([key]) => !keysFor(group).includes(key))));
+    if (conflict?.group === group) setConflict(null);
   }
   function credentialEditor(name: string) {
     return (
       <CredentialEditor
         key={`${name}-${view?.revision}`}
         name={name}
+        label={schema?.credential_metadata?.[name]?.label}
+        description={schema?.credential_metadata?.[name]?.description[language]}
         configured={view?.credentials[name] ?? false}
         pending={credentials[name]}
-        onChange={(value) =>
-          setCredentials((old) => ({ ...old, [name]: value }))
-        }
+        onChange={(value) => {
+          if (credentials[name] === undefined && view) setCredentialRevisions(old => ({ ...old, [name]: view.revision }));
+          setCredentials(old => ({ ...old, [name]: value }));
+        }}
         text={text}
         onError={fail}
       />
@@ -236,6 +251,7 @@ export default function Settings() {
       );
       setView(result);
       setDraft(structuredClone(result.values) as Values);
+      setBaseline(structuredClone(result.values) as Values);
       setCredentials({});
       setPreview(null);
       setImportInput({});
@@ -298,13 +314,9 @@ export default function Settings() {
           language={language}
           text={text}
           models={[]}
+          source={view?.sources[field.key] === "database" ? text.database : text.default}
         />
-        <small className="configuration-source">
-          {text.source}:{" "}
-          {view?.sources[field.key] === "database"
-            ? text.database
-            : text.default}
-        </small>
+
       </>
     );
   }
@@ -320,15 +332,10 @@ export default function Settings() {
         <div role="alert" className="alert">
           {error}
           {Object.entries(fieldErrors).filter(([key]) => key === "connection_changes" || key === "connections" || key.endsWith("connection_id") || key.endsWith("reasoning_effort")).map(([key, message]) => <p key={key}><code>{key}</code>: {message}</p>)}
-          <button
-            className="button"
-            onClick={() => void api.settings().then(setLatest).catch(fail)}
-          >
-            {c.latest}
-          </button>
+
         </div>
       )}
-      {latest && <div className="panel"><h3>{c.server}</h3><pre>{JSON.stringify({ values: latest.values, connections: latest.connections }, null, 2)}</pre><h3>{c.local}</h3><pre>{JSON.stringify(draft, null, 2)}</pre><button className="button" onClick={() => { setView(latest); setLatest(null); setError(""); }}>{c.reapply}</button></div>}
+
       {notice && <p role="status">{notice}</p>}
       {dirty && <p role="status">{c.dirty}</p>}
       {!view && !error && <p role="status">{text.loading}</p>}
@@ -354,17 +361,11 @@ export default function Settings() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <nav className="configuration-nav" aria-label={text.title}>
-            {(["connections", "research", "data", "storage"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-current={category === key ? "page" : undefined}>{c[key]}</Link>)}
+          <nav ref={navRef} className="configuration-nav" aria-label={text.title}>
+            {(["connections", "research", "data", "storage"] as const).map(key => <Link key={key} to={`/settings/${key}`} aria-label={c[key]} aria-current={category === key ? "page" : undefined}>{c[key]}{(key === "connections" ? connectionsDirty : key === "research" ? groupDirty("research") : key === "data" ? groupDirty("sources") || groupDirty("news") : groupDirty("cache")) && <span className="draft-dot" aria-label={c.dirty}> •</span>}</Link>)}
           </nav>
-          {query && <div className="panel configuration-search-results"><h2>{c.results}</h2>{schema.fields.filter(fieldMatches).map(field => {
-            const target = ["llm_provider", "providers"].includes(field.key) || field.group === "providers" || field.group === "compatibility" ? "connections" : field.group === "news" || field.group === "sources" ? "data" : field.group === "cache" ? "storage" : "research";
-            return <Link key={field.key} to={`/settings/${target}#setting-${field.key}`} onClick={() => { setDataTab(field.group); setQuery("");  }}>{field.label[language] ?? field.label.en} <code>{field.key}</code></Link>;
-          })}{Object.entries(schema.credential_owners).filter(([name, owner]) => `${name} ${owner}`.toLowerCase().includes(query.toLowerCase())).map(([name, owner]) => {
-            const match = Object.values(view.connections ?? {}).find(entry => entry.connection.preset === owner);
-            return <Link key={name} to={match ? `/settings/connections?connection=${match.connection.id}` : "/settings/data"} onClick={() => { setQuery(""); setDataTab("sources"); }}>{name}</Link>;
-          })}{Object.values(view.connections ?? {}).filter(entry => `${entry.connection.name} ${entry.connection.id}`.toLowerCase().includes(query.toLowerCase())).map(entry => <Link key={entry.connection.id} to={`/settings/connections?connection=${entry.connection.id}`} onClick={() => setQuery("")}>{entry.connection.name}</Link>)}</div>}
-          <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onSaved={saved => { setView(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
+          <SettingsSearch query={query} schema={schema} view={view} language={language} onNavigate={group => { if (["sources", "news"].includes(group)) setDataTab(group); setQuery(""); }} />
+          <ModelConnections view={view} schema={schema} text={text} language={language} active={category === "connections"} requestedId={new URLSearchParams(location.search).get("connection")} focusField={location.hash.replace("#setting-", "")} onRefresh={receive} onSaved={saved => { receive(saved); setError(""); setNotice(text.saved); }} onError={fail} onDirty={setConnectionsDirty} />
           {category === "data" && <nav className="configuration-subnav">{["sources", "news"].map(key => <button className="button" key={key} aria-pressed={dataTab === key} onClick={() => setDataTab(key)}>{key === "sources" ? c.sources : c.news}</button>)}</nav>}
           <details
             hidden={category !== "storage" && view.initialized}
@@ -489,7 +490,9 @@ export default function Settings() {
                 id={`configuration-${group}`}
               >
                 <h2>{text[group]}</h2>
+                <p className="configuration-help">{schema.group_descriptions?.[group]?.[language] ?? (group === "research" ? editing.future : "")}</p>
                 {group === "providers" && <p>{text.keyHint}</p>}
+                <fieldset className="settings-edit-fields" disabled={conflict?.group === group}>
                 {group === "research" && <RoleConnections language={language} connections={view.connections ?? {}} value={{ quick: { connection: String(draft.quick_connection_id ?? ""), model: String(draft.quick_think_llm ?? ""), reasoning: String(draft.quick_reasoning_effort ?? "") }, deep: { connection: String(draft.deep_connection_id ?? ""), model: String(draft.deep_think_llm ?? ""), reasoning: String(draft.deep_reasoning_effort ?? "") } }} onChange={roles => setDraft(old => ({ ...old, quick_connection_id: roles.quick.connection, deep_connection_id: roles.deep.connection, quick_think_llm: roles.quick.model, deep_think_llm: roles.deep.model, quick_reasoning_effort: roles.quick.reasoning || null, deep_reasoning_effort: roles.deep.reasoning || null }))} />}
                 <div className="configuration-grid">{fields.map((field) => (
                   <div key={field.key} className={field.kind === "routes" ? "route-section" : undefined} data-invalid={!!fieldErrors[field.key]}>
@@ -522,34 +525,30 @@ export default function Settings() {
                   </div>
                 ))}
                 {secretKeys.map(credentialEditor)}</div>
-                <div className="configuration-actions sticky-save">
-                  <button
-                    disabled={busy}
-                    className="button primary"
-                    onClick={() => void save(group)}
-                  >
-                    {text.save}
-                  </button>
-                  <button
-                    disabled={busy}
-                    className="button"
-                    onClick={() => cancel(group)}
-                  >
-                    {text.cancel}
-                  </button>
-                  <button
-                    disabled={busy}
-                    className="button"
-                    onClick={() => void save(group, true)}
-                  >
-                    {text.reset}
-                  </button>
-                </div>
+                </fieldset>
+                {conflict?.group === group && <SettingsConflict key={`${group}-${conflict.server.revision}`} language={language}
+                  conflicts={mergeDraft(conflict.base, conflict.local, groupValues(conflict.server.values as Values, group)).conflicts}
+                  credentials={Object.fromEntries(keysFor(group).filter(key => credentials[key] !== undefined).map(key => [key, credentials[key] === null ? "remove" : "replace"]))}
+                  label={path => schema.fields.find(f => f.key === path[0])?.label[language] ?? path.join(" · ")}
+                  onApply={(choices, secretChoices) => {
+                    const merged = mergeDraft(conflict.base, conflict.local, groupValues(conflict.server.values as Values, group), choices);
+                    const next = refreshDraft(baseline, draft, conflict.server.values as Values);
+                    setBaseline({ ...next.base, ...groupValues(conflict.server.values as Values, group) });
+                    setDraft({ ...next.value, ...merged.value }); setView(conflict.server);
+                    setCredentials(old => Object.fromEntries(Object.entries(old).filter(([key]) => secretChoices[key] !== "server")));
+                    setCredentialRevisions(old => ({ ...old, ...Object.fromEntries(keysFor(group).map(key => [key, conflict.server.revision])) }));
+                    setConflict(null); setError("");
+                  }} />}
+                <SettingsSaveBar label={`${text[group]} · ${groupDirty(group) ? c.dirty : editing.noChanges}`}>
+                  <button disabled={busy || !groupDirty(group) || conflict?.group === group} className="button primary" onClick={() => void save(group)}>{text.save}</button>
+                  <button disabled={busy || !groupDirty(group)} className="button" onClick={() => cancel(group)}>{text.cancel}</button>
+                  <button disabled={busy || conflict?.group === group} className="button" onClick={() => void save(group, true)}>{text.reset}</button>
+                </SettingsSaveBar>
               </section>
             );
           })}
-          <section className="panel configuration-group" hidden={category !== "storage"}>
-            <h2>{text.deployment}</h2>
+          <details className="panel configuration-group configuration-deployment" hidden={category !== "storage"}>
+            <summary>{text.deployment}</summary>
             <p>{text.startup}</p>
             <dl>
               {Object.entries(view.deployment).map(([key, value]) => (
@@ -559,7 +558,7 @@ export default function Settings() {
                 </div>
               ))}
             </dl>
-          </section>
+          </details>
         </>
       )}
     </section>
