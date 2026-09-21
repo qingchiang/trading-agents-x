@@ -6,14 +6,11 @@ come from a resolved credential snapshot and are never returned by this module.
 
 from __future__ import annotations
 
-import importlib.util
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-from tradingagents.configuration.settings import AppSettings
-from tradingagents.credentials import credential
 from tradingagents.llm.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm.provider_presets import OPENAI_COMPATIBLE_PROVIDERS
 
@@ -40,16 +37,6 @@ class ProviderDefinition:
     base_url_env: str | None = None
     base_url_required: bool = False
     required_env: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ProviderAvailability:
-    """Safe provider status exposed to local Web clients."""
-
-    configured: bool
-    selectable: bool
-    api_key_configured: bool | None
-    reason: str | None = None
 
 
 def _openai_compatible_definitions() -> dict[str, ProviderDefinition]:
@@ -116,90 +103,3 @@ PROVIDER_REGISTRY: Mapping[str, ProviderDefinition] = MappingProxyType(_definiti
 def get_provider_definition(provider: str) -> ProviderDefinition | None:
     """Return a provider definition without accepting arbitrary endpoints."""
     return PROVIDER_REGISTRY.get(provider.strip().lower())
-
-
-def resolve_provider_base_url(
-    definition: ProviderDefinition,
-    settings: AppSettings,
-    environ: Mapping[str, str] | None = None,
-    connections: Mapping | None = None,
-) -> str | None:
-    """Resolve the endpoint using the same precedence as a configured run."""
-    env = {} if environ is None else environ
-    if connections is not None:
-        return connections[definition.name].get("base_url")
-    if definition.base_url_env and env.get(definition.base_url_env):
-        return env[definition.base_url_env]
-    return definition.default_base_url
-
-
-def provider_availability(
-    definition: ProviderDefinition,
-    settings: AppSettings,
-    environ: Mapping[str, str] | None = None,
-    connections: Mapping | None = None,
-) -> ProviderAvailability:
-    """Determine whether a provider is configured without exposing credentials."""
-    env = {} if environ is None else environ
-    api_key_configured = (
-        None
-        if definition.api_key_env is None
-        else bool(env.get(definition.api_key_env) if environ is not None else credential(definition.api_key_env))
-    )
-    if definition.api_key_required and not api_key_configured:
-        return ProviderAvailability(
-            configured=False,
-            selectable=False,
-            api_key_configured=api_key_configured,
-            reason="api_key_missing",
-        )
-    if definition.base_url_required and not resolve_provider_base_url(
-        definition,
-        settings,
-        env, connections,
-    ):
-        return ProviderAvailability(
-            configured=False,
-            selectable=False,
-            api_key_configured=api_key_configured,
-            reason="endpoint_missing",
-        )
-    if (definition.name == "azure" and connections is not None and not connections["azure"].get("api_version")) or any(not env.get(name) for name in definition.required_env):
-        return ProviderAvailability(
-            configured=False,
-            selectable=False,
-            api_key_configured=api_key_configured,
-            reason="configuration_missing",
-        )
-    if definition.name == "bedrock":
-        credential_markers = (
-            "AWS_BEARER_TOKEN_BEDROCK",
-            "AWS_ACCESS_KEY_ID",
-            "AWS_PROFILE",
-            "AWS_WEB_IDENTITY_TOKEN_FILE",
-            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        )
-        mode = env.get("BEDROCK_AUTH_MODE")
-        has_credentials = (
-            bool(env.get("AWS_BEARER_TOKEN_BEDROCK")) if mode == "bearer" else
-            bool(env.get("AWS_ACCESS_KEY_ID") and env.get("AWS_SECRET_ACCESS_KEY")) if mode == "static" else
-            True if mode == "system" else any(env.get(name) for name in credential_markers)
-        )
-        has_adapter = importlib.util.find_spec("langchain_aws") is not None
-        if not has_credentials or not has_adapter:
-            return ProviderAvailability(
-                configured=False,
-                selectable=False,
-                api_key_configured=None,
-                reason=(
-                    "optional_dependency_missing"
-                    if not has_adapter
-                    else "credentials_missing"
-                ),
-            )
-    return ProviderAvailability(
-        configured=True,
-        selectable=True,
-        api_key_configured=api_key_configured,
-    )

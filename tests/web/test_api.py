@@ -1790,7 +1790,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/instruments/{instrument}/analysis-cutoff-context",
         "/api/v1/instruments/recent",
         "/api/v1/capabilities",
-        "/api/v1/providers/{provider}/models",
+        "/api/v1/settings/connections/{identity}/models",
         "/api/v1/health",
     } <= set(paths)
     assert "/api/v1/runs/{run_id}/rerun" not in paths
@@ -2083,11 +2083,6 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
         }
         == payload["defaults"]
     )
-    assert payload["providers"]["openai"]["label"] == "OpenAI"
-    assert payload["providers"]["openai"]["api_key_required"] is True
-    assert payload["providers"]["openai"]["configured"] is True
-    assert payload["providers"]["openai"]["selectable"] is True
-    assert "quick_models" not in payload["providers"]["openai"]
     assert payload["defaults"]["trash_retention_days"] == 30
 
 
@@ -2150,8 +2145,8 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
         ],
     )
 
-    response = await web_client.get("/api/v1/providers/openai/models")
-    unknown = await web_client.get("/api/v1/providers/not-real/models")
+    response = await web_client.get("/api/v1/settings/connections/default/models")
+    unknown = await web_client.get("/api/v1/settings/connections/not-real/models")
 
     assert response.status_code == 200
     assert response.json()["source"] == "fallback"
@@ -2160,7 +2155,7 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
         "gpt-5.5",
     }
     assert response.json()["warning"]["code"] == "provider_not_configured"
-    assert unknown.status_code == 404
+    assert unknown.status_code == 422
 
 
 @pytest.mark.anyio

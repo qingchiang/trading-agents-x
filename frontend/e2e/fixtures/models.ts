@@ -9,7 +9,6 @@ export function capabilities(outputLanguage = "en") {
     profiles: ["fast", "standard", "deep"],
     analysts: ["market", "social", "news", "fundamentals"],
     output_languages: ["en", "zh-CN", "ja"],
-    providers: {},
     defaults: {
       models,
       profile: "standard",
@@ -22,7 +21,7 @@ export function capabilities(outputLanguage = "en") {
 }
 
 export const modelCatalog = {
-  provider: "openai",
+  connection_id: models.quick.connection_id,
   models: [
     { id: models.quick.model, label: "Quick", compatibility: "supported", reasoning_efforts: ["provider_default", "low"], default_roles: ["quick"] },
     { id: models.deep.model, label: "Deep", compatibility: "supported", reasoning_efforts: ["provider_default", "high"], default_roles: ["deep"] },

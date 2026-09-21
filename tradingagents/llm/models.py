@@ -1,5 +1,6 @@
 """Typed model connections: identity is independent of vendor presets."""
 
+from dataclasses import dataclass, field
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -210,3 +211,12 @@ def connection_view(connection, credentials):
         unavailable_reason=reason,
         reasoning_efforts=["provider_default", *provider_effort_levels(connection.compatibility)],
     )
+
+
+@dataclass(frozen=True)
+class DiscoverySnapshot:
+    """Connection and current credentials resolved at the discovery boundary."""
+
+    connection: ModelConnection
+    credentials: dict[str, str] = field(repr=False)
+    default_models: dict[str, str]

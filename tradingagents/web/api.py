@@ -37,7 +37,7 @@ from tradingagents.domain.timeline import (
     ResearchTimelinePage,
     RunLifecyclePreview,
 )
-from tradingagents.llm.model_discovery import ModelDiscoveryService, UnknownProviderError
+from tradingagents.llm.model_discovery import ModelDiscoveryService
 from tradingagents.persistence._repository_common import (
     ArtifactConflictError,
     EvidenceConflictError,
@@ -52,12 +52,12 @@ from tradingagents.web.auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManag
 from tradingagents.web.models import (
     AnalysisCutoffErrorResponse,
     CapabilitiesResponse,
+    ConnectionModelCatalog,
     FullBaselineCandidates,
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
     PrimaryCycleSelectionRequest,
-    ProviderModelCatalog,
     RequestValidationErrorResponse,
     ResearchNodeComparisonRequest,
     RunBatchRequest,
@@ -88,7 +88,9 @@ def create_app(
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
-    model_discovery = model_discovery or ModelDiscoveryService(settings, configuration=service.configuration)
+    model_discovery = model_discovery or ModelDiscoveryService(
+        service.configuration.connection_discovery_snapshot
+    )
     maintenance = maintenance or TrashMaintenance(settings, repository)
     auth = LanSessionManager(settings)
 
@@ -110,6 +112,7 @@ def create_app(
         lifespan=lifespan,
     )
     from tradingagents.web.settings_api import register_settings_routes
+
     register_settings_routes(app, service.configuration)
     app.state.settings = settings
     app.state.service = service
@@ -721,17 +724,6 @@ def create_app(
         response_model=CapabilitiesResponse,
     )
     def capabilities():
-        providers = {}
-        for provider, (definition, availability) in model_discovery.providers().items():
-            providers[provider] = {
-                "label": definition.label,
-                "api_key_required": definition.api_key_required,
-                "api_key_configured": availability.api_key_configured,
-                "configured": availability.configured,
-                "selectable": availability.selectable,
-                "unavailable_reason": availability.reason,
-                "model_discovery_supported": definition.adapter != "custom",
-            }
         configuration = service.configuration.read()
         defaults = service.configuration.default_run_settings()
         return CapabilitiesResponse(
@@ -740,7 +732,6 @@ def create_app(
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
             output_languages=["en", "zh-CN", "ja"],
-            providers=providers,
             defaults={
                 "models": configuration.values.models,
                 "profile": defaults.profile.value,
@@ -752,24 +743,8 @@ def create_app(
         )
 
     @app.get(
-        f"{API_PREFIX}/providers/{{provider}}/models",
-        response_model=ProviderModelCatalog,
-    )
-    def provider_models(
-        provider: str,
-        refresh: bool = False,
-    ):
-        try:
-            return model_discovery.discover(provider, refresh=refresh)
-        except UnknownProviderError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail="Unknown model provider",
-            ) from exc
-
-    @app.get(
         f"{API_PREFIX}/settings/connections/{{identity}}/models",
-        response_model=ProviderModelCatalog,
+        response_model=ConnectionModelCatalog,
     )
     def connection_models(identity: str, refresh: bool = False):
         return model_discovery.discover_connection(identity, refresh=refresh)

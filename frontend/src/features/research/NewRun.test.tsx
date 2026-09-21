@@ -6,7 +6,7 @@ import {
   ApiError,
   type Capabilities,
   type FullBaselineCandidate,
-  type ProviderModelCatalog,
+  type ConnectionModelCatalog,
   type RunView,
 } from "../../shared/api/client";
 import i18n from "../../shared/i18n";
@@ -33,35 +33,6 @@ const capabilities = {
   analysts: ["market", "social", "news", "fundamentals"],
   output_languages: ["en", "zh-CN", "ja"],
   connections: Object.fromEntries(["openai", "ollama"].map(id => [id, {connection: {id, name: id === "openai" ? "OpenAI" : "Ollama", preset: id, transport: {kind: "chat_completions", base_url: "https://example.invalid/v1"}}, selectable: true, credentials: {}, missing_fields: [], reasoning_efforts: ["provider_default", "low", "medium", "high"]}])),
-  providers: {
-    openai: {
-      label: "OpenAI",
-      api_key_required: true,
-      api_key_configured: true,
-      configured: true,
-      selectable: true,
-      unavailable_reason: null,
-      model_discovery_supported: true,
-    },
-    anthropic: {
-      label: "Anthropic",
-      api_key_required: true,
-      api_key_configured: false,
-      configured: false,
-      selectable: false,
-      unavailable_reason: "api_key_missing",
-      model_discovery_supported: true,
-    },
-    ollama: {
-      label: "Ollama",
-      api_key_required: false,
-      api_key_configured: null,
-      configured: true,
-      selectable: true,
-      unavailable_reason: null,
-      model_discovery_supported: true,
-    },
-  },
   defaults: {
     profile: "standard",
     models: { quick: { connection_id: "openai", model: "gpt-5.4-mini", reasoning_effort: "low" }, deep: { connection_id: "openai", model: "gpt-5.5", reasoning_effort: "high" } },
@@ -72,7 +43,7 @@ const capabilities = {
 } as Capabilities;
 
 const modelCatalog = {
-  provider: "openai",
+  connection_id: "openai",
   models: [
     {
       id: "gpt-5.4-mini",
@@ -100,7 +71,7 @@ const modelCatalog = {
   fetched_at: "2026-07-28T00:00:00Z",
   stale: false,
   warning: null,
-} as ProviderModelCatalog;
+} as ConnectionModelCatalog;
 
 const analysisCutoffContext = {
   instrument: "NVDA",

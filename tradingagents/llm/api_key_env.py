@@ -1,8 +1,4 @@
-"""Canonical provider credential identifiers and legacy import aliases.
-
-New execution uses connection-scoped credentials. These aliases support legacy
-entry points, explicit imports and searchable settings metadata.
-"""
+"""Canonical SDK credential names used by connection scopes and explicit import."""
 
 from __future__ import annotations
 
@@ -10,8 +6,10 @@ from tradingagents.llm.provider_presets import OPENAI_COMPATIBLE_PROVIDERS
 
 PROVIDER_API_KEY_ENV: dict[str, str | None] = {
     **{name: spec.api_key_env for name, spec in OPENAI_COMPATIBLE_PROVIDERS.items()},
-    "anthropic": "ANTHROPIC_API_KEY", "google": "GOOGLE_API_KEY",
-    "azure": "AZURE_OPENAI_API_KEY", "bedrock": None,
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "azure": "AZURE_OPENAI_API_KEY",
+    "bedrock": None,
 }
 
 

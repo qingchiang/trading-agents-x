@@ -268,3 +268,10 @@ Google connections always use the Gemini Developer API with the configured
 endpoint and DB key. Ambient Google keys or Vertex backend selection variables
 do not change that authentication mode. Bedrock's explicitly selected system
 credential chain retains its existing behavior.
+
+Model catalogs are addressed by connection ID at
+`/api/v1/settings/connections/{identity}/models`. Discovery receives a fresh
+connection/credential snapshot and does not resolve provider names or environment
+variables. Catalog responses identify `connection_id`; connection revision
+changes invalidate cached results. Provider metadata remains in the settings
+schema as connection presets.

@@ -38,7 +38,12 @@ def test_independent_connections_bind_roles_without_exposing_credentials(tmp_pat
                     },
                 },
             ],
-            values={'models': {'quick': {'connection_id': "quick-endpoint"}, 'deep': {'connection_id': "deep-endpoint"}}},
+            values={
+                "models": {
+                    "quick": {"connection_id": "quick-endpoint"},
+                    "deep": {"connection_id": "deep-endpoint"},
+                }
+            },
         ),
         initialize=True,
     )
@@ -77,7 +82,9 @@ def test_key_rotation_is_scoped_and_endpoint_changes_block_execution(tmp_path):
                     "credentials": {"api_key": "first-key"},
                 }
             ],
-            values={'models': {'quick': {'connection_id': "local"}, 'deep': {'connection_id': "local"}}},
+            values={
+                "models": {"quick": {"connection_id": "local"}, "deep": {"connection_id": "local"}}
+            },
         ),
         initialize=True,
     )
@@ -148,7 +155,12 @@ def configured_store(tmp_path):
                     "credentials": {"api_key": "secondary-secret"},
                 },
             ],
-            values={'models': {'quick': {'connection_id': "primary"}, 'deep': {'connection_id': "secondary"}}},
+            values={
+                "models": {
+                    "quick": {"connection_id": "primary"},
+                    "deep": {"connection_id": "secondary"},
+                }
+            },
         ),
         initialize=True,
     )
@@ -164,13 +176,15 @@ def test_disabled_connection_retains_attempts_but_is_not_admitted_for_new_runs(t
     store.save(
         ConfigurationPatch(
             revision=1,
-            values={'models': {'quick': {'connection_id': "secondary"}}},
+            values={"models": {"quick": {"connection_id": "secondary"}}},
             connection_changes=[{"action": "update", "id": "primary", "enabled": False}],
         )
     )
     assert store.execution_credentials(retained)
     with pytest.raises(ValueError, match="disabled"):
-        store.resolve_request(request.model_copy(update={'models': {'quick': {'connection_id': "primary"}}}))
+        store.resolve_request(
+            request.model_copy(update={"models": {"quick": {"connection_id": "primary"}}})
+        )
     assert not store.read().connections["primary"].selectable
 
 
@@ -185,7 +199,9 @@ def test_delete_blocks_active_runs_and_clears_keys_after_terminal_history(tmp_pa
     )
     repository = RunRepository(settings)
     run, _ = repository.create_run(request, retained.snapshot())
-    store.save(ConfigurationPatch(revision=1, values={'models': {'quick': {'connection_id': "secondary"}}}))
+    store.save(
+        ConfigurationPatch(revision=1, values={"models": {"quick": {"connection_id": "secondary"}}})
+    )
     with pytest.raises(ValueError, match="unfinished Runs"):
         store.save(
             ConfigurationPatch(
@@ -229,7 +245,7 @@ def test_two_role_clients_receive_distinct_keys_and_native_interfaces(tmp_path, 
                     "transport": {"kind": "anthropic", "base_url": "https://anthropic.example"},
                 }
             ],
-            values={'models': {'deep': {'model': "claude-sonnet-4-6", 'reasoning_effort': "high"}}},
+            values={"models": {"deep": {"model": "claude-sonnet-4-6", "reasoning_effort": "high"}}},
         )
     )
     _, run = store.resolve_request(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10"))
@@ -297,7 +313,7 @@ def test_connection_model_discovery_is_isolated_and_only_relevant_changes_expire
             calls.append((url, kwargs["headers"]))
             return Response()
 
-    service = ModelDiscoveryService(settings, configuration=store, session=HTTP())
+    service = ModelDiscoveryService(store.connection_discovery_snapshot, session=HTTP())
     assert service.discover_connection("primary").source == "live"
     assert service.discover_connection("secondary").source == "live"
     assert calls[0][1]["Authorization"] == "Bearer primary-secret"
@@ -317,13 +333,16 @@ def test_connection_model_discovery_is_isolated_and_only_relevant_changes_expire
     assert service.discover_connection("secondary").source == "cache"
 
 
-
-
 def test_deleted_connection_cannot_be_rebound_by_environment_import(tmp_path):
     from tradingagents.configuration.models import ImportRequest
+
     _, store = configured_store(tmp_path)
-    store.save(ConfigurationPatch(revision=1, connection_changes=[{"action": "delete", "id": "default"}]))
-    preview = store.preview_import(ImportRequest(primary="OPENAI_API_KEY=fake-import-key", revision=2))
+    store.save(
+        ConfigurationPatch(revision=1, connection_changes=[{"action": "delete", "id": "default"}])
+    )
+    preview = store.preview_import(
+        ImportRequest(primary="OPENAI_API_KEY=fake-import-key", revision=2)
+    )
     assert preview.issues
     assert "fake-import-key" not in preview.model_dump_json()
 
@@ -359,9 +378,15 @@ def test_connection_save_is_atomic_with_bad_fields_and_stale_revision(tmp_path):
 def test_role_connection_overrides_are_independent(tmp_path):
 
     _, store = configured_store(tmp_path)
-    request = AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10", profile="standard", models={
-        "quick": {"connection_id": "primary"}, "deep": {"connection_id": "secondary"},
-    })
+    request = AnalysisRequest(
+        ticker="GOOG",
+        analysis_date="2026-09-10",
+        profile="standard",
+        models={
+            "quick": {"connection_id": "primary"},
+            "deep": {"connection_id": "secondary"},
+        },
+    )
     _, resolved = store.resolve_request(request)
     assert resolved.quick_binding.connection.id == "primary"
     assert resolved.deep_binding.connection.id == "secondary"

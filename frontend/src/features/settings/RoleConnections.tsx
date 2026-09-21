@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type ConnectionView, type ProviderModelCatalog } from "../../shared/api/client";
+import { api, type ConnectionView, type ConnectionModelCatalog } from "../../shared/api/client";
 import { connectionCopy, reasoningLabel } from "./connectionCopy";
 
 export type RoleSelection = { connection: string; model: string; reasoning: string };
@@ -10,7 +10,7 @@ export default function RoleConnections({ connections, value, onChange, language
   const c = connectionCopy(language);
   const [separate, setSeparate] = useState(value.quick.connection !== value.deep.connection);
   const [merging, setMerging] = useState(false);
-  const [catalogs, setCatalogs] = useState<Record<string, ProviderModelCatalog>>({});
+  const [catalogs, setCatalogs] = useState<Record<string, ConnectionModelCatalog>>({});
   const [warning, setWarning] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
   const split = separate || value.quick.connection !== value.deep.connection;

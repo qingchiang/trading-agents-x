@@ -113,7 +113,6 @@ export interface components {
       defaults: components["schemas"]["CapabilityDefaults"];
       output_languages: string[];
       profiles: string[];
-      providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
       analysts?: string[];
@@ -232,6 +231,14 @@ export interface components {
       preset?: string | null;
       reasoning_effort?: string | null;
       transport?: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"] | null;
+    };
+    ConnectionModelCatalog: {
+      connection_id: string;
+      fetched_at: string;
+      models: components["schemas"]["DiscoveredModelView"][];
+      source: "live" | "cache" | "fallback";
+      stale: boolean;
+      warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     ConnectionView: {
       connection: components["schemas"]["ModelConnection"];
@@ -605,23 +612,6 @@ export interface components {
     };
     PrimaryCycleSelectionRequest: {
       full_run_id: string;
-    };
-    ProviderCapabilities: {
-      api_key_configured: boolean | null;
-      api_key_required: boolean;
-      configured: boolean;
-      label: string;
-      model_discovery_supported: boolean;
-      selectable: boolean;
-      unavailable_reason?: string | null;
-    };
-    ProviderModelCatalog: {
-      fetched_at: string;
-      models: components["schemas"]["DiscoveredModelView"][];
-      provider: string;
-      source: "live" | "cache" | "fallback";
-      stale: boolean;
-      warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     QueueHealth: {
       queued: number;

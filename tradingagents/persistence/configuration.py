@@ -162,9 +162,18 @@ class ConfigurationStore:
             if set(patch.credentials) - set(credential_owners()):
                 raise ConfigurationError("Unknown credential field")
             try:
-                if record is None and session.get(ModelConnectionRecord, "default") is None and not any(change.id == "default" and change.action == "create" for change in patch.connection_changes):
+                if (
+                    record is None
+                    and session.get(ModelConnectionRecord, "default") is None
+                    and not any(
+                        change.id == "default" and change.action == "create"
+                        for change in patch.connection_changes
+                    )
+                ):
                     conn = preset_connection("openai", identity="default")
-                    session.add(ModelConnectionRecord(id=conn.id, definition=conn.model_dump(mode="json")))
+                    session.add(
+                        ModelConnectionRecord(id=conn.id, definition=conn.model_dump(mode="json"))
+                    )
                     session.flush()
                 connections.apply_changes(session, patch.connection_changes, raw)
             except ValueError as exc:
@@ -255,20 +264,35 @@ class ConfigurationStore:
             if row is None or row.definition.get("deleted"):
                 raise ConfigurationError("Connection does not exist")
             conn = ModelConnection.model_validate(row.definition)
-            return conn, connections.connection_secrets(session, conn), self._view(session).values
+            from tradingagents.llm.models import DiscoverySnapshot
+
+            defaults = self._view(session).values.models
+            return DiscoverySnapshot(
+                conn,
+                connections.connection_secrets(session, conn),
+                {
+                    role: getattr(defaults, role).model
+                    for role in ("quick", "deep")
+                    if getattr(defaults, role).connection_id == identity
+                },
+            )
 
     def resolve_request(self, request: AnalysisRequest, *, require_initialized=True):
-        request = AnalysisRequest.model_validate(request.model_dump(mode="python", exclude_unset=True))
+        request = AnalysisRequest.model_validate(
+            request.model_dump(mode="python", exclude_unset=True)
+        )
         view = self.read()
         if require_initialized and not view.initialized:
-            raise ConfigurationRequired("Complete configuration in Settings before starting research")
+            raise ConfigurationRequired(
+                "Complete configuration in Settings before starting research"
+            )
         values = view.values
         payload = request.model_dump(mode="python", exclude_unset=True)
         for field in ("profile", "analysts", "output_language"):
             if payload.get(field) is None:
                 payload[field] = getattr(values, field)
         selections, bindings = {}, {}
-        for role in (("deep",) if request.research_kind == "incremental" else ("quick", "deep")):
+        for role in ("deep",) if request.research_kind == "incremental" else ("quick", "deep"):
             selection = (getattr(request.models, role) or ModelSelection()).inherit(
                 getattr(values.models, role) or ModelSelection()
             )
@@ -277,30 +301,45 @@ class ConfigurationStore:
                 if not require_initialized and selection.connection_id == "default":
                     connection = preset_connection("openai", identity="default")
                 else:
-                    raise ConfigurationError("Connection does not exist", fields=[f"models.{role}.connection_id"])
+                    raise ConfigurationError(
+                        "Connection does not exist", fields=[f"models.{role}.connection_id"]
+                    )
             else:
                 connection = entry.connection
                 if not connection.enabled:
-                    raise ConfigurationError("Connection is disabled", fields=[f"models.{role}.connection_id"])
+                    raise ConfigurationError(
+                        "Connection is disabled", fields=[f"models.{role}.connection_id"]
+                    )
             if not selection.model:
                 raise ConfigurationError("Select a model", fields=[f"models.{role}.model"])
-            binding = ModelBinding(connection=connection, model=selection.model, reasoning_effort=selection.reasoning_effort)
+            binding = ModelBinding(
+                connection=connection,
+                model=selection.model,
+                reasoning_effort=selection.reasoning_effort,
+            )
             from tradingagents.llm.connections import validate_binding
+
             try:
                 validate_binding(binding)
             except ValueError as exc:
-                raise ConfigurationError(str(exc), fields=[f"models.{role}.reasoning_effort"]) from None
+                raise ConfigurationError(
+                    str(exc), fields=[f"models.{role}.reasoning_effort"]
+                ) from None
             selections[role], bindings[role] = selection, binding
         payload["models"] = RoleSelections(**selections)
         materialized = AnalysisRequest.model_validate(payload)
         from tradingagents.configuration.defaults import build_default_config
+
         data = values.model_dump(exclude={"models", "profile", "analysts", "trash_retention_days"})
         data = {**build_default_config(), **data}
         return materialized, RunSettings(
             profile=materialized.profile,
-            quick_binding=bindings.get("quick"), deep_binding=bindings["deep"],
-            research_kind=materialized.research_kind, temperature=values.temperature,
-            llm_max_retries=values.llm_max_retries, output_language=materialized.output_language,
+            quick_binding=bindings.get("quick"),
+            deep_binding=bindings["deep"],
+            research_kind=materialized.research_kind,
+            temperature=values.temperature,
+            llm_max_retries=values.llm_max_retries,
+            output_language=materialized.output_language,
             data_config=data,
         )
 
@@ -317,9 +356,12 @@ class ConfigurationStore:
         view = self.read()
         updates = imported.patch.values.model_dump(mode="json", exclude_unset=True)
         return ImportPreview(
-            connection_targets=imported.targets, revision=view.revision,
-            fingerprint=imported.fingerprint, values=updates,
-            credentials=imported.credentials, issues=imported.issues,
+            connection_targets=imported.targets,
+            revision=view.revision,
+            fingerprint=imported.fingerprint,
+            values=updates,
+            credentials=imported.credentials,
+            issues=imported.issues,
             conflicts=[key for key in updates if view.sources.get(key) == "database"],
         )
 
@@ -328,17 +370,28 @@ class ConfigurationStore:
             return self.save(ConfigurationPatch(revision=request.revision), initialize=True)
         imported = self._import(request)
         if imported.issues:
-            raise ConfigurationError("Correct or exclude the reported import fields before applying")
+            raise ConfigurationError(
+                "Correct or exclude the reported import fields before applying"
+            )
         if not request.fingerprint or request.fingerprint != imported.fingerprint:
             raise ConfigurationConflict("Import source changed; preview again")
         return self.save(imported.patch, initialize=True)
 
     def _import(self, request):
         from tradingagents.configuration.importing import parse_import
+
         existing = {identity: view.connection for identity, view in self.read().connections.items()}
         if self.settings.database_path.exists():
-            with closing(sqlite3.connect(self.settings.database_path.as_uri() + "?mode=ro", uri=True)) as db:
-                if db.execute("SELECT 1 FROM sqlite_master WHERE name='model_connections'").fetchone():
-                    existing = {identity: ModelConnection.model_validate_json(definition)
-                                for identity, definition in db.execute("SELECT id, definition FROM model_connections")}
+            with closing(
+                sqlite3.connect(self.settings.database_path.as_uri() + "?mode=ro", uri=True)
+            ) as db:
+                if db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='model_connections'"
+                ).fetchone():
+                    existing = {
+                        identity: ModelConnection.model_validate_json(definition)
+                        for identity, definition in db.execute(
+                            "SELECT id, definition FROM model_connections"
+                        )
+                    }
         return parse_import(self.settings, request, existing)

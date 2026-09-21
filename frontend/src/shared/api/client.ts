@@ -71,8 +71,8 @@ export type ConfigurationField = components["schemas"]["ConfigurationField"];
 export type ConfigurationPatch = components["schemas"]["ConfigurationPatch"];
 export type ImportRequest = components["schemas"]["ImportRequest"];
 export type ImportPreview = components["schemas"]["ImportPreview"];
-export type ProviderModelCatalog =
-  components["schemas"]["ProviderModelCatalog"];
+export type ConnectionModelCatalog =
+  components["schemas"]["ConnectionModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
@@ -156,13 +156,7 @@ export const api = {
   health: () => request<Health>("/api/v1/health"),
   capabilities: () =>
     request<Capabilities>("/api/v1/capabilities"),
-  connectionModels: (id: string, refresh = false) => request<ProviderModelCatalog>(`/api/v1/settings/connections/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`),
-  providerModels: (provider: string, refresh = false) =>
-    request<ProviderModelCatalog>(
-      `/api/v1/providers/${encodeURIComponent(provider)}/models${
-        refresh ? "?refresh=true" : ""
-      }`,
-    ),
+  connectionModels: (id: string, refresh = false) => request<ConnectionModelCatalog>(`/api/v1/settings/connections/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`),
   runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
   runGroups: (query = "") => request<RunGroupPage>(`/api/v1/run-groups${query}`),
   previewLifecycle: (runIds: string[], action: "trash" | "restore" | "purge") => request<RunLifecyclePreview>("/api/v1/runs/lifecycle-preview", { method: "POST", body: JSON.stringify({ run_ids: runIds, action }) }),

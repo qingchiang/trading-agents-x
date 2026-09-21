@@ -138,7 +138,9 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}, exclude_unset=True))
+        return AnalysisRequest.model_validate(
+            self.model_dump(exclude={"source_run_id"}, exclude_unset=True)
+        )
 
 
 class RunLifecyclePreviewRequest(ApiModel):
@@ -192,16 +194,6 @@ class QueueHealth(ApiModel):
     running: int
 
 
-class ProviderCapabilities(ApiModel):
-    label: str
-    api_key_required: bool
-    api_key_configured: bool | None
-    configured: bool
-    selectable: bool
-    unavailable_reason: str | None = None
-    model_discovery_supported: bool
-
-
 class DiscoveredModelView(ApiModel):
     id: str
     label: str
@@ -215,8 +207,8 @@ class ModelDiscoveryWarningView(ApiModel):
     message: str
 
 
-class ProviderModelCatalog(ApiModel):
-    provider: str
+class ConnectionModelCatalog(ApiModel):
+    connection_id: str
     models: list[DiscoveredModelView]
     source: Literal["live", "cache", "fallback"]
     fetched_at: datetime
@@ -226,7 +218,9 @@ class ProviderModelCatalog(ApiModel):
 
 class CapabilityDefaults(ApiModel):
     models: RoleSelections
-    analysts: list[str] = Field(default_factory=lambda: ["market", "social", "news", "fundamentals"])
+    analysts: list[str] = Field(
+        default_factory=lambda: ["market", "social", "news", "fundamentals"]
+    )
     profile: str
     output_language: str
     lan_enabled: bool
@@ -239,5 +233,4 @@ class CapabilitiesResponse(ApiModel):
     profiles: list[str]
     analysts: list[str]
     output_languages: list[str]
-    providers: dict[str, ProviderCapabilities]
     defaults: CapabilityDefaults

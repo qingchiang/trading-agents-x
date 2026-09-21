@@ -13,15 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
-from tradingagents.configuration.settings import AppSettings
-from tradingagents.llm.provider_registry import (
-    PROVIDER_REGISTRY,
-    ProviderAvailability,
-    ProviderDefinition,
-    get_provider_definition,
-    provider_availability,
-    resolve_provider_base_url,
-)
+from tradingagents.llm.models import DiscoverySnapshot, ModelConnection, connection_view
 from tradingagents.llm.reasoning_effort import known_model_effort_levels
 
 logger = logging.getLogger(__name__)
@@ -47,7 +39,7 @@ class DiscoveryWarning:
 
 @dataclass(frozen=True)
 class ModelCatalog:
-    provider: str
+    connection_id: str
     models: tuple[DiscoveredModel, ...]
     source: CatalogSource
     fetched_at: datetime
@@ -61,21 +53,13 @@ class _CacheEntry:
     catalog: ModelCatalog
 
 
-class UnknownProviderError(ValueError):
-    """Raised when a model catalog is requested for an unsupported provider."""
-
-
 class ModelDiscoveryService:
     """Discover provider models on demand with a five-minute memory cache."""
 
     def __init__(
         self,
-        settings: AppSettings,
+        snapshot: Callable[[str], DiscoverySnapshot],
         *,
-        environ: Mapping[str, str] | None = None,
-        configuration=None,
-        connections=None,
-        revision=0,
         session: requests.Session | None = None,
         timeout_seconds: float = 5.0,
         cache_ttl_seconds: float = 300.0,
@@ -83,25 +67,20 @@ class ModelDiscoveryService:
         now: Callable[[], datetime] | None = None,
         bedrock_client_factory: Callable[[str], Any] | None = None,
     ) -> None:
-        self.settings = settings
-        self.configuration = configuration
-        self.connections = connections
-        self.revision = revision
-        self.environ = environ
+        self.snapshot = snapshot
         self.session = session or requests.Session()
         self.timeout_seconds = timeout_seconds
         self.cache_ttl_seconds = cache_ttl_seconds
         self.clock = clock
         self.now = now or (lambda: datetime.now(UTC))
         self.bedrock_client_factory = bedrock_client_factory
-        self._cache: dict[tuple[str, str | None, int], _CacheEntry] = {}
+        self._cache: dict[tuple[str, int], _CacheEntry] = {}
         self._lock = Lock()
 
     def discover_connection(self, identity: str, *, refresh=False):
-        from tradingagents.llm.models import connection_view
-
-        conn, auth, defaults = self.configuration.connection_discovery_snapshot(identity)
-        key = (conn.id, None, conn.revision)
+        snapshot = self.snapshot(identity)
+        conn, auth, defaults = snapshot.connection, snapshot.credentials, snapshot.default_models
+        key = (conn.id, conn.revision)
         with self._lock:
             for old in list(self._cache):
                 if old[0] == conn.id and old != key:
@@ -111,22 +90,8 @@ class ModelDiscoveryService:
             return self._connection_defaults(
                 replace(cached.catalog, source="cache"), conn, defaults
             )
-        worker = ModelDiscoveryService(
-            self.settings,
-            session=self.session,
-            timeout_seconds=self.timeout_seconds,
-            now=self.now,
-            bedrock_client_factory=self.bedrock_client_factory,
-        )
-        worker._connection_auth = auth
-        worker._active_connection = conn
-        definition = ProviderDefinition(
-            conn.compatibility,
-            conn.name,
-            conn.discovery,
-            None,
-            conn.key_required,
-            getattr(conn.transport, "base_url", None),
+        worker = _DiscoveryClient(
+            conn, auth, self.session, self.timeout_seconds, self.bedrock_client_factory
         )
         warning = None
         models = ()
@@ -136,9 +101,7 @@ class ModelDiscoveryService:
             )
         else:
             try:
-                models = worker._normalize_models(
-                    conn.compatibility, worker._fetch(definition, definition.default_base_url)
-                )
+                models = self._normalize_models(conn.compatibility, worker.fetch())
             except Exception as exc:
                 logger.warning("Connection model discovery failed (%s)", type(exc).__name__)
                 warning = DiscoveryWarning(
@@ -156,8 +119,8 @@ class ModelDiscoveryService:
     def _connection_defaults(catalog, conn, defaults):
         by_id = {model.id: model for model in catalog.models}
         for role in ("quick", "deep"):
-            if getattr(defaults.models, role).connection_id == conn.id:
-                model_id = getattr(defaults.models, role).model
+            if role in defaults:
+                model_id = defaults[role]
                 existing = by_id.get(model_id)
                 by_id[model_id] = DiscoveredModel(
                     model_id,
@@ -166,151 +129,87 @@ class ModelDiscoveryService:
                     ("provider_default", *known_model_effort_levels(conn.compatibility, model_id)),
                     (*existing.default_roles, role) if existing else (role,),
                 )
-        return replace(catalog, models=tuple(by_id.values()))
-
-    def providers(self) -> dict[str, tuple[ProviderDefinition, ProviderAvailability]]:
-        """Return every provider for Settings, including unavailable entries."""
-        if self.configuration is not None:
-            view = self.configuration.read()
-            result = {}
-            for name, definition in PROVIDER_REGISTRY.items():
-                entry = next((entry for entry in view.connections.values() if entry.connection.preset == name), None)
-                result[name] = (
-                    definition,
-                    ProviderAvailability(
-                        configured=bool(entry and not entry.missing_fields),
-                        selectable=bool(entry and entry.selectable),
-                        api_key_configured=bool(entry and entry.credentials.get("api_key")),
-                        reason=entry.unavailable_reason if entry else "missing_configuration",
-                    ),
+        return replace(
+            catalog,
+            models=tuple(
+                sorted(
+                    by_id.values(),
+                    key=lambda model: (not bool(model.default_roles), model.id.casefold()),
                 )
-            return result
-        return {
-            name: (
-                definition,
-                provider_availability(
-                    definition,
-                    self.settings,
-                    self.environ,
-                    self.connections,
-                ),
-            )
-            for name, definition in PROVIDER_REGISTRY.items()
-        }
-
-    def _provider_connection_id(self, provider):
-        matches = [entry.connection.id for entry in self.configuration.read().connections.values()
-                   if entry.connection.preset == provider]
-        if len(matches) != 1:
-            raise UnknownProviderError("Select a connection ID for model discovery")
-        return matches[0]
-
-    def discover(self, provider: str, *, refresh: bool = False) -> ModelCatalog:
-        """Return a live, cached, or configured-default model catalog."""
-        if self.configuration is not None:
-            if provider not in PROVIDER_REGISTRY:
-                raise UnknownProviderError(provider)
-            return replace(
-                self.discover_connection(self._provider_connection_id(provider), refresh=refresh),
-                provider=provider,
-            )
-        definition = get_provider_definition(provider)
-        if definition is None:
-            raise UnknownProviderError(provider)
-        availability = provider_availability(
-            definition,
-            self.settings,
-            self.environ,
-            self.connections,
+            ),
         )
-        base_url = resolve_provider_base_url(
-            definition,
-            self.settings,
-            self.environ,
-            self.connections,
-        )
-        cache_key = (definition.name, _safe_endpoint_identity(base_url), self.revision)
-        now_monotonic = self.clock()
-        if not refresh:
-            with self._lock:
-                cached = self._cache.get(cache_key)
-            if cached and cached.expires_at > now_monotonic:
-                return replace(cached.catalog, source="cache")
 
-        if not availability.selectable:
-            catalog = self._fallback_catalog(
-                definition,
-                warning=DiscoveryWarning(
-                    code="provider_not_configured",
-                    message=(
-                        f"{definition.label} is not configured; "
-                        "only configured defaults and a custom model ID are available."
-                    ),
-                ),
-            )
-        else:
-            try:
-                raw_models = self._fetch(definition, base_url)
-                models = self._normalize_models(definition.name, raw_models)
-                models = self._merge_configured_defaults(definition.name, models)
-                catalog = ModelCatalog(
-                    provider=definition.name,
-                    models=models,
-                    source="live",
-                    fetched_at=self.now(),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Model discovery failed for provider %s (%s)",
-                    definition.name,
-                    type(exc).__name__,
-                )
-                catalog = self._fallback_catalog(
-                    definition,
-                    warning=DiscoveryWarning(
-                        code="model_discovery_unavailable",
-                        message=(
-                            f"Could not refresh {definition.label} models. "
-                            "Configured defaults and a custom model ID remain available."
-                        ),
-                    ),
-                )
-
-        with self._lock:
-            self._cache[cache_key] = _CacheEntry(
-                expires_at=now_monotonic + self.cache_ttl_seconds,
-                catalog=catalog,
-            )
-        return catalog
-
-    def _fetch(
+    def _normalize_models(
         self,
-        definition: ProviderDefinition,
-        base_url: str | None,
-    ) -> list[tuple[str, ModelCompatibility]]:
-        if definition.adapter == "openai_compatible":
-            return self._discover_openai_compatible(definition, base_url)
-        if definition.adapter == "anthropic":
-            return self._discover_anthropic(definition, base_url)
-        if definition.adapter == "google":
-            return self._discover_google(definition, base_url)
-        if definition.adapter == "ollama":
+        provider: str,
+        raw_models: list[tuple[str, ModelCompatibility]],
+    ) -> tuple[DiscoveredModel, ...]:
+        unique: dict[str, ModelCompatibility] = {}
+        for model_id, compatibility in raw_models:
+            normalized = model_id.strip()
+            if not normalized:
+                continue
+            existing = unique.get(normalized)
+            if existing != "supported":
+                unique[normalized] = compatibility
+        return tuple(
+            DiscoveredModel(
+                id=model_id,
+                label=model_id,
+                compatibility=compatibility,
+                reasoning_efforts=(
+                    "provider_default",
+                    *known_model_effort_levels(provider, model_id),
+                ),
+            )
+            for model_id, compatibility in sorted(
+                unique.items(),
+                key=lambda item: item[0].casefold(),
+            )
+        )
+
+
+class _DiscoveryClient:
+    """Protocol requests using one immutable connection snapshot."""
+
+    def __init__(
+        self,
+        connection: ModelConnection,
+        credentials,
+        session,
+        timeout_seconds,
+        bedrock_client_factory,
+    ):
+        self.connection = connection
+        self.credentials = credentials
+        self.session = session
+        self.timeout_seconds = timeout_seconds
+        self.bedrock_client_factory = bedrock_client_factory
+
+    def fetch(self) -> list[tuple[str, ModelCompatibility]]:
+        base_url = getattr(self.connection.transport, "base_url", None)
+        if self.connection.discovery == "openai_compatible":
+            return self._discover_openai_compatible(base_url)
+        if self.connection.discovery == "anthropic":
+            return self._discover_anthropic(base_url)
+        if self.connection.discovery == "google":
+            return self._discover_google(base_url)
+        if self.connection.discovery == "ollama":
             return self._discover_ollama(base_url)
-        if definition.adapter == "bedrock":
+        if self.connection.discovery == "bedrock":
             return self._discover_bedrock()
-        if definition.adapter == "custom":
+        if self.connection.discovery == "custom":
             return []
         raise RuntimeError("Unsupported discovery adapter")
 
     def _discover_openai_compatible(
         self,
-        definition: ProviderDefinition,
         base_url: str | None,
     ) -> list[tuple[str, ModelCompatibility]]:
         if not base_url:
             raise RuntimeError("Provider endpoint is not configured")
         headers: dict[str, str] = {}
-        api_key = self._api_key(definition.api_key_env)
+        api_key = self.credentials.get("api_key")
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         endpoint = f"{base_url.rstrip('/')}/models"
@@ -336,13 +235,12 @@ class ModelDiscoveryService:
 
     def _discover_anthropic(
         self,
-        definition: ProviderDefinition,
         base_url: str | None,
     ) -> list[tuple[str, ModelCompatibility]]:
         if not base_url:
             raise RuntimeError("Provider endpoint is not configured")
         headers = {
-            "x-api-key": self._api_key(definition.api_key_env) or "",
+            "x-api-key": self.credentials.get("api_key") or "",
             "anthropic-version": "2023-06-01",
         }
         root = base_url.rstrip("/")
@@ -368,7 +266,6 @@ class ModelDiscoveryService:
 
     def _discover_google(
         self,
-        definition: ProviderDefinition,
         base_url: str | None,
     ) -> list[tuple[str, ModelCompatibility]]:
         if not base_url:
@@ -380,7 +277,7 @@ class ModelDiscoveryService:
         models: list[tuple[str, ModelCompatibility]] = []
         page_token: str | None = None
         for _page in range(20):
-            params = {"key": self._api_key(definition.api_key_env) or ""}
+            params = {"key": self.credentials.get("api_key") or ""}
             if page_token:
                 params["pageToken"] = page_token
             payload = self._get_json(endpoint, params=params)
@@ -431,43 +328,14 @@ class ModelDiscoveryService:
         return models
 
     def _discover_bedrock(self) -> list[tuple[str, ModelCompatibility]]:
-        if hasattr(self, "_active_connection"):
-            from tradingagents.llm.connections import aws_client
+        from tradingagents.llm.connections import aws_client
 
-            region = self._active_connection.transport.region
-            client = (
-                self.bedrock_client_factory(region)
-                if self.bedrock_client_factory
-                else aws_client(
-                    self._active_connection.transport.model_dump(), self._connection_auth, "bedrock"
-                )
-            )
-        else:
-            region = (
-                self._env_value("AWS_REGION")
-                or self._env_value("AWS_DEFAULT_REGION")
-                or "us-west-2"
-            )
-            if self.bedrock_client_factory is not None:
-                client = self.bedrock_client_factory(region)
-            else:
-                import boto3
-
-                mode = self._env_value("BEDROCK_AUTH_MODE") or "system"
-                if mode == "bearer":
-                    raise ValueError(
-                        "Model discovery is unavailable for bearer authentication; enter a model ID"
-                    )
-                kwargs = {}
-                if mode == "static":
-                    kwargs = {
-                        "aws_access_key_id": self._env_value("AWS_ACCESS_KEY_ID"),
-                        "aws_secret_access_key": self._env_value("AWS_SECRET_ACCESS_KEY"),
-                        "aws_session_token": self._env_value("AWS_SESSION_TOKEN"),
-                    }
-                else:
-                    kwargs["profile_name"] = self._env_value("AWS_PROFILE")
-                client = boto3.Session(**kwargs).client("bedrock", region_name=region)
+        region = self.connection.transport.region
+        client = (
+            self.bedrock_client_factory(region)
+            if self.bedrock_client_factory
+            else aws_client(self.connection.transport.model_dump(), self.credentials, "bedrock")
+        )
         models: list[tuple[str, ModelCompatibility]] = []
         token: str | None = None
         for _page in range(20):
@@ -513,124 +381,6 @@ class ModelDiscoveryService:
         if not isinstance(payload, dict):
             raise ValueError("Invalid model list response")
         return payload
-
-    def _normalize_models(
-        self,
-        provider: str,
-        raw_models: list[tuple[str, ModelCompatibility]],
-    ) -> tuple[DiscoveredModel, ...]:
-        unique: dict[str, ModelCompatibility] = {}
-        for model_id, compatibility in raw_models:
-            normalized = model_id.strip()
-            if not normalized:
-                continue
-            existing = unique.get(normalized)
-            if existing != "supported":
-                unique[normalized] = compatibility
-        return tuple(
-            DiscoveredModel(
-                id=model_id,
-                label=model_id,
-                compatibility=compatibility,
-                reasoning_efforts=(
-                    "provider_default",
-                    *known_model_effort_levels(provider, model_id),
-                ),
-            )
-            for model_id, compatibility in sorted(
-                unique.items(),
-                key=lambda item: item[0].casefold(),
-            )
-        )
-
-    def _merge_configured_defaults(
-        self,
-        provider: str,
-        models: tuple[DiscoveredModel, ...],
-    ) -> tuple[DiscoveredModel, ...]:
-        roles = self._default_roles(provider)
-        by_id = {model.id: model for model in models}
-        for model_id, default_roles in roles.items():
-            if model_id in by_id:
-                by_id[model_id] = replace(
-                    by_id[model_id],
-                    default_roles=default_roles,
-                )
-            else:
-                by_id[model_id] = DiscoveredModel(
-                    id=model_id,
-                    label=model_id,
-                    compatibility="unknown",
-                    reasoning_efforts=(
-                        "provider_default",
-                        *known_model_effort_levels(provider, model_id),
-                    ),
-                    default_roles=default_roles,
-                )
-        return tuple(
-            sorted(
-                by_id.values(),
-                key=lambda model: (
-                    not bool(model.default_roles),
-                    model.id.casefold(),
-                ),
-            )
-        )
-
-    def _fallback_catalog(
-        self,
-        definition: ProviderDefinition,
-        *,
-        warning: DiscoveryWarning,
-    ) -> ModelCatalog:
-        return ModelCatalog(
-            provider=definition.name,
-            models=self._merge_configured_defaults(definition.name, ()),
-            source="fallback",
-            fetched_at=self.now(),
-            stale=True,
-            warning=warning,
-        )
-
-    def _default_roles(
-        self,
-        provider: str,
-    ) -> dict[str, tuple[Literal["quick", "deep"], ...]]:
-        roles: dict[str, list[Literal["quick", "deep"]]] = {}
-        for role in ("quick", "deep"):
-            binding = getattr(self.settings.default_run_settings, f"{role}_binding")
-            if binding is not None and binding.connection.compatibility == provider:
-                roles.setdefault(binding.model, []).append(role)
-        return {model: tuple(values) for model, values in roles.items()}
-
-    def _api_key(self, legacy_name):
-        if hasattr(self, "_connection_auth"):
-            return self._connection_auth.get("api_key")
-        return self._env_value(legacy_name)
-
-    def _env_value(self, name: str | None) -> str | None:
-        if name is None:
-            return None
-        if self.environ is not None:
-            return self.environ.get(name)
-        return context_credential(name)
-
-
-def context_credential(name: str) -> str | None:
-    """Small seam kept out of serialized settings and easy to isolate in tests."""
-    from tradingagents.credentials import credential
-
-    return credential(name)
-
-
-def _safe_endpoint_identity(base_url: str | None) -> str | None:
-    """Cache by scheme/host/path while dropping query strings and credentials."""
-    if not base_url:
-        return None
-    parsed = urlsplit(base_url)
-    host = parsed.hostname or ""
-    port = f":{parsed.port}" if parsed.port else ""
-    return urlunsplit((parsed.scheme, f"{host}{port}", parsed.path, "", ""))
 
 
 def _parse_model_item(

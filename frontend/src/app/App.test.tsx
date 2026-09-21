@@ -30,7 +30,9 @@ const capabilities = {
     lan_enabled: false,
     trash_retention_days: 30,
   },
-  providers: {},
+  analysts: ["market", "social", "news", "fundamentals"],
+  profiles: ["fast", "standard", "deep"],
+  output_languages: ["en", "zh-CN", "ja"],
 } as Capabilities;
 
 beforeEach(async () => {
