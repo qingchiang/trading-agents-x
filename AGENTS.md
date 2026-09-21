@@ -51,7 +51,7 @@ and `--no-dev` for source-checkout runtime sync and run commands.
 uv sync --locked
 
 uv run --locked pytest -q
-uv run --locked pytest tests/test_market_routing.py
+uv run --locked pytest tests/data/test_market_routing.py
 uv run --locked ruff check .
 
 npm ci --prefix frontend

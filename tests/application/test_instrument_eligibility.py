@@ -7,8 +7,8 @@ import pytest
 from sqlalchemy import text
 from yfinance.exceptions import YFRateLimitError
 
-from tests.data_policy import request_context
 from tests.research_helpers import stub_run_llms
+from tests.support.data_policy import request_context
 from tradingagents.application.service import AnalysisService
 from tradingagents.client import TradingAgents
 from tradingagents.configuration.settings import AppSettings
@@ -34,7 +34,7 @@ def _with_eligibility_vendor(
 ) -> AppSettings:
     from sqlalchemy.orm import Session
 
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     from tradingagents.configuration.errors import ConfigurationError
     from tradingagents.configuration.models import ConfigurationPatch
     from tradingagents.persistence.configuration import ConfigurationStore
@@ -341,7 +341,7 @@ def test_retry_uses_current_eligibility_config_for_legacy_snapshot(
     app_settings,
     repository,
 ) -> None:
-    from tests.configuration_helpers import save_configuration
+    from tests.support.configuration_helpers import save_configuration
     save_configuration(app_settings, {"data_vendors": {**app_settings.default_run_settings.data_config["data_vendors"], "instrument_eligibility": "default"}})
     settings = app_settings
     observed_vendors: list[str | None] = []

@@ -28,7 +28,7 @@ def web_settings(tmp_path: Path) -> AppSettings:
         load_env_files=False,
     )
 
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(settings)
     return settings
 

@@ -7,14 +7,19 @@ import pytest
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
-from tests.application.test_service import _equity_resolver, _Graph, _service
-from tests.factories import analyst_report, research_decision
-from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
+from tests.research_helpers import default_incremental_synthesizer
+from tests.support.factories import analyst_report, research_decision
+from tests.support.incremental import (
+    _incremental_service,
+    _pit_collection,
+    _sources,
+    _unavailable_domains,
+)
+from tests.support.service import _equity_resolver, _Graph, _service
 from tradingagents.application.service import AnalysisService
 from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
-    CollectionSourceProvenance,
     CollectionSummary,
     IncrementalCollectionRequest,
     IncrementalEvidenceCandidate,
@@ -56,32 +61,6 @@ from tradingagents.research.incremental.synthesis import (
 from tradingagents.research.synthesis.structured_output import StructuredOutputError
 
 
-def _unavailable_domains(request: IncrementalCollectionRequest):
-    return tuple(
-        CollectionDomainResult(
-            domain=domain,
-            state="unavailable",
-            diagnostic=CollectionDiagnostic(code="not_configured"),
-        )
-        for domain in request.enabled_domains
-    )
-
-
-def _sources(
-    source: str,
-    retrieved_at: datetime,
-    *,
-    fallback: bool = False,
-) -> tuple[CollectionSourceProvenance, ...]:
-    return (
-        CollectionSourceProvenance(
-            source=source,
-            fallback=fallback,
-            retrieved_at=retrieved_at,
-        ),
-    )
-
-
 @pytest.mark.parametrize(
     ("language", "expected"),
     (
@@ -95,60 +74,6 @@ def test_incremental_brief_fallback_title_is_localized(
     expected: str,
 ) -> None:
     assert _incremental_brief_fallback_title(language) == expected
-
-
-def _incremental_service(
-    app_settings,
-    repository,
-    *,
-    collector,
-    synthesizer=default_incremental_synthesizer,
-    eligibility_resolver=_equity_resolver,
-    identity_resolver=lambda symbol, _date: {"company_name": symbol},
-    local_name_resolver=lambda _ticker, _date, _config: None,
-    now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
-) -> AnalysisService:
-    return AnalysisService(
-        app_settings,
-        repository=repository,
-        llm_factory=stub_run_llms,
-        graph_factory=_Graph,
-        identity_resolver=identity_resolver,
-        eligibility_resolver=eligibility_resolver,
-        local_name_resolver=local_name_resolver,
-        incremental_collector=collector,
-        incremental_synthesizer=synthesizer,
-        now=now,
-    )
-
-
-def _pit_collection(
-    request: IncrementalCollectionRequest,
-    candidate: IncrementalEvidenceCandidate,
-    *,
-    domain: str = "news",
-) -> IncrementalCollectionResult:
-    domains = list(_unavailable_domains(request))
-    index = request.enabled_domains.index(domain)
-    domains[index] = CollectionDomainResult(
-        domain=domain,
-        state="data",
-        sources=_sources(
-            candidate.evidence.source,
-            request.window_end,
-            fallback=candidate.evidence.fallback,
-        ),
-        temporal_bases=("pit",),
-        evidence_refs=(candidate.evidence.ref,),
-    )
-    return IncrementalCollectionResult(
-        collection_summary=CollectionSummary(
-            version=request.version,
-            market=request.market,
-            domains=tuple(domains),
-        ),
-        evidence=(candidate,),
-    )
 
 
 def test_real_full_social_observation_does_not_advance_for_incremental_retrieval_spelling(
@@ -210,7 +135,9 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domains[request.enabled_domains.index("social")] = CollectionDomainResult(
             domain="social",
@@ -451,7 +378,9 @@ def test_incremental_service_commits_simplified_actual_result_products(
     )
     synthesis_inputs = []
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = []
         for domain in request.enabled_domains:
             if domain == "news":
@@ -1079,14 +1008,12 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         expected_calls.append(("_IncrementalDecisionPayload", None))
     assert serializer.calls == expected_calls
     confidence_instruction = (
-        "Never express final Decision confidence as a number, decimal, percentage, "
-        "or probability"
+        "Never express final Decision confidence as a number, decimal, percentage, or probability"
     )
     assert semantic.prompts
     assert serializer.prompts
     assert all(
-        confidence_instruction in prompt
-        for prompt in (*semantic.prompts, *serializer.prompts)
+        confidence_instruction in prompt for prompt in (*semantic.prompts, *serializer.prompts)
     )
     assert result.decision is not None
     assert (
@@ -1248,7 +1175,9 @@ def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
     )
     observed = []
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         observed.append((dict(data_context.config), request))
         return _pit_collection(request, candidate)
 
@@ -1426,7 +1355,9 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     )
     synthesized = []
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1481,26 +1412,43 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             value=110,
             content="The completed 2026-07-24 adjusted close.",
             fallback=True,
-            origins=(EvidenceOrigin(
-                source="fixture.market", evidence_type="adjusted_close",
-                retrieved_at="2026-07-24T21:00:00Z", fallback=True,
-                temporal_scope="point_in_time",
-            ),) if later_market_snapshot else (),
+            origins=(
+                EvidenceOrigin(
+                    source="fixture.market",
+                    evidence_type="adjusted_close",
+                    retrieved_at="2026-07-24T21:00:00Z",
+                    fallback=True,
+                    temporal_scope="point_in_time",
+                ),
+            )
+            if later_market_snapshot
+            else (),
         ),
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
-        extra = IncrementalEvidenceCandidate(evidence=EvidenceItem.create(
-            source="fixture.market", evidence_type="market_snapshot",
-            requested_date=date(2026, 7, 24), available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
-            content="A separate snapshot from the same provider, retrieved one minute later.",
-            fallback=True, origins=(EvidenceOrigin(
-                source="fixture.market", evidence_type="market_snapshot",
-                retrieved_at="2026-07-24T21:01:00Z", fallback=True,
-                temporal_scope="point_in_time",
-            ),),
-        ))
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
+        extra = IncrementalEvidenceCandidate(
+            evidence=EvidenceItem.create(
+                source="fixture.market",
+                evidence_type="market_snapshot",
+                requested_date=date(2026, 7, 24),
+                available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+                content="A separate snapshot from the same provider, retrieved one minute later.",
+                fallback=True,
+                origins=(
+                    EvidenceOrigin(
+                        source="fixture.market",
+                        evidence_type="market_snapshot",
+                        retrieved_at="2026-07-24T21:01:00Z",
+                        fallback=True,
+                        temporal_scope="point_in_time",
+                    ),
+                ),
+            )
+        )
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1512,7 +1460,8 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
                 fallback=True,
             ),
             temporal_bases=("pit",),
-            evidence_refs=(market_evidence.evidence.ref,) + ((extra.evidence.ref,) if later_market_snapshot else ()),
+            evidence_refs=(market_evidence.evidence.ref,)
+            + ((extra.evidence.ref,) if later_market_snapshot else ()),
         )
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
@@ -1573,7 +1522,9 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         now=lambda: datetime(2026, 7, 25, 5, tzinfo=UTC),
     )
     request = AnalysisRequest(
-        ticker="NVDA", analysis_date=date(2026, 7, 24), research_kind="incremental",
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
         full_baseline_run_id=baseline.run_id,
     )
     if series_minute:
@@ -1583,7 +1534,9 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     result = service.run(request)
     events = [event.event_type for event in repository.list_events(result.run_id)]
     assert events.index("run.started") < events.index("incremental.collection_started")
-    assert events.index("incremental.collection_started") < events.index("incremental.collection_completed")
+    assert events.index("incremental.collection_started") < events.index(
+        "incremental.collection_completed"
+    )
     assert events.index("incremental.synthesis_completed") < events.index("run.commit_started")
     assert events.index("run.commit_started") < events.index("run.succeeded")
 
@@ -1625,7 +1578,9 @@ def test_completed_stock_session_rejects_unrelated_market_evidence(
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1693,7 +1648,9 @@ def test_incremental_service_rejects_unadmitted_stock_series_advancement(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1756,7 +1713,9 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return _pit_collection(request, candidate).model_copy(
             update={
                 "benchmark_series": (
@@ -1834,7 +1793,9 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         fundamentals = request.enabled_domains.index("fundamentals")
         domains[fundamentals] = CollectionDomainResult(
@@ -1942,7 +1903,9 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = {
             "fundamentals": CollectionDomainResult(
                 domain="fundamentals",
@@ -2083,7 +2046,9 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         news = request.enabled_domains.index("news")
         domains[news] = CollectionDomainResult(
@@ -2142,7 +2107,9 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         available_at = datetime(
             2026,
             7,
@@ -2251,7 +2218,9 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
         }
     )
 
-    def collect_copied(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect_copied(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domain = request.enabled_domains.index("news")
         domains[domain] = CollectionDomainResult(
@@ -2377,7 +2346,9 @@ def test_incremental_commit_revalidates_a_baseline_trashed_during_execution(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         if mutation_phase == "collection":
             repository.trash_runs((baseline.run_id,))
         return _pit_collection(request, candidate)

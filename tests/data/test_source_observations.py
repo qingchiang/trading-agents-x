@@ -1,0 +1,617 @@
+from datetime import UTC, date, datetime
+
+import pandas as pd
+
+from tests.support.data_policy import request_context
+from tests.support.source_results import source_message
+from tradingagents.data import y_finance
+from tradingagents.data.news_selection import news_observations
+from tradingagents.domain.data_result import DataResult
+
+
+def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeypatch):
+    from tradingagents.domain import instruments as symbol_utils
+
+    class MarketClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 5, 16, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr(symbol_utils, "datetime", MarketClock)
+
+    class Stock:
+        quarterly_cashflow = pd.DataFrame(
+            {pd.Timestamp("2026-06-30"): [150.0, -100.0]},
+            index=["Operating Cash Flow", "Capital Expenditure"],
+        )
+
+    monkeypatch.setattr(y_finance.yf, "Ticker", lambda _: Stock())
+    output = y_finance.get_cashflow(
+        "GOOG", "quarterly", "2026-09-05", data_context=request_context()
+    )
+    observations = output.observations
+    assert "150" in output.content
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.effective_date == date(2026, 6, 30)
+    assert observation.available_at is None
+    assert observation.available_on is None
+    assert observation.values["Capital Expenditure"] == -100.0
+    assert observation.retrieved_at.tzinfo is not None
+
+
+def test_china_statement_observations_retain_visibility_and_cumulative_basis(monkeypatch):
+    from tests.support.china_financials import _frame
+    from tradingagents.data.cn import cn_statements
+
+    monkeypatch.setattr(cn_statements, "fetch_finance_records", lambda *_: ("600309.SS", _frame()))
+    monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
+    monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_: None)
+    observations = cn_statements.get_income_statement(
+        "600309.SS", curr_date="2026-03-21", data_context=request_context()
+    ).observations
+    assert observations[0].available_on == date(2026, 3, 21)
+    assert observations[0].values["period_basis"] == "YTD"
+    assert observations[0].values["Revenue"] == 1000
+
+
+def test_japan_margin_publishes_conservative_release_date(monkeypatch):
+    from tradingagents.data.jp import jquants_sentiment
+
+    monkeypatch.setattr(
+        jquants_sentiment,
+        "fetch_records",
+        lambda *a: [
+            {"Date": "2026-08-28", "LongVol": 90, "ShrtVol": 10},
+        ],
+    )
+    result = jquants_sentiment.get_margin_balance(
+        "9984.T", "2026-09-05", data_context=request_context()
+    )
+    observations = result.observations
+    assert observations[0].effective_date == date(2026, 8, 28)
+    assert observations[0].available_on == date(2026, 9, 1)
+    assert "T+2" in observations[0].timing
+
+
+def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch):
+    from tests.support.us_collection import _request
+    from tradingagents.data.incremental_us import collect_us_incremental
+    from tradingagents.domain.data import ProvenanceRecord
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
+
+    class Stock:
+        quarterly_cashflow = pd.DataFrame(
+            {pd.Timestamp("2026-06-30"): [150.0, -100.0]},
+            index=["Operating Cash Flow", "Capital Expenditure"],
+        )
+
+    monkeypatch.setattr(y_finance.yf, "Ticker", lambda _: Stock())
+
+    def route(method, *args, **kwargs):
+        if method == "get_cashflow":
+            return y_finance.get_cashflow(*args, data_context=request_context())
+        return DataResult("live overview").with_provenance(
+            ProvenanceRecord(
+                evidence=method,
+                source="yfinance",
+                requested="2026-09-05",
+                effective="live snapshot",
+                timing="live non-point-in-time",
+            )
+        )
+
+    now = datetime.now(UTC)
+    request = _request(
+        enabled_domains=("fundamentals",),
+        baseline=date(2026, 8, 29),
+        target=now.date(),
+        window_start=datetime(2026, 8, 29, tzinfo=UTC),
+        window_end=now,
+    )
+    result = collect_us_incremental(request, route_to_vendor=route, data_context=request_context())
+    _, items, _ = normalize_incremental_collection(request, result, sealed_at=datetime.now(UTC))
+    statement = next(item for item in items if item.evidence_type == "financial_cashflow")
+    assert '"Capital Expenditure": -100.0' in statement.content
+    assert statement.origins[0].temporal_scope.value == "live_only"
+
+
+def test_professional_signal_enters_incremental_and_full_with_same_identity(monkeypatch):
+    from tests.support.japan_collection import _request
+    from tradingagents.data import incremental_jp
+    from tradingagents.data.market_signals import FetchedSentimentSignal, sentiment_signal_specs
+    from tradingagents.domain.data import SourceObservation
+    from tradingagents.research.full.evidence import collect_evidence
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
+
+    observed = SourceObservation(
+        "J-Quants",
+        "margin_balances",
+        "2026-07-17",
+        {"LongVol": 90, "ShrtVol": 10},
+        datetime(2026, 7, 24, 6, tzinfo=UTC),
+        effective_date=date(2026, 7, 17),
+        available_on=date(2026, 7, 21),
+        timing="inferred T+2 publication",
+    )
+    fetched = FetchedSentimentSignal(
+        sentiment_signal_specs("7203.T")[1], DataResult("margin", observations=(observed,))
+    )
+    monkeypatch.setattr(
+        incremental_jp, "fetch_sentiment_signals", lambda *a, data_context: (fetched,)
+    )
+    request = _request(enabled_domains=("social",))
+    result = incremental_jp.collect_japan_incremental(request, data_context=request_context())
+    _, admitted, _ = normalize_incremental_collection(
+        request,
+        result,
+        sealed_at=datetime(2026, 7, 25, tzinfo=UTC),
+    )
+    full = collect_evidence(
+        [],
+        requested_date=request.analysis_cutoff,
+        analyst="social",
+        prefetched_blocks=[{"source_observation": observed.dump()}],
+        instrument=request.instrument,
+    )
+    assert len(admitted) == 1
+    assert (
+        admitted[0].provenance["observation_identity"] == full[0].provenance["observation_identity"]
+    )
+
+
+def test_financial_release_keeps_older_comparative_periods_as_context():
+    from tradingagents.data.financial_inputs import collect_financial_inputs
+    from tradingagents.data.source_observations import make_observation
+
+    def route(method, *_args, **_kwargs):
+        observations = []
+        if method == "get_income_statement":
+            for period, visible, value in (
+                ("2026-06-30", "2026-08-25", 20),
+                ("2026-03-31", "2026-04-25", 10),
+            ):
+                observations.append(
+                    make_observation(
+                        "Sina",
+                        "financial_income",
+                        period,
+                        {"Revenue": value, "period_basis": "YTD"},
+                        effective_date=period,
+                        available_on=visible,
+                    )
+                )
+        return DataResult("source response", observations=tuple(observations))
+
+    result = collect_financial_inputs(
+        "600309.SS",
+        "2026-09-05",
+        route=route,
+        include_overview=False,
+        data_context=request_context(),
+    )
+    assert len(result["observations"]) == 1
+    observation = result["observations"][0]
+    assert observation["available_on"] == "2026-08-25"
+    assert [period["values"]["Revenue"] for period in observation["values"]["periods"]] == [20, 10]
+
+
+def test_financial_rate_limit_preserves_an_earlier_success():
+    from tradingagents.data.financial_inputs import collect_financial_inputs
+    from tradingagents.data.source_observations import make_observation
+    from tradingagents.domain.vendor_errors import VendorRateLimitError
+
+    calls = []
+
+    def route(method, *_args, **_kwargs):
+        calls.append(method)
+        if method == "get_balance_sheet":
+            raise VendorRateLimitError("limited")
+        return DataResult(
+            "success",
+            observations=(
+                make_observation("Yahoo", "financial_income", "GOOG:2026-06-30", {"Revenue": 42}),
+            ),
+        )
+
+    result = collect_financial_inputs(
+        "GOOG",
+        "2026-09-05",
+        route=route,
+        include_overview=False,
+        stop_on_rate_limit=True,
+        data_context=request_context(),
+    )
+    assert len(result["observations"]) == 1
+    assert calls == ["get_income_statement", "get_balance_sheet"]
+
+
+def test_cn_news_signal_deduplication_preserves_valid_domain_contracts():
+    from tests.support.china_collection import _request
+    from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
+    from tradingagents.domain.data import SourceObservation
+
+    request = _request(enabled_domains=("news", "social"))
+    observed = SourceObservation(
+        "CNINFO",
+        "news_article",
+        "record-1",
+        {"title": "event", "url": "https://example.test/1"},
+        datetime(2026, 7, 24, tzinfo=UTC),
+        available_on=date(2026, 7, 21),
+    )
+    domains, candidates = [], []
+    for role in ("news", "social"):
+        empty = CollectionDomainResult(
+            domain=role, state="unavailable", diagnostic=CollectionDiagnostic(code="test")
+        )
+        domain, values = augment_domain(request, empty, [observed])
+        domains.append(domain)
+        candidates.extend(values)
+    domains, candidates = dedupe_news_domains(domains, candidates)
+    assert len(candidates) == 1
+    assert not domains[1].evidence_refs
+    for domain in domains:
+        CollectionDomainResult.model_validate(domain.model_dump())
+
+
+def test_full_statement_evidence_resolves_publication_day_in_its_market():
+    from zoneinfo import ZoneInfo
+
+    import pytest
+
+    from tradingagents.domain.data import SourceObservation
+    from tradingagents.domain.evidence import EvidenceBundle
+    from tradingagents.research.full.evidence import collect_evidence
+
+    observation = SourceObservation(
+        "J-Quants",
+        "financial_income",
+        "9984.T:2026-06-30",
+        {"Revenue": 100},
+        datetime(2026, 9, 5, tzinfo=UTC),
+        effective_date=date(2026, 6, 30),
+        available_on=date(2026, 9, 5),
+    )
+    items = collect_evidence(
+        [],
+        requested_date=date(2026, 9, 5),
+        analyst="fundamentals",
+        prefetched_blocks=[{"source_observation": observation.dump()}],
+        instrument="9984.T",
+    )
+    assert items[0].available_at == datetime(
+        2026, 9, 5, 23, 59, 59, 999999, tzinfo=ZoneInfo("Asia/Tokyo")
+    )
+    with pytest.raises(ValueError, match="after the analysis cutoff"):
+        EvidenceBundle(instrument="9984.T", analysis_date=date(2026, 9, 4), items=tuple(items))
+
+
+def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
+
+    from tests.support.data_policy import data_config, data_policy
+    from tradingagents.data import interface
+    from tradingagents.data.news_selection import finalize_news, news_result
+    from tradingagents.domain.news import NewsCandidate
+    from tradingagents.domain.vendor_errors import NoMarketDataError
+    from tradingagents.research.full.evidence import collect_evidence
+
+    current = datetime(2026, 9, 5, 10, tzinfo=UTC)
+
+    def failed(*_a, **_k):
+        raise NoMarketDataError("GOOG")
+
+    def fallback(*_a, **_k):
+        row = NewsCandidate(
+            "yfinance",
+            "event",
+            "### event",
+            published="2026-09-04T10:00:00Z",
+            retrieved_at=current.isoformat(),
+        )
+        return finalize_news(
+            news_result("## news", [row]), "yfinance", "GOOG", "2026-09-01", "2026-09-05", 30
+        )
+
+    monkeypatch.setitem(
+        interface.VENDOR_METHODS, "get_news", {"alpha_vantage": failed, "yfinance": fallback}
+    )
+    with data_policy({**data_config(), "tool_vendors": {"get_news": "alpha_vantage,yfinance"}}):
+        body = interface.route_to_vendor(
+            "get_news", "GOOG", "2026-09-01", "2026-09-05", data_context=request_context()
+        )
+    observed = body.observations
+    assert len(observed) == 1
+    assert observed[0].fallback
+    sealed = collect_evidence(
+        [source_message(body, name="get_news", tool_call_id="news")],
+        requested_date=current.date(),
+        analyst="news",
+        instrument="GOOG",
+    )
+    combined = {
+        item.ref: item
+        for item in [*sealed, *(o.evidence(current.date(), instrument="GOOG") for o in observed)]
+    }
+    assert sum(item.evidence_type == "news_article" for item in combined.values()) == 1
+    assert all(
+        item.content is None for item in combined.values() if item.evidence_type != "news_article"
+    )
+    assert all(item.fallback and item.origins[0].fallback for item in combined.values())
+
+
+def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
+    from tests.support.data_policy import data_config, data_policy
+    from tradingagents.data import interface
+    from tradingagents.data.source_observations import make_observation
+    from tradingagents.domain.vendor_errors import NoMarketDataError
+
+    def failed(*_a, **_k):
+        raise NoMarketDataError("GOOG")
+
+    def snapshot(*_a, **_k):
+        return DataResult(
+            "snapshot",
+            observations=(
+                make_observation("yfinance", "verified_market_snapshot", "GOOG", {"close": 100}),
+            ),
+        )
+
+    monkeypatch.setitem(
+        interface.VENDOR_METHODS,
+        "get_verified_market_snapshot",
+        {"alpha_vantage": failed, "yfinance": snapshot},
+    )
+    with data_policy(
+        {
+            **data_config(),
+            "tool_vendors": {"get_verified_market_snapshot": "alpha_vantage,yfinance"},
+        }
+    ):
+        body = interface.route_to_vendor(
+            "get_verified_market_snapshot", "GOOG", "2026-09-05", 5, data_context=request_context()
+        )
+    observed = body.observations
+    assert len(observed) == 1 and observed[0].fallback
+
+
+def test_cn_news_deduplication_preserves_failures_for_partial_and_empty_social():
+    from tests.support.china_collection import _request
+    from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.domain.collection import (
+        CollectionDiagnostic,
+        CollectionDomainResult,
+        CollectionSourceProvenance,
+        CollectionSummary,
+    )
+    from tradingagents.domain.data import SourceObservation
+    from tradingagents.domain.incremental import IncrementalCollectionResult
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
+
+    request = _request(enabled_domains=("news", "social"))
+    retrieved = datetime(2026, 7, 24, tzinfo=UTC)
+    announcement = SourceObservation(
+        "CNINFO",
+        "news_article",
+        "one",
+        {"title": "event", "link": "https://example.test/1"},
+        retrieved,
+        available_on=date(2026, 7, 21),
+    )
+    rating = SourceObservation(
+        "Eastmoney",
+        "analyst_rating",
+        "two",
+        {"rating": "buy"},
+        retrieved,
+        available_on=date(2026, 7, 22),
+        fallback=True,
+    )
+    for keep_rating in (True, False):
+        domains, candidates = [], []
+        for role, observations in (
+            ("news", [announcement]),
+            ("social", [announcement] + ([rating] if keep_rating else [])),
+        ):
+            empty = CollectionDomainResult(
+                domain=role, state="unavailable", diagnostic=CollectionDiagnostic(code="test")
+            )
+            domain, extra = augment_domain(request, empty, observations)
+            domains.append(domain)
+            candidates.extend(extra)
+        social = domains[1]
+        social = social.model_copy(
+            update={
+                "diagnostic": CollectionDiagnostic(code="professional_signals_partial"),
+                "sources": tuple(
+                    source.model_copy(
+                        update={"diagnostic": CollectionDiagnostic(code="upstream_source_partial")}
+                    )
+                    for source in social.sources
+                )
+                + (
+                    CollectionSourceProvenance(
+                        source="sse",
+                        retrieved_at=retrieved,
+                        diagnostic=CollectionDiagnostic(code="upstream_source_unavailable"),
+                    ),
+                ),
+            }
+        )
+        domains, candidates = dedupe_news_domains([domains[0], social], candidates)
+        result = IncrementalCollectionResult(
+            collection_summary=CollectionSummary(
+                version="1", market=request.market, domains=tuple(domains)
+            ),
+            evidence=tuple(candidates),
+        )
+        summary, _, _ = normalize_incremental_collection(
+            request, result, sealed_at=request.window_end
+        )
+        social = summary.domains[1]
+        sources = {source.source: source for source in social.sources}
+        assert sources["sse"].diagnostic.code == "upstream_source_unavailable"
+        assert sources["cninfo"].diagnostic.code == "upstream_source_partial"
+        assert "professional_signals_partial" in social.diagnostic.code
+        if keep_rating:
+            assert len(social.evidence_refs) == 1
+            assert sources["eastmoney"].diagnostic.code == "upstream_source_partial"
+            assert sources["eastmoney"].retrieved_at == retrieved and sources["eastmoney"].fallback
+        else:
+            assert not social.evidence_refs
+            assert "articles_already_in_news" in social.diagnostic.code
+
+
+def test_full_structured_near_live_guard_covers_each_ingress():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from tests.support.data_policy import data_config
+    from tradingagents.data.news_selection import NewsCandidate
+    from tradingagents.domain.data import SourceObservation
+    from tradingagents.domain.evidence import EvidenceItem
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.research.full.evidence import collect_evidence
+    from tradingagents.research.full.workflow import ResearchGraph
+
+    retrieved = datetime(2026, 9, 5, 10, tzinfo=UTC)
+    cutoff = date(2020, 1, 2)
+    observation = SourceObservation(
+        "FRED",
+        "macro_indicator",
+        "rate",
+        {"value": 12345},
+        retrieved,
+        effective_date=date(2020, 1, 1),
+    )
+
+    def invoke(*args, **kwargs):
+        return {
+            "messages": [],
+            "news_report": "fixture",
+            "prefetched_evidence": [{"source_observation": observation.dump()}],
+        }
+
+    graph = ResearchGraph.__new__(ResearchGraph)
+    graph._analyst_subgraphs = {"news": SimpleNamespace(invoke=invoke)}
+    graph.metrics = Mock()
+    graph._start_node = graph._finish_node = lambda *args, **kwargs: None
+    context = SimpleNamespace(
+        request=AnalysisRequest(ticker="GOOG", analysis_date=cutoff),
+        dataflow_config=data_config(),
+        instrument_context="GOOG",
+        cancel_requested=lambda: False,
+        shutdown_requested=lambda: False,
+    )
+    output = graph._create_analyst_collect_node("news")({}, SimpleNamespace(context=context))
+    captured = [
+        EvidenceItem.model_validate(item) for item in output["analyst_evidence_items"]["news"]
+    ]
+    prefetched = collect_evidence(
+        [],
+        requested_date=cutoff,
+        analyst="news",
+        instrument="GOOG",
+        prefetched_blocks=[{"source_observation": observation.dump()}],
+    )
+    revision = NewsCandidate(
+        "yfinance",
+        "revised",
+        "### revised\n12345",
+        "2020-01-01T10:00:00Z",
+        retrieved_at=retrieved.isoformat(),
+        revision=True,
+        market_day="2026-09-05",
+    )
+    rehydrated = collect_evidence(
+        [
+            source_message(
+                DataResult(
+                    "revision",
+                    news=(revision,),
+                    observations=news_observations([revision], "yfinance", "GOOG"),
+                ),
+                tool_call_id="news",
+                name="get_news",
+            )
+        ],
+        requested_date=cutoff,
+        analyst="news",
+        instrument="GOOG",
+    )
+    for items in (captured, prefetched, rehydrated):
+        assert all(item.content is None for item in items)
+        assert all(item.quality.value == "unavailable" for item in items)
+        assert "12345" not in str([item.model_dump() for item in items])
+        assert any(
+            "near-live" in origin.timing and origin.retrieved_at == retrieved.isoformat()
+            for item in items
+            for origin in item.origins
+        )
+
+
+def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit():
+    from datetime import timedelta
+
+    from tradingagents.domain.data import SourceObservation
+    from tradingagents.domain.instruments import market_timezone
+    from tradingagents.research.full.evidence import collect_evidence
+
+    # The same instant falls on different US and Asian calendar dates.
+    retrieved = datetime(2026, 9, 5, 1, tzinfo=UTC)
+    for ticker in ("GOOG", "9984.T", "600309.SS"):
+        local_day = retrieved.astimezone(market_timezone(ticker)).date()
+        for age in (-1, 0, 5, 6):
+            cutoff = local_day - timedelta(days=age)
+            row = SourceObservation(
+                "fixture",
+                "macro_indicator",
+                "rate",
+                {"value": 2},
+                retrieved,
+                effective_date=date(2020, 1, 1),
+            )
+            evidence = collect_evidence(
+                [],
+                requested_date=cutoff,
+                analyst="news",
+                instrument=ticker,
+                prefetched_blocks=[{"source_observation": row.dump()}],
+            )[0]
+            assert (evidence.content is not None) == (0 <= age <= 5)
+        pit = SourceObservation(
+            "fixture",
+            "financial_income",
+            "period",
+            {"value": 2},
+            retrieved,
+            effective_date=date(2019, 12, 31),
+            available_on=date(2020, 1, 2),
+        )
+        evidence = collect_evidence(
+            [],
+            requested_date=date(2020, 1, 3),
+            analyst="fundamentals",
+            instrument=ticker,
+            prefetched_blocks=[{"source_observation": pit.dump()}],
+        )[0]
+        assert evidence.content is not None
+
+
+def test_news_text_without_producer_observations_is_not_parsed():
+    from tests.support.japan_collection import _request
+    from tradingagents.data.incremental_inputs import collect_news_observations
+    from tradingagents.domain.data import ProvenanceRecord
+
+    result = DataResult(
+        "### A seemingly dated article\nPublished: 2026-07-22T03:00:00Z"
+    ).with_provenance(ProvenanceRecord("get_news", "official", timing="publication-date filtered"))
+    _, (domain, candidates) = collect_news_observations(
+        _request(enabled_domains=("news",)),
+        lambda *a, **k: result,
+        lambda: datetime(2026, 7, 24, 15, tzinfo=UTC),
+    )
+    assert candidates == ()
+    assert domain.state.value == "empty"
+    assert domain.sources[0].source == "official"

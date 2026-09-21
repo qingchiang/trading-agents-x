@@ -8,12 +8,10 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import research_decision
+from tests.support.cycles import _commit_node, _warning_products
 from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.domain.common import CURRENT_RESEARCH_SCHEMA_VERSION, RunStatus
 from tradingagents.domain.errors import IncrementalRequestConflictError
-from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
-from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence._repository_common import InvalidRunTransitionError, RunNotFoundError
 from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import (
@@ -25,121 +23,8 @@ from tradingagents.persistence.models import (
 )
 
 
-def _commit_node(
-    repository,
-    app_settings,
-    *,
-    analysis_date: date,
-    baseline_id: str | None = None,
-    make_primary: bool | None = None,
-):
-    research_kind = "incremental" if baseline_id else "full"
-    request = AnalysisRequest(
-        ticker="NVDA",
-        analysis_date=analysis_date,
-        research_kind=research_kind,
-        full_baseline_run_id=baseline_id,
-        make_primary=make_primary,
-    )
-    run, _ = repository.create_run(
-        request,
-        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
-        research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
-        information_cutoff_at=datetime.combine(
-            analysis_date, datetime.max.time(), UTC
-        ),
-        method_snapshot={
-            "schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
-            "llm_provider": "fixture",
-        },
-        incremental_input_fingerprint=(
-            f"fingerprint-{analysis_date.isoformat()}" if baseline_id else None
-        ),
-    )
-    repository.claim_run(run.id, "fixture", 30)
-    item = EvidenceItem.create(
-        source="fixture",
-        evidence_type="fixture",
-        requested_date=analysis_date,
-        effective_date=analysis_date,
-        content=run.id,
-    )
-    evidence = EvidenceBundle(
-        instrument="NVDA", analysis_date=analysis_date, items=(item,)
-    )
-    result = AnalysisResult(
-        run_id=run.id, status=RunStatus.SUCCEEDED, instrument="NVDA", reports={},
-        decision=research_decision(evidence_refs=(item.ref,)), evidence=evidence,
-    )
-    if baseline_id:
-        from tradingagents.domain.incremental import IncrementalNodeProducts
-        products = _warning_products()
-        products.update(full_research_required_reasons=[], decision_outcome="updated",
-                        decision_outcome_reason="Fixture observation changes the decision.")
-        repository.complete_incremental(run.id, result, evidence=evidence,
-                                        products=IncrementalNodeProducts.model_validate(products))
-    else:
-        repository.seal_evidence(run.id, evidence)
-        repository.complete(run.id, result, evidence=evidence)
-    return repository.get_run(run.id)
-
-
-def _warning_products() -> dict[str, object]:
-    return {
-        "collection_summary": {
-            "version": "1",
-            "market": "united_states",
-            "domains": [
-                {
-                    "domain": "news",
-                    "state": "empty",
-                    "sources": [
-                        {
-                            "source": "fixture",
-                            "retrieved_at": "2026-07-26T20:00:00Z",
-                        }
-                    ],
-                }
-            ],
-        },
-        "research_availability": {
-            "version": "1",
-            "domains": [{"domain": "news", "status": "missing"}],
-        },
-        "information_advancement": {
-            "advanced": True,
-            "reasons": ["completed_stock_session"],
-            "observation_ids": [],
-        },
-        "performance": {
-            "stock": {"status": "unavailable", "reason": "fixture"},
-            "benchmarks": [],
-        },
-        "reassessment": {
-            "entries": [
-                {
-                    "component_id": "thesis",
-                    "disposition": "unresolved",
-                    "reason": "fixture",
-                    "evidence_refs": [],
-                }
-            ]
-        },
-        "full_research_required_reasons": [
-            {
-                "code": "attribution.unreliable",
-                "message": "Fixture warning.",
-                "origin": "semantic",
-                "evidence_refs": [],
-            }
-        ],
-    }
-
-
 def test_independent_incremental_trash_updates_the_active_cycle(repository, app_settings):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     first = _commit_node(
         repository,
         app_settings,
@@ -153,9 +38,7 @@ def test_independent_incremental_trash_updates_the_active_cycle(repository, app_
         baseline_id=full.id,
     )
     with repository.sessions.begin() as session:
-        session.get(ResearchNodeRecord, head.id).incremental_products_json = (
-            _warning_products()
-        )
+        session.get(ResearchNodeRecord, head.id).incremental_products_json = _warning_products()
 
     warned = repository.get_timeline("NVDA")
     assert warned.timeline_warning is True
@@ -180,12 +63,8 @@ def test_independent_incremental_trash_updates_the_active_cycle(repository, app_
     assert tuple(node.id for node in trashed_only.cycles[0].increments) == (head.id,)
 
 
-def test_full_trash_cascades_only_active_children_and_records_them(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_full_trash_cascades_only_active_children_and_records_them(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     independently_trashed = _commit_node(
         repository,
         app_settings,
@@ -212,12 +91,8 @@ def test_full_trash_cascades_only_active_children_and_records_them(
     assert repository.get_timeline("NVDA").all_nodes == ()
 
 
-def test_primary_full_trash_requires_an_explicit_active_replacement(
-    repository, app_settings
-):
-    primary = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_primary_full_trash_requires_an_explicit_active_replacement(repository, app_settings):
+    primary = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     replacement = _commit_node(
         repository,
         app_settings,
@@ -244,9 +119,7 @@ def test_primary_full_trash_requires_an_explicit_active_replacement(
 def test_full_restore_preserves_independent_trash_and_rejects_slot_conflicts(
     repository, app_settings
 ):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     independent = _commit_node(
         repository,
         app_settings,
@@ -287,12 +160,8 @@ def test_full_restore_preserves_independent_trash_and_rejects_slot_conflicts(
     assert repository.get_run(replacement.id).trashed_at is None
 
 
-def test_full_purge_removes_the_owned_cycle_and_checkpoints_only(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_full_purge_removes_the_owned_cycle_and_checkpoints_only(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -309,9 +178,7 @@ def test_full_purge_removes_the_owned_cycle_and_checkpoints_only(
         (full.id,),
         primary_replacements={full.id: other_cycle.id},
     )
-    thread_ids = tuple(
-        repository.checkpoint_thread(run_id) for run_id in (full.id, child.id)
-    )
+    thread_ids = tuple(repository.checkpoint_thread(run_id) for run_id in (full.id, child.id))
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
         for index, thread_id in enumerate(thread_ids):
@@ -337,18 +204,17 @@ def test_full_purge_removes_the_owned_cycle_and_checkpoints_only(
     assert repository.get_run(other_cycle.id).id == other_cycle.id
     with repository.engine.connect() as connection:
         for thread_id in thread_ids:
-            assert connection.exec_driver_sql(
-                "SELECT count(*) FROM checkpoints WHERE thread_id = ?",
-                (thread_id,),
-            ).scalar_one() == 0
+            assert (
+                connection.exec_driver_sql(
+                    "SELECT count(*) FROM checkpoints WHERE thread_id = ?",
+                    (thread_id,),
+                ).scalar_one()
+                == 0
+            )
 
 
-def test_two_maintenance_connections_purge_one_full_cycle_once(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_two_maintenance_connections_purge_one_full_cycle_once(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -359,9 +225,9 @@ def test_two_maintenance_connections_purge_one_full_cycle_once(
     now = datetime(2026, 9, 1, tzinfo=UTC)
     with repository.sessions.begin() as session:
         for run_id in (full.id, child.id):
-            session.get(RunRecord, run_id).trashed_at = (
-                now - timedelta(days=31)
-            ).replace(tzinfo=None)
+            session.get(RunRecord, run_id).trashed_at = (now - timedelta(days=31)).replace(
+                tzinfo=None
+            )
 
     def purge() -> int:
         return TrashMaintenance(
@@ -380,12 +246,8 @@ def test_two_maintenance_connections_purge_one_full_cycle_once(
             repository.get_run(run_id)
 
 
-def test_retention_batch_promotes_cascade_child_to_atomic_full_cycle(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_retention_batch_promotes_cascade_child_to_atomic_full_cycle(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -397,12 +259,10 @@ def test_retention_batch_promotes_cascade_child_to_atomic_full_cycle(
         saver.setup()
     now = datetime(2026, 9, 1, tzinfo=UTC)
     with repository.sessions.begin() as session:
-        session.get(RunRecord, child.id).trashed_at = (
-            now - timedelta(days=32)
-        ).replace(tzinfo=None)
-        session.get(RunRecord, full.id).trashed_at = (
-            now - timedelta(days=31)
-        ).replace(tzinfo=None)
+        session.get(RunRecord, child.id).trashed_at = (now - timedelta(days=32)).replace(
+            tzinfo=None
+        )
+        session.get(RunRecord, full.id).trashed_at = (now - timedelta(days=31)).replace(tzinfo=None)
 
     purged = repository.purge_expired_trash(
         cutoff=now - timedelta(days=30),
@@ -415,12 +275,8 @@ def test_retention_batch_promotes_cascade_child_to_atomic_full_cycle(
             repository.get_run(run_id)
 
 
-def test_two_connections_linearize_independent_child_and_full_trash(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_two_connections_linearize_independent_child_and_full_trash(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -449,12 +305,8 @@ def test_two_connections_linearize_independent_child_and_full_trash(
         assert child_after_full_restore.trashed_at is not None
 
 
-def test_incremental_restore_revalidates_the_current_full_baseline(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_incremental_restore_revalidates_the_current_full_baseline(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -474,12 +326,8 @@ def test_incremental_restore_revalidates_the_current_full_baseline(
     assert repository.get_run(child.id).trashed_at is not None
 
 
-def test_two_connections_linearize_restore_against_incremental_retry_slot(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_two_connections_linearize_restore_against_incremental_retry_slot(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     retained = _commit_node(
         repository,
         app_settings,
@@ -495,7 +343,9 @@ def test_two_connections_linearize_restore_against_incremental_retry_slot(
     )
     failed, _ = repository.create_run(
         request,
-        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
+        ConfigurationStore(app_settings)
+        .resolve_request(request, require_initialized=False)[1]
+        .snapshot(),
         research_schema_version="1",
         information_cutoff_at=datetime(2026, 7, 25, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -546,12 +396,8 @@ def test_two_connections_linearize_restore_against_incremental_retry_slot(
     assert outcomes[0] in {"restored", "slot-won"}
 
 
-def test_incremental_purge_removes_only_its_owned_rows_and_checkpoint(
-    repository, app_settings
-):
-    full = _commit_node(
-        repository, app_settings, analysis_date=date(2026, 7, 24)
-    )
+def test_incremental_purge_removes_only_its_owned_rows_and_checkpoint(repository, app_settings):
+    full = _commit_node(repository, app_settings, analysis_date=date(2026, 7, 24))
     child = _commit_node(
         repository,
         app_settings,
@@ -585,13 +431,17 @@ def test_incremental_purge_removes_only_its_owned_rows_and_checkpoint(
             RunEvidenceRecord,
             DecisionRecord,
         ):
-            assert session.scalar(
-                select(func.count()).select_from(model).where(
-                    model.run_id == child.id
+            assert (
+                session.scalar(
+                    select(func.count()).select_from(model).where(model.run_id == child.id)
                 )
-            ) == 0
+                == 0
+            )
     with repository.engine.connect() as connection:
-        assert connection.exec_driver_sql(
-            "SELECT count(*) FROM checkpoints WHERE thread_id = ?",
-            (checkpoint_thread,),
-        ).scalar_one() == 0
+        assert (
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM checkpoints WHERE thread_id = ?",
+                (checkpoint_thread,),
+            ).scalar_one()
+            == 0
+        )

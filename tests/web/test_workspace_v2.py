@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from tests.factories import research_decision
+from tests.support.factories import research_decision
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
@@ -144,7 +144,7 @@ async def test_recent_summary_keeps_primary_judgment_separate_from_newer_cycle(
 async def test_preview_scope_changes_when_a_child_commits_and_restore_preserves_independent_trash(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     first = _commit_node(
@@ -204,7 +204,7 @@ async def test_preview_scope_changes_when_a_child_commits_and_restore_preserves_
 async def test_groups_page_whole_cycles_and_do_not_count_hidden_trash(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     child = _commit_node(
@@ -228,7 +228,7 @@ async def test_groups_page_whole_cycles_and_do_not_count_hidden_trash(
 async def test_restore_preview_reports_existing_cycle_cutoff_conflict(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     child = _commit_node(

@@ -5,9 +5,9 @@ from datetime import date
 import pytest
 from sqlalchemy import select
 
-from tests.application.test_cycle_trash_lifecycle import _commit_node, _warning_products
-from tests.application.test_service import _equity_resolver, _Graph
 from tests.research_helpers import stub_run_llms
+from tests.support.cycles import _commit_node, _warning_products
+from tests.support.service import _equity_resolver, _Graph
 from tradingagents.application.service import AnalysisService
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.errors import InvalidResearchNodeComparisonError

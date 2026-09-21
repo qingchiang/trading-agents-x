@@ -6,7 +6,7 @@ import operator
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
-from threading import Barrier, Lock
+from threading import Barrier
 from typing import Annotated, TypedDict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -17,8 +17,8 @@ from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from tests.factories import analyst_report, research_decision
 from tests.research_helpers import stub_run_llms
+from tests.support.service import _equity_resolver, _execution, _Graph, _service
 from tradingagents.application.service import AnalysisService
 from tradingagents.domain.artifacts import ResearchArtifactDraft
 from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
@@ -28,7 +28,6 @@ from tradingagents.domain.errors import (
     InvalidIncrementalBaselineError,
     UnsupportedInstrumentError,
 )
-from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence._repository_common import (
     IdempotencyConflictError,
@@ -40,13 +39,8 @@ from tradingagents.persistence.models import (
     ResearchNodeRecord,
     RunRecord,
 )
-from tradingagents.persistence.repository import RunRepository
 from tradingagents.research.full.state import GraphExecution
 from tradingagents.research.runtime import RunCancelled, WorkerShutdown
-
-
-def _equity_resolver(ticker: str, *, data_context) -> dict[str, str]:
-    return {"symbol": ticker, "quote_type": "EQUITY"}
 
 
 def test_first_full_run_commits_same_identity_node_and_primary_timeline(
@@ -457,11 +451,23 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     changed_value,
 ) -> None:
     """Queued Runs retain non-secret LLM behavior that can change a method."""
-    from tests.configuration_helpers import save_configuration
-    save_configuration(app_settings, {"temperature": 0.2, "llm_max_retries": 3}, connection_changes=[{
-        "action": "update", "id": "default", "transport": {"kind": "chat_completions", "base_url": "https://gateway.example.invalid/v1"},
-        "credentials": {"api_key": "method-snapshot-test-secret"},
-    }])
+    from tests.support.configuration_helpers import save_configuration
+
+    save_configuration(
+        app_settings,
+        {"temperature": 0.2, "llm_max_retries": 3},
+        connection_changes=[
+            {
+                "action": "update",
+                "id": "default",
+                "transport": {
+                    "kind": "chat_completions",
+                    "base_url": "https://gateway.example.invalid/v1",
+                },
+                "credentials": {"api_key": "method-snapshot-test-secret"},
+            }
+        ],
+    )
     base_settings = app_settings
     request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
 
@@ -472,15 +478,25 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     ).enqueue(request, idempotency_key=f"method-snapshot-base-{field}")
     base_snapshot = repository.get_run(base_run.id).method_snapshot
 
-    assert base_snapshot["deep_binding"]["connection"]["transport"]["base_url"] == "https://gateway.example.invalid/v1"
+    assert (
+        base_snapshot["deep_binding"]["connection"]["transport"]["base_url"]
+        == "https://gateway.example.invalid/v1"
+    )
     assert base_snapshot["temperature"] == 0.2
     assert base_snapshot["llm_max_retries"] == 3
     assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
 
     if field == "backend_url":
-        save_configuration(app_settings, connection_changes=[{
-            "action": "update", "id": "default", "transport": {"kind": "chat_completions", "base_url": changed_value},
-        }])
+        save_configuration(
+            app_settings,
+            connection_changes=[
+                {
+                    "action": "update",
+                    "id": "default",
+                    "transport": {"kind": "chat_completions", "base_url": changed_value},
+                }
+            ],
+        )
     else:
         save_configuration(app_settings, {field: changed_value})
     changed_settings = app_settings
@@ -491,7 +507,11 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     ).enqueue(request, idempotency_key=f"method-snapshot-changed-{field}")
     changed_snapshot = repository.get_run(changed_run.id).method_snapshot
 
-    assert (changed_snapshot["deep_binding"]["connection"]["transport"]["base_url"] if field == "backend_url" else changed_snapshot[field]) == changed_value
+    assert (
+        changed_snapshot["deep_binding"]["connection"]["transport"]["base_url"]
+        if field == "backend_url"
+        else changed_snapshot[field]
+    ) == changed_value
     assert (
         changed_snapshot["configuration_fingerprint"] != base_snapshot["configuration_fingerprint"]
     )
@@ -726,70 +746,6 @@ def test_historical_cutoffs_use_each_listed_instrument_market_day_end(
     assert run.information_cutoff_at == expected
 
 
-def _execution(ticker: str) -> GraphExecution:
-    item = EvidenceItem.create(
-        source="fixture",
-        evidence_type="fixture evidence",
-        requested_date=date(2026, 7, 24),
-        effective_date=date(2026, 7, 24),
-        content="Fixture evidence.",
-    )
-    bundle = EvidenceBundle(
-        instrument=ticker,
-        analysis_date=date(2026, 7, 24),
-        items=(item,),
-    )
-    report = analyst_report(
-        executive_summary="Fixture summary.",
-        confidence=0.8,
-        evidence_ref=item.ref,
-        narrative="Fixture report.",
-    )
-    decision = research_decision(
-        confidence="medium",
-        thesis="Fixture thesis.",
-        evidence_refs=(item.ref,),
-    )
-    return GraphExecution(
-        state={},
-        evidence=bundle,
-        reports={"market": report},
-        decision=decision,
-    )
-
-
-class _Graph:
-    barrier: Barrier | None = None
-    observed: list[tuple[str, str, str]] = []
-    lock = Lock()
-    error: Exception | None = None
-
-    def __init__(self, **_kwargs):
-        pass
-
-    def execute(self, context, *, on_event, **_kwargs):
-        if self.barrier is not None:
-            self.barrier.wait(timeout=10)
-        with self.lock:
-            self.observed.append(
-                (
-                    context.request.ticker,
-                    context.settings.deep_binding.connection.compatibility,
-                    context.settings.output_language.value,
-                )
-            )
-        on_event(
-            {
-                "event_type": "node.completed",
-                "node": "fixture",
-                "payload": {"api_key": "must-not-persist"},
-            }
-        )
-        if self.error is not None:
-            raise self.error
-        return _execution(context.request.ticker)
-
-
 class _ArtifactGraph:
     def __init__(self, **_kwargs):
         pass
@@ -841,7 +797,6 @@ def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decis
     failed = repository.list_runs(status=RunStatus.FAILED).items[0]
     assert repository.get_timeline("NVDA").all_nodes == ()
     assert repository.get_result(failed.id).decision is None
-
 
 
 class _MetricFailureGraph:
@@ -1004,22 +959,6 @@ def _reset_graph():
     _ResumableGraph.first_calls = 0
     _ResumableGraph.second_calls = 0
     _ResumableGraph.fail_second_once = True
-
-
-def _service(
-    app_settings,
-    repository: RunRepository,
-    graph_factory=_Graph,
-) -> AnalysisService:
-    return AnalysisService(
-        app_settings,
-        repository=repository,
-        llm_factory=stub_run_llms,
-        graph_factory=graph_factory,
-        identity_resolver=lambda ticker, _date: {"company_name": ticker},
-        eligibility_resolver=_equity_resolver,
-        local_name_resolver=lambda _ticker, _date, _config: None,
-    )
 
 
 def test_service_persists_events_before_callback_and_result(
@@ -1337,10 +1276,20 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
 ) -> None:
     service = _service(app_settings, repository)
     from tradingagents.configuration.models import ConfigurationPatch
-    service.configuration.save(ConfigurationPatch(
-        revision=service.configuration.read().revision,
-        connection_changes=[{"action": "create", "id": "deepseek", "preset": "deepseek", "credentials": {"api_key": "placeholder"}}],
-    ))
+
+    service.configuration.save(
+        ConfigurationPatch(
+            revision=service.configuration.read().revision,
+            connection_changes=[
+                {
+                    "action": "create",
+                    "id": "deepseek",
+                    "preset": "deepseek",
+                    "credentials": {"api_key": "placeholder"},
+                }
+            ],
+        )
+    )
     _Graph.barrier = Barrier(2)
     requests = (
         AnalysisRequest(

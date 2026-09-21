@@ -7,9 +7,9 @@ from datetime import UTC, date, datetime
 import httpx2 as httpx
 import pytest
 
-from tests.factories import analyst_report, research_case, research_decision
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
-from tests.source_results import market_fixture, scoped_fixture
+from tests.support.factories import analyst_report, research_case, research_decision
+from tests.support.source_results import market_fixture, scoped_fixture
 from tradingagents.application.service import AnalysisService
 from tradingagents.configuration.settings import AppSettings
 from tradingagents.data import incremental_cn, incremental_jp, incremental_us
@@ -2099,7 +2099,7 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
         },
         load_env_files=False,
     )
-    from tests.configuration_helpers import import_configuration
+    from tests.support.configuration_helpers import import_configuration
 
     import_configuration(settings)
     service = AnalysisService(
@@ -2136,7 +2136,7 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
     web_client: httpx.AsyncClient,
     web_settings,
 ) -> None:
-    from tests.configuration_helpers import save_configuration
+    from tests.support.configuration_helpers import save_configuration
 
     save_configuration(
         web_settings,

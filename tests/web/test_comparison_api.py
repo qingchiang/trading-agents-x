@@ -5,8 +5,8 @@ from datetime import UTC, date, datetime
 import httpx2 as httpx
 import pytest
 
-from tests.application.test_cycle_trash_lifecycle import _commit_node
-from tests.factories import research_decision
+from tests.support.cycles import _commit_node
+from tests.support.factories import research_decision
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult

@@ -815,7 +815,8 @@ roles, tenant isolation, or Internet-facing hardening.
 
 ## Validation boundaries
 
-The default suite is offline. It covers configuration isolation, lifecycle
+The default suite is offline; [test responsibilities](testing.md) identifies each
+behavior owner and verification boundary. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
 SSE replay, cancellation/retry/run templates, SQLite backup, migration,
 point-in-time evidence sealing, API security, frontend behavior,

@@ -21,7 +21,7 @@ from io import StringIO
 import pandas as pd
 import pytest
 
-from tests.data_policy import request_context
+from tests.support.data_policy import request_context
 from tradingagents.data import cn_macro, jp_macro
 from tradingagents.data.cn import (
     akshare_stock,

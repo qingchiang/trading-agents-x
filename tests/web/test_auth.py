@@ -22,7 +22,7 @@ def _lan_app(tmp_path: Path):
         },
         load_env_files=False,
     )
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(settings)
     repository = RunRepository(settings)
     service = AnalysisService(

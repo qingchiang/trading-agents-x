@@ -83,7 +83,7 @@ def _isolate_config():
     import tempfile
 
     import tradingagents.configuration.defaults as default_config
-    from tests.data_policy import configure_data, reset_data
+    from tests.support.data_policy import configure_data, reset_data
 
     def _fresh(cache_dir):
         cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -133,6 +133,6 @@ def repository(app_settings):
     from tradingagents.persistence.repository import RunRepository
 
     upgrade_database(app_settings)
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(app_settings)
     return RunRepository(app_settings)

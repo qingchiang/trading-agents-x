@@ -7,7 +7,7 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import analyst_report, research_decision
+from tests.support.factories import analyst_report, research_decision
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.domain.artifacts import ResearchArtifactDraft
 from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
@@ -220,7 +220,7 @@ def test_trash_maintenance_honors_cutoff_restore_and_disabled_retention(
     assert repository.get_run(newer.id).trashed_at is not None
     assert repository.get_run(restored.id).trashed_at is None
 
-    from tests.configuration_helpers import save_configuration
+    from tests.support.configuration_helpers import save_configuration
     save_configuration(app_settings, {"trash_retention_days": 0})
     disabled = app_settings
     _set_trashed_at(repository, newer.id, now - timedelta(days=90))
