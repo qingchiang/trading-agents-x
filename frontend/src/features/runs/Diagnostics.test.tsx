@@ -22,7 +22,7 @@ test("keeps conflicting snapshot values separate and filters all recorded events
   const { default: DiagnosticEvents } = await import('./DiagnosticEvents');
   const { fireEvent } = await import('@testing-library/react');
   const events = Array.from({ length: 31 }, (_, index) => ({ run_id: 'run', attempt: 1, sequence: index + 1, created_at: '2026-09-01T12:00:00Z', event_type: index === 30 ? 'node.failed' : 'node.completed', node: 'analyst.market', payload: { message: index === 30 ? 'Final failure' : `Observed ${index}` } }));
-  render(<><DiagnosticSnapshot label="Configuration snapshot" snapshot={{ quick_model: 'configured-quick', temperature: 0 }} /><DiagnosticSnapshot label="Method snapshot" snapshot={{ quick_model: 'recorded-quick' }} /><DiagnosticEvents events={events} /></>);
+  render(<><DiagnosticSnapshot label="Configuration snapshot" snapshot={{ quick_binding: {model: 'configured-quick'}, temperature: 0 }} /><DiagnosticSnapshot label="Method snapshot" snapshot={{ quick_binding: {model: 'recorded-quick'} }} /><DiagnosticEvents events={events} /></>);
   expect(within(screen.getByRole('heading', { name: 'Configuration snapshot' }).closest('section')!).getByText('configured-quick')).toBeVisible();
   expect(within(screen.getByRole('heading', { name: 'Method snapshot' }).closest('section')!).getByText('recorded-quick')).toBeVisible();
   expect(screen.queryByText('Final failure')).toBeNull();

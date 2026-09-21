@@ -82,7 +82,7 @@ export default function Runs() {
     {run.trashed_at && <small>{retention ? formatUtcDate(trashDeadline(run.trashed_at, retention)!.deletionAt) : t("trashRetentionDisabled")}</small>}
     <div className="task-actions">
       <Link className="text-link" to={`/runs/${run.id}?view=timeline`}>{t("executionDetails")}</Link>
-      {run.status === "succeeded" && <Link className="text-link" to={researchLocation(run)}>{t("openResearch")}</Link>}
+      {run.is_research_node && <Link className="text-link" to={researchLocation(run)}>{t("openResearch")}</Link>}
       {!run.trashed_at && ["queued", "running"].includes(run.status) && <button className="button" disabled={busy || run.cancel_requested} onClick={() => void act(run, "cancel")}>{t(run.cancel_requested ? "taskCancelSent" : "cancel")}</button>}
       {!run.trashed_at && run.status === "failed" && <button className="button" disabled={busy} onClick={() => void act(run, "retry")}>{t("retry")}</button>}
       {!baseline && !["queued", "running"].includes(run.status) && <ActionMenu label={t("manageTask")}>

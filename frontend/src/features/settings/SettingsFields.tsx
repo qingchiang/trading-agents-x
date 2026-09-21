@@ -11,7 +11,6 @@ type FieldProps = {
   onChange: (value: unknown) => void;
   language: string;
   text: SettingsText;
-  models: string[];
   source?: string;
 };
 export function SettingField({
@@ -20,7 +19,6 @@ export function SettingField({
   onChange,
   language,
   text,
-  models,
   source,
 }: FieldProps) {
   const label = field.label[language] ?? field.label.en;
@@ -85,9 +83,6 @@ export function SettingField({
           step={field.key === "temperature" ? "any" : 1}
           value={value == null ? "" : String(value)}
           placeholder={field.nullable ? text.unset : undefined}
-          list={
-            field.key.endsWith("think_llm") ? "configuration-models" : undefined
-          }
           onChange={(e) =>
             onChange(
               field.kind === "number"
@@ -103,13 +98,6 @@ export function SettingField({
         {field.description[language] ?? field.description.en}
       </p>}
       {(field.minimum != null || field.maximum != null) && <small className="configuration-help">{text.range}: {field.minimum ?? "−∞"} … {field.maximum ?? "∞"}</small>}
-      {field.key === "quick_think_llm" && (
-        <datalist id="configuration-models">
-          {models.map((model) => (
-            <option key={model} value={model} />
-          ))}
-        </datalist>
-      )}
       <details className="configuration-details">
         <summary>
           {text.technical}

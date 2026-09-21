@@ -174,7 +174,7 @@ export default function Settings() {
       .map(([name]) => name);
   }
   function groupValues(values: Values, group: string) {
-    return Object.fromEntries((schema?.fields ?? []).filter(field => field.group === group && field.key !== "llm_provider").map(field => [field.key, values[field.key]]));
+    return Object.fromEntries((schema?.fields ?? []).filter(field => field.group === group).map(field => [field.key, values[field.key]]));
   }
   function receive(result: ConfigurationView, savedGroup?: string) {
     const next = refreshDraft(baseline, draft, result.values as Values);
@@ -190,7 +190,7 @@ export default function Settings() {
   async function save(group: string, reset = false) {
     if (!view || !schema) return;
     const base = groupValues(baseline, group);
-    const local = reset ? Object.fromEntries(schema.fields.filter(f => f.group === group && f.key !== "llm_provider").map(f => [f.key, f.default])) : groupValues(draft, group);
+    const local = reset ? Object.fromEntries(schema.fields.filter(f => f.group === group).map(f => [f.key, f.default])) : groupValues(draft, group);
     const server = groupValues(view.values as Values, group);
     const merged = mergeDraft(base, local, server);
     if (merged.conflicts.length || (!reset && keysFor(group).some(key => credentials[key] !== undefined && credentialRevisions[key] !== view.revision))) { setConflict({ group, server: view, base, local }); return; }
@@ -311,7 +311,6 @@ export default function Settings() {
           onChange={(value) => update(field.key, value)}
           language={language}
           text={text}
-          models={[]}
           source={view?.sources[field.key] === "database" ? text.database : text.default}
         />
 

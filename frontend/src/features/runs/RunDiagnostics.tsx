@@ -57,10 +57,10 @@ export default function RunDiagnostics({ detail, events, artifacts, evidence }: 
     <section className="diagnostic-block" aria-labelledby="diagnostic-records">
       <h2 id="diagnostic-records">{t('diagnosticRecords')}</h2>
       <h3>{t('reports')}</h3>
-      {Object.entries(reports).map(([name, report]) => <article className="diagnostic-index-row" key={name}><Link className="text-link" to={reading('reports', name)}>{t(`${name}Analyst`, { defaultValue: name })}</Link><JsonRecord label={name} value={report} /></article>)}
+      {Object.entries(reports).map(([name, report]) => <article className="diagnostic-index-row" key={name}>{run.is_research_node ? <Link className="text-link" to={reading('reports', name)}>{t(`${name}Analyst`, { defaultValue: name })}</Link> : <span>{t(`${name}Analyst`, {defaultValue: name})}</span>}<JsonRecord label={name} value={report} /></article>)}
       {!Object.keys(reports).length && <p>{t('notRecorded')}</p>}
       <h3>{t('evidence')}</h3>
-      {bundle ? <p><Link className="text-link" to={reading('evidence')}>{t('evidence')}</Link> · {t('recordCount', { count: bundle.items.length })}</p> : <p>{t('notRecorded')}</p>}
+      {bundle ? <p>{run.is_research_node ? <Link className="text-link" to={reading('evidence')}>{t('evidence')}</Link> : t('evidence')} · {t('recordCount', { count: bundle.items.length })}</p> : <p>{t('notRecorded')}</p>}
       <JsonRecord label={t('evidence')} value={bundle} />
       <h3>{t('researchNode')}</h3>
       {node ? <><dl className="diagnostic-fields"><div><dt>{t('selectedCutoff')}</dt><dd>{node.analysis_date}</dd></div><div><dt>{t('researchCycle')}</dt><dd><code>{node.cycle_id}</code></dd></div></dl>
@@ -70,7 +70,7 @@ export default function RunDiagnostics({ detail, events, artifacts, evidence }: 
       <h3>{t('researchArtifacts')}</h3>
       {artifacts.map(artifact => <article className="diagnostic-index-row" key={artifact.id}>
         <header><strong>{artifact.stage} · {artifact.role}{artifact.round != null ? ` · ${t('round')} ${artifact.round}` : ''}</strong><time>{time(artifact.created_at)}</time><span>{t('attempt')} {artifact.attempt}</span></header>
-        {run.research_kind !== 'incremental' && <Link className="text-link" to={artifact.stage === 'analyst' ? reading('reports', artifact.role) : reading('deliberation', undefined, `deliberation-report-${artifact.id}`)}>{t('openExistingResearch')}</Link>}
+        {run.is_research_node && run.research_kind !== 'incremental' && <Link className="text-link" to={artifact.stage === 'analyst' ? reading('reports', artifact.role) : reading('deliberation', undefined, `deliberation-report-${artifact.id}`)}>{t('openExistingResearch')}</Link>}
         <JsonRecord label={`${artifact.stage} · ${artifact.role} · ${artifact.id}`} value={artifact} />
       </article>)}
       {!artifacts.length && <p>{t('notRecorded')}</p>}

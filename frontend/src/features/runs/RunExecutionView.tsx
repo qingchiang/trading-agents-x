@@ -31,7 +31,6 @@ export default function RunExecutionView({ record, diagnostics }: { record: RunR
     catch (cause) { setError(String(cause)); }
     finally { lock.current = false; setBusy(false); }
   };
-  const partial = !!detail.result || artifacts.length > 0;
   return <section className="execution-page">
     <header className="page-header run-heading">
       <div><Link className="back-link" to="/runs">{t("runManagement")}</Link>
@@ -41,7 +40,7 @@ export default function RunExecutionView({ record, diagnostics }: { record: RunR
       <div className="action-row">
         {!run.trashed_at && ["running", "queued"].includes(run.status) && <button className="button danger" disabled={busy || run.cancel_requested} onClick={() => void act("cancel")}>{t(run.cancel_requested ? "taskCancelSent" : "cancel")}</button>}
         {!run.trashed_at && run.status === "failed" && <button className="button primary" disabled={busy} onClick={() => void act("retry")}>{t("retry")}</button>}
-        {(run.is_research_node || partial) && <Link className="button primary" to={run.is_research_node ? researchLocation(run) : `/runs/${encodeURIComponent(run.id)}?view=${detail.result?.decision ? "decision" : "deliberation"}`}>{t(run.is_research_node ? "openResearch" : "openExistingResearch")}</Link>}
+        {run.is_research_node && <Link className="button primary" to={researchLocation(run)}>{t("openResearch")}</Link>}
         {run.trashed_at && <button className="button" onClick={() => setRestore(true)}>{t("restore")}</button>}
         <ActionMenu label={t("moreResearchActions")}>
           <Link className="button" to={`/runs/${encodeURIComponent(run.id)}?view=${diagnostics ? "timeline" : "diagnostics"}`}>{t(diagnostics ? "activity" : "runDiagnostics")}</Link>

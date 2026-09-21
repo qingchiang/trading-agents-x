@@ -1,29 +1,24 @@
-import ReadingAnchorNotice from "./ReadingAnchorNotice";
-import { researchLocation } from "./researchLinks";
-import { useRunRecord, type RunRecord } from "../../shared/useRunRecord";
-import { NumericNoticeHandled, numericWarningLabel } from "./researchWarnings";
-import { formatResearchDate } from "../../shared/researchDate";
-import { createPortal } from "react-dom";
-import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
-import EvidenceCoverage from "./EvidenceCoverage";
-import PerformanceSection from "./PerformanceSection";
-import { useReadingPosition } from "./useReadingPosition";
 import type { TFunction } from "i18next";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy,Suspense,useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { api, type AnalysisResult, type AnalystReport, type Capabilities, type EvidenceBundle, type IncrementalAnalysisBrief, type ResearchArtifact, type ResearchDecision, type ResearchNodeView, type RunDetail as RunDetailType, } from "../../shared/api/client";
+import { Link,useLocation,useNavigate,} from "../../app/router";
+import { api,type AnalysisResult,type AnalystReport,type Capabilities,type EvidenceBundle,type IncrementalAnalysisBrief,type ResearchArtifact,type ResearchDecision,type ResearchNodeView } from "../../shared/api/client";
+import { ActionMenu } from "../../shared/Interaction";
+import { formatResearchDate } from "../../shared/researchDate";
+import { formatUtcDate,trashDeadline } from "../../shared/trash";
+import { useMarketDate } from "../../shared/useMarketDate";
+import { useRunRecord } from "../../shared/useRunRecord";
+import { buildEvidenceReferenceIndex,type EvidenceDisplayGroup,type EvidenceReferenceIndex } from "./evidence";
+import EvidenceCoverage from "./EvidenceCoverage";
 import EvidenceLinks from "./EvidenceLinks";
 import EvidenceSourceDrawer from "./EvidenceSourceDrawer";
-import { InstrumentIdentity } from "../../shared/Instruments";
-import { ActionMenu } from "../../shared/Interaction";
-import ResearchKindBadge from "./ResearchKindBadge";
-import RunExecutionView from "../runs/RunExecutionView";
-import StatusBadge from "../../shared/StatusBadge";
-import { buildEvidenceReferenceIndex, type EvidenceDisplayGroup, type EvidenceReferenceIndex } from "./evidence";
-import { baselineComponentText, groupReassessment, reassessmentDispositionCounts, type ReassessmentGroupKey, } from "./reassessment";
-import { Link, useLocation, useNavigate, useParams, } from "../../app/router";
-import { formatUtcDate, trashDeadline } from "../../shared/trash";
-import { useMarketDate } from "../../shared/useMarketDate";
+import PerformanceSection from "./PerformanceSection";
+import ReadingAnchorNotice from "./ReadingAnchorNotice";
+import { baselineComponentText,groupReassessment,reassessmentDispositionCounts,type ReassessmentGroupKey,} from "./reassessment";
+import { NumericNoticeHandled,numericWarningLabel } from "./researchWarnings";
+import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
+import { useReadingPosition } from "./useReadingPosition";
 
 const AnalystReportView = lazy(() => import("./AnalystReportView"));
 const ResearchMarkdownReader = lazy(() =>
@@ -41,14 +36,10 @@ const ResearchDecisionContentView = lazy(() =>
   })),
 );
 
-const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
 const viewNames = [
-  "diagnostics",
-  "incremental",
   "brief",
   "reassessment",
-  "timeline",
   "deliberation",
   "evidence",
   "reports",
@@ -58,37 +49,20 @@ const viewNames = [
 
 type ViewName = (typeof viewNames)[number];
 type ReturnViewName = Exclude<ViewName, "evidence">;
-type ArtifactContent = ResearchArtifact["content"];
 type VisibleWarning =
   | string
   | NonNullable<AnalystReport["warnings"]>[number];
 
-type ReaderProps = { selectedRunId?: string; workspace?: boolean; actionsTarget?: HTMLElement | null };
-export default function ResearchReader(props: ReaderProps) {
-  const { runId: routeRunId = "" } = useParams();
-  const location = useLocation();
-  const record = useRunRecord(props.selectedRunId ?? routeRunId, new URLSearchParams(location.search).get("view") ?? "decision");
-  return <ResearchReaderContent {...props} record={record} />;
-}
-export function ResearchReaderContent({ selectedRunId, workspace = false, actionsTarget, record }: ReaderProps & { record: RunRecord }) {
+type ReaderProps = { selectedRunId: string; actionsTarget?: HTMLElement | null };
+export default function ResearchReader({ selectedRunId: runId, actionsTarget }: ReaderProps) {
   const { t } = useTranslation();
-  const routerNavigate = useNavigate();
+  const navigate = useNavigate();
   const location = useLocation();
-  const { runId: routeRunId = "" } = useParams();
-  const runId = selectedRunId ?? routeRunId;
-  const readerPath = useCallback((to: string) => {
-    if (workspace && to.startsWith(`/runs/${encodeURIComponent(runId)}?`)) {
-      const next = new URL(to, "http://local");
-      const params = new URLSearchParams(location.search);
-      for (const key of ["view", "report", "ref", "return_view", "return_report"]) params.delete(key);
-      next.searchParams.forEach((value, key) => params.set(key, value));
-      params.set("node", runId);
-      return `${location.pathname}?${params}${next.hash}`;
-    } else return to;
-  }, [workspace, runId, location.pathname, location.search]);
-  const navigate = useCallback((to: string, options?: { replace?: boolean }) => routerNavigate(readerPath(to), options), [readerPath, routerNavigate]);
-  const { detail, evidence, artifacts, events, error, setError, refresh } = record;
-  const [actionBusy, setActionBusy] = useState(false);
+  const record = useRunRecord(runId, new URLSearchParams(location.search).get("view") ?? "decision");
+  const { detail, evidence, artifacts, error, refresh } = record;
+  const readingPath = useCallback((identity: string, values: Parameters<typeof timelinePath>[3]) =>
+    timelinePath(detail?.run.request.ticker ?? "", identity, location.search, values),
+    [detail?.run.request.ticker, location.search]);
   const [baselineEvidence, setBaselineEvidence] = useState<EvidenceBundle | null>(null);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
@@ -101,19 +75,12 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
   const requestedView = searchParams.get("view");
   const isIncremental = detail?.run.research_kind === "incremental";
   const availableViews: ViewName[] = isIncremental
-    ? ["brief", "reassessment", "decision", "evidence", "timeline", "diagnostics"]
-    : ["decision", "reports", "deliberation", "evidence", "timeline", "diagnostics"];
-  const defaultView: ViewName =
-    detail?.run.status === "succeeded"
-      ? isIncremental
-        ? "brief"
-        : "decision"
-      : "timeline";
-  const normalizedRequestedView =
-    requestedView === "incremental" ? "brief" : requestedView;
+    ? ["brief", "reassessment", "decision", "evidence"]
+    : ["decision", "reports", "deliberation", "evidence"];
+  const defaultView: ViewName = isIncremental ? "brief" : "decision";
   const activeView: ViewName =
-    isViewName(normalizedRequestedView) && availableViews.includes(normalizedRequestedView)
-      ? normalizedRequestedView
+    isViewName(requestedView) && availableViews.includes(requestedView)
+      ? requestedView
       : defaultView;
   useReadingPosition(`tradingagents-reading:${runId}:${activeView}`, undefined, Boolean(detail) && !["reports", "brief"].includes(activeView));
   const requestedReport = searchParams.get("report") ?? "";
@@ -135,22 +102,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
     };
   }, [detail?.run.trashed_at]);
 
-  const reports = useMemo<Record<string, AnalystReport | string>>(() => {
-    const completed = detail?.result?.reports ?? {};
-    if (Object.keys(completed).length > 0) return completed;
-    return Object.fromEntries(
-      artifacts
-        .filter(
-          (artifact) =>
-            artifact.stage === "analyst" &&
-            isAnalystReport(artifact.content),
-        )
-        .map((artifact) => [
-          artifact.role,
-          artifact.content as AnalystReport,
-        ]),
-    );
-  }, [artifacts, detail?.result?.reports]);
+  const reports = useMemo(() => detail?.result?.reports ?? {}, [detail?.result?.reports]);
   const reportNames = useMemo(
     () => orderReportNames(Object.keys(reports)),
     [reports],
@@ -166,12 +118,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
     () => buildEvidenceReferenceIndex(evidence, baselineEvidence),
     [baselineEvidence, evidence],
   );
-  const decision = useMemo(
-    () =>
-      detail?.result?.decision ??
-      latestResearchDecision(artifacts),
-    [artifacts, detail?.result?.decision],
-  );
+  const decision = detail?.result?.decision ?? null;
   const runWarnings = useMemo(() => {
     const reportWarningKeys = new Set([...Object.values(reports).flatMap(reportWarnings), ...(detail?.incremental_context?.analysis_brief?.warnings ?? [])].map(warningKey));
     return dedupeWarnings(detail?.result?.warnings ?? []).filter(
@@ -188,7 +135,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
       return;
     }
     navigate(
-      runDetailPath(runId, {
+      readingPath(runId, {
         view: "reports",
         report: activeReport,
       }),
@@ -236,22 +183,22 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
     detail?.incremental_context?.full_baseline.run_id,
   ]);
 
-  const viewPath = (view: ViewName) => readerPath(runDetailPath(runId, {
+  const viewPath = (view: ViewName) => readingPath(runId, {
     view,
     report: view === "reports" && activeReport ? activeReport : undefined,
     return_view: view === "evidence" && activeView !== "evidence" ? activeView : undefined,
     return_report: view === "evidence" && activeView === "reports" ? activeReport : undefined,
-  }));
-  const selectView = (view: ViewName) => routerNavigate(viewPath(view));
+  });
+  const selectView = (view: ViewName) => navigate(viewPath(view));
 
   const openEvidence = useCallback(
     (ref: string) => {
       navigate(
-        runDetailPath(runId, {
+        readingPath(runId, {
           view: "evidence",
           ref,
           return_view:
-            activeView === "evidence" ? "timeline" : activeView,
+            activeView === "evidence" ? defaultView : activeView,
           return_report:
             activeView === "reports" && activeReport
               ? activeReport
@@ -292,7 +239,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
         : "";
   const returnFromEvidence = useCallback(() => {
     navigate(
-      runDetailPath(runId, {
+      readingPath(runId, {
         view: returnView,
         report: returnReport || undefined,
       }),
@@ -300,72 +247,20 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
     );
   }, [navigate, returnReport, returnView, runId]);
 
-  const act = async (action: "cancel" | "retry") => {
-    if (actionBusy) return;
-    setActionBusy(true);
-    try {
-      await api.action(runId, action);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
-    } finally { setActionBusy(false); }
-  };
-
-  const restore = async () => {
-    try {
-      await api.restoreRuns([runId]);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
-    }
-  };
-
   const marketDate = useMarketDate(detail?.run.request.ticker);
 
   if (!detail || detail.run.id !== runId) {
     return <div className="loading" role={error ? "alert" : "status"}>{error || t("loading")}{error && <button className="button" onClick={() => void refresh()}>{t("retryLoad")}</button>}</div>;
   }
-  if (["timeline", "diagnostics"].includes(activeView)) return <RunExecutionView record={record} diagnostics={activeView === "diagnostics"} />;
   const { run } = detail;
   const canUpdateResearch =
     run.is_research_node &&
     run.status === "succeeded" &&
     !run.trashed_at &&
     marketDate.date !== null && run.request.analysis_date < marketDate.date;
-  const hasPartialResearch =
-    run.status !== "succeeded" &&
-    (evidence !== null ||
-      artifacts.length > 0 ||
-      Object.keys(reports).length > 0 ||
-      decision !== null);
-
-  const readingViews = availableViews.filter(view => !["timeline", "diagnostics"].includes(view));
+  const readingViews = availableViews;
   const actions = (
         <div className="action-row">
-          {!run.trashed_at &&
-            (run.status === "queued" || run.status === "running") && (
-            <button className="button danger" disabled={actionBusy || run.cancel_requested} onClick={() => void act("cancel")}>
-              {t("cancel")}
-            </button>
-          )}
-          {!run.trashed_at && run.status === "failed" && (
-            <button className="button" disabled={actionBusy} onClick={() => void act("retry")}>
-              {t("retry")}
-            </button>
-          )}
-          {run.trashed_at && !run.is_research_node && (
-            <button className="button primary" onClick={() => void restore()}>
-              {t("restore")}
-            </button>
-          )}
-          {!workspace && run.is_research_node && (
-            <Link
-              className="button"
-              to={researchLocation(run)}
-            >
-              {t("researchTimeline")}
-            </Link>
-          )}
           {marketDate.error && <span className="warning" role="status">{t("futureContextUnavailable")} <button className="button" onClick={marketDate.retry}>{t("retryLoad")}</button></span>}
           {canUpdateResearch && (
             <Link
@@ -383,14 +278,6 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
                 {t("updateThisResearch")}
               </span>
             )}
-          {!workspace && terminal.has(run.status) && (
-            <Link
-              className="button"
-              to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}
-            >
-              {t("cloneAsFullResearch")}
-            </Link>
-          )}
           <ActionMenu label={t("exportResearch")}>
           <a
             className="button"
@@ -411,39 +298,20 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
             {t("exportJson")}
           </a>
           </ActionMenu>
-          {!workspace && activeView === "diagnostics" && <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=timeline`}>{t("activity")}</Link>}
-          {workspace ? !actionsTarget && <ActionMenu label={t("moreResearchActions")}>
-            {terminal.has(run.status) && <Link className="button" to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}>{t("cloneAsFullResearch")}</Link>}
+          {!actionsTarget && <ActionMenu label={t("moreResearchActions")}>
+            <Link className="button" to={`/runs/new?intent=clone_full&from_run=${encodeURIComponent(runId)}`}>{t("cloneAsFullResearch")}</Link>
             <Link className="button" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>
-          </ActionMenu> : <Link className="text-link" to={`/runs/${encodeURIComponent(runId)}?view=diagnostics`}>{t("runDiagnostics")}</Link>}
+          </ActionMenu>}
         </div>
   );
 
   return (
-    <section className={workspace ? "workspace-reader" : "run-reader"}>
+    <section className="workspace-reader">
       <ReadingAnchorNotice identity={`${runId}:${activeView}:${activeReport}`} />
       <header className={`page-header run-heading ${actionsTarget ? "actions-relocated" : ""}`}>
         <div>
-          {!workspace && <Link className="back-link" to="/">
-            ← {t("dashboard")}
-          </Link>}
-          {!workspace && <div className="run-title">
-            <InstrumentIdentity
-              ticker={run.request.ticker}
-              instrumentName={run.instrument_name}
-              instrumentLocalName={run.instrument_local_name}
-              prominent
-            />
-            <ResearchKindBadge
-              kind={run.research_kind}
-              request={run.request}
-              methodSnapshot={run.method_snapshot}
-            />
-            <StatusBadge status={run.status} />
-          </div>}
           <p className="subtitle">
             {run.request.analysis_date}
-            {(activeView === "timeline" || activeView === "diagnostics") && " · " + t("attempt") + " " + run.attempt}
           </p>
           {run.source_run_id && (
             <p className="subtitle">
@@ -470,11 +338,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
         </div>
       )}
       {run.error_message && <div className="alert">{run.error_message}</div>}
-      {hasPartialResearch && (
-        <div className="notice partial-research-notice" role="status">
-          {t("partialResearchAvailable")}
-        </div>
-      )}
+
       <RunWarnings
         warnings={runWarnings}
         openRequest={warningOpenRequest}
@@ -524,7 +388,6 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
             onView={selectView}
             node={detail.research_node ?? null}
             runId={run.id}
-            runStatus={run.status}
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
           />
@@ -552,8 +415,6 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
         {activeView === "evidence" && (
           <EvidencePanel
             evidence={evidence}
-            evidenceStatus={detail.evidence_status.status}
-            runStatus={run.status}
             focusedRef={focusedEvidence}
             onReturn={returnFromEvidence}
             returnLabel={returnViewLabel(t, returnView)}
@@ -570,7 +431,7 @@ export function ResearchReaderContent({ selectedRunId, workspace = false, action
             reports={reports}
             reportNames={reportNames}
             activeReport={activeReport}
-            reportHref={report => readerPath(runDetailPath(runId, { view: "reports", report }))}
+            reportHref={report => readingPath(runId, { view: "reports", report })}
             onEvidence={openSourceDrawer}
             evidenceIndex={evidenceIndex}
           />
@@ -645,7 +506,6 @@ function IncrementalBriefPanel({
   brief,
   node,
   runId,
-  runStatus,
   evidenceIndex,
   onEvidence,
 }: {
@@ -654,7 +514,6 @@ function IncrementalBriefPanel({
   brief: IncrementalAnalysisBrief | null;
   node: ResearchNodeView | null;
   runId: string;
-  runStatus: RunDetailType["run"]["status"];
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
 }) {
@@ -674,7 +533,7 @@ function IncrementalBriefPanel({
       {node && <><p className="brief-period">{t("baselineDate")}: {baselineDate ?? "—"} → {t("selectedCutoff")}: {node.analysis_date}</p><IncrementalOutcomeSummary node={node} /></>}
       {!brief ? (
         <div className="empty-state">
-          {t(briefUnavailableLabel(runStatus))}
+          {t("historicalBriefUnavailable")}
           <p><button className="button" onClick={() => onView("reassessment")}>{t("reassessment")}</button> <button className="button" onClick={() => onView("decision")}>{t("completeJudgment")}</button></p>
         </div>
       ) : (
@@ -923,8 +782,6 @@ function DeliberationPanel({
 
 function EvidencePanel({
   evidence,
-  evidenceStatus,
-  runStatus,
   focusedRef,
   onReturn,
   returnLabel,
@@ -935,8 +792,6 @@ function EvidencePanel({
   incrementalNode,
 }: {
   evidence: EvidenceBundle | null;
-  evidenceStatus: RunDetailType["evidence_status"]["status"];
-  runStatus: RunDetailType["run"]["status"];
   focusedRef: string;
   onReturn: () => void;
   returnLabel: string;
@@ -983,10 +838,7 @@ function EvidencePanel({
       }} />}
       {!evidence ? (
         <div className="empty-state">
-          {evidenceStatus === "pending" &&
-          (runStatus === "queued" || runStatus === "running")
-            ? t("evidencePending")
-            : t("noEvidenceRecorded")}
+          {t("noEvidenceRecorded")}
         </div>
       ) : (
         <>
@@ -1307,39 +1159,6 @@ function dedupeWarnings(warnings: VisibleWarning[]): VisibleWarning[] {
   });
 }
 
-function isAnalystReport(content: ArtifactContent): content is AnalystReport {
-  return (
-    "analyst" in content &&
-    "markdown" in content &&
-    "report_sections" in content &&
-    "audit_status" in content
-  );
-}
-
-function isResearchDecision(
-  content: ArtifactContent,
-): content is ResearchDecision {
-  return (
-    "rating" in content &&
-    "thesis" in content &&
-    "scenarios" in content
-  );
-}
-
-function latestResearchDecision(
-  artifacts: ResearchArtifact[],
-): ResearchDecision | null {
-  for (const artifact of [...artifacts].reverse()) {
-    if (
-      artifact.stage === "decision" &&
-      isResearchDecision(artifact.content)
-    ) {
-      return artifact.content;
-    }
-  }
-  return null;
-}
-
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
 }
@@ -1372,11 +1191,8 @@ function reportLabel(t: TFunction, name: string): string {
 
 function returnViewLabel(t: TFunction, view: ReturnViewName): string {
   const labels: Record<ReturnViewName, string> = {
-    diagnostics: "diagnostics",
-    incremental: "returnToIncrementalSummary",
     brief: "returnToAnalysisBrief",
     reassessment: "returnToReassessment",
-    timeline: "returnToActivity",
     deliberation: "returnToDeliberation",
     reports: "returnToReports",
     decision: "returnToOverview",
@@ -1387,40 +1203,19 @@ function returnViewLabel(t: TFunction, view: ReturnViewName): string {
 function viewLabel(view: ViewName, incremental: boolean): string {
   if (view === "decision") return incremental ? "completeJudgment" : "overview";
   if (view === "brief") return "analysisBrief";
-  if (view === "timeline") return "activity";
   if (view === "evidence" && incremental) return "evidenceUpdates";
   return view;
 }
 
-function briefUnavailableLabel(
-  status: RunDetailType["run"]["status"],
+function timelinePath(
+  instrument: string, runId: string, scope: string,
+  values: {view?: ViewName; report?: string; ref?: string; return_view?: ReturnViewName; return_report?: string},
 ): string {
-  if (status === "queued" || status === "running") {
-    return "analysisBriefPending";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "analysisBriefNotProduced";
-  }
-  return "historicalBriefUnavailable";
-}
-
-
-function runDetailPath(
-  runId: string,
-  values: {
-    view?: ViewName;
-    report?: string;
-    ref?: string;
-    return_view?: ReturnViewName;
-    return_report?: string;
-  },
-): string {
-  const params = new URLSearchParams();
-  Object.entries(values).forEach(([key, value]) => {
-    if (value) params.set(key, value);
-  });
-  const query = params.toString();
-  return `/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ""}`;
+  const params = new URLSearchParams(scope);
+  for (const key of ["view", "report", "ref", "return_view", "return_report"]) params.delete(key);
+  params.set("node", runId);
+  Object.entries(values).forEach(([key, value]) => { if (value) params.set(key, value); });
+  return `/timelines/${encodeURIComponent(instrument)}?${params}`;
 }
 
 function cleanupLabel(

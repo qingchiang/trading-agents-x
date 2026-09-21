@@ -15,7 +15,6 @@ export default function SettingsSearch({ query, schema, view, language, onNaviga
   const c = connectionCopy(language);
   const results: { id: string; label: string; key: string; target: string; group: string }[] = [];
   for (const field of schema.fields) {
-    if (["providers", "compatibility"].includes(field.group) || field.key === "llm_provider") continue;
     if (!matches(field.key, ...Object.values(field.label), ...field.env_names ?? [])) continue;
     const category = field.group === "cache" ? "storage" : ["sources", "news"].includes(field.group) ? "data" : "research";
     results.push({ id: field.key, label: field.label[language] ?? field.label.en, key: field.key, target: `/settings/${category}#setting-${field.key}`, group: field.group });
@@ -27,7 +26,7 @@ export default function SettingsSearch({ query, schema, view, language, onNaviga
   }
   for (const { connection: conn } of Object.values(view.connections ?? {})) {
     const target = `/settings/connections?connection=${encodeURIComponent(conn.id)}`;
-    if (matches(conn.id, conn.name, conn.preset, "llm_provider providers")) results.push({ id: conn.id, label: conn.name, key: "", target: `${target}#connection-name`, group: "connections" });
+    if (matches(conn.id, conn.name, conn.preset, "models connections")) results.push({ id: conn.id, label: conn.name, key: "", target: `${target}#connection-name`, group: "connections" });
     for (const field of ["name", "enabled", ...Object.keys(conn.transport), "compatibility", "key_required", "discovery"]) {
       if (["kind", "compatibility", "key_required"].includes(field) && !["chat_completions", "responses"].includes(conn.transport.kind ?? "")) continue;
       const labels = ["en", "zh-CN", "ja"].map(lang => connectionField(lang, field));

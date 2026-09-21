@@ -152,8 +152,7 @@ class RunRequestSnapshot(FrozenModel):
     This is deliberately separate from :class:`AnalysisRequest`.  The latter
     is the admission contract for creating research, while this snapshot must
     remain able to represent request values that were accepted by an older
-    application version (including ``asset_type='crypto'``).  Snapshot
-    validation does not normalize symbols, infer an asset type, or otherwise
+    application version. Snapshot validation does not normalize symbols or otherwise
     rewrite persisted request data.
     """
 

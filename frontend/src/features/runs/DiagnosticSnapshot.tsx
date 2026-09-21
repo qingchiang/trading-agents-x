@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import JsonRecord from "../../shared/JsonRecord";
 
 const fieldLabels: Record<string, string> = {
-  profile: 'profile', llm_provider: 'provider', quick_model: 'quickModel', deep_model: 'deepModel', quick_reasoning_effort: 'quickReasoning', deep_reasoning_effort: 'deepReasoning',
+  profile: 'profile',
   temperature: 'temperature', llm_max_retries: 'maxRetries', output_language: 'reportLanguage', enabled_roles: 'analysts', application_version: 'applicationVersion',
   schema_version: 'schemaVersion', research_schema_version: 'researchSchemaVersion', market_identity: 'marketIdentity', data_availability_policy: 'diagnosticPolicy',
 };
@@ -29,8 +29,14 @@ export default function DiagnosticSnapshot({ label, snapshot }: { label: string;
     <h2>{label}</h2>
     <p className="secondary-line">{t('sourceSnapshot')}: {label}</p>
     {!snapshot ? <p>{t('notRecorded')}</p> : <>
-      {fields(['profile', 'llm_provider', 'output_language', 'enabled_roles'].filter(key => key in snapshot))}
-      <div className="diagnostic-models">{['quick', 'deep'].map(role => <section key={role}><h3>{t(role === 'quick' ? 'quickModel' : 'deepModel')}</h3>{fields([`${role}_model`, `${role}_reasoning_effort`])}</section>)}</div>
+      {fields(['profile', 'output_language', 'enabled_roles'].filter(key => key in snapshot))}
+      <div className="diagnostic-models">{(snapshot.research_kind === "incremental" ? ["deep"] : ["quick", "deep"]).map(role => {
+        const binding = snapshot[`${role}_binding`] as {model?: string; reasoning_effort?: string} | undefined;
+        return <section key={role}><h3>{t(role === 'quick' ? 'quickModel' : 'deepModel')}</h3><dl className="diagnostic-fields">
+          <div><dt>{t(role === 'quick' ? 'quickModel' : 'deepModel')}</dt><dd>{display('model', binding?.model)}</dd></div>
+          <div><dt>{t(role === 'quick' ? 'quickReasoning' : 'deepReasoning')}</dt><dd>{display('reasoning_effort', binding?.reasoning_effort)}</dd></div>
+        </dl></section>;
+      })}</div>
       {fields(['temperature', 'llm_max_retries', 'application_version', 'schema_version', 'research_schema_version', 'market_identity', 'data_availability_policy'].filter(key => key in snapshot))}
       {detailKeys.length > 0 && <details className="diagnostic-disclosure"><summary>{t('rawDetails')}</summary>
         {detailKeys.map(key => <JsonRecord label={key} value={snapshot[key]} key={key} />)}

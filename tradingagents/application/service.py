@@ -382,8 +382,6 @@ class AnalysisService:
             method_snapshot["prompt_versions"] = {
                 "incremental_synthesis": "v1-bounded-full-baseline",
             }
-            method_snapshot.pop("quick_model", None)
-            method_snapshot.pop("quick_reasoning_effort", None)
         canonical = json.dumps(
             method_snapshot,
             ensure_ascii=True,

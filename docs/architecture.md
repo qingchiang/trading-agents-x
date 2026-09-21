@@ -196,9 +196,9 @@ Creation and retained history use separate request contracts.
 `AnalysisRequest` is the admission contract for new research and for any
 action that can launch research, including retry and source-based creation.
 `RunRequestSnapshot` is a tolerant, read-only representation of the JSON
-stored on a Run; it preserves legacy request values such as
-`asset_type="crypto"` for history views and exports without rewriting stored
-JSON or implying that those values remain admitted for new research. Execution
+stored on a Run. Offline conversion retains predecessor JSON in a separate
+audit snapshot and generates this normalized reading projection. Missing facts
+remain missing; current settings never supply historical identity. Execution
 crosses back through `AnalysisRequest` explicitly, so tightening admission
 cannot make a retained Run unreadable or create a second creation path.
 
@@ -428,8 +428,8 @@ The sealed bundle is written to `run_evidence` independently of the run's final
 status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
 running or failed run can still expose the immutable ledger. Analyst artifacts,
 deliberation artifacts, and the final decision are also durable as soon as each
-stage completes; Run Detail and exports therefore show partial research rather
-than treating an unsuccessful attempt as empty.
+stage completes. Run diagnostics and explicit exports retain these partial
+artifacts even when an attempt does not commit a Research Node.
 
 `EvidenceTable` is an audit fact table containing canonical raw values and
 source mappings. It is available on the Evidence page and as CSV in the
@@ -846,10 +846,11 @@ pagination. `total` counts the filtered set. `primary_head_run_id`,
 Cycle head; `latest_analysis_date` still describes the latest active research
 across cycles. These are derived reads and introduce no persistence migration.
 
-The instrument route `/timelines/:instrument?node=:id` shares the Run reader
-with legacy `/runs/:id` links. Selecting history does not select a Primary
+The instrument route `/timelines/:instrument?node=:id` is the research reader.
+Run routes `/runs/:id` show execution and diagnostics; retired reading query
+values do not redirect to research. Selecting history does not select a Primary
 Cycle. Technical snapshots, recovery records, numeric audit appendices, and
-raw events are available under `view=diagnostics`; evidence and consequential
+raw events are available on the Run diagnostics page; evidence and consequential
 limitations stay reachable from research reading. Presentation never rewrites
 stored reports or export products. The dashboard uses bounded summary and Run
 list requests, without loading individual reports.
@@ -876,3 +877,8 @@ scope before any mutation. Existing callers may omit the field. Actual transitio
 compatibility and uniqueness validations remain authoritative at submission.
 Related uncommitted tasks never become owned nodes merely because they are grouped
 under a baseline in the UI. Restore retains the existing cascade provenance rules.
+
+Frontend composition and routing live in `frontend/src/app`. Research reading
+and creation, execution diagnostics, and settings live in `features/research`,
+`features/runs`, and `features/settings`, with adjacent tests and styles. Shared
+UI primitives, hooks, and generated API contracts live in `shared`.
