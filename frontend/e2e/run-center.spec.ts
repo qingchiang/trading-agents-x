@@ -1,3 +1,4 @@
+import { capabilities as makeCapabilities, modelCatalog } from "./fixtures/models";
 import { expect, test } from "@playwright/test";
 
 import { timestamp, makeRun, result, artifacts, cycleTimeline, type MockRun, type TimelineNodeFixture } from "./fixtures/research";
@@ -41,7 +42,7 @@ test("runs, templates, trash, and restores local research", async ({
     if (path === "/api/v1/run-groups") {
       const trash = url.searchParams.get("trash_state") === "trashed";
       const visible = [...runs.values()].filter(run => !purged.has(run.id) && Boolean(run.trashed_at) === trash);
-      return route.fulfill({ json: { items: visible.map(run => ({ id: run.id, kind: "standalone", instrument: run.request.ticker, research_runs: [], related_tasks: [run], matched_run_ids: [run.id], status_counts: { [run.status]: 1 } })), total: visible.length, limit: 12, offset: 0 } });
+      return route.fulfill({ json: { items: visible.map(run => ({ id: run.id, kind: run.is_research_node ? "cycle" : "standalone", instrument: run.request.ticker, baseline: run.is_research_node ? run : null, research_runs: run.is_research_node ? [run] : [], related_tasks: run.is_research_node ? [] : [run], matched_run_ids: [run.id], status_counts: { [run.status]: 1 } })), total: visible.length, limit: 12, offset: 0 } });
     }
     if (path === "/api/v1/runs/lifecycle-preview") {
       const payload = request.postDataJSON();
@@ -59,60 +60,12 @@ test("runs, templates, trash, and restores local research", async ({
     }
     if (path === "/api/v1/capabilities") {
       return route.fulfill({
-        json: {
-          profiles: ["fast", "standard", "deep"],
-          analysts: ["market", "social", "news", "fundamentals"],
-          output_languages: ["en", "zh-CN", "ja"],
-          providers: {
-            openai: {
-              label: "OpenAI",
-              api_key_required: true,
-              api_key_configured: true,
-              configured: true,
-              selectable: true,
-              unavailable_reason: null,
-              model_discovery_supported: true,
-            },
-          },
-          defaults: {
-            profile: "standard",
-            llm_provider: "openai",
-            quick_model: "gpt-5.4-mini",
-            deep_model: "gpt-5.5",
-            quick_reasoning_effort: "provider_default",
-            deep_reasoning_effort: "provider_default",
-            output_language: "zh-CN",
-            lan_enabled: false,
-            trash_retention_days: 30,
-          },
-        },
+        json: makeCapabilities("zh-CN"),
       });
     }
-    if (path === "/api/v1/providers/openai/models") {
+    if (path === "/api/v1/settings/connections/default/models") {
       return route.fulfill({
-        json: {
-          provider: "openai",
-          models: [
-            {
-              id: "gpt-5.4-mini",
-              label: "GPT quick",
-              compatibility: "supported",
-              reasoning_efforts: ["provider_default", "low"],
-              default_roles: ["quick"],
-            },
-            {
-              id: "gpt-5.5",
-              label: "GPT deep",
-              compatibility: "supported",
-              reasoning_efforts: ["provider_default", "high"],
-              default_roles: ["deep"],
-            },
-          ],
-          source: "live",
-          fetched_at: timestamp,
-          stale: false,
-          warning: null,
-        },
+        json: modelCatalog,
       });
     }
     if (path === "/api/v1/instruments/recent") {
@@ -438,7 +391,7 @@ test("runs, templates, trash, and restores local research", async ({
     source_run_id: "run-created",
   });
 
-  await page.goto("/runs/run-report?view=deliberation");
+  await page.goto("/timelines/NVDA?node=run-report&view=deliberation");
   await expect(
     page.getByRole("heading", { name: "Bull and bear cases" }),
   ).toBeVisible();
@@ -461,15 +414,7 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("link", { name: "Research reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole("navigation", { name: "Report section navigation" }).getByRole("button", { name: "Risk lens" }).click();
-  await expect(page).toHaveURL(/#risk/);
-  await page.getByRole("link", { name: "Overview", exact: true }).click();
-  await page.goBack();
-  await expect(page).toHaveURL(/view=reports.*#risk/);
-  await expect.poll(() => page.getByRole("heading", { name: "Risk lens" }).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(90);
-
-  await page.goto("/runs/run-report?view=decision");
+  await page.goto("/timelines/NVDA?node=run-report&view=decision");
   await expect(
     page.getByRole("link", { name: "Overview", exact: true }),
   ).toHaveAttribute("aria-current", "page");
@@ -488,6 +433,7 @@ test("runs, templates, trash, and restores local research", async ({
 
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);
   await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("link", { name: "Run & diagnostics" }).click();
   await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
   await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
@@ -542,7 +488,7 @@ test("runs, templates, trash, and restores local research", async ({
   );
   await page.getByRole("button", { name: "Latest first" }).click();
 
-  await page.goto("/runs/run-daiichi?view=decision");
+  await page.goto("/runs/run-daiichi");
   const detailIdentity = page.locator(".run-title .instrument-identity");
   await expect(detailIdentity).toContainText("第一三共");
   const detailGeometry = await detailIdentity.evaluate((element) => {
@@ -651,8 +597,8 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page.getByRole("tooltip", { name: "Research configuration" })).toHaveCount(0);
 
   const reportRow = page.locator(".task-group").filter({ hasText: "NVDA" });
-  await reportRow.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Move to Trash (1)" }).click();
+  await reportRow.getByRole("button", { name: "Manage cycle" }).click();
+  await reportRow.getByRole("button", { name: "Move Cycle to Trash" }).click();
   const trashDialog = page.getByRole("alertdialog", {
     name: "Move research to Trash?",
   });
@@ -665,8 +611,8 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
   const trashedRow = page.locator(".task-group").filter({ hasText: "NVDA" });
-  await trashedRow.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Restore selected (1)" }).click();
+  await trashedRow.getByRole("button", { name: "Manage cycle" }).click();
+  await trashedRow.getByRole("button", { name: "Restore", exact: true }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Restore", exact: true }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
   const restored = runs.get("run-report")!;
@@ -677,29 +623,7 @@ test("runs, templates, trash, and restores local research", async ({
 
   purged.delete("run-report");
   restored.trashed_at = null;
-  for (const width of [1440, 1024]) {
-    await page.setViewportSize({ width, height: 1000 });
-    await page.goto("/runs/run-report?view=reports&report=market");
-    await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
-    const body = page.locator(".report-panel .analyst-report");
-    expect(await body.evaluate(element => getComputedStyle(element).overflowY)).toBe("visible");
-    expect(await body.locator("p").first().evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(880);
-    if (width === 1440) {
-      const nav = page.getByRole("navigation", { name: "Report section navigation" });
-      await expect(nav).toBeVisible();
-      const boxes = await Promise.all([nav.boundingBox(), body.boundingBox()]);
-      expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
-      await nav.getByRole("button", { name: "Risk lens" }).click();
-      await expect(page).toHaveURL(/#risk/);
-    } else await expect(page.getByLabel("Jump to section")).toBeVisible();
-  }
-
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/runs/run-report?view=reports&report=market");
-  await expect(page.getByLabel("Jump to section")).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "Report section navigation" }),
-  ).toBeHidden();
   await page.goto("/runs");
   const shell = page.locator(".app-shell");
   await page.getByRole("button", { name: "Open navigation" }).click();
@@ -995,27 +919,10 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
     const path = url.pathname;
 
     if (path === "/api/v1/capabilities") {
-      return route.fulfill({ json: {
-        profiles: ["fast", "standard", "deep"],
-        analysts: ["market", "social", "news", "fundamentals"],
-        output_languages: ["en", "zh-CN", "ja"],
-        providers: { openai: { label: "OpenAI", api_key_required: true,
-          api_key_configured: true, configured: true, selectable: true,
-          unavailable_reason: null, model_discovery_supported: true } },
-        defaults: { profile: "standard", llm_provider: "openai",
-          quick_model: "gpt-5.4-mini", deep_model: "gpt-5.5",
-          quick_reasoning_effort: "provider_default",
-          deep_reasoning_effort: "provider_default", output_language: "en",
-          lan_enabled: false, trash_retention_days: 30 },
-      } });
+      return route.fulfill({ json: makeCapabilities("en") });
     }
-    if (path === "/api/v1/providers/openai/models") {
-      return route.fulfill({ json: { provider: "openai", models: [
-        { id: "gpt-5.4-mini", label: "GPT quick", compatibility: "supported",
-          reasoning_efforts: ["provider_default"], default_roles: ["quick"] },
-        { id: "gpt-5.5", label: "GPT deep", compatibility: "supported",
-          reasoning_efforts: ["provider_default"], default_roles: ["deep"] },
-      ], source: "fixture", fetched_at: timestamp, stale: false, warning: null } });
+    if (path === "/api/v1/settings/connections/default/models") {
+      return route.fulfill({ json: modelCatalog });
     }
     if (path === "/api/v1/instruments/recent") return route.fulfill({ json: [] });
     if (/^\/api\/v1\/instruments\/[^/]+\/analysis-cutoff-context$/.test(path)) {
@@ -1127,7 +1034,8 @@ test("completes a mocked Full-to-Incremental Timeline journey", async ({ page })
   await page.locator("form.run-form button").last().click();
   await expect(page).toHaveURL(/\/runs\/incremental-journey$/);
   expect(incrementalPayload).toMatchObject({ research_kind: "incremental",
-    full_baseline_run_id: "full-journey" });
+    full_baseline_run_id: "full-journey", models: { deep: { connection_id: "default", model: "gpt-5.5" } } });
+  expect((incrementalPayload as Record<string, any>).models).not.toHaveProperty("quick");
 
   await page.goto("/timelines/NVDA");
   await expect(page.locator(".history-node.full")).toBeVisible();

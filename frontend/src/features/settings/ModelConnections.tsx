@@ -24,11 +24,6 @@ export default function ModelConnections({ view, schema, language, text, active,
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (requestedId) setSelected(requestedId); }, [requestedId]);
-  useEffect(() => {
-    if (requestedId || !focusField || !["google_thinking_level", "anthropic_effort", "openai_reasoning_effort"].includes(focusField)) return;
-    const compatible = Object.values(view.connections ?? {}).find(entry => focusField.startsWith(entry.connection.compatibility ?? "") || (focusField.startsWith("openai") && ["chat_completions", "responses", "azure"].includes(entry.connection.transport.kind ?? "")));
-    if (compatible) setSelected(compatible.connection.id);
-  }, [focusField, requestedId, view.connections]);
   useEffect(() => { setRestore(false); }, [selected, active]);
   useEffect(() => {
     setDrafts(old => Object.fromEntries(Object.entries(old).map(([id, draft]) => {
@@ -129,7 +124,6 @@ export default function ModelConnections({ view, schema, language, text, active,
           <label>{c.compatibility}<select id="connection-compatibility" value={conn.compatibility} onChange={e => update({ compatibility: e.target.value })}>{Object.entries(schema.presets ?? {}).filter(([, p]) => ["chat_completions", "responses"].includes(p.transport.kind ?? "")).map(([id, p]) => <option value={id} key={id}>{p.name}</option>)}</select></label>
           <label className="checkbox-label"><input id="connection-key_required" type="checkbox" checked={conn.key_required ?? true} onChange={e => update({ key_required: e.target.checked })} />{c.required}</label>
         </>}
-        {schema.fields.filter(f => f.group === "compatibility" && (f.key.startsWith(conn.transport.kind ?? "") || (f.key.startsWith("openai") && ["chat_completions", "responses", "azure"].includes(conn.transport.kind ?? "")))).map(f => <label key={f.key}>{f.label[language] ?? f.label.en}<select id={`setting-${f.key}`} value={conn.reasoning_defaults?.[f.key] ?? ""} onChange={e => update({ reasoning_defaults: { ...conn.reasoning_defaults, [f.key]: e.target.value || null } })}><option value="">{text.unset}</option>{f.options?.map(option => <option key={option} value={option}>{f.option_labels?.[option]?.[language] ?? option}</option>)}</select></label>)}
       </div></details>
       </fieldset>
       {deleted && <p className="alert" role="alert">{editing.deleted}</p>}

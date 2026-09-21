@@ -2,11 +2,6 @@ import type { ConfigurationSchema, ConfigurationView } from "../../shared/api/cl
 import { connectionCopy, connectionField } from "./connectionCopy";
 import { Link } from "../../app/router";
 
-const transportEnv: Record<string, string[]> = {
-  base_url: ["TRADINGAGENTS_LLM_BACKEND_URL", "AZURE_OPENAI_ENDPOINT", "OLLAMA_BASE_URL"],
-  deployment: ["AZURE_OPENAI_DEPLOYMENT_NAME"], api_version: ["OPENAI_API_VERSION"],
-  region: ["AWS_REGION", "AWS_DEFAULT_REGION"], aws_profile: ["AWS_PROFILE"],
-};
 export default function SettingsSearch({ query, schema, view, language, onNavigate }: {
   query: string; schema: ConfigurationSchema; view: ConfigurationView; language: string; onNavigate: (group: string) => void;
 }) {
@@ -30,15 +25,11 @@ export default function SettingsSearch({ query, schema, view, language, onNaviga
     for (const field of ["name", "enabled", ...Object.keys(conn.transport), "compatibility", "key_required", "discovery"]) {
       if (["kind", "compatibility", "key_required"].includes(field) && !["chat_completions", "responses"].includes(conn.transport.kind ?? "")) continue;
       const labels = ["en", "zh-CN", "ja"].map(lang => connectionField(lang, field));
-      if (matches(field, ...labels, ...transportEnv[field] ?? [])) results.push({ id: `${conn.id}-${field}`, label: `${conn.name} · ${connectionField(language, field)}`, key: field, target: `${target}#connection-${field}`, group: "connections" });
-    }
-    for (const field of schema.fields.filter(f => f.group === "compatibility" && (f.key.startsWith(conn.transport.kind ?? "") || (f.key.startsWith("openai") && ["chat_completions", "responses", "azure"].includes(conn.transport.kind ?? ""))))) {
-      if (matches(field.key, ...Object.values(field.label), ...field.env_names ?? [])) results.push({ id: `${conn.id}-${field.key}`, label: `${conn.name} · ${field.label[language] ?? field.label.en}`, key: field.key, target: `${target}#setting-${field.key}`, group: "connections" });
+      if (matches(field, ...labels)) results.push({ id: `${conn.id}-${field}`, label: `${conn.name} · ${connectionField(language, field)}`, key: field, target: `${target}#connection-${field}`, group: "connections" });
     }
     const credentialFields = conn.transport.kind === "bedrock" ? ["access_key_id", "secret_access_key", "session_token", "bearer_token"] : ["api_key"];
     for (const field of credentialFields) {
-      const env = Object.entries(schema.credential_owners).filter(([, owner]) => owner === conn.preset).map(([name]) => name);
-      if (matches(field, ...["en", "zh-CN", "ja"].map(lang => connectionField(lang, field)), ...env)) results.push({ id: `${conn.id}-credential-${field}`, label: `${conn.name} · ${connectionField(language, field)}`, key: env.join(" / "), target: `${target}#credential-${field}`, group: "connections" });
+      if (matches(field, ...["en", "zh-CN", "ja"].map(lang => connectionField(lang, field)))) results.push({ id: `${conn.id}-credential-${field}`, label: `${conn.name} · ${connectionField(language, field)}`, key: field, target: `${target}#credential-${field}`, group: "connections" });
     }
   }
   return <div className="panel configuration-search-results"><h2>{c.results}</h2>{results.map(item => <Link key={item.id} to={item.target} onClick={() => onNavigate(item.group)}>{item.label}<code>{item.key}</code></Link>)}</div>;

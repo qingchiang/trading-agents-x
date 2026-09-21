@@ -66,7 +66,7 @@ test("reads diagnostics directly and searches and downloads complete JSON beyond
     const url = new URL(route.request().url());
     const value = respond(url, route.request().method()) as Record<string, any>;
     if (url.pathname === '/api/v1/runs/full') {
-      value.run.config_snapshot = { quick_model: 'quick-recorded', quick_reasoning_effort: 'medium', deep_model: 'deep-recorded', deep_reasoning_effort: 'high', temperature: 0, extra };
+      value.run.config_snapshot = { quick_binding: { model: 'quick-recorded', reasoning_effort: 'medium' }, deep_binding: { model: 'deep-recorded', reasoning_effort: 'high' }, temperature: 0, extra };
       value.run.metrics = { llm_calls: 0, input_tokens: 1250 };
       value.result.numeric_audit = null;
     }

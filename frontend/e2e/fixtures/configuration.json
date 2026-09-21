@@ -1,9 +1,9 @@
 {
   "view": {
     "connections": {
-      "200e8466-bf15-5c6f-a474-77dcc33f7f7a": {
+      "default": {
         "connection": {
-          "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+          "id": "default",
           "name": "OpenAI",
           "enabled": true,
           "deleted": false,
@@ -16,20 +16,17 @@
             "base_url": "https://api.openai.com/v1"
           },
           "template": {
+            "transport": {
+              "kind": "responses",
+              "base_url": "https://api.openai.com/v1"
+            },
             "compatibility": "openai",
             "discovery": "openai_compatible",
             "key_required": true,
-            "reasoning_defaults": {},
-            "transport": {
-              "base_url": "https://api.openai.com/v1",
-              "kind": "responses"
-            }
+            "reasoning_defaults": {}
           },
-          "reasoning_defaults": {
-            "google_thinking_level": null,
-            "openai_reasoning_effort": null,
-            "anthropic_effort": null
-          },
+          "template_origin": "creation",
+          "reasoning_defaults": {},
           "revision": 2
         },
         "credentials": {
@@ -60,16 +57,18 @@
         "news",
         "fundamentals"
       ],
-      "quick_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
-      "deep_connection_id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
-      "llm_provider": "openai",
-      "quick_think_llm": "gpt-5.4-mini",
-      "deep_think_llm": "gpt-5.5",
-      "quick_reasoning_effort": null,
-      "deep_reasoning_effort": null,
-      "google_thinking_level": null,
-      "openai_reasoning_effort": null,
-      "anthropic_effort": null,
+      "models": {
+        "quick": {
+          "connection_id": "default",
+          "model": "gpt-5.4-mini",
+          "reasoning_effort": "provider_default"
+        },
+        "deep": {
+          "connection_id": "default",
+          "model": "gpt-5.5",
+          "reasoning_effort": "provider_default"
+        }
+      },
       "temperature": null,
       "llm_max_retries": null,
       "output_language": "en",
@@ -125,79 +124,46 @@
           "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
           "news_data": "cn_news,yfinance"
         }
-      },
-      "providers": {}
+      }
     },
     "sources": {
-      "profile": "database",
-      "analysts": "database",
-      "quick_connection_id": "database",
-      "deep_connection_id": "database",
-      "llm_provider": "database",
-      "quick_think_llm": "database",
-      "deep_think_llm": "database",
-      "quick_reasoning_effort": "database",
-      "deep_reasoning_effort": "database",
-      "google_thinking_level": "database",
-      "openai_reasoning_effort": "database",
-      "anthropic_effort": "database",
-      "temperature": "database",
-      "llm_max_retries": "database",
-      "output_language": "database",
-      "news_article_limit": "database",
-      "yahoo_news_candidate_limit": "database",
-      "cn_news_candidate_limit": "database",
-      "sentiment_filing_limit": "database",
-      "ticker_news_lookback_days": "database",
-      "social_lookback_days": "database",
-      "global_news_article_limit": "database",
-      "global_news_candidate_limit": "database",
-      "global_news_query_limit": "database",
-      "global_news_lookback_days": "database",
-      "global_news_queries": "database",
-      "news_cache_enabled": "database",
-      "news_cache_refresh_seconds": "database",
-      "news_cache_retention_days": "database",
-      "news_cache_scope_limit": "database",
-      "news_cache_total_limit": "database",
-      "trash_retention_days": "database",
-      "data_vendors": "database",
-      "tool_vendors": "database",
-      "data_vendors_by_market": "database",
-      "providers": "database"
+      "profile": "default",
+      "analysts": "default",
+      "models": "database",
+      "temperature": "default",
+      "llm_max_retries": "default",
+      "output_language": "default",
+      "news_article_limit": "default",
+      "yahoo_news_candidate_limit": "default",
+      "cn_news_candidate_limit": "default",
+      "sentiment_filing_limit": "default",
+      "ticker_news_lookback_days": "default",
+      "social_lookback_days": "default",
+      "global_news_article_limit": "default",
+      "global_news_candidate_limit": "default",
+      "global_news_query_limit": "default",
+      "global_news_lookback_days": "default",
+      "global_news_queries": "default",
+      "news_cache_enabled": "default",
+      "news_cache_refresh_seconds": "default",
+      "news_cache_retention_days": "default",
+      "news_cache_scope_limit": "default",
+      "news_cache_total_limit": "default",
+      "trash_retention_days": "default",
+      "data_vendors": "default",
+      "tool_vendors": "default",
+      "data_vendors_by_market": "default"
     },
     "credentials": {
-      "OPENAI_API_KEY": true,
-      "XAI_API_KEY": false,
-      "DEEPSEEK_API_KEY": false,
-      "DASHSCOPE_API_KEY": false,
-      "DASHSCOPE_CN_API_KEY": false,
-      "ZHIPU_API_KEY": false,
-      "ZHIPU_CN_API_KEY": false,
-      "MINIMAX_API_KEY": false,
-      "MINIMAX_CN_API_KEY": false,
-      "OPENROUTER_API_KEY": false,
-      "MISTRAL_API_KEY": false,
-      "MOONSHOT_API_KEY": false,
-      "GROQ_API_KEY": false,
-      "NVIDIA_API_KEY": false,
-      "OPENAI_COMPATIBLE_API_KEY": false,
-      "ANTHROPIC_API_KEY": false,
-      "GOOGLE_API_KEY": false,
-      "AZURE_OPENAI_API_KEY": false,
       "ALPHA_VANTAGE_API_KEY": false,
       "FRED_API_KEY": false,
       "ESTAT_APP_ID": false,
       "JQUANTS_API_KEY": false,
-      "EDINET_API_KEY": false,
-      "AWS_BEARER_TOKEN_BEDROCK": false,
-      "AWS_ACCESS_KEY_ID": false,
-      "AWS_SECRET_ACCESS_KEY": false,
-      "AWS_SESSION_TOKEN": false
+      "EDINET_API_KEY": false
     },
     "deployment": {
-      "database_path": "/tmp/tmpja79lzcr/tradingagents.db",
-      "data_cache_dir": "/tmp/tmpja79lzcr/cache",
+      "database_path": "/tmp/tradingagents-fixture/tradingagents.db",
+      "data_cache_dir": "/tmp/tradingagents-fixture/cache",
       "host": "127.0.0.1",
       "port": "8000",
       "lan_enabled": "False",
@@ -228,16 +194,6 @@
         "en": "Ordered fallback: tool override, then market override, then default category. Only selected sources are used.",
         "zh-CN": "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
         "ja": "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。"
-      },
-      "compatibility": {
-        "en": "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
-        "zh-CN": "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
-        "ja": "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。"
-      },
-      "providers": {
-        "en": "Each connection has independent credentials, read at execution start.",
-        "zh-CN": "每个连接独立管理凭据，在执行开始时读取。",
-        "ja": "接続ごとに認証情報を管理し、実行開始時に読み込みます。"
       }
     },
     "credential_metadata": {
@@ -284,7 +240,7 @@
     },
     "presets": {
       "openai": {
-        "id": "200e8466-bf15-5c6f-a474-77dcc33f7f7a",
+        "id": "preset-openai",
         "name": "OpenAI",
         "enabled": true,
         "deleted": false,
@@ -311,7 +267,7 @@
         "revision": 1
       },
       "xai": {
-        "id": "326d06e3-d782-54b1-9578-983e629484ad",
+        "id": "preset-xai",
         "name": "xAI",
         "enabled": true,
         "deleted": false,
@@ -338,7 +294,7 @@
         "revision": 1
       },
       "deepseek": {
-        "id": "835c21bf-9cdc-5609-9d61-f52a7169a5de",
+        "id": "preset-deepseek",
         "name": "DeepSeek",
         "enabled": true,
         "deleted": false,
@@ -365,7 +321,7 @@
         "revision": 1
       },
       "qwen": {
-        "id": "639030c8-96d7-5be2-8d6c-ccf20d79505c",
+        "id": "preset-qwen",
         "name": "Qwen (International)",
         "enabled": true,
         "deleted": false,
@@ -392,7 +348,7 @@
         "revision": 1
       },
       "qwen-cn": {
-        "id": "4eab9ca5-f302-52e5-99d3-b302cfe83cf3",
+        "id": "preset-qwen-cn",
         "name": "Qwen (China)",
         "enabled": true,
         "deleted": false,
@@ -419,7 +375,7 @@
         "revision": 1
       },
       "glm": {
-        "id": "724b3de2-54ed-5a62-8c8a-d8d070e2c4d2",
+        "id": "preset-glm",
         "name": "Z.AI GLM",
         "enabled": true,
         "deleted": false,
@@ -446,7 +402,7 @@
         "revision": 1
       },
       "glm-cn": {
-        "id": "0cf8a22c-4ebe-5111-87c4-44f109d31e6c",
+        "id": "preset-glm-cn",
         "name": "BigModel GLM (China)",
         "enabled": true,
         "deleted": false,
@@ -473,7 +429,7 @@
         "revision": 1
       },
       "minimax": {
-        "id": "25e93d8f-fb13-515c-aff5-4e81206786c9",
+        "id": "preset-minimax",
         "name": "MiniMax (International)",
         "enabled": true,
         "deleted": false,
@@ -500,7 +456,7 @@
         "revision": 1
       },
       "minimax-cn": {
-        "id": "4bd876b8-ded9-50ad-80a3-fbd4752c8941",
+        "id": "preset-minimax-cn",
         "name": "MiniMax (China)",
         "enabled": true,
         "deleted": false,
@@ -527,7 +483,7 @@
         "revision": 1
       },
       "openrouter": {
-        "id": "a90773dc-e40c-5d36-b0cc-c3876f27a8a5",
+        "id": "preset-openrouter",
         "name": "OpenRouter",
         "enabled": true,
         "deleted": false,
@@ -554,7 +510,7 @@
         "revision": 1
       },
       "mistral": {
-        "id": "97d11dea-af22-521a-8500-4375d2b770af",
+        "id": "preset-mistral",
         "name": "Mistral",
         "enabled": true,
         "deleted": false,
@@ -581,7 +537,7 @@
         "revision": 1
       },
       "kimi": {
-        "id": "4e9ed1e7-de26-5db3-acd9-742a983ea3ec",
+        "id": "preset-kimi",
         "name": "Kimi / Moonshot",
         "enabled": true,
         "deleted": false,
@@ -608,7 +564,7 @@
         "revision": 1
       },
       "groq": {
-        "id": "16fe6d47-fece-51aa-be34-c236ec9da1e3",
+        "id": "preset-groq",
         "name": "Groq",
         "enabled": true,
         "deleted": false,
@@ -635,7 +591,7 @@
         "revision": 1
       },
       "nvidia": {
-        "id": "ed7aa4e1-f7ca-5836-8105-0a4562efc913",
+        "id": "preset-nvidia",
         "name": "NVIDIA NIM",
         "enabled": true,
         "deleted": false,
@@ -662,7 +618,7 @@
         "revision": 1
       },
       "ollama": {
-        "id": "70ca418e-2c0e-552f-9393-bf96f4374006",
+        "id": "preset-ollama",
         "name": "Ollama",
         "enabled": true,
         "deleted": false,
@@ -689,7 +645,7 @@
         "revision": 1
       },
       "openai_compatible": {
-        "id": "0b85bee6-c046-51d0-bd77-0b15bc5bcd8a",
+        "id": "preset-openai_compatible",
         "name": "OpenAI-compatible",
         "enabled": true,
         "deleted": false,
@@ -716,7 +672,7 @@
         "revision": 1
       },
       "anthropic": {
-        "id": "5b71fe60-aace-559f-9aa9-3493ee3f7e18",
+        "id": "preset-anthropic",
         "name": "Anthropic",
         "enabled": true,
         "deleted": false,
@@ -743,7 +699,7 @@
         "revision": 1
       },
       "google": {
-        "id": "961e5e9a-9481-54b0-b086-c302b7f01397",
+        "id": "preset-google",
         "name": "Google Gemini",
         "enabled": true,
         "deleted": false,
@@ -770,7 +726,7 @@
         "revision": 1
       },
       "azure": {
-        "id": "61c003fa-6fdb-5294-8dbf-6476e7aaa4fa",
+        "id": "preset-azure",
         "name": "Azure OpenAI",
         "enabled": true,
         "deleted": false,
@@ -801,7 +757,7 @@
         "revision": 1
       },
       "bedrock": {
-        "id": "32dd0801-9e5c-50fb-ace9-732b439a581e",
+        "id": "preset-bedrock",
         "name": "Amazon Bedrock",
         "enabled": true,
         "deleted": false,
@@ -929,481 +885,37 @@
         "env_names": []
       },
       {
-        "key": "quick_connection_id",
+        "key": "models",
         "group": "research",
         "label": {
-          "en": "Quick connection",
-          "zh-CN": "快速模型连接",
-          "ja": "高速モデル接続"
+          "en": "Role models",
+          "zh-CN": "角色模型",
+          "ja": "役割別モデル"
         },
         "description": {
           "en": "",
           "zh-CN": "",
           "ja": ""
         },
-        "kind": "text",
-        "default": null,
-        "nullable": true,
+        "kind": "models",
+        "default": {
+          "quick": {
+            "connection_id": "default",
+            "model": "gpt-5.4-mini",
+            "reasoning_effort": null
+          },
+          "deep": {
+            "connection_id": "default",
+            "model": "gpt-5.5",
+            "reasoning_effort": null
+          }
+        },
+        "nullable": false,
         "minimum": null,
         "maximum": null,
         "options": [],
         "option_labels": {},
         "env_names": []
-      },
-      {
-        "key": "deep_connection_id",
-        "group": "research",
-        "label": {
-          "en": "Deep connection",
-          "zh-CN": "深入模型连接",
-          "ja": "詳細モデル接続"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "text",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [],
-        "option_labels": {},
-        "env_names": []
-      },
-      {
-        "key": "llm_provider",
-        "group": "research",
-        "label": {
-          "en": "Default provider",
-          "zh-CN": "默认模型服务",
-          "ja": "既定のプロバイダー"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": "openai",
-        "nullable": false,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "openai",
-          "xai",
-          "deepseek",
-          "qwen",
-          "qwen-cn",
-          "glm",
-          "glm-cn",
-          "minimax",
-          "minimax-cn",
-          "openrouter",
-          "mistral",
-          "kimi",
-          "groq",
-          "nvidia",
-          "ollama",
-          "openai_compatible",
-          "anthropic",
-          "google",
-          "azure",
-          "bedrock"
-        ],
-        "option_labels": {},
-        "env_names": [
-          "TRADINGAGENTS_LLM_PROVIDER"
-        ]
-      },
-      {
-        "key": "quick_think_llm",
-        "group": "research",
-        "label": {
-          "en": "Quick model",
-          "zh-CN": "快速模型",
-          "ja": "高速モデル"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "text",
-        "default": "gpt-5.4-mini",
-        "nullable": false,
-        "minimum": null,
-        "maximum": null,
-        "options": [],
-        "option_labels": {},
-        "env_names": [
-          "TRADINGAGENTS_QUICK_THINK_LLM"
-        ]
-      },
-      {
-        "key": "deep_think_llm",
-        "group": "research",
-        "label": {
-          "en": "Deep model",
-          "zh-CN": "深入模型",
-          "ja": "詳細モデル"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "text",
-        "default": "gpt-5.5",
-        "nullable": false,
-        "minimum": null,
-        "maximum": null,
-        "options": [],
-        "option_labels": {},
-        "env_names": [
-          "TRADINGAGENTS_DEEP_THINK_LLM"
-        ]
-      },
-      {
-        "key": "quick_reasoning_effort",
-        "group": "research",
-        "label": {
-          "en": "Quick reasoning effort",
-          "zh-CN": "快速模型推理强度",
-          "ja": "高速モデルの推論強度"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "provider_default",
-          "none",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "option_labels": {
-          "provider_default": {
-            "en": "Service default",
-            "zh-CN": "服务默认",
-            "ja": "サービス既定"
-          },
-          "none": {
-            "en": "None",
-            "zh-CN": "不启用",
-            "ja": "なし"
-          },
-          "minimal": {
-            "en": "Minimal",
-            "zh-CN": "最低",
-            "ja": "最小"
-          },
-          "low": {
-            "en": "Low",
-            "zh-CN": "低",
-            "ja": "低"
-          },
-          "medium": {
-            "en": "Medium",
-            "zh-CN": "中",
-            "ja": "中"
-          },
-          "high": {
-            "en": "High",
-            "zh-CN": "高",
-            "ja": "高"
-          },
-          "xhigh": {
-            "en": "Extra high",
-            "zh-CN": "极高",
-            "ja": "非常に高い"
-          },
-          "max": {
-            "en": "Maximum",
-            "zh-CN": "最高",
-            "ja": "最大"
-          }
-        },
-        "env_names": [
-          "TRADINGAGENTS_QUICK_REASONING_EFFORT"
-        ]
-      },
-      {
-        "key": "deep_reasoning_effort",
-        "group": "research",
-        "label": {
-          "en": "Deep reasoning effort",
-          "zh-CN": "深入模型推理强度",
-          "ja": "詳細モデルの推論強度"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "provider_default",
-          "none",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "option_labels": {
-          "provider_default": {
-            "en": "Service default",
-            "zh-CN": "服务默认",
-            "ja": "サービス既定"
-          },
-          "none": {
-            "en": "None",
-            "zh-CN": "不启用",
-            "ja": "なし"
-          },
-          "minimal": {
-            "en": "Minimal",
-            "zh-CN": "最低",
-            "ja": "最小"
-          },
-          "low": {
-            "en": "Low",
-            "zh-CN": "低",
-            "ja": "低"
-          },
-          "medium": {
-            "en": "Medium",
-            "zh-CN": "中",
-            "ja": "中"
-          },
-          "high": {
-            "en": "High",
-            "zh-CN": "高",
-            "ja": "高"
-          },
-          "xhigh": {
-            "en": "Extra high",
-            "zh-CN": "极高",
-            "ja": "非常に高い"
-          },
-          "max": {
-            "en": "Maximum",
-            "zh-CN": "最高",
-            "ja": "最大"
-          }
-        },
-        "env_names": [
-          "TRADINGAGENTS_DEEP_REASONING_EFFORT"
-        ]
-      },
-      {
-        "key": "google_thinking_level",
-        "group": "compatibility",
-        "label": {
-          "en": "Google shared thinking level",
-          "zh-CN": "Google 共享思考强度",
-          "ja": "Google 共通思考強度"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "provider_default",
-          "minimal",
-          "low",
-          "medium",
-          "high"
-        ],
-        "option_labels": {
-          "provider_default": {
-            "en": "Service default",
-            "zh-CN": "服务默认",
-            "ja": "サービス既定"
-          },
-          "minimal": {
-            "en": "Minimal",
-            "zh-CN": "最低",
-            "ja": "最小"
-          },
-          "low": {
-            "en": "Low",
-            "zh-CN": "低",
-            "ja": "低"
-          },
-          "medium": {
-            "en": "Medium",
-            "zh-CN": "中",
-            "ja": "中"
-          },
-          "high": {
-            "en": "High",
-            "zh-CN": "高",
-            "ja": "高"
-          }
-        },
-        "env_names": [
-          "TRADINGAGENTS_GOOGLE_THINKING_LEVEL"
-        ]
-      },
-      {
-        "key": "openai_reasoning_effort",
-        "group": "compatibility",
-        "label": {
-          "en": "OpenAI shared reasoning effort",
-          "zh-CN": "OpenAI 共享推理强度",
-          "ja": "OpenAI 共通推論強度"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "provider_default",
-          "none",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "option_labels": {
-          "provider_default": {
-            "en": "Service default",
-            "zh-CN": "服务默认",
-            "ja": "サービス既定"
-          },
-          "none": {
-            "en": "None",
-            "zh-CN": "不启用",
-            "ja": "なし"
-          },
-          "minimal": {
-            "en": "Minimal",
-            "zh-CN": "最低",
-            "ja": "最小"
-          },
-          "low": {
-            "en": "Low",
-            "zh-CN": "低",
-            "ja": "低"
-          },
-          "medium": {
-            "en": "Medium",
-            "zh-CN": "中",
-            "ja": "中"
-          },
-          "high": {
-            "en": "High",
-            "zh-CN": "高",
-            "ja": "高"
-          },
-          "xhigh": {
-            "en": "Extra high",
-            "zh-CN": "极高",
-            "ja": "非常に高い"
-          },
-          "max": {
-            "en": "Maximum",
-            "zh-CN": "最高",
-            "ja": "最大"
-          }
-        },
-        "env_names": [
-          "TRADINGAGENTS_OPENAI_REASONING_EFFORT"
-        ]
-      },
-      {
-        "key": "anthropic_effort",
-        "group": "compatibility",
-        "label": {
-          "en": "Anthropic shared effort",
-          "zh-CN": "Anthropic 共享推理强度",
-          "ja": "Anthropic 共通推論強度"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "choice",
-        "default": null,
-        "nullable": true,
-        "minimum": null,
-        "maximum": null,
-        "options": [
-          "provider_default",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "option_labels": {
-          "provider_default": {
-            "en": "Service default",
-            "zh-CN": "服务默认",
-            "ja": "サービス既定"
-          },
-          "low": {
-            "en": "Low",
-            "zh-CN": "低",
-            "ja": "低"
-          },
-          "medium": {
-            "en": "Medium",
-            "zh-CN": "中",
-            "ja": "中"
-          },
-          "high": {
-            "en": "High",
-            "zh-CN": "高",
-            "ja": "高"
-          },
-          "xhigh": {
-            "en": "Extra high",
-            "zh-CN": "极高",
-            "ja": "非常に高い"
-          },
-          "max": {
-            "en": "Maximum",
-            "zh-CN": "最高",
-            "ja": "最大"
-          }
-        },
-        "env_names": [
-          "TRADINGAGENTS_ANTHROPIC_EFFORT"
-        ]
       },
       {
         "key": "temperature",
@@ -1955,37 +1467,6 @@
         "options": [],
         "option_labels": {},
         "env_names": []
-      },
-      {
-        "key": "providers",
-        "group": "providers",
-        "label": {
-          "en": "Model service connections",
-          "zh-CN": "模型服务连接",
-          "ja": "モデルサービス接続"
-        },
-        "description": {
-          "en": "",
-          "zh-CN": "",
-          "ja": ""
-        },
-        "kind": "providers",
-        "default": {},
-        "nullable": false,
-        "minimum": null,
-        "maximum": null,
-        "options": [],
-        "option_labels": {},
-        "env_names": [
-          "TRADINGAGENTS_LLM_BACKEND_URL",
-          "AZURE_OPENAI_ENDPOINT",
-          "AZURE_OPENAI_DEPLOYMENT_NAME",
-          "OPENAI_API_VERSION",
-          "OLLAMA_BASE_URL",
-          "AWS_REGION",
-          "AWS_DEFAULT_REGION",
-          "AWS_PROFILE"
-        ]
       }
     ],
     "providers": {
@@ -2010,196 +1491,12 @@
       "azure": "Azure OpenAI",
       "bedrock": "Amazon Bedrock"
     },
-    "provider_defaults": {
-      "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "xai": {
-        "base_url": "https://api.x.ai/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "qwen": {
-        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "qwen-cn": {
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "glm": {
-        "base_url": "https://api.z.ai/api/paas/v4",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "glm-cn": {
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "minimax": {
-        "base_url": "https://api.minimax.io/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "minimax-cn": {
-        "base_url": "https://api.minimaxi.com/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "mistral": {
-        "base_url": "https://api.mistral.ai/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "kimi": {
-        "base_url": "https://api.moonshot.ai/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "groq": {
-        "base_url": "https://api.groq.com/openai/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "nvidia": {
-        "base_url": "https://integrate.api.nvidia.com/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "ollama": {
-        "base_url": "http://localhost:11434/v1",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "openai_compatible": {
-        "base_url": null,
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "anthropic": {
-        "base_url": "https://api.anthropic.com",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "google": {
-        "base_url": "https://generativelanguage.googleapis.com",
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "azure": {
-        "base_url": null,
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      },
-      "bedrock": {
-        "base_url": null,
-        "deployment": null,
-        "api_version": null,
-        "region": "us-west-2",
-        "auth_mode": "system",
-        "aws_profile": null
-      }
-    },
     "credential_owners": {
-      "OPENAI_API_KEY": "openai",
-      "XAI_API_KEY": "xai",
-      "DEEPSEEK_API_KEY": "deepseek",
-      "DASHSCOPE_API_KEY": "qwen",
-      "DASHSCOPE_CN_API_KEY": "qwen-cn",
-      "ZHIPU_API_KEY": "glm",
-      "ZHIPU_CN_API_KEY": "glm-cn",
-      "MINIMAX_API_KEY": "minimax",
-      "MINIMAX_CN_API_KEY": "minimax-cn",
-      "OPENROUTER_API_KEY": "openrouter",
-      "MISTRAL_API_KEY": "mistral",
-      "MOONSHOT_API_KEY": "kimi",
-      "GROQ_API_KEY": "groq",
-      "NVIDIA_API_KEY": "nvidia",
-      "OPENAI_COMPATIBLE_API_KEY": "openai_compatible",
-      "ANTHROPIC_API_KEY": "anthropic",
-      "GOOGLE_API_KEY": "google",
-      "AZURE_OPENAI_API_KEY": "azure",
       "ALPHA_VANTAGE_API_KEY": "alpha_vantage",
       "FRED_API_KEY": "fred",
       "ESTAT_APP_ID": "estat",
       "JQUANTS_API_KEY": "jquants",
-      "EDINET_API_KEY": "edinet",
-      "AWS_BEARER_TOKEN_BEDROCK": "bedrock",
-      "AWS_ACCESS_KEY_ID": "bedrock",
-      "AWS_SECRET_ACCESS_KEY": "bedrock",
-      "AWS_SESSION_TOKEN": "bedrock"
+      "EDINET_API_KEY": "edinet"
     },
     "route_options": {
       "instrument_eligibility": [
