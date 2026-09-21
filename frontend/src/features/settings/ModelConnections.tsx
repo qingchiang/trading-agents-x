@@ -55,7 +55,7 @@ export default function ModelConnections({ view, schema, language, text, active,
       const change: ConnectionChange = { action, id: conn.id };
       if (action === "create" || action === "update") {
         const values = action === "create" ? merged.value : changedValues(saved!.connection, merged.value);
-        for (const key of ["name", "preset", "transport", "compatibility", "enabled", "discovery", "key_required", "reasoning_defaults"] as const) {
+        for (const key of ["name", "preset", "transport", "compatibility", "enabled", "discovery", "key_required", "reasoning_effort"] as const) {
           if (key in values) Object.assign(change, { [key]: values[key] });
         }
         change.credentials = Object.fromEntries(Object.entries(draft?.credentials ?? {}).filter((entry): entry is [string, string | null] => entry[1] !== undefined));
@@ -86,7 +86,7 @@ export default function ModelConnections({ view, schema, language, text, active,
   if (!active) return null;
   const conflictServer = conflict?.id === selected ? conflict.server.connections?.[selected]?.connection : undefined;
   const deleted = !draft?.fresh && !!conn && (!saved || (conflict?.id === selected && !conflictServer));
-  const templateChanges = conn ? changedValues(conn, { ...conn, ...Object.fromEntries(Object.entries(conn.template ?? {}).filter(([key]) => ["transport", "compatibility", "discovery", "key_required", "reasoning_defaults"].includes(key))) }) : {};
+  const templateChanges = conn ? changedValues(conn, { ...conn, ...Object.fromEntries(Object.entries(conn.template ?? {}).filter(([key]) => ["transport", "compatibility", "discovery", "key_required", "reasoning_effort"].includes(key))) }) : {};
   const transport = conn?.transport as Record<string, unknown> | undefined;
   const discoveryOptions = Array.from(new Set([conn?.discovery, "custom", ...Object.values(schema.presets ?? {}).filter(p => p.transport.kind === conn?.transport.kind || (["chat_completions", "responses"].includes(p.transport.kind ?? "") && ["chat_completions", "responses"].includes(conn?.transport.kind ?? ""))).map(p => p.discovery)])).filter(Boolean);
   const setTransport = (key: string, value: unknown) => update({ transport: { ...conn!.transport, [key]: value } as ModelConnection["transport"] });

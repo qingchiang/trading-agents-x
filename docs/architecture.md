@@ -158,6 +158,9 @@ configuration. Provider keys are excluded from Run configuration snapshots. Mode
 have stable IDs independent of vendor presets. Each quick/deep binding retains
 a typed transport, compatibility policy, model and reasoning selection; the
 application layer delegates vendor-specific behavior to the LLM subsystem.
+The LLM subsystem resolves typed role and connection selections directly;
+provider-specific environment aliases are handled only by explicit import
+and the one-time predecessor conversion.
 Connection credentials are scoped by ID and bound once per attempt. Admission
 and retry recheck connection references under their SQLite write transaction,
 so deletion cannot race a new queued reference.

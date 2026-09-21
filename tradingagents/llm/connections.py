@@ -32,13 +32,10 @@ def build_model(binding, *, temperature=None, max_retries=None, callbacks=None, 
         kwargs["max_retries"] = max_retries
     if callbacks:
         kwargs["callbacks"] = callbacks
-    config = {
-        **connection.reasoning_defaults,
-        "llm_provider": connection.compatibility,
-        "quick_think_llm": binding.model,
-        "quick_reasoning_effort": binding.reasoning_effort,
-    }
-    resolution = resolve_reasoning_effort(config, "quick")
+    resolution = resolve_reasoning_effort(
+        connection.compatibility, binding.model, binding.reasoning_effort,
+        connection_default=connection.reasoning_effort,
+    )
     kwargs.update(resolution.kwargs)
     kwargs[RESOLVED_MARKER] = True
     if connection.transport.kind in {"chat_completions", "responses"}:
@@ -81,9 +78,7 @@ def aws_client(connection, auth, service):
 
 def validate_binding(binding):
     """Check provider capabilities without constructing an SDK client."""
-    resolve_reasoning_effort({
-        **binding.connection.reasoning_defaults,
-        'llm_provider': binding.connection.compatibility,
-        'quick_think_llm': binding.model,
-        'quick_reasoning_effort': binding.reasoning_effort,
-    }, 'quick')
+    resolve_reasoning_effort(
+        binding.connection.compatibility, binding.model, binding.reasoning_effort,
+        connection_default=binding.connection.reasoning_effort,
+    )

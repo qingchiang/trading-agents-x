@@ -230,7 +230,7 @@ export interface components {
       key_required?: boolean | null;
       name?: string | null;
       preset?: string | null;
-      reasoning_defaults?: Record<string, string | null> | null;
+      reasoning_effort?: string | null;
       transport?: components["schemas"]["EndpointTransport"] | components["schemas"]["AzureTransport"] | components["schemas"]["BedrockTransport"] | null;
     };
     ConnectionView: {
@@ -499,7 +499,7 @@ export interface components {
       key_required?: boolean;
       name: string;
       preset?: string | null;
-      reasoning_defaults?: Record<string, string | null>;
+      reasoning_effort?: string | null;
       revision?: number;
       template?: Record<string, unknown>;
       template_origin?: "creation" | "upgrade";

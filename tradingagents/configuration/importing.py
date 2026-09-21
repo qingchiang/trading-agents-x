@@ -123,7 +123,7 @@ def parse_import(settings, request, existing):
                 selected.setdefault(role, {})[key] = value
             elif field in {'openai_reasoning_effort', 'google_thinking_level', 'anthropic_effort'}:
                 owner = {'openai_reasoning_effort': 'openai', 'google_thinking_level': 'google', 'anthropic_effort': 'anthropic'}[field]
-                native.setdefault(owner, {})[field] = value
+                native[owner] = value
             else:
                 try:
                     values[field] = getattr(ConfigurationValues.model_validate({field: value}), field)
@@ -158,7 +158,7 @@ def parse_import(settings, request, existing):
             changes.append(ConnectionChange(
                 action='update' if matches else 'create', id=identity, preset=owner,
                 transport=transport, credentials=auth.get(owner, {}),
-                reasoning_defaults={**base.reasoning_defaults, **native.get(owner, {})},
+                reasoning_effort=native.get(owner, base.reasoning_effort),
             ))
         except (ValidationError, ValueError):
             issues.extend(ImportIssue(name=name, message='Invalid provider connection') for name, (p, _) in connection_fields.items() if p == owner and name in environment)

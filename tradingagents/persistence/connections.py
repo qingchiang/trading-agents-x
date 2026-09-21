@@ -160,14 +160,10 @@ def apply_changes(session, changes, raw):
         values = ConfigurationValues.model_validate(raw)
         conn = ModelConnection.model_validate(row.definition)
         try:
+            selection = getattr(values.models, role)
             resolve_reasoning_effort(
-                {
-                    **conn.reasoning_defaults,
-                    "llm_provider": conn.compatibility,
-                    "quick_think_llm": getattr(values.models, role).model,
-                    "quick_reasoning_effort": getattr(values.models, role).reasoning_effort,
-                },
-                "quick",
+                conn.compatibility, selection.model, selection.reasoning_effort,
+                connection_default=conn.reasoning_effort,
             )
         except ValueError as exc:
             raise ConfigurationError(

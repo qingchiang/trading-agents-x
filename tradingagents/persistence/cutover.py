@@ -86,6 +86,7 @@ def _convert(source, target):
         from tradingagents.persistence.cutover_projection import (
             config_projection,
             configuration_projection,
+            connection_projection,
             request_projection,
             submission_projection,
         )
@@ -109,6 +110,9 @@ def _convert(source, target):
             common = [*common, 'audit_snapshot_json']
             names = ', '.join(f'"{name}"' for name in common)
             rows = [tuple(values[name] for name in common) for values in projected]
+        elif table == 'model_connections':
+            index = common.index('definition')
+            rows = [tuple(json.dumps(connection_projection(json.loads(value))) if i == index else value for i, value in enumerate(row)) for row in rows]
         elif table == 'application_configuration':
             index = common.index('values_json')
             rows = [tuple(json.dumps(configuration_projection(json.loads(value), legacy_identities)) if i == index else value for i, value in enumerate(row)) for row in rows]

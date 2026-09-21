@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import warnings
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,14 +22,6 @@ _NATIVE_PARAMETERS = {
     "deepseek": "reasoning_effort",
     "google": "thinking_level",
     "anthropic": "effort",
-}
-
-_LEGACY_KEYS = {
-    "openai": "openai_reasoning_effort",
-    "openai_compatible": "openai_reasoning_effort",
-    "azure": "openai_reasoning_effort",
-    "google": "google_thinking_level",
-    "anthropic": "anthropic_effort",
 }
 
 _PROVIDER_LEVELS = {
@@ -93,7 +84,6 @@ _ANTHROPIC_XHIGH_MIN_VERSION = {
 class ReasoningEffortResolution:
     """A resolved role value and the provider-native wire representation."""
 
-    role: str
     provider: str
     model: str
     source: str
@@ -118,11 +108,6 @@ def _normalize(value: Any) -> str | None:
         return None
     normalized = str(value).strip().lower()
     return normalized or None
-
-
-def legacy_config_key(provider: str) -> str | None:
-    """Return the legacy shared config key for a provider."""
-    return _LEGACY_KEYS.get(provider.strip().lower())
 
 
 def provider_effort_levels(provider: str) -> tuple[str, ...]:
@@ -312,26 +297,21 @@ def resolve_native_reasoning_value(
 
 
 def resolve_reasoning_effort(
-    config: Mapping[str, Any],
-    role: str,
-    model: str | None = None,
+    provider: str,
+    model: str,
+    requested: str | None,
     *,
+    connection_default: str | None = None,
     warn: bool = True,
 ) -> ReasoningEffortResolution:
-    """Resolve a quick/deep config value using role, legacy, default precedence."""
-    role = role.strip().lower()
-    if role not in {"quick", "deep"}:
-        raise ValueError(f"role must be 'quick' or 'deep', got {role!r}")
-    provider = str(config.get("llm_provider", "")).strip().lower()
-    model = str(model or config.get(f"{role}_think_llm", "")).strip()
-    role_key = f"{role}_reasoning_effort"
-    requested = _normalize(config.get(role_key))
-    source = role_key
-
+    """Resolve a selected role value against its retained connection policy."""
+    provider = provider.strip().lower()
+    model = model.strip()
+    requested = _normalize(requested)
+    source = "role"
     if requested is None:
-        legacy_key = legacy_config_key(provider)
-        requested = _normalize(config.get(legacy_key)) if legacy_key else None
-        source = legacy_key or "provider_default"
+        requested = _normalize(connection_default)
+        source = "connection"
     if requested is None:
         source = "provider_default"
         requested = PROVIDER_DEFAULT
@@ -339,18 +319,10 @@ def resolve_reasoning_effort(
     native_parameter = _NATIVE_PARAMETERS.get(provider)
     if requested == PROVIDER_DEFAULT:
         return ReasoningEffortResolution(
-            role, provider, model, source, requested, None, native_parameter, "provider default"
+            provider, model, source, requested, None, native_parameter, "provider default"
         )
-
     value = resolve_native_reasoning_value(provider, model, requested, warn=warn)
-    omitted_reason = None if value is not None else "unsupported"
     return ReasoningEffortResolution(
-        role,
-        provider,
-        model,
-        source,
-        requested,
-        value,
-        native_parameter,
-        omitted_reason,
+        provider, model, source, requested, value, native_parameter,
+        None if value is not None else "unsupported",
     )

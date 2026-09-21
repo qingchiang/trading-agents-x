@@ -65,7 +65,7 @@ class ModelConnection(ConnectionModel):
     transport: Transport
     template: dict = Field(default_factory=dict)
     template_origin: Literal["creation", "upgrade"] = "creation"
-    reasoning_defaults: dict[str, str | None] = Field(default_factory=dict)
+    reasoning_effort: str | None = None
     revision: int = Field(default=1, ge=1)
 
     @field_validator("name")
@@ -74,13 +74,6 @@ class ModelConnection(ConnectionModel):
         value = value.strip()
         if not value:
             raise ValueError("Enter a connection name")
-        return value
-
-    @field_validator("reasoning_defaults")
-    @classmethod
-    def known_reasoning_fields(cls, value):
-        if set(value) - {"openai_reasoning_effort", "google_thinking_level", "anthropic_effort"}:
-            raise ValueError("Unknown reasoning default")
         return value
 
     def execution_identity(self):
@@ -134,7 +127,7 @@ class ConnectionChange(ConnectionModel):
         Literal["openai_compatible", "anthropic", "google", "ollama", "bedrock", "custom"] | None
     ) = None
     key_required: bool | None = None
-    reasoning_defaults: dict[str, str | None] | None = None
+    reasoning_effort: str | None = None
     credentials: dict[str, SecretStr | None] = Field(default_factory=dict, repr=False)
 
 
@@ -148,29 +141,20 @@ def credential_name(connection_id, field):
     return f"connection:{connection_id}:{field}"
 
 
-def preset_connection(provider, *, identity=None, name=None, legacy=None, defaults=None):
+def preset_connection(provider, *, identity=None, name=None):
     from tradingagents.llm.provider_presets import _is_native_openai_base_url
     from tradingagents.llm.provider_registry import get_provider_definition
 
     definition = get_provider_definition(provider)
     if definition is None:
         raise ValueError("Unknown connection preset")
-    legacy = legacy or {}
-    url = legacy.get("base_url") or definition.default_base_url
+    url = definition.default_base_url
     kind = (
         provider if provider in {"anthropic", "google", "azure", "bedrock"} else "chat_completions"
     )
     if provider == "openai" and _is_native_openai_base_url(url):
         kind = "responses"
-    if kind == "bedrock":
-        transport = {
-            "kind": kind,
-            **{k: v for k, v in legacy.items() if k in {"region", "auth_mode", "aws_profile"}},
-        }
-    else:
-        transport = {"kind": kind, "base_url": url}
-        if kind == "azure":
-            transport.update({k: legacy.get(k) for k in ("deployment", "api_version")})
+    transport = {"kind": kind} if kind == "bedrock" else {"kind": kind, "base_url": url}
     payload = {
         "id": identity or str(uuid4()),
         "name": name or definition.label,
@@ -179,7 +163,6 @@ def preset_connection(provider, *, identity=None, name=None, legacy=None, defaul
         "discovery": definition.adapter,
         "key_required": definition.api_key_required,
         "transport": transport,
-        "reasoning_defaults": defaults or {},
     }
     result = ModelConnection.model_validate(payload)
     return result.model_copy(
@@ -191,7 +174,7 @@ def preset_connection(provider, *, identity=None, name=None, legacy=None, defaul
                     "compatibility",
                     "discovery",
                     "key_required",
-                    "reasoning_defaults",
+                    "reasoning_effort",
                 )
             }
         }

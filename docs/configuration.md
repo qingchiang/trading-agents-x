@@ -238,7 +238,10 @@ places them in the draft for review and saving. It preserves credentials, name,
 and enabled state. New connections use **Restore creation settings**. Connections
 converted from `0013` retain their recorded creation or upgrade template and the
 corresponding restore label; conversion does not replace that template with
-current defaults.
+current defaults. Legacy native effort keys are converted to the connection’s
+`reasoning_effort`; its reset template is converted separately using the values
+recorded in that template. A selected role value takes precedence, and
+`provider_default` explicitly suppresses the native effort parameter.
 
 ### Submission replay and Incremental roles
 

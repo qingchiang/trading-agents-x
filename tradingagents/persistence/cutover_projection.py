@@ -34,6 +34,9 @@ def config_projection(config, research_kind):
     result['research_kind'] = research_kind
     result['quick_binding'] = deepcopy(config.get('quick_binding')) if research_kind == 'full' else None
     result['deep_binding'] = deepcopy(config.get('deep_binding'))
+    for role in ('quick_binding', 'deep_binding'):
+        if result[role] and result[role].get('connection'):
+            result[role]['connection'] = connection_projection(result[role]['connection'])
     # Only fully recorded bindings/settings form an executable projection.
     # Original audit JSON is never passed to the current execution validator.
     complete = bool(result['deep_binding']) and (research_kind == 'incremental' or bool(result['quick_binding']))
@@ -82,3 +85,21 @@ def submission_projection(identity, legacy_identities):
     if selected:
         payload['models'] = selected
     return {'version': 2, 'request': payload, 'source_run_id': identity.get('source_run_id')}
+
+
+def connection_projection(definition):
+    """Translate only recorded defaults; preserve the reset template's own policy."""
+    result = deepcopy(definition)
+    if 'reasoning_defaults' in result:
+        defaults = result.pop('reasoning_defaults') or {}
+        key = {
+            'openai': 'openai_reasoning_effort',
+            'openai_compatible': 'openai_reasoning_effort',
+            'azure': 'openai_reasoning_effort',
+            'google': 'google_thinking_level',
+            'anthropic': 'anthropic_effort',
+        }.get(result.get('compatibility'))
+        result['reasoning_effort'] = defaults.get(key) if key else None
+    if 'template' in result:
+        result['template'] = connection_projection(result['template'])
+    return result

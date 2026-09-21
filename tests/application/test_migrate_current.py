@@ -121,7 +121,7 @@ def test_conversion_retains_connection_identity_secrets_and_reset_template(sourc
     report = migrate_current(source_0013, destination)
     assert 'fixture-secret' not in repr(report)
     with sqlite3.connect(destination) as db:
-        assert db.execute('SELECT definition FROM model_connections').fetchone()[0] == definition
+        assert json.loads(db.execute('SELECT definition FROM model_connections').fetchone()[0]) == json.loads(definition)
         assert db.execute('SELECT value FROM configuration_credentials').fetchone()[0] == 'fixture-secret'
         assert db.execute('SELECT revision FROM application_configuration').fetchone()[0] == 8
 
@@ -182,3 +182,26 @@ def test_converted_full_remains_a_baseline_for_offline_incremental(source_0013, 
     assert repository.get_run(result.run_id).full_baseline_run_id == "baseline"
     assert repository.get_evidence("baseline").digest == bundle.digest
     assert repository.get_result("baseline").decision == decision
+
+
+def test_conversion_normalizes_connection_effort_and_retains_audit(source_0013, tmp_path):
+    from tradingagents.llm.models import ModelConnection, preset_connection
+
+    old = preset_connection('openai', identity='retained').model_dump(mode='json')
+    old.pop('reasoning_effort', None)
+    old['reasoning_defaults'] = {'openai_reasoning_effort': 'high'}
+    old['template'].pop('reasoning_effort', None)
+    old['template']['reasoning_defaults'] = {'openai_reasoning_effort': 'medium'}
+    snapshot = {'deep_binding': {'connection': old, 'model': 'gpt-5.5', 'reasoning_effort': None}}
+    with sqlite3.connect(source_0013) as db:
+        db.execute('INSERT INTO model_connections VALUES (?,?,?)', ('retained', json.dumps(old), 'openai'))
+        db.execute("UPDATE runs SET config_json=? WHERE id='baseline'", (json.dumps(snapshot),))
+    destination = tmp_path / 'new.db'
+    migrate_current(source_0013, destination)
+    with sqlite3.connect(destination) as db:
+        converted = ModelConnection.model_validate_json(db.execute('SELECT definition FROM model_connections').fetchone()[0])
+        assert converted.reasoning_effort == 'high'
+        assert converted.template['reasoning_effort'] == 'medium'
+        config, audit = db.execute("SELECT config_json, audit_snapshot_json FROM runs WHERE id='baseline'").fetchone()
+        assert json.loads(config)['deep_binding']['connection']['reasoning_effort'] == 'high'
+        assert json.loads(audit)['config'] == snapshot

@@ -23,10 +23,10 @@
             "compatibility": "openai",
             "discovery": "openai_compatible",
             "key_required": true,
-            "reasoning_defaults": {}
+            "reasoning_effort": null
           },
           "template_origin": "creation",
-          "reasoning_defaults": {},
+          "reasoning_effort": null,
           "revision": 2
         },
         "credentials": {
@@ -260,10 +260,10 @@
           "compatibility": "openai",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "xai": {
@@ -287,10 +287,10 @@
           "compatibility": "xai",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "deepseek": {
@@ -314,10 +314,10 @@
           "compatibility": "deepseek",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "qwen": {
@@ -341,10 +341,10 @@
           "compatibility": "qwen",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "qwen-cn": {
@@ -368,10 +368,10 @@
           "compatibility": "qwen-cn",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "glm": {
@@ -395,10 +395,10 @@
           "compatibility": "glm",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "glm-cn": {
@@ -422,10 +422,10 @@
           "compatibility": "glm-cn",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "minimax": {
@@ -449,10 +449,10 @@
           "compatibility": "minimax",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "minimax-cn": {
@@ -476,10 +476,10 @@
           "compatibility": "minimax-cn",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "openrouter": {
@@ -503,10 +503,10 @@
           "compatibility": "openrouter",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "mistral": {
@@ -530,10 +530,10 @@
           "compatibility": "mistral",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "kimi": {
@@ -557,10 +557,10 @@
           "compatibility": "kimi",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "groq": {
@@ -584,10 +584,10 @@
           "compatibility": "groq",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "nvidia": {
@@ -611,10 +611,10 @@
           "compatibility": "nvidia",
           "discovery": "openai_compatible",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "ollama": {
@@ -638,10 +638,10 @@
           "compatibility": "ollama",
           "discovery": "ollama",
           "key_required": false,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "openai_compatible": {
@@ -665,10 +665,10 @@
           "compatibility": "openai_compatible",
           "discovery": "openai_compatible",
           "key_required": false,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "anthropic": {
@@ -692,10 +692,10 @@
           "compatibility": "anthropic",
           "discovery": "anthropic",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "google": {
@@ -719,10 +719,10 @@
           "compatibility": "google",
           "discovery": "google",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "azure": {
@@ -750,10 +750,10 @@
           "compatibility": "azure",
           "discovery": "custom",
           "key_required": true,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       },
       "bedrock": {
@@ -781,10 +781,10 @@
           "compatibility": "bedrock",
           "discovery": "bedrock",
           "key_required": false,
-          "reasoning_defaults": {}
+          "reasoning_effort": null
         },
         "template_origin": "creation",
-        "reasoning_defaults": {},
+        "reasoning_effort": null,
         "revision": 1
       }
     },

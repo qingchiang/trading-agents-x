@@ -1643,26 +1643,16 @@
             ],
             "title": "Preset"
           },
-          "reasoning_defaults": {
+          "reasoning_effort": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reasoning Defaults"
+            "title": "Reasoning Effort"
           },
           "transport": {
             "anyOf": [
@@ -3505,19 +3495,16 @@
             ],
             "title": "Preset"
           },
-          "reasoning_defaults": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Reasoning Defaults",
-            "type": "object"
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
           },
           "revision": {
             "default": 1,
@@ -6946,7 +6933,7 @@
       },
       "RunRequestSnapshot": {
         "additionalProperties": false,
-        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version (including ``asset_type='crypto'``).  Snapshot\nvalidation does not normalize symbols, infer an asset type, or otherwise\nrewrite persisted request data.",
+        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version. Snapshot validation does not normalize symbols or otherwise\nrewrite persisted request data.",
         "properties": {
           "analysis_date": {
             "format": "date",

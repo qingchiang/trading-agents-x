@@ -188,7 +188,7 @@ test("category navigation preserves drafts and does not expand every section", a
 });
 
 test("creates and deletes a custom connection with scoped credentials", async () => {
-  const preset = { id: "preset", name: "Compatible endpoint", preset: "openai_compatible", enabled: true, compatibility: "openai_compatible", discovery: "openai_compatible", key_required: false, transport: { kind: "chat_completions", base_url: null }, template: {}, reasoning_defaults: {} };
+  const preset = { id: "preset", name: "Compatible endpoint", preset: "openai_compatible", enabled: true, compatibility: "openai_compatible", discovery: "openai_compatible", key_required: false, transport: { kind: "chat_completions", base_url: null }, template: {}, reasoning_effort: null };
   vi.mocked(api.settingsSchema).mockResolvedValue({ ...schema, presets: { openai_compatible: preset } } as never);
   let current = structuredClone(view);
   vi.mocked(api.saveSettings).mockImplementation(async patch => {
