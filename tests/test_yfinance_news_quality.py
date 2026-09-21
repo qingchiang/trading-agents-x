@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 import pytest
 from yfinance.exceptions import YFRateLimitError
 
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import yfinance_news as ynews
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.vendor_errors import VendorRateLimitError
@@ -48,8 +49,8 @@ def _run(monkeypatch, articles, *, limit=10, ticker="NVDA", identity=None):
             else identity
         ),
     )
-    monkeypatch.setattr(ynews, "get_config", lambda: {"news_article_limit": limit})
-    result = ynews.get_news_yfinance(ticker, "2025-05-01", "2025-05-09")
+    configure_data({"news_article_limit": limit})
+    result = ynews.get_news_yfinance(ticker, "2025-05-01", "2025-05-09", data_context=request_context())
     return result, seen
 
 
@@ -145,10 +146,10 @@ def test_yahoo_http_429_surfaces_typed_rate_limit_without_rendering_error(monkey
     monkeypatch.setattr(ynews.yf, "Ticker", FakeTicker)
     monkeypatch.setattr(ynews, "yf_retry", lambda fn, **_kwargs: fn())
     monkeypatch.setattr(ynews, "resolve_search_identity", lambda _symbol: {})
-    monkeypatch.setattr(ynews, "get_config", lambda: {"news_article_limit": 10})
+    configure_data({"news_article_limit": 10})
 
     with pytest.raises(VendorRateLimitError, match="Yahoo Finance rate limited"):
-        ynews.get_news_yfinance("NVDA", "2025-05-01", "2025-05-09")
+        ynews.get_news_yfinance("NVDA", "2025-05-01", "2025-05-09", data_context=request_context())
 
 
 @pytest.mark.unit
@@ -165,8 +166,8 @@ def test_focused_yahoo_rate_limit_does_not_retry(monkeypatch):
 
     monkeypatch.setattr(ynews.yf, "Ticker", FakeTicker)
     monkeypatch.setattr(ynews, "resolve_search_identity", lambda _symbol: {})
-    monkeypatch.setattr(ynews, "get_config", lambda: {"news_article_limit": 10})
+    configure_data({"news_article_limit": 10})
 
     with stop_on_rate_limit_scope(True), pytest.raises(VendorRateLimitError):
-        ynews.get_news_yfinance("NVDA", "2025-05-01", "2025-05-09")
+        ynews.get_news_yfinance("NVDA", "2025-05-01", "2025-05-09", data_context=request_context())
     assert calls == [200]

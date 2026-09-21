@@ -13,7 +13,7 @@ import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
-from functools import lru_cache
+from functools import lru_cache, partial
 from io import StringIO
 from zoneinfo import ZoneInfo
 
@@ -21,6 +21,7 @@ import exchange_calendars as xcals
 import pandas as pd
 
 from tradingagents.data.collection_progress import report_collection_progress
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.incremental_inputs import (
     append_financials,
     append_market_context,
@@ -76,11 +77,12 @@ def collect_us_incremental(
     route_to_vendor: Callable[..., object] | None = None,
     fetch_stocktwits_messages: Callable[..., str] | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    data_context: DataRequestContext,
 ) -> IncrementalCollectionResult:
     """Collect US observations through configured legacy routes exactly once each."""
     if request.market != "united_states":
         raise ValueError("US collection requires a United States request")
-    routed = route_to_vendor or DEFAULT_ROUTE_TO_VENDOR
+    routed = partial(route_to_vendor or DEFAULT_ROUTE_TO_VENDOR, data_context=data_context)
     stocktwits = fetch_stocktwits_messages or DEFAULT_STOCKTWITS_FETCH
 
     domains: list[CollectionDomainResult] = []
@@ -105,7 +107,7 @@ def collect_us_incremental(
             evidence.extend(extra)
         elif domain == "news":
             result, candidates = _collect_news(request, route_to_vendor=routed, now=now)
-            result, extra = append_news_context(request, result, routed)
+            result, extra = append_news_context(request, result, routed, data_context=data_context)
             domains.append(result)
             evidence.extend(extra)
             evidence.extend(candidates)
@@ -115,7 +117,7 @@ def collect_us_incremental(
                 route_to_vendor=routed,
                 now=now,
             )
-            result, extra = append_financials(request, result, routed)
+            result, extra = append_financials(request, result, routed, data_context=data_context)
             domains.append(result)
             evidence.extend(extra)
             if candidate is not None:

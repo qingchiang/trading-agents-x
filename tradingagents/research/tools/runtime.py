@@ -1,25 +1,22 @@
-"""Run-context bridge for graph-only tools."""
+"""Validated runtime access for model-facing data tools."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 
 from langgraph.prebuilt import ToolRuntime
 
-from tradingagents.data.config import use_config
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import AgentState
 
 AnalysisToolRuntime = ToolRuntime[RunContext, AgentState]
 
 
-@contextmanager
-def tool_runtime_scope(
+def analysis_cutoff(
     runtime: AnalysisToolRuntime,
     injected_date: str,
-) -> Iterator[str]:
-    """Validate the state-injected cutoff and bind this tool's run config."""
+) -> str:
+    """Validate the state-injected cutoff against the immutable runtime request."""
     context = runtime.context
     request = getattr(context, "request", None)
     dataflow_config = getattr(context, "dataflow_config", None)
@@ -28,8 +25,5 @@ def tool_runtime_scope(
         raise ValueError("data tools require an explicit analysis runtime context")
     expected = analysis_date.isoformat()
     if injected_date != expected:
-        raise ValueError(
-            "tool analysis date does not match immutable runtime context"
-        )
-    with use_config(dict(dataflow_config)):
-        yield expected
+        raise ValueError("tool analysis date does not match immutable runtime context")
+    return expected

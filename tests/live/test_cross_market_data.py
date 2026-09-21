@@ -21,6 +21,7 @@ from io import StringIO
 import pandas as pd
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import cn_macro, jp_macro
 from tradingagents.data.cn import (
     akshare_stock,
@@ -129,7 +130,7 @@ def _latest_event_date(text: str) -> date | str:
 def test_us_yfinance_daily_ohlcv_contract(live_endpoint):
     with live_endpoint("us.yfinance.daily", source="yfinance") as audit:
         start, end = _settled_window()
-        output = get_YFin_data_online("NVDA", start, end)
+        output = get_YFin_data_online("NVDA", start, end, data_context=request_context())
 
         assert "# Actual data source: yfinance" in output
         frame = pd.read_csv(StringIO(output[output.index("Date,") :]))
@@ -241,7 +242,7 @@ def test_china_company_news_schema_contracts(live_endpoint):
     with live_endpoint(
         "cn.cninfo.announcements.600309", source="CNINFO"
     ) as audit:
-        disclosures = news_sources.disclosure_rows("600309.SS", start_text, end_text)
+        disclosures = news_sources.disclosure_rows("600309.SS", start_text, end_text, data_context=request_context())
         latest = max((row["published"].date() for row in disclosures), default="empty-window")
         audit.observe(source="CNINFO", last_observation=latest)
         assert isinstance(disclosures, list)
@@ -257,7 +258,7 @@ def test_china_company_news_schema_contracts(live_endpoint):
     with live_endpoint(
         "cn.eastmoney.research.600309", source="Eastmoney Research"
     ) as audit:
-        research = news_sources.research_rows("600309.SS", start_text, end_text)
+        research = news_sources.research_rows("600309.SS", start_text, end_text, data_context=request_context())
         latest = max((row["published"] for row in research), default="empty-window")
         audit.observe(source="Eastmoney Research", last_observation=latest)
         assert isinstance(research, list)
@@ -285,7 +286,7 @@ def test_china_research_signal_source_contract(live_endpoint):
     with live_endpoint(
         "cn.research-signal.600519", source="Sina Finance -> Eastmoney Research"
     ) as audit:
-        result = cn_sentiment.get_research_signal("600519.SS", end.isoformat())
+        result = cn_sentiment.get_research_signal("600519.SS", end.isoformat(), data_context=request_context())
         records = extract_provenance(result)
         assert records
         sources = " -> ".join(record.source for record in records)
@@ -303,7 +304,7 @@ def test_china_holding_change_source_contract(live_endpoint):
         "cn.holding-changes.600519",
         source="Eastmoney disclosures -> CNINFO fallback",
     ) as audit:
-        result = cn_sentiment.get_holding_changes("600519.SS", end.isoformat())
+        result = cn_sentiment.get_holding_changes("600519.SS", end.isoformat(), data_context=request_context())
         records = extract_provenance(result)
         assert isinstance(result, str) and result.strip()
         assert records
@@ -322,7 +323,7 @@ def test_japan_10y_source_date_and_frequency_contract(live_endpoint):
     _start, end = _settled_window(days=180)
     requested_end = date.fromisoformat(end)
     with live_endpoint("jp.jp10y", source="MOF -> FRED") as audit:
-        data = jp_macro.fetch_series("jp_10y_yield", end, look_back_days=180)
+        data = jp_macro.fetch_series("jp_10y_yield", end, look_back_days=180, data_context=request_context())
         assert data is not None
         latest, value = _assert_macro_points(data, requested_end)
         audit.observe(source=data["actual_source"], last_observation=latest)
@@ -354,7 +355,7 @@ def test_china_recent_macro_source_contract(
     with live_endpoint(
         f"cn.macro.{indicator}", source="NBS -> Eastmoney"
     ) as audit:
-        data = cn_macro.fetch_series(indicator, end.isoformat(), look_back_days=180)
+        data = cn_macro.fetch_series(indicator, end.isoformat(), look_back_days=180, data_context=request_context())
         assert data is not None
         latest, value = _assert_macro_points(data, end)
         audit.observe(source=data["actual_source"], last_observation=latest)
@@ -377,7 +378,7 @@ def test_china_10y_source_shape_contract(live_endpoint):
     with live_endpoint(
         "cn.macro.cn10y", source="Eastmoney -> ChinaMoney"
     ) as audit:
-        data = cn_macro.fetch_series("cn_10y_yield", end.isoformat(), look_back_days=45)
+        data = cn_macro.fetch_series("cn_10y_yield", end.isoformat(), look_back_days=45, data_context=request_context())
 
         assert data is not None
         latest, value = _assert_macro_points(data, end)
@@ -398,7 +399,7 @@ def test_china_10y_source_shape_contract(live_endpoint):
 def test_usd_cny_safe_primary_and_unit_contract(live_endpoint):
     end = date.today()
     with live_endpoint("cn.macro.usd-cny", source="SAFE -> Eastmoney") as audit:
-        data = cn_macro.fetch_series("usd_cny", end.isoformat(), look_back_days=45)
+        data = cn_macro.fetch_series("usd_cny", end.isoformat(), look_back_days=45, data_context=request_context())
 
         assert data is not None
         latest, value = _assert_macro_points(data, end)

@@ -10,9 +10,9 @@ import pytest
 import requests
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface, stockstats_utils, y_finance
 from tradingagents.data.cn import akshare_indicator, akshare_stock, calendar, common
-from tradingagents.data.config import bind_config
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.domain.vendor_errors import NoMarketDataError
@@ -82,7 +82,7 @@ def test_tencent_qfq_is_primary_and_records_adjustment(monkeypatch):
 
     output = akshare_stock.get_stock(
         "600519.SS", "2026-07-01", "2026-07-19"
-    )
+    , data_context=request_context())
 
     assert "# Actual data source: AkShare / Tencent" in output
     assert "# Price adjustment: qfq (forward-adjusted)" in output
@@ -110,7 +110,7 @@ def test_eastmoney_cold_fallback_preserves_extended_fields(monkeypatch):
 
     output = akshare_stock.get_stock(
         "000001.SZ", "2026-07-01", "2026-07-19"
-    )
+    , data_context=request_context())
     result = akshare_stock.fetch_ohlcv("000001.SZ", "2026-07-01", "2026-07-19")
 
     assert result.source == "AkShare / Eastmoney"
@@ -445,7 +445,7 @@ def test_yfinance_fallback_excludes_incomplete_mainland_daily_bar(monkeypatch):
     monkeypatch.setattr(y_finance.yf, "Ticker", FakeTicker)
     output = y_finance.get_YFin_data_online(
         "600519.SS", "2026-07-01", "2026-07-17"
-    )
+    , data_context=request_context())
 
     assert "# Effective trading date: 2026-07-16" in output
     assert "\n2026-07-16," in output
@@ -504,10 +504,10 @@ def test_indicator_and_snapshot_reuse_same_qfq_fetch(monkeypatch):
 
     indicator = akshare_indicator.get_indicator(
         "600519.SS", "rsi", "2026-07-19", 5
-    )
+    , data_context=request_context())
     snapshot = akshare_indicator.get_verified_market_snapshot(
         "600519.SS", "2026-07-19", 30
-    )
+    , data_context=request_context())
 
     assert tencent.call_count == 1
     em.assert_not_called()
@@ -542,10 +542,10 @@ def test_eastmoney_fallback_is_auditable_in_indicator_and_snapshot(monkeypatch):
 
     indicator = akshare_indicator.get_indicator(
         "600519.SS", "rsi", "2026-07-19", 5
-    )
+    , data_context=request_context())
     snapshot = akshare_indicator.get_verified_market_snapshot(
         "600519.SS", "2026-07-19", 30
-    )
+    , data_context=request_context())
 
     indicator_record = extract_provenance(indicator)[0]
     snapshot_record = extract_provenance(snapshot)[0]
@@ -743,8 +743,8 @@ def test_incremental_market_stops_before_eastmoney_after_tencent_rate_limit(
 
 @pytest.mark.unit
 def test_router_falls_back_to_yfinance_after_akshare_no_data():
-    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
-    bind_config(
+    configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+    configure_data(
         {
             "data_vendors_by_market": {
                 ".SS": {"core_stock_apis": "akshare,yfinance"}
@@ -762,16 +762,16 @@ def test_router_falls_back_to_yfinance_after_akshare_no_data():
     ):
         output = interface.route_to_vendor(
             "get_stock_data", "600519", "2026-07-01", "2026-07-17"
-        )
+        , data_context=request_context())
     assert output == "YFINANCE_FALLBACK"
-    ak.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17")
-    yf.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17")
+    ak.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17", data_context=request_context())
+    yf.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17", data_context=request_context())
 
 
 @pytest.mark.unit
 def test_router_yfinance_fallback_records_adjustment_provider_change():
-    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
-    bind_config(
+    configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+    configure_data(
         {
             "data_vendors_by_market": {
                 ".SS": {"core_stock_apis": "akshare,yfinance"}
@@ -798,6 +798,7 @@ def test_router_yfinance_fallback_records_adjustment_provider_change():
             "2026-07-01",
             "2026-07-17",
             _provenance=True,
+            data_context=request_context(),
         )
 
     record = extract_provenance(output)[0]
@@ -819,6 +820,6 @@ def test_router_rejects_unsupported_mainland_symbol_before_any_vendor(symbol):
     ), pytest.raises(ValueError, match="suffix mismatch|not supported"):
         interface.route_to_vendor(
             "get_stock_data", symbol, "2026-07-01", "2026-07-17"
-        )
+        , data_context=request_context())
     ak.assert_not_called()
     yf.assert_not_called()

@@ -17,7 +17,7 @@ from urllib.request import Request
 from zoneinfo import ZoneInfo
 
 from tradingagents.data.cn.common import REQUEST_TIMEOUT
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.calendar import (
     add_government_business_days,
     is_government_business_day,
@@ -148,9 +148,9 @@ def _cache_expiry(kind: str, points: list[tuple[str, str]], now: datetime) -> da
     return expiry
 
 
-def _cache_path(kind: str) -> str:
+def _cache_path(kind: str, *, data_context: DataRequestContext) -> str:
     return os.path.join(
-        get_config()["data_cache_dir"], "macro", "jp", f"mof_{kind}.json"
+        data_context.config["data_cache_dir"], "macro", "jp", f"mof_{kind}.json"
     )
 
 
@@ -176,14 +176,14 @@ def _validate_cached_points(value: object) -> list[tuple[str, str]]:
     return points
 
 
-def _cache_get(kind: str, now: datetime) -> list[tuple[str, str]] | None:
+def _cache_get(kind: str, now: datetime, *, data_context: DataRequestContext) -> list[tuple[str, str]] | None:
     entry = _memory_cache.get(kind)
     if entry is not None:
         if now < entry.expires_at:
             return entry.points
         del _memory_cache[kind]
 
-    path = _cache_path(kind)
+    path = _cache_path(kind, data_context=data_context)
     try:
         with open(path, encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -205,10 +205,12 @@ def _cache_put(
     kind: str,
     points: list[tuple[str, str]],
     expires_at: datetime,
+    *,
+    data_context: DataRequestContext,
 ) -> None:
     """Persist only a validated non-empty response, atomically and best-effort."""
     _memory_cache[kind] = _CacheEntry(points, expires_at)
-    path = _cache_path(kind)
+    path = _cache_path(kind, data_context=data_context)
     disk_dir = os.path.dirname(path)
     try:
         os.makedirs(disk_dir, exist_ok=True)
@@ -295,14 +297,14 @@ def _download(kind: str) -> bytes:
     return body
 
 
-def _load(kind: str, now: datetime) -> list[tuple[str, str]]:
-    cached = _cache_get(kind, now)
+def _load(kind: str, now: datetime, *, data_context: DataRequestContext) -> list[tuple[str, str]]:
+    cached = _cache_get(kind, now, data_context=data_context)
     if cached is not None:
         return cached
     points = parse_csv(_download(kind))
     if not points:
         raise MofSchemaError("MOF JP10Y CSV returned no usable observations.")
-    _cache_put(kind, points, _cache_expiry(kind, points, now))
+    _cache_put(kind, points, _cache_expiry(kind, points, now), data_context=data_context)
     return points
 
 
@@ -321,6 +323,7 @@ def fetch_points(
     *,
     as_of: datetime,
     now: datetime | None = None,
+    data_context: DataRequestContext,
 ) -> list[tuple[str, str]]:
     """Load the required MOF files, merge them, and apply publication-time PIT."""
     current = tokyo_now(now)
@@ -328,7 +331,7 @@ def fetch_points(
     merged: dict[str, str] = {}
     history_points: list[tuple[str, str]] = []
     if start < current_month or end < current_month:
-        history_points = _load("history", current)
+        history_points = _load("history", current, data_context=data_context)
         merged.update(history_points)
 
     if end >= current_month:
@@ -347,7 +350,7 @@ def fetch_points(
             start < current_month and not history_covers_latest_publication
         )
         if current_required:
-            for observation_text, value in _load("current", current):
+            for observation_text, value in _load("current", current, data_context=data_context):
                 existing = merged.get(observation_text)
                 if existing is not None and existing != value:
                     raise MofSchemaError(

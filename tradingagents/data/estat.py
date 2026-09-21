@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 import requests
 
 from tradingagents.credentials import credential
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import SeriesCache, render_macro_report
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorNotConfiguredError
 
@@ -131,6 +132,8 @@ def fetch_series(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> dict | None:
     """Fetch a Japan CPI series as structured data, mirroring :func:`fred.fetch_series`.
 
@@ -151,7 +154,7 @@ def fetch_series(
     cat01, title = ESTAT_SERIES[key]
 
     cache_key = (key, curr_date, look_back_days)
-    cached = _series_cache.get(cache_key)
+    cached = _series_cache.get(cache_key, data_context=data_context)
     if cached is not None:
         return cached
 
@@ -200,7 +203,7 @@ def fetch_series(
         "start_date": start_dt.strftime("%Y-%m-%d"),
         "points": points,
     }
-    _series_cache.put_observation(cache_key, data)
+    _series_cache.put_observation(cache_key, data, data_context=data_context)
     return data
 
 
@@ -208,6 +211,8 @@ def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Render a Japan CPI series as a markdown report (the microscope path).
 
@@ -219,7 +224,7 @@ def get_macro_data(
     """
     if indicator.strip().lower() not in ESTAT_SERIES:
         raise NoMarketDataError(indicator, detail="not an e-Stat series")
-    data = fetch_series(indicator, curr_date, look_back_days)
+    data = fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
     if data is None:
         return f"e-Stat: no data for '{indicator}' in this window."
     return render_macro_report("e-Stat", data, curr_date)

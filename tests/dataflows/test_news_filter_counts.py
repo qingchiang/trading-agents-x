@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from tests.data_policy import request_context
+
 
 @pytest.mark.parametrize("source", ["disclosure", "research"])
 def test_cn_source_counts_survive_shared_memory_cache(source, monkeypatch):
@@ -25,8 +27,8 @@ def test_cn_source_counts_survive_shared_memory_cache(source, monkeypatch):
     monkeypatch.setattr(news_sources, "_request_json", fetch)
     producer = news_sources.get_disclosure_news if source == "disclosure" else news_sources.get_research_news
     try:
-        first = producer("600309.SS", "2026-09-01", "2026-09-05")
-        hot = producer("600309.SS", "2026-09-02", "2026-09-05")
+        first = producer("600309.SS", "2026-09-01", "2026-09-05", data_context=request_context())
+        hot = producer("600309.SS", "2026-09-02", "2026-09-05", data_context=request_context())
         for body in (first, hot):
             assert "upstream_returned=100" in body
             assert "date_filtered=98" in body
@@ -39,7 +41,7 @@ def test_cn_source_counts_survive_shared_memory_cache(source, monkeypatch):
 
 
 def test_edinet_counts_cover_security_filter_and_source_cap(monkeypatch):
-    from tradingagents.data.config import get_config, use_config
+    from tests.data_policy import data_config, data_policy
     from tradingagents.data.jp import edinet_news
 
     rows = [
@@ -47,9 +49,9 @@ def test_edinet_counts_cover_security_filter_and_source_cap(monkeypatch):
         {"secCode": "99840", "docDescription": "two", "submitDateTime": "2026-09-03 11:00", "docID": "2"},
         {"secCode": "72030", "docDescription": "other"},
     ]
-    monkeypatch.setattr(edinet_news, "documents_on", lambda *_: rows)
-    with use_config({**get_config(), "news_article_limit": 1}):
-        body = edinet_news.get_news("9984.T", "2026-09-03", "2026-09-03")
+    monkeypatch.setattr(edinet_news, "documents_on", lambda *_, data_context: rows)
+    with data_policy({**data_config(), "news_article_limit": 1}):
+        body = edinet_news.get_news("9984.T", "2026-09-03", "2026-09-03", data_context=request_context())
     assert "upstream_returned=3" in body
     assert "relevance_filtered=1" in body
     assert "source_truncated=1" in body
@@ -57,8 +59,8 @@ def test_edinet_counts_cover_security_filter_and_source_cap(monkeypatch):
 
 
 def test_tdnet_counts_cover_parse_date_security_and_cap(monkeypatch):
+    from tests.data_policy import data_config, data_policy
     from tests.jp.test_tdnet_news import _page, _row
-    from tradingagents.data.config import get_config, use_config
     from tradingagents.data.jp import tdnet_news
 
     page = _page(_row(when="2026/09/03 10:00", title="one"),
@@ -68,8 +70,8 @@ def test_tdnet_counts_cover_parse_date_security_and_cap(monkeypatch):
                  _row(when="invalid"))
     monkeypatch.setattr(tdnet_news, "_search", lambda *_: page)
     monkeypatch.setattr(tdnet_news, "tokyo_today", lambda: datetime(2026, 9, 5).date())
-    with use_config({**get_config(), "news_article_limit": 1}):
-        body = tdnet_news.get_news("7203.T", "2026-09-03", "2026-09-03")
+    with data_policy({**data_config(), "news_article_limit": 1}):
+        body = tdnet_news.get_news("7203.T", "2026-09-03", "2026-09-03", data_context=request_context())
     assert "upstream_returned=5" in body
     assert "date_filtered=2" in body
     assert "relevance_filtered=1" in body

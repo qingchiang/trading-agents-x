@@ -173,7 +173,7 @@ def test_converted_full_remains_a_baseline_for_offline_incremental(source_0013, 
     candidate = IncrementalEvidenceCandidate(evidence=candidate_item,
         available_on=date(2026, 9, 11))
     service = _incremental_service(settings, repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
         now=lambda: datetime(2026, 9, 12, 20, tzinfo=UTC))
     result = service.run(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-11",
         research_kind="incremental", full_baseline_run_id="baseline"))

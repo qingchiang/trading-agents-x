@@ -7,7 +7,7 @@ import yfinance as yf
 from dateutil.relativedelta import relativedelta
 from yfinance.exceptions import YFRateLimitError
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.instrument_identity import identity_names, resolve_search_identity
 from tradingagents.data.news_cache import fetch_news_feed
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
@@ -127,6 +127,8 @@ def _get_news_yfinance(
     ticker: str,
     start_date: str,
     end_date: str,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """
     Retrieve news for a specific stock ticker using yfinance.
@@ -139,8 +141,8 @@ def _get_news_yfinance(
     Returns:
         Formatted string containing news articles
     """
-    article_limit = get_config().get("yahoo_news_candidate_limit", 200) if in_candidate_scope() else get_config()["news_article_limit"]
-    candidate_limit = max(1, min(int(get_config().get("yahoo_news_candidate_limit", 200)), 200))
+    article_limit = data_context.config.get("yahoo_news_candidate_limit", 200) if in_candidate_scope() else data_context.config["news_article_limit"]
+    candidate_limit = max(1, min(int(data_context.config.get("yahoo_news_candidate_limit", 200)), 200))
     # Query Yahoo with the canonical symbol, like every other yfinance path —
     # a raw broker/forex alias (for example, XAUUSD) otherwise silently
     # returns no news. Keep the user's ticker in the report header.
@@ -250,6 +252,8 @@ def _get_global_news_yfinance(
     curr_date: str,
     look_back_days: int | None = None,
     limit: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """
     Retrieve global/macro economic news using yfinance Search.
@@ -264,7 +268,7 @@ def _get_global_news_yfinance(
     Returns:
         Formatted string containing global news articles
     """
-    config = get_config()
+    config = data_context.config
     if look_back_days is None:
         look_back_days = config["global_news_lookback_days"]
     if limit is None:
@@ -341,24 +345,24 @@ def _get_global_news_yfinance(
         return f"Error fetching global news: {str(e)}"
 
 
-def get_news_yfinance(ticker: str, start_date: str, end_date: str) -> str:
-    config = get_config()
+def get_news_yfinance(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+    config = data_context.config
     def fetch():
         with candidate_scope():
-            return _get_news_yfinance(ticker, start_date, end_date)
+            return _get_news_yfinance(ticker, start_date, end_date, data_context=data_context)
     block = fetch_news_feed("yfinance", normalize_symbol(ticker), start_date, end_date, fetch,
                             budget=config.get("yahoo_news_candidate_limit", 200), config=config)
     return finalize_news(block, "yfinance", ticker, start_date, end_date, config["news_article_limit"])
 
 
-def get_global_news_yfinance(curr_date: str, look_back_days: int | None = None, limit: int | None = None) -> str:
-    config = get_config()
+def get_global_news_yfinance(curr_date: str, look_back_days: int | None = None, limit: int | None = None, *, data_context: DataRequestContext) -> str:
+    config = data_context.config
     days = config["global_news_lookback_days"] if look_back_days is None else look_back_days
     limit = config["global_news_article_limit"] if limit is None else limit
     start = (date.fromisoformat(curr_date) - relativedelta(days=days)).isoformat()
     def fetch():
         with candidate_scope():
-            return _get_global_news_yfinance(curr_date, days, limit)
+            return _get_global_news_yfinance(curr_date, days, limit, data_context=data_context)
     block = fetch_news_feed("yfinance-global", "global", start, curr_date, fetch,
                             budget=(config.get("global_news_candidate_limit", 10), limit), config=config,
                             global_feed=True)

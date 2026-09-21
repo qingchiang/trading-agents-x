@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from langchain_core.messages import ToolMessage
 
+from tests.data_policy import request_context
 from tradingagents.data import interface
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import provenance_quality_issues
@@ -141,13 +142,14 @@ def test_router_marker_names_actual_fallback_vendor_only_when_requested():
     ):
         plain = interface.route_to_vendor(
             "get_news", "NVDA", "2026-07-01", "2026-07-17"
-        )
+        , data_context=request_context())
         marked = interface.route_to_vendor(
             "get_news",
             "NVDA",
             "2026-07-01",
             "2026-07-17",
             _provenance=True,
+            data_context=request_context(),
         )
 
     assert plain == "RESULT"
@@ -185,6 +187,7 @@ def test_router_adds_fallback_status_when_vendor_already_supplies_provenance():
             "2026-07-01",
             "2026-07-17",
             _provenance=True,
+            data_context=request_context(),
         )
 
     records = extract_provenance(marked)
@@ -214,6 +217,7 @@ def test_stock_route_uses_actual_returned_trading_dates():
             "2026-07-15",
             "2026-07-19",
             _provenance=True,
+            data_context=request_context(),
         )
 
     record = extract_provenance(marked)[0]
@@ -240,6 +244,7 @@ def test_indicator_route_uses_latest_valid_indicator_observation() -> None:
             "2026-08-01",
             5,
             _provenance=True,
+            data_context=request_context(),
         )
 
     record = extract_provenance(marked)[0]
@@ -263,6 +268,7 @@ def test_snapshot_route_uses_latest_verified_trading_row() -> None:
             "6501.T",
             "2026-08-01",
             _provenance=True,
+            data_context=request_context(),
         )
 
     assert extract_provenance(marked)[0].effective == "2026-07-31"
@@ -283,6 +289,7 @@ def test_historical_live_only_sentinel_keeps_not_queried_semantics():
             "NVDA",
             "2020-01-15",
             _provenance=True,
+            data_context=request_context(),
         )
 
     record = extract_provenance(marked)[0]

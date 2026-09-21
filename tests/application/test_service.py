@@ -45,7 +45,7 @@ from tradingagents.research.full.state import GraphExecution
 from tradingagents.research.runtime import RunCancelled, WorkerShutdown
 
 
-def _equity_resolver(ticker: str) -> dict[str, str]:
+def _equity_resolver(ticker: str, *, data_context) -> dict[str, str]:
     return {"symbol": ticker, "quote_type": "EQUITY"}
 
 

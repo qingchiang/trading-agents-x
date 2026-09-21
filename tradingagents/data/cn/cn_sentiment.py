@@ -21,6 +21,7 @@ from tradingagents.data.cn.common import (
 )
 from tradingagents.data.cn.news_sources import disclosure_rows, research_rows
 from tradingagents.data.cn.sina_ratings import rating_rows as sina_rating_rows
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.measurement import instrument_currency
@@ -69,7 +70,7 @@ def _first_present(row, *keys: str):
     return None
 
 
-def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5) -> str:
+def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5, *, data_context: DataRequestContext) -> str:
     """Return latest on/before-date official exchange margin detail."""
     _canonical, code, exchange = canonical_a_share(ticker)
     trade_date = previous_trade_date(curr_date)
@@ -119,7 +120,7 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5)
         if not isinstance(row, dict):
             return _earlier_margin_or_uncovered(
                 ticker, trade_date, "SSE", code, _remaining_sessions
-            )
+            , data_context=data_context)
         financing = _first_present(row, "FIN_BALANCE", "RZYE", "rzye", "finBalance")
         buy = _first_present(row, "FIN_BUY_AMT", "RZMRE", "rzmre", "finBuyAmount")
         short = _first_present(
@@ -154,7 +155,7 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5)
         if matches.empty:
             return _earlier_margin_or_uncovered(
                 ticker, trade_date, "SZSE", code, _remaining_sessions
-            )
+            , data_context=data_context)
         metric_columns = {
             "融资余额",
             "融资余额(元)",
@@ -193,18 +194,20 @@ def _earlier_margin_or_uncovered(
     exchange_name: str,
     code: str,
     remaining_sessions: int,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Walk through publication lag, then distinguish sustained non-coverage."""
     if remaining_sessions > 1:
         earlier = previous_trade_date(trade_date, inclusive=False)
-        return get_margin_signal(ticker, earlier.isoformat(), remaining_sessions - 1)
+        return get_margin_signal(ticker, earlier.isoformat(), remaining_sessions - 1, data_context=data_context)
     return (
         f"<{exchange_name} margin detail: no covered row for {code} in the checked "
         f"exchange sessions ending {trade_date}>"
     )
 
 
-def get_holding_changes(ticker: str, curr_date: str) -> str:
+def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
     """Return major-shareholder/executive changes bounded by available dates."""
     _canonical, code, _exchange = canonical_a_share(ticker)
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
@@ -287,7 +290,7 @@ def get_holding_changes(ticker: str, curr_date: str) -> str:
     cninfo_succeeded = False
     if failures:
         try:
-            announcements = disclosure_rows(ticker, start.isoformat(), end.isoformat())
+            announcements = disclosure_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
         except Exception as exc:  # noqa: BLE001 - preserve structured feed results
             notes.append(f"<CNINFO holding-announcement fallback unavailable: {type(exc).__name__}>")
             provenance.append(
@@ -562,6 +565,8 @@ def _executive_events(records: list[dict], start, end) -> list[tuple]:
 def get_research_signal_payload(
     ticker: str,
     curr_date: str,
+    *,
+    data_context: DataRequestContext,
 ) -> tuple[str, tuple[StructuredNumericFact, ...]]:
     """Return dated sell-side prose plus exact target-price facts."""
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
@@ -603,7 +608,7 @@ def get_research_signal_payload(
     source = "Sina Finance"
     if not rows:
         try:
-            rows = research_rows(ticker, start.isoformat(), end.isoformat())
+            rows = research_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
         except Exception as exc:  # noqa: BLE001 - keep Sina's successful-empty state visible
             notes.append(f"<Eastmoney research fallback unavailable: {type(exc).__name__}>")
             provenance.append(
@@ -683,10 +688,10 @@ def get_research_signal_payload(
     ), tuple(facts)
 
 
-def get_research_signal(ticker: str, curr_date: str) -> str:
+def get_research_signal(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
     """Return recent ratings and target ranges known by the analysis date."""
 
-    return get_research_signal_payload(ticker, curr_date)[0]
+    return get_research_signal_payload(ticker, curr_date, data_context=data_context)[0]
 
 
 _IMPORTANT_TERMS = (
@@ -716,11 +721,11 @@ _HOLDING_ANNOUNCEMENT_TERMS = (
 )
 
 
-def get_important_announcements(ticker: str, curr_date: str) -> str:
+def get_important_announcements(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
     """Return directly code-bound, potentially material CNINFO announcements."""
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=29)
-    rows = disclosure_rows(ticker, start.isoformat(), end.isoformat())
+    rows = disclosure_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
     rows = [row for row in rows if any(term in row["title"] for term in _IMPORTANT_TERMS)]
     if not rows:
         return f"<CNINFO important announcements: no matched events in {start} to {end}>"

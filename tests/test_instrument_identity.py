@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import instrument_identity as identity_dataflow
 from tradingagents.data.instrument_identity import (
     resolve_instrument_eligibility,
@@ -127,7 +128,7 @@ def test_eligibility_resolver_preserves_malformed_mixed_candidates():
         },
     )()
     with patch.object(identity_dataflow.yf, "Search", return_value=search):
-        result = resolve_instrument_eligibility("NVDA")
+        result = resolve_instrument_eligibility("NVDA", data_context=request_context())
 
     assert isinstance(result, list)
     assert result[1] == {"_malformed": True}
@@ -145,7 +146,7 @@ def test_eligibility_resolver_keeps_mismatched_symbol_ambiguous():
         },
     )()
     with patch.object(identity_dataflow.yf, "Search", return_value=search):
-        result = resolve_instrument_eligibility("NVDA")
+        result = resolve_instrument_eligibility("NVDA", data_context=request_context())
 
     assert result == {"symbol": "NVD", "quote_type": "EQUITY"}
 

@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.edinet_code_map import learn_many, resolve_edinet_code
 from tradingagents.data.jp.edinet_common import (
     documents_on,
@@ -94,7 +94,7 @@ def _format_filing(record: dict) -> str:
     return f"{line}\n{detail}" if detail else line
 
 
-def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_BACK_DAYS) -> str:
+def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_BACK_DAYS, *, data_context: DataRequestContext) -> str:
     """Return recent EDINET large-shareholding & tender-offer (TOB) filings about ``ticker``.
 
     Tokyo-only (returns "" for non-``.T`` tickers, like the investor-flow proxy —
@@ -112,7 +112,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
         end = datetime.strptime(curr_date, "%Y-%m-%d")
         start = (end - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
-        code = resolve_edinet_code(ticker)
+        code = resolve_edinet_code(ticker, data_context=data_context)
         if code is None:
             # Unknown issuer (new listing not yet in seed or learned cache). Don't
             # scan dozens of dates for a subject we can't match; the self-heal on
@@ -127,7 +127,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
         matches = []
         learned_pairs = []
         for date_str in dates:
-            for record in documents_on(date_str):
+            for record in documents_on(date_str, data_context=data_context):
                 learned_pairs.append((record.get("secCode"), record.get("edinetCode")))
                 if (
                     record.get("subjectEdinetCode") == code
@@ -135,7 +135,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
                 ):
                     matches.append(record)
         # Self-heal in one lock + one cache write, not per record.
-        learn_many(learned_pairs)
+        learn_many(learned_pairs, data_context=data_context)
     except Exception as exc:
         logger.warning("Large-holding fetch failed for %s: %s", ticker, exc)
         return f"<large-shareholding data unavailable: {type(exc).__name__}>"
@@ -149,7 +149,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
     items = render_filings(
         matches,
         _format_filing,
-        get_config()["sentiment_filing_limit"],
+        data_context.config["sentiment_filing_limit"],
     )
     return (
         f"EDINET ownership & control filings about {ticker}, {scanned_start} to {curr_date} "

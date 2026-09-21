@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.edinet_common import (
     documents_on,
     filing_detail_line,
@@ -55,7 +55,7 @@ def _format_filing(record: dict) -> str:
     return f"{line}\n{detail}" if detail else line
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     """Return EDINET disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     Iterates the window day by day, keeping filings whose securities code matches
@@ -64,13 +64,13 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     common outcome — not a data-availability failure).
     """
     code = to_jquants_code(ticker)
-    limit = source_output_limit(get_config()["news_article_limit"])
+    limit = source_output_limit(data_context.config["news_article_limit"])
     dates = list(iter_window_dates(start_date, end_date))
     scanned_start = dates[0] if dates else start_date
 
     # EDINET carries the 5-digit securities code (``99840``); reduce it to the
     # 4-digit base so it compares equal to the ticker's J-Quants code (``9984``).
-    records = [record for date_str in dates for record in documents_on(date_str)]
+    records = [record for date_str in dates for record in documents_on(date_str, data_context=data_context)]
     matches = [record for record in records if tokyo_securities_base(record.get("secCode")) == code]
     counts = CandidateFilterCounts(
         upstream_returned=len(records), relevance_filtered=len(records) - len(matches),

@@ -3,11 +3,13 @@ look-ahead-safe windowing, and process caching.
 
 All API access is mocked, so these run without a network connection or app id.
 """
+
 import unittest
 from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.credentials import use_credentials
 from tradingagents.data import estat
 from tradingagents.domain.vendor_errors import NoMarketDataError
@@ -73,19 +75,19 @@ class EstatFetchSeriesTests(unittest.TestCase):
     def test_unknown_alias_raises_value_error(self):
         # An unknown alias is rejected before any API call (no app id needed).
         with self.assertRaises(ValueError):
-            estat.fetch_series("not_a_real_alias", "2026-06-20")
+            estat.fetch_series("not_a_real_alias", "2026-06-20", data_context=request_context())
 
     def test_missing_app_id_raises_not_configured(self):
         with use_credentials({}), \
                 self.assertRaises(estat.EstatNotConfiguredError):
-            estat.fetch_series("jp_cpi", "2026-06-20")
+            estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context())
 
     def test_parses_descending_values_into_ascending_points(self):
         # e-Stat returns newest-first; fetch_series must sort ascending.
         values = [_val("2026000505", "113.5"), _val("2026000404", "113.0"),
                   _val("2026000303", "112.7")]
         with mock.patch.object(estat, "_request", return_value=_root(values)):
-            data = estat.fetch_series("jp_core_cpi", "2026-06-20")
+            data = estat.fetch_series("jp_core_cpi", "2026-06-20", data_context=request_context())
         self.assertEqual(data["points"],
                          [("2026-03-01", "112.7"), ("2026-04-01", "113.0"),
                           ("2026-05-01", "113.5")])
@@ -96,13 +98,13 @@ class EstatFetchSeriesTests(unittest.TestCase):
     def test_non_numeric_markers_are_skipped(self):
         values = [_val("2026000404", "-"), _val("2026000505", "113.5")]
         with mock.patch.object(estat, "_request", return_value=_root(values)):
-            data = estat.fetch_series("jp_cpi", "2026-06-20")
+            data = estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context())
         self.assertEqual(data["points"], [("2026-05-01", "113.5")])
 
     def test_single_value_object_is_wrapped(self):
         # A one-observation window comes back as a dict, not a list.
         with mock.patch.object(estat, "_request", return_value=_root(_val("2026000505", "113.5"))):
-            data = estat.fetch_series("jp_cpi", "2026-06-20")
+            data = estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context())
         self.assertEqual(data["points"], [("2026-05-01", "113.5")])
 
     def test_lookahead_drops_future_months_and_caps_cdtimeto(self):
@@ -115,7 +117,7 @@ class EstatFetchSeriesTests(unittest.TestCase):
                           _val("2026000404", "113.0")])
 
         with mock.patch.object(estat, "_request", side_effect=_capture):
-            data = estat.fetch_series("jp_cpi", "2026-03-15")
+            data = estat.fetch_series("jp_cpi", "2026-03-15", data_context=request_context())
         self.assertEqual(captured["cdTimeTo"], "2026000303")
         self.assertNotIn(("2026-04-01", "113.0"), data["points"])
         self.assertEqual(data["points"][-1], ("2026-03-01", "112.7"))
@@ -128,8 +130,8 @@ class EstatFetchSeriesTests(unittest.TestCase):
             return _root([])
 
         with mock.patch.object(estat, "_request", side_effect=_req):
-            self.assertIsNone(estat.fetch_series("jp_cpi", "2026-06-20"))
-            self.assertIsNone(estat.fetch_series("jp_cpi", "2026-06-20"))
+            self.assertIsNone(estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context()))
+            self.assertIsNone(estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context()))
         # A miss is not memoized (could be a transient outage), so it is retried.
         self.assertEqual(calls, ["getStatsData", "getStatsData"])
 
@@ -141,8 +143,8 @@ class EstatFetchSeriesTests(unittest.TestCase):
             return _root([_val("2026000505", "113.5")])
 
         with mock.patch.object(estat, "_request", side_effect=_req):
-            estat.fetch_series("jp_cpi", "2026-06-20")
-            estat.fetch_series("jp_cpi", "2026-06-20")
+            estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context())
+            estat.fetch_series("jp_cpi", "2026-06-20", data_context=request_context())
         self.assertEqual(calls, ["getStatsData"])  # second call served from cache
 
 
@@ -158,18 +160,18 @@ class EstatGetMacroDataTests(unittest.TestCase):
         # An indicator e-Stat doesn't own must raise so the router chain falls
         # through to the next vendor — without any API call (no app id needed).
         with self.assertRaises(NoMarketDataError):
-            estat.get_macro_data("cpi", "2026-06-20")
+            estat.get_macro_data("cpi", "2026-06-20", data_context=request_context())
 
     def test_owned_alias_renders_markdown(self):
         values = [_val("2025000505", "112.0"), _val("2026000505", "113.5")]
         with mock.patch.object(estat, "_request", return_value=_root(values)):
-            out = estat.get_macro_data("jp_cpi", "2026-06-20")
+            out = estat.get_macro_data("jp_cpi", "2026-06-20", data_context=request_context())
         self.assertIn("## e-Stat: Japan CPI (all items)", out)
         self.assertIn("**Latest:** 113.5 (2026-05-01)", out)
 
     def test_owned_alias_empty_window_returns_note(self):
         with mock.patch.object(estat, "_request", return_value=_root([])):
-            out = estat.get_macro_data("jp_cpi", "2026-06-20")
+            out = estat.get_macro_data("jp_cpi", "2026-06-20", data_context=request_context())
         self.assertIn("e-Stat: no data", out)
 
 

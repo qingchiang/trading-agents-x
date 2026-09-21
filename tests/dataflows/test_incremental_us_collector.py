@@ -5,10 +5,10 @@ from datetime import UTC, date, datetime
 import pytest
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
+from tests.data_policy import configure_data, request_context, reset_data
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
 from tradingagents.application.service import AnalysisService
 from tradingagents.data import incremental_us, interface, y_finance as yf_data
-from tradingagents.data.config import bind_config, reset_config
 from tradingagents.data.incremental_us import collect_us_incremental
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.domain.collection import IncrementalCollectionRequest
@@ -24,7 +24,7 @@ from tradingagents.research.incremental.collection import normalize_incremental_
 def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
 
 
@@ -82,6 +82,7 @@ def test_social_observed_range_describes_messages_not_requested_window():
             "[2026-07-24 13:00:00 EDT · @two · no-label] second"
         ),
         now=lambda: datetime(2026, 7, 25, tzinfo=UTC),
+        data_context=request_context(),
     )
     domain = result.collection_summary.domains[0]
     assert domain.observed_from == datetime(2026, 7, 24, 16, tzinfo=UTC)
@@ -107,6 +108,7 @@ def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -
             route_to_vendor=route,
             fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+            data_context=request_context(),
         )
     report_collection_progress("unrelated", "started")
     assert progress == [("market", "started"), ("market", "completed"),
@@ -152,6 +154,7 @@ Date,Open,High,Low,Close,Volume
         _request(baseline=date(2026, 7, 4), target=date(2026, 7, 7)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 8, 2, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert mismatched.collection_summary.domains[0].diagnostic.code == "market_instrument_mismatch"
 
@@ -165,6 +168,7 @@ Date,Open,High,Low,Close,Volume
         ),
         route_to_vendor=lambda *_args, **_kwargs: eligible_body,
         now=lambda: datetime(2026, 7, 8, 2, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert [point.session for point in collected.stock_series.points] == [
         date(2026, 7, 2),
@@ -183,6 +187,7 @@ def test_us_collector_omits_same_day_bar_before_new_york_close() -> None:
         request,
         route_to_vendor=lambda *_args, **_kwargs: _market_response(),
         now=lambda: datetime(2026, 7, 24, 19, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert [point.session for point in collected.stock_series.points] == [
         date(2026, 7, 17),
@@ -215,6 +220,7 @@ outside
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 18, 30, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 18, 31, tzinfo=UTC)
@@ -236,6 +242,7 @@ def test_us_collector_reports_yahoo_error_as_unavailable_with_actual_source() ->
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        data_context=request_context(),
     )
     domain = collected.collection_summary.domains[0]
     assert domain.state.value == "unavailable"
@@ -255,6 +262,7 @@ def test_us_collector_stops_the_journey_on_rate_limit_before_news_or_benchmarks(
             _request(enabled_domains=("market", "news")),
             route_to_vendor=route,
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+            data_context=request_context(),
         )
     assert calls == ["get_stock_data"]
 
@@ -280,15 +288,16 @@ def test_us_collector_stops_after_a_focused_fundamentals_info_rate_limit() -> No
         monkeypatch.setitem(
             interface.VENDOR_METHODS["get_fundamentals"], "yfinance", get_fundamentals
         )
-        token = bind_config({"data_vendors": {"fundamental_data": "yfinance"}})
+        token = configure_data({"data_vendors": {"fundamental_data": "yfinance"}})
         try:
             with pytest.raises(VendorRateLimitError, match="Yahoo Finance rate limited"):
                 collect_us_incremental(
                     _request(enabled_domains=("fundamentals", "news", "market")),
                     now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+                    data_context=request_context(),
                 )
         finally:
-            reset_config(token)
+            reset_data(token)
 
     assert calls == ["get_fundamentals", "info"]
 
@@ -302,6 +311,7 @@ def test_us_collector_stops_on_stocktwits_rate_limit_before_later_domains() -> N
                 VendorRateLimitError("StockTwits rate limited")
             ),
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+            data_context=request_context(),
         )
 
 
@@ -316,6 +326,7 @@ def test_us_collector_enters_the_bounded_stocktwits_rate_limit_scope(monkeypatch
             _request(enabled_domains=("social", "market")),
             route_to_vendor=lambda *_args, **_kwargs: _market_response(),
             now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+            data_context=request_context(),
         )
 
 
@@ -328,6 +339,7 @@ def test_us_collector_starts_social_query_after_the_baseline_market_date() -> No
             "<no StockTwits messages found>"
         ),
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert result.collection_summary.domains[0].state.value == "empty"
@@ -368,6 +380,7 @@ The announcement was observed in the bounded Yahoo feed.
         route_to_vendor=lambda *_args, **_kwargs: response,
         fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request,
@@ -387,6 +400,7 @@ def test_us_collector_describes_an_empty_stocktwits_sample_without_historical_ab
         route_to_vendor=lambda *_args, **_kwargs: "unused",
         fetch_stocktwits_messages=lambda *_args, **_kwargs: "<no StockTwits messages found>",
         now=lambda: datetime(2026, 7, 29, 15, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     social = result.collection_summary.domains[0]
@@ -414,6 +428,7 @@ def test_us_collector_omits_six_day_old_live_snapshot_at_shared_boundary() -> No
         route_to_vendor=lambda method, *_args, **_kwargs: response,
         fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
         now=lambda: datetime(2026, 7, 30, 15, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request,
@@ -433,6 +448,7 @@ def test_us_collector_admits_current_stocktwits_only_as_near_live_advisory() -> 
         route_to_vendor=lambda *_args, **_kwargs: "unused",
         fetch_stocktwits_messages=lambda *_args, **_kwargs: "Bullish: 1 (100%)\n\n[message]",
         now=lambda: datetime(2026, 7, 29, 15, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request,
@@ -496,7 +512,7 @@ def test_market_interval_includes_baseline_endpoint_when_snapshot_fails(target_c
             return _market_response().replace("109,111,108,110", f"{target_close},{target_close},{target_close},{target_close}")
         raise RuntimeError("snapshot unavailable")
     result = collect_us_incremental(_request(), route_to_vendor=route,
-                                   now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC))
+                                   now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC), data_context=request_context())
     interval = next(c.evidence.provenance["observation"]["values"] for c in result.evidence
                     if c.evidence.evidence_type == "market_interval")
     assert interval["start_session"] == "2026-07-20"

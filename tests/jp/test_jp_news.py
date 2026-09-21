@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
+from tests.data_policy import data_policy, request_context
 from tradingagents.data.jp import http_util, jp_news, tdnet_news
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.vendor_errors import (
@@ -38,7 +39,7 @@ def _run(edinet, media, tdnet=_TDNET_EMPTY):
         mock.patch.object(jp_news, "_tdnet_news", **_spec(tdnet)),
         mock.patch.object(jp_news, "_google_news", **_spec(media)),
     ):
-        return jp_news.get_news("4568.T", "a", "b")
+        return jp_news.get_news("4568.T", "a", "b", data_context=request_context())
 
 
 def _block(source: str, titles: list[str]) -> str:
@@ -62,7 +63,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
         tdnet_titles = [f"TDnet item {index}" for index in range(15)]
         media_titles = [f"Media item {index}" for index in range(15)]
 
-        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 30}):
+        with data_policy({"news_article_limit": 30}, merge=True):
             out = _run(
                 _block("EDINET", edinet_titles),
                 _block("Google News", media_titles),
@@ -86,10 +87,10 @@ class JpNewsAssemblerTests(unittest.TestCase):
             ["[direct] 通期業績予想の修正 (source: Example News)", "独自取材"],
         )
 
-        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 30}):
+        with data_policy({"news_article_limit": 30}, merge=True):
             out = _run(edinet, media)
 
-        self.assertEqual(out.count("通期業績予想の修正"), 1)
+        self.assertEqual(sum(line.startswith("### ") and "通期業績予想の修正" in line for line in out.splitlines()), 1)
         self.assertIn("filer: Example Corp", out)
         self.assertNotIn("source: Example News", out)
         self.assertIn("独自取材", out)
@@ -100,7 +101,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertNotIn("truncated_by_global_cap", out)
 
     def test_configured_limit_is_applied_after_cross_source_merge(self):
-        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 2}):
+        with data_policy({"news_article_limit": 2}, merge=True):
             out = _run(
                 _block("EDINET", ["Official one", "Official two"]),
                 _block("Google News", ["Media one"]),
@@ -149,11 +150,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet,
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media,
         ):
-            jp_news.get_news("4568.T", "2026-04-19", "2026-07-17")
+            jp_news.get_news("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
 
-        edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
-        tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17")
-        media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+        edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
+        tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17", data_context=request_context())
+        media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
 
     def test_edinet_capped_window_is_recorded_as_limited_provenance(self):
         with (
@@ -161,7 +162,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_EMPTY),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2020-01-01", "2026-07-17")
+            out = jp_news.get_news("4568.T", "2020-01-01", "2026-07-17", data_context=request_context())
 
         record = next(record for record in extract_provenance(out) if record.source == "EDINET")
         self.assertEqual(record.effective, "2026-04-19 to 2026-07-17")
@@ -174,7 +175,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2026-06-01", "2026-07-05")
+            out = jp_news.get_news("4568.T", "2026-06-01", "2026-07-05", data_context=request_context())
 
         record = next(record for record in extract_provenance(out) if record.source == "TDnet")
         self.assertEqual(record.effective, "2026-06-12 to 2026-07-05")
@@ -191,7 +192,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             ),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2026-05-01", "2026-06-01")
+            out = jp_news.get_news("4568.T", "2026-05-01", "2026-06-01", data_context=request_context())
 
         record = next(record for record in extract_provenance(out) if record.source == "TDnet")
         self.assertEqual(record.effective, "outside rolling TDnet archive; no query")
@@ -228,7 +229,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             stop_on_rate_limit_scope(True),
             self.assertRaises(VendorRateLimitError),
         ):
-            jp_news.get_news("4568.T", "2026-06-20", "2026-06-22")
+            jp_news.get_news("4568.T", "2026-06-20", "2026-06-22", data_context=request_context())
 
         edinet.assert_called_once()
         tdnet.assert_not_called()
@@ -246,7 +247,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             stop_on_rate_limit_scope(True),
             self.assertRaises(VendorRateLimitError),
         ):
-            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25")
+            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25", data_context=request_context())
 
         self.assertEqual(urlopen.call_count, 1)
         sleep.assert_not_called()
@@ -262,7 +263,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
             stop_on_rate_limit_scope(True),
             self.assertRaises(NoMarketDataError) as ctx,
         ):
-            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25")
+            jp_news.get_news("7203.T", "2026-08-20", "2026-08-25", data_context=request_context())
 
         self.assertIn("<TDnet unavailable: VendorTransportError>", ctx.exception.availability_notes[0])
         media.assert_called_once()

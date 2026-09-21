@@ -5,6 +5,7 @@ responses mislabeled as rate limits and silently treated as transient), and
 #1115 (fundamentals look-ahead filter never ran because the payload is a JSON
 string, not a dict).
 """
+
 import json
 from unittest import mock
 
@@ -12,6 +13,7 @@ import pytest
 
 import tradingagents.data.alpha_vantage_common as av
 import tradingagents.data.alpha_vantage_fundamentals as avf
+from tests.data_policy import request_context
 
 
 class _FakeResponse:
@@ -78,7 +80,7 @@ def test_fundamentals_look_ahead_filter_runs_on_json_string(monkeypatch):
     # #1115: the payload arrives as a JSON *string*; the old dict-only guard let
     # future-dated fiscal periods leak into historical runs.
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: _FUNDAMENTALS_JSON)
-    out = avf.get_balance_sheet("AAPL", curr_date="2024-01-01")
+    out = avf.get_balance_sheet("AAPL", curr_date="2024-01-01", data_context=request_context())
     assert isinstance(out, str)  # callers still receive a str
     parsed = json.loads(out)
     assert [r["fiscalDateEnding"] for r in parsed["annualReports"]] == ["2023-12-31"]
@@ -88,13 +90,13 @@ def test_fundamentals_look_ahead_filter_runs_on_json_string(monkeypatch):
 @pytest.mark.unit
 def test_fundamentals_no_curr_date_passes_through(monkeypatch):
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: _FUNDAMENTALS_JSON)
-    assert avf.get_income_statement("AAPL") == _FUNDAMENTALS_JSON
+    assert avf.get_income_statement("AAPL", data_context=request_context()) == _FUNDAMENTALS_JSON
 
 
 @pytest.mark.unit
 def test_fundamentals_non_json_body_unchanged(monkeypatch):
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: "not-json")
-    assert avf.get_cashflow("AAPL", curr_date="2024-01-01") == "not-json"
+    assert avf.get_cashflow("AAPL", curr_date="2024-01-01", data_context=request_context()) == "not-json"
 
 
 @pytest.mark.unit
@@ -102,7 +104,7 @@ def test_historical_overview_does_not_query_current_snapshot(monkeypatch):
     vendor = mock.Mock(return_value="SHOULD NOT BE RETURNED")
     monkeypatch.setattr(avf, "_make_api_request", vendor)
 
-    out = avf.get_fundamentals("AAPL", curr_date="2020-01-15")
+    out = avf.get_fundamentals("AAPL", curr_date="2020-01-15", data_context=request_context())
 
     vendor.assert_not_called()
     assert "LIVE_DATA_UNAVAILABLE" in out
@@ -114,7 +116,7 @@ def test_live_overview_labels_retrieval_time_and_non_point_in_time(monkeypatch):
     monkeypatch.setattr(avf, "is_near_live", lambda curr_date, ticker: True)
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: '{"PERatio":"30"}')
 
-    out = avf.get_fundamentals("AAPL", curr_date="2026-07-17")
+    out = avf.get_fundamentals("AAPL", curr_date="2026-07-17", data_context=request_context())
 
     assert "Requested analysis date: 2026-07-17" in out
     assert "Retrieval timestamp:" in out

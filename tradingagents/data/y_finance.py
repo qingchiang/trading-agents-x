@@ -4,6 +4,7 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.macro_common import SeriesCache
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
@@ -26,6 +27,8 @@ def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+    *,
+    data_context: DataRequestContext,
 ):
 
     datetime.strptime(start_date, "%Y-%m-%d")
@@ -102,6 +105,8 @@ def get_stock_stats_indicators_window(
         str, "The current trading date you are trading on, YYYY-mm-dd"
     ],
     look_back_days: Annotated[int, "how many days to look back"],
+    *,
+    data_context: DataRequestContext,
 ) -> str:
 
     if indicator not in INDICATOR_DESCRIPTIONS:
@@ -113,7 +118,7 @@ def get_stock_stats_indicators_window(
     # vendor-neutral helper (also used by the J-Quants path) so every vendor's
     # report has an identical shape.
     try:
-        data = load_ohlcv(symbol, curr_date)
+        data = load_ohlcv(symbol, curr_date, data_context=data_context)
         rendered = render_indicator_window(data, indicator, curr_date, look_back_days)
         canonical = normalize_symbol(symbol)
         if canonical.endswith((".SS", ".SZ")):
@@ -140,7 +145,7 @@ def get_stock_stats_indicators_window(
     while day >= before:
         indicator_value = get_stockstats_indicator(
             symbol, indicator, day.strftime("%Y-%m-%d")
-        )
+        , data_context=data_context)
         ind_string += f"{day.strftime('%Y-%m-%d')}: {indicator_value}\n"
         day = day - relativedelta(days=1)
 
@@ -158,6 +163,8 @@ def get_stockstats_indicator(
     curr_date: Annotated[
         str, "The current trading date you are trading on, YYYY-mm-dd"
     ],
+    *,
+    data_context: DataRequestContext,
 ) -> str:
 
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -168,6 +175,7 @@ def get_stockstats_indicator(
             symbol,
             indicator,
             curr_date,
+            data_context=data_context,
         )
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
@@ -183,7 +191,7 @@ def get_stockstats_indicator(
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
     curr_date: Annotated[str, "requested analysis date; live .info has no history"] = None
-):
+, *, data_context: DataRequestContext):
     """Get a live company overview, refusing to inject it into old backtests."""
     canonical = normalize_symbol(ticker)
     if curr_date is not None and not is_near_live(curr_date, canonical):
@@ -281,9 +289,9 @@ def get_fundamentals(
 _INFO_CACHE = SeriesCache(max_entries=256)
 
 
-def _yf_info(canonical: str) -> dict:
+def _yf_info(canonical: str, *, data_context: DataRequestContext) -> dict:
     """Fetch (and memoize) yfinance ``.info`` for a canonical symbol; ``{}`` on failure."""
-    info = _INFO_CACHE.get(canonical)
+    info = _INFO_CACHE.get(canonical, data_context=data_context)
     if info is not None:
         return info
     try:
@@ -292,11 +300,11 @@ def _yf_info(canonical: str) -> dict:
         return {}
     if not info:
         return {}
-    _INFO_CACHE.put(canonical, info)
+    _INFO_CACHE.put(canonical, info, data_context=data_context)
     return info
 
 
-def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
+def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext):
     """Return ``(forward_eps, num_analysts)`` from yfinance ``.info``, else ``(None, None)``.
 
     The analyst-consensus forward EPS and the number of contributing analysts.
@@ -304,7 +312,7 @@ def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
     callers must gate it on look-ahead (it is used only for the JP assembler's
     live-only analyst-forward overlay). Any fetch failure degrades to ``(None, None)``.
     """
-    info = _yf_info(normalize_symbol(ticker))
+    info = _yf_info(normalize_symbol(ticker), data_context=data_context)
     return info.get("forwardEps"), info.get("numberOfAnalystOpinions")
 
 
@@ -323,7 +331,7 @@ _RATING_FIELDS = (
 )
 
 
-def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"]) -> dict:
+def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext) -> dict:
     """Return yfinance analyst-consensus rating fields as a dict, else ``{}``.
 
     Sell-side rating (buy/hold/sell), its 1–5 mean, the contributing analyst
@@ -332,7 +340,7 @@ def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"]) 
     it on look-ahead (it feeds the JP sentiment analyst's live-only rating
     overlay). Any fetch failure degrades to ``{}``.
     """
-    info = _yf_info(normalize_symbol(ticker))
+    info = _yf_info(normalize_symbol(ticker), data_context=data_context)
     return {k: info.get(k) for k in _RATING_FIELDS} if info else {}
 
 
@@ -419,7 +427,7 @@ def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
+, *, data_context: DataRequestContext):
     """Get balance sheet data from yfinance."""
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
@@ -456,7 +464,7 @@ def get_cashflow(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
+, *, data_context: DataRequestContext):
     """Get cash flow data from yfinance."""
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
@@ -493,7 +501,7 @@ def get_income_statement(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
+, *, data_context: DataRequestContext):
     """Get income statement data from yfinance."""
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
@@ -528,7 +536,7 @@ def get_income_statement(
 
 def get_insider_transactions(
     ticker: Annotated[str, "ticker symbol of the company"]
-):
+, *, data_context: DataRequestContext):
     """Get insider transactions data from yfinance."""
     canonical = normalize_symbol(ticker)
     try:

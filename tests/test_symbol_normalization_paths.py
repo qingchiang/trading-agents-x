@@ -5,10 +5,12 @@ XAUUSD must resolve to the same Yahoo symbol
 (GC=F) that the price path uses, so identity, realized-return, and news lookups
 hit the right instrument instead of failing/mismatching.
 """
+
 import pytest
 
 import tradingagents.data.instrument_identity as identity_dataflow
 import tradingagents.data.yfinance_news as ynews
+from tests.data_policy import request_context
 from tradingagents.domain.instruments import market_timezone
 
 
@@ -68,7 +70,7 @@ def test_news_lookup_normalizes_symbol(monkeypatch):
     monkeypatch.setattr(ynews.yf, "Ticker", FakeTicker)
     monkeypatch.setattr(ynews, "yf_retry", lambda fn: fn())
 
-    out = ynews.get_news_yfinance("XAUUSD", "2025-01-01", "2025-01-10")
+    out = ynews.get_news_yfinance("XAUUSD", "2025-01-01", "2025-01-10", data_context=request_context())
 
     assert seen["symbol"] == "GC=F"   # news queried with the canonical symbol
     assert "XAUUSD" in out            # the user's ticker stays in the report

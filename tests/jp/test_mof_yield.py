@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.jp import mof_yield
 from tradingagents.data.jp.calendar import add_government_business_days, is_government_business_day
 
@@ -86,17 +87,17 @@ def test_fetch_filters_same_observation_before_and_after_0930(monkeypatch):
     monkeypatch.setattr(
         mof_yield,
         "_load",
-        lambda kind, _now: history if kind == "history" else current,
+        lambda kind, _now, *, data_context: history if kind == "history" else current,
     )
 
     before = datetime(2026, 7, 21, 9, 29, tzinfo=_TOKYO)
     after = datetime(2026, 7, 21, 9, 30, tzinfo=_TOKYO)
     before_points = mof_yield.fetch_points(
         date(2026, 6, 1), date(2026, 7, 21), as_of=before, now=before
-    )
+    , data_context=request_context())
     after_points = mof_yield.fetch_points(
         date(2026, 6, 1), date(2026, 7, 21), as_of=after, now=after
-    )
+    , data_context=request_context())
 
     assert before_points[-1][0] == "2026-07-16"
     assert after_points[-1][0] == "2026-07-17"
@@ -105,7 +106,7 @@ def test_fetch_filters_same_observation_before_and_after_0930(monkeypatch):
 @pytest.mark.unit
 def test_historical_analysis_uses_end_of_day_visibility(monkeypatch):
     points = [("2024-02-28", "0.72"), ("2024-02-29", "0.73")]
-    monkeypatch.setattr(mof_yield, "_load", lambda *_args: points)
+    monkeypatch.setattr(mof_yield, "_load", lambda *_args, data_context: points)
     now = datetime(2026, 7, 21, 10, 0, tzinfo=_TOKYO)
 
     visible = mof_yield.fetch_points(
@@ -113,6 +114,7 @@ def test_historical_analysis_uses_end_of_day_visibility(monkeypatch):
         date(2024, 3, 1),
         as_of=mof_yield.analysis_as_of(date(2024, 3, 1), now),
         now=now,
+        data_context=request_context(),
     )
 
     assert visible == points
@@ -124,7 +126,7 @@ def test_new_month_uses_prior_current_file_until_history_absorbs_it(monkeypatch)
     prior_current = [("2026-07-30", "2.7"), ("2026-07-31", "2.71")]
     seen = []
 
-    def load(kind, _now):
+    def load(kind, _now, *, data_context):
         seen.append(kind)
         return history if kind == "history" else prior_current
 
@@ -133,7 +135,7 @@ def test_new_month_uses_prior_current_file_until_history_absorbs_it(monkeypatch)
 
     points = mof_yield.fetch_points(
         date(2026, 6, 1), date(2026, 8, 1), as_of=now, now=now
-    )
+    , data_context=request_context())
 
     assert seen == ["history", "current"]
     # July 31 is only published on Monday August 3; July 30 was public on July 31.
@@ -151,10 +153,10 @@ def test_new_month_skips_empty_current_file_once_history_covers_prior_month(
 
     points = mof_yield.fetch_points(
         date(2026, 7, 1), date(2026, 8, 3), as_of=now, now=now
-    )
+    , data_context=request_context())
 
     assert points == [("2026-07-31", "2.71")]
-    load.assert_called_once_with("history", now)
+    load.assert_called_once_with("history", now, data_context=request_context())
 
 
 @pytest.mark.unit
@@ -164,12 +166,12 @@ def test_current_cache_cross_instance_hit_and_publication_expiry(monkeypatch):
     monkeypatch.setattr(mof_yield, "_download", download)
     now = datetime(2026, 7, 21, 10, 0, tzinfo=_TOKYO)
 
-    first = mof_yield._load("current", now)
-    path = mof_yield._cache_path("current")
+    first = mof_yield._load("current", now, data_context=request_context())
+    path = mof_yield._cache_path("current", data_context=request_context())
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
     mof_yield.clear_memory_cache()
-    second = mof_yield._load("current", now)
+    second = mof_yield._load("current", now, data_context=request_context())
 
     assert first == second
     assert download.call_count == 1
@@ -216,7 +218,7 @@ def test_schema_failure_is_not_cached(monkeypatch):
 
     for _ in range(2):
         with pytest.raises(mof_yield.MofSchemaError, match="header changed"):
-            mof_yield._load("current", now)
+            mof_yield._load("current", now, data_context=request_context())
 
     assert download.call_count == 2
-    assert not os.path.exists(mof_yield._cache_path("current"))
+    assert not os.path.exists(mof_yield._cache_path("current", data_context=request_context()))

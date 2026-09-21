@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
+from tests.data_policy import request_context
+
 
 def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
@@ -13,7 +15,7 @@ def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
         return ("## feed\n\n### old event\nPublished: 2026-09-03T10:00:00Z"
                 if len(calls) == 1 else "No news found")
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     first = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current, config=config)
     second = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=1), config=config)
     third = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=16), config=config)
@@ -23,13 +25,13 @@ def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
 
 
 def test_cache_refresh_scope_revision_and_failure(tmp_path):
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import emit_news, split_candidates
     from tradingagents.data.source_observations import capture_observations
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     calls = []
 
     def fetch(text="original"):
@@ -67,11 +69,11 @@ def test_cache_refresh_scope_revision_and_failure(tmp_path):
 def test_cache_eviction_corruption_and_disabled_mode(tmp_path):
     import sqlite3
 
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import split_candidates
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path), "news_cache_scope_limit": 2,
+    config = {**data_config(), "data_cache_dir": str(tmp_path), "news_cache_scope_limit": 2,
               "news_cache_total_limit": 3}
     current = datetime(2026, 9, 5, tzinfo=UTC)
     body = "## feed" + "".join(f"\n\n### event{i}\nPublished: 2026-09-0{i+1}" for i in range(4))
@@ -99,10 +101,10 @@ def test_cache_eviction_corruption_and_disabled_mode(tmp_path):
 def test_cache_concurrent_writes_remain_readable(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     def request(index):
         return fetch_news_feed("one", "GOOG", "2026-09-01", "2026-09-05",
                                lambda: f"## feed\n\n### event{index}\nPublished: 2026-09-03",
@@ -117,15 +119,15 @@ def test_cache_concurrent_writes_remain_readable(tmp_path):
 def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path):
     from langchain_core.messages import ToolMessage
 
+    from tests.data_policy import data_config
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.data.config import get_config
     from tradingagents.data.incremental_us import _collect_news
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import finalize_news
     from tradingagents.research.full.evidence import collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     args = ("yfinance", "GOOG", "2026-09-01", "2026-09-05")
     fetch_news_feed(*args, lambda: "## news\n\n### event\nPublished: 2026-09-03T10:00:00Z", config=config, now=lambda: current)
     def route(*_args, **_kwargs):
@@ -143,11 +145,11 @@ def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path
 
 
 def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_path):
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import split_candidates
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     body = fetch_news_feed("JP", "9984.T", "2026-09-04", "2026-09-04",
                            lambda: "## feed\n\n### event\nPublished: 2026-09-03T16:00:00Z", config=config)
     row = split_candidates(body)[1][0]
@@ -155,11 +157,11 @@ def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_p
 
 
 def test_global_cache_uses_utc_publication_day(tmp_path):
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import split_candidates
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     calls = []
 
@@ -194,19 +196,19 @@ def test_global_cache_uses_utc_publication_day(tmp_path):
 
 
 def test_refresh_failure_survives_incremental_admission_without_changing_article_identity(tmp_path, monkeypatch):
+    from tests.data_policy import data_config
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.data import incremental_inputs
-    from tradingagents.data.config import get_config
     from tradingagents.data.incremental_us import collect_us_incremental
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import finalize_news
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     request = _request(enabled_domains=("news",), baseline=current.date()-timedelta(days=4),
                        target=current.date(), window_start=current-timedelta(days=4), window_end=current)
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
     attempt_time = current
     def fetch():
         if attempt_time == current:
@@ -218,9 +220,9 @@ def test_refresh_failure_survives_incremental_admission_without_changing_article
         block = fetch_news_feed("yfinance", "GOOG", "2026-09-01", "2026-09-05", fetch,
                                 config=config, now=lambda: attempt_time)
         return finalize_news(block, "yfinance", "GOOG", "2026-09-01", "2026-09-05", 30)
-    original = collect_us_incremental(request, route_to_vendor=route, now=lambda: current)
+    original = collect_us_incremental(request, route_to_vendor=route, now=lambda: current, data_context=request_context())
     attempt_time = current + timedelta(minutes=16)
-    refreshed = collect_us_incremental(request, route_to_vendor=route, now=lambda: attempt_time)
+    refreshed = collect_us_incremental(request, route_to_vendor=route, now=lambda: attempt_time, data_context=request_context())
     summary, items, _ = normalize_incremental_collection(request, refreshed, sealed_at=attempt_time)
     assert len(items) == 1
     assert "cache refresh failed" in items[0].origins[0].timing
@@ -230,11 +232,11 @@ def test_refresh_failure_survives_incremental_admission_without_changing_article
 
 
 def test_cache_tracks_content_reversion_as_a_new_observed_version(tmp_path):
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import split_candidates
 
-    config = {**get_config(), "data_cache_dir": str(tmp_path), "news_cache_refresh_seconds": 0}
+    config = {**data_config(), "data_cache_dir": str(tmp_path), "news_cache_refresh_seconds": 0}
     current = datetime(2026, 9, 3, 10, tzinfo=UTC)
     def request(text, now, end="2026-09-05"):
         return fetch_news_feed("source", "GOOG", "2026-09-01", end,
@@ -280,13 +282,13 @@ def test_full_news_separates_availability_diagnostics_from_articles():
 def test_cn_query_recovery_does_not_revise_unchanged_cached_article(tmp_path, monkeypatch):
     import sqlite3
 
+    from tests.data_policy import data_config
     from tradingagents.data.cn import google_news
-    from tradingagents.data.config import get_config
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import split_candidates
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
-    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    config = {**data_config(), "data_cache_dir": str(tmp_path)}
     partial = True
     monkeypatch.setattr(google_news, "_company_names", lambda _: ("贵州茅台酒股份有限公司", "贵州茅台"))
     def fetch(query):
@@ -296,7 +298,7 @@ def test_cn_query_recovery_does_not_revise_unchanged_cached_article(tmp_path, mo
             return []
         return [{"title": "贵州茅台发布业绩", "source": "证券时报", "published": datetime(2026, 9, 4, 10)}]
     monkeypatch.setattr(google_news, "_fetch_items", fetch)
-    args = ("google", "600519.SS", "2026-09-01", "2026-09-05", lambda: google_news.get_news("600519.SS", "2026-09-01", "2026-09-05"))
+    args = ("google", "600519.SS", "2026-09-01", "2026-09-05", lambda: google_news.get_news("600519.SS", "2026-09-01", "2026-09-05", data_context=request_context()))
     first = fetch_news_feed(*args, config=config, now=lambda: current)
     partial = False
     recovered = fetch_news_feed(*args, config=config, now=lambda: current + timedelta(minutes=16))

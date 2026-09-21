@@ -1,4 +1,3 @@
-
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
@@ -10,6 +9,8 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
+from tests.data_policy import request_context
+from tradingagents.data.context import DataRequestContext
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
@@ -36,10 +37,10 @@ class _ToolState(TypedDict):
 
 
 def _invoke_tool(tool, args, trade_date="2020-01-15", context=None, config=None):
+    from tests.data_policy import data_config
     from tests.factories import analyst_runtime
-    from tradingagents.data.config import get_config
 
-    context = context or analyst_runtime(config or get_config(), analysis_date=trade_date).context
+    context = context or analyst_runtime(config or data_config(), analysis_date=trade_date).context
     workflow = StateGraph(
         _ToolState,
         **({"context_schema": RunContext} if context is not None else {}),
@@ -107,6 +108,7 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         "2019-12-01",
         "2020-01-15",
         _provenance=True,
+        data_context=request_context(),
     )
     message = result["messages"][0]
     assert "Market data analytical overview" in message.content
@@ -152,6 +154,7 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         "2019-12-01",
         "2020-01-15",
         _provenance=True,
+        data_context=context.data_context,
     )
     message = result["messages"][0]
     assert "Market data analytical overview" in message.content
@@ -180,6 +183,7 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
         "2020-01-01",
         "2020-01-15",
         _provenance=True,
+        data_context=request_context(),
     )
 
 
@@ -200,6 +204,7 @@ def test_news_tool_node_supports_bounded_extended_window():
         "2019-10-18",
         "2020-01-15",
         _provenance=True,
+        data_context=request_context(),
     )
 
 
@@ -226,6 +231,7 @@ def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
         "2019-09-17",
         "2020-01-15",
         _provenance=True,
+        data_context=DataRequestContext(config),
     )
     assert router.call_args_list == [expected, expected]
 
@@ -237,7 +243,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
     retrieved.isoformat.return_value = "2026-07-17T01:02:03+00:00"
     clock.now.return_value = retrieved
 
-    def live_result(*_args):
+    def live_result(*_args, data_context):
         assert not clock.now.called
         return "LIVE"
 
@@ -268,7 +274,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
         {"topic": "Fed rate cut", "limit": 3},
         trade_date="2026-07-17",
     )
-    router.assert_called_once_with("get_prediction_markets", "Fed rate cut", 3)
+    router.assert_called_once_with("get_prediction_markets", "Fed rate cut", 3, data_context=request_context())
     content = live["messages"][0].content
     assert strip_provenance_markers(content) == "LIVE"
     record = extract_provenance(content)[0]

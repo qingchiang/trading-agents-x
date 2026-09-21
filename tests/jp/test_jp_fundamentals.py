@@ -1,6 +1,7 @@
 """JP fundamentals assembler: date-safe valuation ratios computed from the
 J-Quants summary + as-of price. All J-Quants/price fetches are mocked, so these
 run without network or keys."""
+
 import unittest
 from unittest import mock
 
@@ -8,6 +9,7 @@ import pandas as pd
 import pytest
 import requests
 
+from tests.data_policy import request_context
 from tradingagents.data.jp import jp_fundamentals
 from tradingagents.provenance import extract_provenance
 
@@ -73,7 +75,7 @@ class JPFundamentalsTests(unittest.TestCase):
                 mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame", return_value=price_df), \
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes",
                                   return_value=bench_df if bench_df is not None else price_df):
-            return jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
+            return jp_fundamentals.get_fundamentals("7011.T", "2026-06-26", data_context=request_context())
 
     def test_fy_case_matches_golden_ratios(self):
         # FY disclosure (7011.T @ 2026-06-26): every ratio checked against the
@@ -115,7 +117,7 @@ class JPFundamentalsTests(unittest.TestCase):
                 mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame",
                                   return_value=_price_df(3567.0, 5208.0, 3171.0)), \
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes", side_effect=RuntimeError("no index")):
-            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
+            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26", data_context=request_context())
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)
         self.assertIn("PE: 36.08 (TTM)", out)   # rest of the block intact
 
@@ -128,7 +130,7 @@ class JPFundamentalsTests(unittest.TestCase):
                                   return_value=_price_df(3567.0, 5208.0, 3171.0)), \
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes",
                                   side_effect=requests.ConnectionError("reset")):
-            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
+            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26", data_context=request_context())
         self.assertIn("BASE-OVERVIEW", out)
         self.assertIn("PE: 36.08 (TTM)", out)
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)
@@ -145,7 +147,7 @@ class JPFundamentalsTests(unittest.TestCase):
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes",
                                   return_value=_price_df(3567.0, 5208.0, 3171.0)), \
                 mock.patch.object(jp_fundamentals, "get_analyst_forward", return_value=analyst) as gaf:
-            out = jp_fundamentals.get_fundamentals("7011.T", curr_date)
+            out = jp_fundamentals.get_fundamentals("7011.T", curr_date, data_context=request_context())
         return out, gaf
 
     def test_live_mode_adds_analyst_forward_overlay(self):
@@ -220,7 +222,7 @@ class JPFundamentalsTests(unittest.TestCase):
         with mock.patch.object(jp_fundamentals.jqf, "get_fundamentals", return_value="BASE-OVERVIEW"), \
                 mock.patch.object(jp_fundamentals.jqf, "fetch_periods", return_value=("7011.T", [_FY])), \
                 mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame", side_effect=RuntimeError("halted")):
-            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
+            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26", data_context=request_context())
         self.assertIn("BASE-OVERVIEW", out)
         self.assertIn("Price: N/A", out)
         self.assertIn("PE: N/A", out)
@@ -267,7 +269,7 @@ class JPFundamentalsTests(unittest.TestCase):
                 mock.patch.object(jp_fundamentals.jqf, "fetch_periods", side_effect=fake_periods), \
                 mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame", side_effect=fake_ohlcv), \
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes", side_effect=fake_topix):
-            jp_fundamentals.get_fundamentals("7011.T", "2024-03-15")
+            jp_fundamentals.get_fundamentals("7011.T", "2024-03-15", data_context=request_context())
         self.assertEqual(seen["periods_date"], "2024-03-15")
         self.assertEqual(seen["ohlcv_end"], "2024-03-15")  # window ends at curr_date, not today
         self.assertEqual(seen["topix_end"], "2024-03-15")  # TOPIX also date-safe

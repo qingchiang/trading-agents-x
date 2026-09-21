@@ -22,7 +22,7 @@ from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.utils import get_current_date
 from tradingagents.domain.measurement import classify_vendor_unit
 
@@ -138,7 +138,7 @@ class SeriesCache:
         self._pruned = False
         self._writes_since_prune = 0
 
-    def get(self, key):
+    def get(self, key, *, data_context: DataRequestContext):
         if key in self._data:
             entry = self._data[key]
             settled = self._is_settled(key)
@@ -152,7 +152,7 @@ class SeriesCache:
                 self._data.move_to_end(key)  # mark most-recently-used
                 return entry.value
             del self._data[key]
-        entry = self._disk_get(key)
+        entry = self._disk_get(key, data_context=data_context)
         if entry is not None:
             self._remember(
                 key,
@@ -163,14 +163,14 @@ class SeriesCache:
             return entry.value
         return None
 
-    def put(self, key, value) -> None:
+    def put(self, key, value, *, data_context: DataRequestContext) -> None:
         self._remember(key, value)
-        self._disk_put(key, value)
+        self._disk_put(key, value, data_context=data_context)
 
-    def put_observation(self, key, value: dict) -> None:
+    def put_observation(self, key, value: dict, *, data_context: DataRequestContext) -> None:
         """Keep a macro producer's retrieval receipt with its series payload."""
         value.setdefault("retrieved_at", datetime.fromtimestamp(time.time(), UTC).isoformat())
-        self.put(key, value)
+        self.put(key, value, data_context=data_context)
 
     def clear(self) -> None:
         # In-memory only: the persisted disk layer is deliberately NOT purged here
@@ -199,13 +199,13 @@ class SeriesCache:
         while len(self._data) > self._max:
             self._data.popitem(last=False)  # evict least-recently-used
 
-    def _disk_dir(self) -> str | None:
+    def _disk_dir(self, *, data_context: DataRequestContext) -> str | None:
         if self._namespace is None:
             return None
-        return os.path.join(get_config()["data_cache_dir"], "macro", self._namespace)
+        return os.path.join(data_context.config["data_cache_dir"], "macro", self._namespace)
 
-    def _disk_file(self, key) -> str | None:
-        disk_dir = self._disk_dir()
+    def _disk_file(self, key, *, data_context: DataRequestContext) -> str | None:
+        disk_dir = self._disk_dir(data_context=data_context)
         if disk_dir is None:
             return None
         # Readable prefix for eyeballing the dir, plus a hash of the full key so
@@ -215,9 +215,9 @@ class SeriesCache:
         digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16]
         return os.path.join(disk_dir, f"{prefix}__{digest}.json")
 
-    def _recent_disk_file(self, key) -> str | None:
+    def _recent_disk_file(self, key, *, data_context: DataRequestContext) -> str | None:
         """Return the short-lived cache path, kept distinct from settled data."""
-        path = self._disk_file(key)
+        path = self._disk_file(key, data_context=data_context)
         if path is None:
             return None
         return path.removesuffix(".json") + ".recent.json"
@@ -241,9 +241,9 @@ class SeriesCache:
             return False
         return key_date <= today - timedelta(days=_SETTLE_GRACE_DAYS)
 
-    def _disk_get(self, key):
+    def _disk_get(self, key, *, data_context: DataRequestContext):
         settled = self._is_settled(key)
-        path = self._disk_file(key) if settled else self._recent_disk_file(key)
+        path = self._disk_file(key, data_context=data_context) if settled else self._recent_disk_file(key, data_context=data_context)
         if path is None:
             return None
         ttl = _DISK_TTL_SECONDS if settled else self._recent_ttl_seconds
@@ -261,11 +261,11 @@ class SeriesCache:
         except (OSError, ValueError):
             return None
 
-    def _disk_put(self, key, value) -> None:
+    def _disk_put(self, key, value, *, data_context: DataRequestContext) -> None:
         settled = self._is_settled(key)
         if not settled and self._recent_ttl_seconds is None:
             return
-        path = self._disk_file(key) if settled else self._recent_disk_file(key)
+        path = self._disk_file(key, data_context=data_context) if settled else self._recent_disk_file(key, data_context=data_context)
         if path is None:
             return
         disk_dir = os.path.dirname(path)
@@ -288,7 +288,7 @@ class SeriesCache:
         if settled:
             # A key that crossed the grace boundary must never keep serving the
             # short-lived snapshot under long-term cache semantics.
-            recent_path = self._recent_disk_file(key)
+            recent_path = self._recent_disk_file(key, data_context=data_context)
             if recent_path is not None:
                 self._remove(recent_path)
         self._writes_since_prune += 1

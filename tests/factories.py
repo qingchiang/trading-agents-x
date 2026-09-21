@@ -165,7 +165,7 @@ def captured_analyst_prompt(monkeypatch, role, *, language="English"):
 
     module = import_module(f"tradingagents.research.analysts.{role}_analyst")
     if role == "news":
-        monkeypatch.setattr(module, "get_global_macro_panel", lambda *_: "Offline macro input")
+        monkeypatch.setattr(module, "get_global_macro_panel", lambda *_, data_context: "Offline macro input")
     if role == "sentiment":
         monkeypatch.setattr(module, "is_near_live", lambda *_: False)
         monkeypatch.setattr(module, "route_to_vendor", lambda *_, **__: "Offline news input")

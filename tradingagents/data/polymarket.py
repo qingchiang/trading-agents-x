@@ -9,11 +9,14 @@ Uses Polymarket's public Gamma API (https://gamma-api.polymarket.com) — no key
 no auth. Each market's ``outcomePrices`` are the implied probabilities of its
 outcomes (a "Yes" at 0.76 means the market prices a 76% chance).
 """
+
 import json
 import logging
 from datetime import UTC, datetime
 
 import requests
+
+from tradingagents.data.context import DataRequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +68,7 @@ def _is_forward_looking(market: dict, now: datetime) -> bool:
     )
 
 
-def get_prediction_markets(topic: str, limit: int | None = None) -> str:
+def get_prediction_markets(topic: str, limit: int | None = None, *, data_context: DataRequestContext) -> str:
     """Return live prediction-market probabilities for an event topic.
 
     Args:

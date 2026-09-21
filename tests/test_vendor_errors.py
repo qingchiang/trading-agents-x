@@ -2,6 +2,7 @@
 condition derives from VendorError, so the router catches base types and any
 vendor slots in without new handling.
 """
+
 import copy
 import unittest
 from unittest import mock
@@ -9,12 +10,12 @@ from unittest import mock
 import pytest
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface
 from tradingagents.data.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
     AlphaVantageRateLimitError,
 )
-from tradingagents.data.config import bind_config
 from tradingagents.data.fred import FredNotConfiguredError
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
@@ -49,14 +50,14 @@ class HierarchyTests(unittest.TestCase):
 @pytest.mark.unit
 class RouterHandlesBaseTypesTests(unittest.TestCase):
     def setUp(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_rate_limit_subclass_caught_by_base(self):
         # A vendor-named rate-limit error skips to the next vendor in the chain.
-        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+        configure_data({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 
         def _throttled(*a, **k):
             raise AlphaVantageRateLimitError("slow down")
@@ -66,11 +67,11 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
             {"get_stock_data": {"alpha_vantage": _throttled, "yfinance": lambda *a, **k: "YF"}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
         self.assertEqual(out, "YF")
 
     def test_focused_incremental_route_does_not_fall_back_after_rate_limit(self):
-        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+        configure_data({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 
         def _throttled(*a, **k):
             raise AlphaVantageRateLimitError("slow down")
@@ -84,11 +85,12 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
             interface.route_to_vendor(
                 "get_stock_data", "AAPL", "2026-01-01", "2026-01-10",
                 _stop_on_rate_limit=True,
+                data_context=request_context(),
             )
         fallback.assert_not_called()
 
     def test_not_configured_falls_through_to_next_vendor(self):
-        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+        configure_data({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
@@ -98,12 +100,12 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
             {"get_stock_data": {"alpha_vantage": _unconfigured, "yfinance": lambda *a, **k: "YF"}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
         self.assertEqual(out, "YF")
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
         # With no fallback, the not-configured condition must surface (not vanish).
-        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage"}})
+        configure_data({"data_vendors": {"core_stock_apis": "alpha_vantage"}})
 
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
@@ -113,7 +115,7 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
             {"get_stock_data": {"alpha_vantage": _unconfigured}},
             clear=False,
         ), self.assertRaises(AlphaVantageNotConfiguredError):
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
 
 
 if __name__ == "__main__":

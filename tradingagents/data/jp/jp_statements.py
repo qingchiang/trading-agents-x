@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp import jquants_fundamentals as jqf
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.y_finance import get_statement_frame
@@ -207,22 +208,22 @@ def _with_official_provenance(
     )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """J-Quants income summary + curated yfinance line items."""
-    base = jqf.get_income_statement(ticker, freq, curr_date)
+    base = jqf.get_income_statement(ticker, freq, curr_date, data_context=data_context)
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "income", freq, curr_date)
     return _with_official_provenance(result, "income", curr_date)
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """J-Quants balance-sheet summary + curated yfinance line items."""
-    base = jqf.get_balance_sheet(ticker, freq, curr_date)
+    base = jqf.get_balance_sheet(ticker, freq, curr_date, data_context=data_context)
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "balance", freq, curr_date)
     return _with_official_provenance(result, "balance", curr_date)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """J-Quants cash-flow summary + curated yfinance line items."""
-    base = jqf.get_cashflow(ticker, freq, curr_date)
+    base = jqf.get_cashflow(ticker, freq, curr_date, data_context=data_context)
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "cashflow", freq, curr_date)
     return _with_official_provenance(result, "cashflow", curr_date)

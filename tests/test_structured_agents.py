@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.data_policy import configure_data, data_config, request_context
 from tests.factories import analyst_runtime
-from tradingagents.data.config import bind_config, get_config
 from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
@@ -57,7 +57,7 @@ def _run(
 ):
     captured: dict = {}
     if routes:
-        bind_config({"data_vendors_by_market": routes})
+        configure_data({"data_vendors_by_market": routes})
     with (
         mock.patch(
             f"{_MODULE}.fetch_stocktwits_messages",
@@ -87,7 +87,7 @@ def _run(
         else:
             news.return_value = "NEWS_DATA"
         llm = llm or _capturing_llm(captured)
-        result = create_sentiment_analyst(llm)(_state(ticker, trade_date), analyst_runtime(get_config()))
+        result = create_sentiment_analyst(llm)(_state(ticker, trade_date), analyst_runtime(data_config()))
     return captured, stocktwits, reddit, market_signals, news, result
 
 
@@ -161,7 +161,7 @@ def test_markdown_draft_is_persisted_with_local_confidence():
 def test_us_run_uses_social_sources_and_separate_windows():
     captured, stocktwits, reddit, signals, news, _ = _run()
 
-    news.assert_called_once_with("get_news", "NVDA", "2026-01-01", "2026-01-15", _provenance=True)
+    news.assert_called_once_with("get_news", "NVDA", "2026-01-01", "2026-01-15", _provenance=True, data_context=request_context())
     stocktwits.assert_called_once_with(
         "NVDA",
         limit=30,
@@ -208,7 +208,7 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(ticker, route):
 
     stocktwits.assert_not_called()
     reddit.assert_not_called()
-    signals.assert_called_once_with(ticker, "2026-01-15")
+    signals.assert_called_once_with(ticker, "2026-01-15", data_context=request_context())
     prompt = "\n".join(map(str, captured["prompt"]))
     assert "unavailable: no coverage for this market" in prompt
     assert "SIGNAL_DATA" in prompt
@@ -264,7 +264,7 @@ def test_news_error_degrades_to_a_redacted_type_marker():
     ],
 )
 def test_report_language_contract_is_explicit(language, expected):
-    bind_config({"output_language": language})
+    configure_data({"output_language": language})
     captured, *_ = _run()
     assert expected in "\n".join(map(str, captured["prompt"]))
 

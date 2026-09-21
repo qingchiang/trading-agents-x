@@ -2,6 +2,7 @@ from tradingagents.data.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
     _make_api_request,
 )
+from tradingagents.data.context import DataRequestContext
 
 
 def get_indicator(
@@ -12,7 +13,7 @@ def get_indicator(
     interval: str = "daily",
     time_period: int = 14,
     series_type: str = "close"
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """
     Returns Alpha Vantage technical indicator values over a time window.
 

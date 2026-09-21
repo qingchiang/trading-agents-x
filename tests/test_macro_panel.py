@@ -11,9 +11,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data, data_config, request_context
 from tests.factories import analyst_runtime
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.data.config import bind_config, get_config
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.provenance import attach_provenance, extract_provenance
@@ -88,7 +88,7 @@ class MacroPanelTests(unittest.TestCase):
             "fetch_series",
             return_value=_series([("2025-06-01", "1.0"), ("2026-06-01", "2.0")]),
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("Global macro panel (as of 2026-06-20)", out)
         self.assertIn("| Indicator | US | Japan | China |", out)
         # every dimension heading and indicator label appears
@@ -109,7 +109,7 @@ class MacroPanelTests(unittest.TestCase):
             "fetch_series",
             return_value=_series([("2026-06-01", "1.0")]),
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
 
         policy_row = next(
             line for line in out.splitlines() if "Policy / reference rate" in line
@@ -126,7 +126,7 @@ class MacroPanelTests(unittest.TestCase):
             fallback_reason="MOF primary retrieval unavailable",
         )
 
-        def cn_fetch(indicator, *_args):
+        def cn_fetch(indicator, *_args, data_context):
             data = _series([("2026-06-19", "7.1")], timing="trade-date filtered")
             if indicator == "cn_10y_yield":
                 data.update(
@@ -157,7 +157,7 @@ class MacroPanelTests(unittest.TestCase):
             mock.patch.object(jp_macro, "fetch_series", return_value=jp_data),
             mock.patch.object(cn_macro, "fetch_series", side_effect=cn_fetch),
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
 
         records = {
             record.evidence: record
@@ -192,7 +192,7 @@ class MacroPanelTests(unittest.TestCase):
         )
         jp_data.update(actual_source="Japan Ministry of Finance", frequency="Daily")
 
-        def cn_fetch(indicator, *_args):
+        def cn_fetch(indicator, *_args, data_context):
             data = _series([("2026-06-19", "7.1")], timing="trade-date filtered")
             if indicator == "cn_10y_yield":
                 data.update(actual_source="Eastmoney", frequency="Daily")
@@ -217,7 +217,7 @@ class MacroPanelTests(unittest.TestCase):
             mock.patch.object(jp_macro, "fetch_series", return_value=jp_data),
             mock.patch.object(cn_macro, "fetch_series", side_effect=cn_fetch),
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
 
         records = [
             record
@@ -232,7 +232,7 @@ class MacroPanelTests(unittest.TestCase):
         fred_seen, estat_seen, boj_seen, cn_seen, jp_seen = [], [], [], [], []
 
         def _spy(seen, val):
-            def fake(indicator, curr_date, look_back_days=None):
+            def fake(indicator, curr_date, look_back_days=None, *, data_context):
                 seen.append(indicator)
                 return _series([("2025-01-01", val)])
 
@@ -245,7 +245,7 @@ class MacroPanelTests(unittest.TestCase):
             mock.patch.object(cn_macro, "fetch_series", side_effect=_spy(cn_seen, "3.0")),
             mock.patch.object(jp_macro, "fetch_series", side_effect=_spy(jp_seen, "2.0")),
         ):
-            macro_panel.get_global_macro_panel("2026-06-20")
+            macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertEqual(set(estat_seen), {"jp_cpi", "jp_core_cpi"})
         self.assertEqual(set(boj_seen), {"jp_policy_rate", "jp_tankan"})
         self.assertIn("fed_funds_rate", fred_seen)  # US rate via FRED
@@ -276,11 +276,11 @@ class MacroPanelTests(unittest.TestCase):
             mock.patch.object(cn_macro, "fetch_series", side_effect=AssertionError("fetched")),
             mock.patch.object(jp_macro, "fetch_series", side_effect=AssertionError("fetched")),
         ):
-            self.assertEqual(macro_panel._cell(None, "2026-06-20"), "n/a")
+            self.assertEqual(macro_panel._cell(None, "2026-06-20", data_context=request_context()), "n/a")
 
     def test_cell_failure_degrades_without_raising(self):
         with mock.patch.object(fred, "fetch_series", side_effect=RuntimeError("boom")):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("n/a", out)
         self.assertIn("| Indicator | US | Japan | China |", out)  # still a full table
         records = {record.source: record for record in extract_provenance(out)}
@@ -295,7 +295,7 @@ class MacroPanelTests(unittest.TestCase):
         with mock.patch.object(
             fred, "get_api_key", side_effect=fred.FredNotConfiguredError("no key")
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("| Indicator | US | Japan | China |", out)
         self.assertIn("USD/JPY", out)
         self.assertIn("3.0 (2025-06-01)", out)
@@ -304,7 +304,7 @@ class MacroPanelTests(unittest.TestCase):
         self.assertNotIn("unavailable", records["China macro"].timing)
 
     def test_one_china_cell_failure_does_not_hide_other_china_cells(self):
-        def fetch(indicator, *_args):
+        def fetch(indicator, *_args, data_context):
             if indicator == "cn_cpi":
                 raise RuntimeError("CPI endpoint unavailable")
             return _series(
@@ -313,7 +313,7 @@ class MacroPanelTests(unittest.TestCase):
             )
 
         with mock.patch.object(cn_macro, "fetch_series", side_effect=fetch):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
 
         self.assertIn("| CPI / inflation |", out)
         self.assertIn("cn_pmi (2026-06-01)", out)
@@ -338,17 +338,17 @@ class MacroPanelTests(unittest.TestCase):
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.
         with mock.patch.object(fred, "fetch_series", return_value=_series([("2026-01-01", "5.0")])):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("5.0 (2026-01-01)", out)
         self.assertNotIn("+0.00", out)
 
     def test_empty_series_is_na(self):
         with mock.patch.object(fred, "fetch_series", return_value=_series([])):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("n/a", out)
 
     def test_cpi_and_gdp_use_exact_yoy_and_require_comparator(self):
-        def fetch(indicator, *_args):
+        def fetch(indicator, *_args, data_context):
             if indicator == "cpi":
                 return _series([("2025-06-01", "100"), ("2026-06-01", "103")])
             if indicator == "real_gdp":
@@ -356,7 +356,7 @@ class MacroPanelTests(unittest.TestCase):
             return _series([("2026-06-01", "2")])
 
         with mock.patch.object(fred, "fetch_series", side_effect=fetch):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("+3.0% YoY (2026-06-01)", out)
         gdp_row = next(line for line in out.splitlines() if "GDP / growth" in line)
         self.assertIn("n/a", gdp_row)
@@ -366,12 +366,12 @@ class MacroPanelTests(unittest.TestCase):
     def test_lookahead_curr_date_passed_to_fetch(self):
         captured = {}
 
-        def fake(indicator, curr_date, look_back_days=None):
+        def fake(indicator, curr_date, look_back_days=None, *, data_context):
             captured["curr_date"] = curr_date
             return _series([("2025-01-01", "1.0")])
 
         with mock.patch.object(fred, "fetch_series", side_effect=fake):
-            macro_panel.get_global_macro_panel("2026-06-20")
+            macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertEqual(captured["curr_date"], "2026-06-20")
 
     def test_non_numeric_latest_renders_without_delta(self):
@@ -380,7 +380,7 @@ class MacroPanelTests(unittest.TestCase):
             "fetch_series",
             return_value=_series([("2025-01-01", "1.0"), ("2026-01-01", "x")]),
         ):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
+            out = macro_panel.get_global_macro_panel("2026-06-20", data_context=request_context())
         self.assertIn("x (2026-01-01)", out)  # graceful, no crash on bad number
 
 
@@ -390,7 +390,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
     get_macro_indicators microscope tool bound."""
 
     def setUp(self):
-        bind_config(deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
@@ -420,7 +420,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
                 return_value=market_flows,
             ) as flows,
         ):
-            result = create_news_analyst(llm)(state, analyst_runtime(get_config()))
+            result = create_news_analyst(llm)(state, analyst_runtime(data_config()))
         return captured, result, flows
 
     def test_panel_is_injected_into_prompt(self):
@@ -490,7 +490,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
         self.assertIn("do not attempt to supply or override any date", captured["prompt"])
 
     def test_prompt_preserves_configured_recent_window_longer_than_90_dates(self):
-        bind_config({"ticker_news_lookback_days": 120})
+        configure_data({"ticker_news_lookback_days": 120})
         captured, _, _ = self._run()
         self.assertIn(
             "window='recent' first; it covers 2025-09-17 through 2026-01-15",

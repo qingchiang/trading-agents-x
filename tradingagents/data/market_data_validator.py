@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, load_ohlcv
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.measurement import instrument_currency
@@ -71,10 +72,12 @@ def build_verified_market_snapshot(
     curr_date: str,
     look_back_days: int = 30,
     indicators: Iterable[str] | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Build a yfinance-backed snapshot (the default US vendor implementation)."""
     return render_verified_market_snapshot(
-        load_ohlcv(symbol, curr_date),
+        load_ohlcv(symbol, curr_date, data_context=data_context),
         symbol,
         curr_date,
         look_back_days,

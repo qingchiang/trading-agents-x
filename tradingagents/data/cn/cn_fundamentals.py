@@ -15,6 +15,7 @@ from tradingagents.data.cn.sina_finance import (
     filter_visible_records,
     validate_analysis_date,
 )
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.y_finance import get_fundamentals as get_yfinance_fundamentals
@@ -130,7 +131,7 @@ def _render_abstract(frame: pd.DataFrame, entity_type: str) -> tuple[str, list[s
     return output.fillna("N/A").to_csv(index=False), missing
 
 
-def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
+def _live_yfinance_block(ticker: str, curr_date: str | None, *, data_context: DataRequestContext) -> str:
     if curr_date is not None and not is_near_live(curr_date, ticker):
         return attach_evidence_span(
             attach_provenance(
@@ -148,7 +149,7 @@ def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
             temporal_scope="live_only",
         )
     try:
-        result = get_yfinance_fundamentals(ticker, curr_date)
+        result = get_yfinance_fundamentals(ticker, curr_date, data_context=data_context)
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
@@ -182,7 +183,7 @@ def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
     )
 
 
-def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
+def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """Assemble CNINFO profile, disclosure-filtered metrics, and live valuation."""
     validate_analysis_date(curr_date)
     canonical, _code, _exchange = canonical_a_share(ticker)
@@ -330,4 +331,4 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
         temporal_scope="point_in_time",
     )
     base = f"{profile_block}\n\n{abstract_block}"
-    return base + "\n\n" + _live_yfinance_block(ticker, curr_date)
+    return base + "\n\n" + _live_yfinance_block(ticker, curr_date, data_context=data_context)

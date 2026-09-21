@@ -30,7 +30,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.edinet_common import effective_window as _edinet_effective_window
 from tradingagents.data.jp.edinet_news import get_news as _edinet_news
 from tradingagents.data.jp.google_news import get_news as _google_news
@@ -65,6 +65,7 @@ def _safe_feed(
     stop_on_rate_limit: bool = False,
     cache_start: str | None = None,
     cache_end: str | None = None,
+    data_context: DataRequestContext,
 ) -> str:
     """Run one sub-feed, degrading any failure to an availability note.
 
@@ -74,7 +75,7 @@ def _safe_feed(
     """
     try:
         with candidate_scope():
-            return fetch_news_feed(source, ticker, cache_start or start_date, cache_end or end_date, lambda: fetch(ticker, start_date, end_date), config=get_config())
+            return fetch_news_feed(source, ticker, cache_start or start_date, cache_end or end_date, lambda: fetch(ticker, start_date, end_date, data_context=data_context), config=data_context.config)
     except VendorRateLimitError:
         if stop_on_rate_limit:
             raise
@@ -90,7 +91,7 @@ def _safe_feed(
         return f"<{source} unavailable: {type(exc).__name__}>"
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     """Return EDINET + TDnet disclosures + Google-News media for ``ticker``.
 
     Combines whichever sub-feeds have data (statutory filings, then timely
@@ -143,6 +144,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                 effective_end,
                 stop_on_rate_limit=True,
                 cache_start=start_date, cache_end=end_date,
+                data_context=data_context,
             )
             for source, fetch, effective_start, effective_end, _effective, _limited in feed_requests
         ]
@@ -152,12 +154,12 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
             rendered = list(
                 pool.map(
-                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, pair[1][2], pair[1][3], cache_start=start_date, cache_end=end_date),
+                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, pair[1][2], pair[1][3], cache_start=start_date, cache_end=end_date, data_context=data_context),
                     [(copy_context(), request) for request in feed_requests],
                 )
             )
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
-    limit = max(1, int(get_config()["news_article_limit"]))
+    limit = max(1, int(data_context.config["news_article_limit"]))
     blocks, merged_counts = merge_news_blocks(data_blocks, limit, start_date, end_date)
     notes: list[tuple[str, ProvenanceRecord]] = []
     omitted_data_records: list[ProvenanceRecord] = []

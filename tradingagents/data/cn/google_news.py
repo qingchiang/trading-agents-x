@@ -20,6 +20,7 @@ from tradingagents.data.cn.common import (
 )
 from tradingagents.data.cn.company import get_company_profile
 from tradingagents.data.cn.news_sources import news_quotas
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
 from tradingagents.data.news_quality import (
     build_chinese_company_aliases,
@@ -108,7 +109,7 @@ def _safe_query(query: str) -> tuple[list[dict], Exception | None]:
         return [], exc
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     """Return entity-filtered Chinese media headlines within CST calendar days."""
     counts = CandidateFilterCounts()
     _canonical, code, _exchange = canonical_a_share(ticker)
@@ -162,7 +163,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         seen.add(key)
         relevant.append((item, classification.tier))
 
-    _disclosure_limit, _research_limit, media_limit = news_quotas()
+    _disclosure_limit, _research_limit, media_limit = news_quotas(data_context=data_context)
     kept = relevant[:media_limit]
     counts.source_truncated = len(relevant) - len(kept)
     if not kept:

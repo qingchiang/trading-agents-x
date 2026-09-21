@@ -8,6 +8,7 @@ A free API key (https://fred.stlouisfed.org/docs/api/api_key.html) is read from
 ``FRED_API_KEY``; if it is unset the vendor raises ``FredNotConfiguredError`` so
 the routing layer treats it as "unavailable" rather than a hard crash.
 """
+
 import logging
 import re
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from datetime import datetime, timedelta
 import requests
 
 from tradingagents.credentials import credential
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import SeriesCache, render_macro_report
 from tradingagents.domain.vendor_errors import VendorNotConfiguredError
 
@@ -146,6 +148,8 @@ def fetch_series(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> dict | None:
     """Fetch a FRED series as structured data (metadata + observations).
 
@@ -162,7 +166,7 @@ def fetch_series(
     series_id = _resolve_series_id(indicator)
 
     cache_key = (series_id, curr_date, look_back_days)
-    cached = _series_cache.get(cache_key)
+    cached = _series_cache.get(cache_key, data_context=data_context)
     if cached is not None:
         return cached
 
@@ -202,7 +206,7 @@ def fetch_series(
         "start_date": start_date,
         "points": points,
     }
-    _series_cache.put_observation(cache_key, data)
+    _series_cache.put_observation(cache_key, data, data_context=data_context)
     return data
 
 
@@ -210,6 +214,8 @@ def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Fetch a FRED macroeconomic series as a formatted markdown report.
 
@@ -230,7 +236,7 @@ def get_macro_data(
     # (FredNotConfiguredError, also a ValueError) must still propagate so macro
     # degrades at the router rather than reading as a bad indicator.
     try:
-        data = fetch_series(indicator, curr_date, look_back_days)
+        data = fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
     except FredNotConfiguredError:
         raise
     except ValueError as e:

@@ -120,7 +120,7 @@ Date,Open,High,Low,Close,Volume
         web_settings,
         repository=web_repository,
         llm_factory=stub_run_llms,
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        eligibility_resolver=lambda symbol, *, data_context: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_synthesizer=default_incremental_synthesizer,
     )
 
@@ -243,7 +243,7 @@ Date,Open,High,Low,Close,Volume
         web_settings,
         repository=web_repository,
         llm_factory=stub_run_llms,
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        eligibility_resolver=lambda symbol, *, data_context: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_synthesizer=default_incremental_synthesizer,
     )
 
@@ -415,7 +415,7 @@ Date,Open,High,Low,Close,Volume
         web_settings,
         repository=web_repository,
         llm_factory=stub_run_llms,
-        eligibility_resolver=lambda symbol: {
+        eligibility_resolver=lambda symbol, *, data_context: {
             "symbol": symbol,
             "quote_type": "EQUITY",
         },
@@ -512,7 +512,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         content=f"admissible {ticker} evidence",
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -554,7 +554,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         web_settings,
         repository=web_repository,
         llm_factory=stub_run_llms,
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        eligibility_resolver=lambda symbol, *, data_context: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_collector=collect,
         incremental_synthesizer=lambda input_: default_incremental_synthesizer(input_).model_copy(
             update={
@@ -1458,7 +1458,7 @@ async def test_run_creation_distinguishes_typed_admission_failures(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: result,
+        eligibility_resolver=lambda _ticker, *, data_context: result,
     )
     transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
     async with httpx.AsyncClient(
@@ -1654,7 +1654,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+        eligibility_resolver=lambda _ticker, *, data_context: (_ for _ in ()).throw(
             AssertionError("date context must not call the eligibility vendor")
         ),
         now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
@@ -1692,7 +1692,7 @@ async def test_future_analysis_cutoff_returns_context_without_creating_a_run(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },
@@ -1728,7 +1728,7 @@ async def test_future_analysis_cutoff_precedes_vendor_admission_failure(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+        eligibility_resolver=lambda _ticker, *, data_context: (_ for _ in ()).throw(
             RuntimeError("vendor unavailable")
         ),
         now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
@@ -2087,7 +2087,7 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
     import_configuration(settings)
     service = AnalysisService(
         settings,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },

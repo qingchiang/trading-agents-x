@@ -104,5 +104,6 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
         "annual",
         "2020-01-15",
         _provenance=True,
+        data_context=analyst_runtime(analysis_date=state["trade_date"]).context.data_context,
     )
     assert result["messages"][0].content == "SAFE"

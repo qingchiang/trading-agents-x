@@ -1,9 +1,11 @@
 """J-Quants investor-type flows (the Japanese sentiment proxy). Network mocked."""
+
 import unittest
 from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.jp import jquants_sentiment as js
 from tradingagents.data.jp.jquants_sentiment import (
     get_investor_flows,
@@ -127,7 +129,7 @@ def _margin(date, *, long="22000000", short="2000000"):
 class MarginBalanceTests(unittest.TestCase):
     def test_non_tokyo_ticker_returns_empty(self):
         with mock.patch.object(js, "fetch_records") as fr:
-            self.assertEqual(get_margin_balance("AAPL", "2026-06-25"), "")
+            self.assertEqual(get_margin_balance("AAPL", "2026-06-25", data_context=request_context()), "")
         fr.assert_not_called()
 
     def test_renders_recent_weeks_newest_first_with_credit_ratio(self):
@@ -136,7 +138,7 @@ class MarginBalanceTests(unittest.TestCase):
             _margin("2026-06-05", long="22000000", short="2000000"),
         ]
         with _patch(weeks):
-            out = get_margin_balance("9984.T", "2026-06-25")
+            out = get_margin_balance("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("信用取引", out)
         self.assertIn("Week 2026-06-05", out)
         self.assertIn("買残(long) 22,000,000", out)
@@ -152,7 +154,7 @@ class MarginBalanceTests(unittest.TestCase):
             _margin("2026-06-19", short="9999999"),  # publishes 2026-06-23 -> excluded
         ]
         with _patch(weeks):
-            out = get_margin_balance("9984.T", "2026-06-22")
+            out = get_margin_balance("9984.T", "2026-06-22", data_context=request_context())
         self.assertIn("2026-06-12", out)
         self.assertNotIn("2026-06-19", out)
         self.assertNotIn("9,999,999", out)
@@ -162,36 +164,36 @@ class MarginBalanceTests(unittest.TestCase):
         # publishes on 2025-01-06 (T+2 TSE business days across the New Year break),
         # so a backtest on 2025-01-03 (record+7) must NOT see it.
         with _patch([_margin("2024-12-27", short="9999999")]):
-            self.assertEqual(get_margin_balance("9984.T", "2025-01-03"), "")
+            self.assertEqual(get_margin_balance("9984.T", "2025-01-03", data_context=request_context()), "")
         with _patch([_margin("2024-12-27", short="9999999")]):
-            self.assertIn("2024-12-27", get_margin_balance("9984.T", "2025-01-06"))
+            self.assertIn("2024-12-27", get_margin_balance("9984.T", "2025-01-06", data_context=request_context()))
 
     def test_no_visible_weeks_returns_empty(self):
         # Only an unpublished week -> nothing to show -> omit the section.
         with _patch([_margin("2026-06-24")]):
-            self.assertEqual(get_margin_balance("9984.T", "2026-06-25"), "")
+            self.assertEqual(get_margin_balance("9984.T", "2026-06-25", data_context=request_context()), "")
 
     def test_caps_to_look_back_weeks(self):
         weeks = [_margin(f"2026-0{m}-05") for m in range(1, 6)]  # 5 published weeks
         with _patch(weeks):
-            out = get_margin_balance("9984.T", "2026-06-25", look_back_weeks=3)
+            out = get_margin_balance("9984.T", "2026-06-25", look_back_weeks=3, data_context=request_context())
         self.assertEqual(out.count("- Week "), 3)
 
     def test_zero_short_balance_renders_na_ratio(self):
         with _patch([_margin("2026-06-05", short="0")]):
-            out = get_margin_balance("9984.T", "2026-06-25")
+            out = get_margin_balance("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("credit ratio N/A", out)
 
     def test_fetch_error_degrades_to_placeholder(self):
         # Unlike a genuine no-data name (""), an error is surfaced so the LLM can
         # tell a lost official source from one this name lacks.
         with _patch(side_effect=RuntimeError("boom")):
-            out = get_margin_balance("9984.T", "2026-06-25")
+            out = get_margin_balance("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("<margin balances unavailable: RuntimeError>", out)
 
     def test_malformed_curr_date_degrades_to_placeholder(self):
         with _patch([_margin("2026-06-05")]):
-            out = get_margin_balance("9984.T", "not-a-date")
+            out = get_margin_balance("9984.T", "not-a-date", data_context=request_context())
         self.assertIn("<margin balances unavailable: ValueError>", out)
 
 
@@ -206,7 +208,7 @@ def _short(disc, *, seller="Barclays Bank PLC", ratio="0.0052", prev=None):
 class ShortPositionTests(unittest.TestCase):
     def test_non_tokyo_ticker_returns_empty(self):
         with mock.patch.object(js, "fetch_records") as fr:
-            self.assertEqual(get_short_positions("AAPL", "2026-06-25"), "")
+            self.assertEqual(get_short_positions("AAPL", "2026-06-25", data_context=request_context()), "")
         fr.assert_not_called()
 
     def test_renders_events_newest_first_with_name_and_ratio(self):
@@ -215,7 +217,7 @@ class ShortPositionTests(unittest.TestCase):
             _short("2026-06-10", seller="Barclays Bank PLC", ratio="0.0052"),
         ]
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("空売り残高報告", out)
         self.assertIn("Barclays Bank PLC — 0.52% of shares out", out)
         self.assertIn("Marshall Wace LLP", out)
@@ -223,7 +225,7 @@ class ShortPositionTests(unittest.TestCase):
 
     def test_trend_arrow_from_previous_ratio(self):
         with _patch([_short("2026-06-10", ratio="0.0052", prev="0.0048")]):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("0.52% of shares out (was 0.48% ↑)", out)
 
     def test_lookahead_excludes_future_disclosures(self):
@@ -232,7 +234,7 @@ class ShortPositionTests(unittest.TestCase):
             _short("2026-06-30", ratio="0.0099"),  # disclosed after curr_date
         ]
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("2026-06-10", out)
         self.assertNotIn("2026-06-30", out)
         self.assertNotIn("0.99%", out)
@@ -243,7 +245,7 @@ class ShortPositionTests(unittest.TestCase):
             _short("2026-06-10", ratio="0.0052"),
         ]
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("2026-06-10", out)
         self.assertNotIn("2024-01-01", out)
 
@@ -253,7 +255,7 @@ class ShortPositionTests(unittest.TestCase):
         # must exclude it.
         rows = [_short("2026-06-10", ratio="0.0052"), _short("2026-07-30", ratio="0.0099")]
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-7-5")
+            out = get_short_positions("9984.T", "2026-7-5", data_context=request_context())
         self.assertIn("2026-06-10", out)
         self.assertNotIn("2026-07-30", out)
 
@@ -265,28 +267,28 @@ class ShortPositionTests(unittest.TestCase):
             _short("2026-06-10", seller="Covered Fund", ratio="0"),
         ]
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertNotIn("No Ratio LLP", out)
         self.assertIn("Covered Fund — 0.00% of shares out", out)
 
     def test_no_disclosures_returns_empty(self):
         with _patch([]):
-            self.assertEqual(get_short_positions("9984.T", "2026-06-25"), "")
+            self.assertEqual(get_short_positions("9984.T", "2026-06-25", data_context=request_context()), "")
 
     def test_caps_to_max_rows(self):
         rows = [_short(f"2026-06-{d:02d}") for d in range(1, 12)]  # 11 in window
         with _patch(rows):
-            out = get_short_positions("9984.T", "2026-06-25", max_rows=5)
+            out = get_short_positions("9984.T", "2026-06-25", max_rows=5, data_context=request_context())
         self.assertEqual(out.count("- 2026-06-"), 5)
 
     def test_fetch_error_degrades_to_placeholder(self):
         with _patch(side_effect=RuntimeError("boom")):
-            out = get_short_positions("9984.T", "2026-06-25")
+            out = get_short_positions("9984.T", "2026-06-25", data_context=request_context())
         self.assertIn("<short positions unavailable: RuntimeError>", out)
 
     def test_malformed_curr_date_degrades_to_placeholder(self):
         with _patch([_short("2026-06-10")]):
-            out = get_short_positions("9984.T", "not-a-date")
+            out = get_short_positions("9984.T", "not-a-date", data_context=request_context())
         self.assertIn("<short positions unavailable: ValueError>", out)
 
 

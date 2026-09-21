@@ -7,12 +7,12 @@ import pytest
 from sqlalchemy import text
 from yfinance.exceptions import YFRateLimitError
 
+from tests.data_policy import request_context
 from tests.research_helpers import stub_run_llms
 from tradingagents.application.service import AnalysisService
 from tradingagents.client import TradingAgents
 from tradingagents.configuration.settings import AppSettings
 from tradingagents.data import instrument_identity as identity_dataflow
-from tradingagents.data.config import get_config
 from tradingagents.data.instrument_identity import resolve_instrument_eligibility
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.errors import (
@@ -80,7 +80,7 @@ def test_admission_rejects_non_affirmative_eligibility_before_persistence(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        eligibility_resolver=lambda _ticker: result,
+        eligibility_resolver=lambda _ticker, *, data_context: result,
     )
 
     with pytest.raises(error):
@@ -99,7 +99,7 @@ def test_execution_revalidates_before_graph_construction(app_settings, repositor
     responses = [{"symbol": "NVDA", "quote_type": "EQUITY"},
                  {"symbol": "NVDA", "quote_type": "ETF"}]
 
-    def resolve(_ticker):
+    def resolve(_ticker, *, data_context):
         return responses.pop(0)
 
     class Graph:
@@ -128,7 +128,7 @@ def test_resolver_failure_is_typed_as_temporarily_unavailable(
     app_settings,
     repository,
 ) -> None:
-    def resolve(_ticker):
+    def resolve(_ticker, *, data_context):
         raise ValueError("provider schema changed")
 
     service = AnalysisService(
@@ -204,7 +204,7 @@ def test_yfinance_eligibility_wraps_provider_failures(
     monkeypatch.setattr(identity_dataflow, "yf_retry", fail)
 
     with pytest.raises(VendorError, match="eligibility lookup failed"):
-        resolve_instrument_eligibility("NVDA")
+        resolve_instrument_eligibility("NVDA", data_context=request_context())
 
 
 def test_yfinance_eligibility_preserves_rate_limit_semantics(
@@ -216,7 +216,7 @@ def test_yfinance_eligibility_preserves_rate_limit_semantics(
     monkeypatch.setattr(identity_dataflow, "yf_retry", rate_limited)
 
     with pytest.raises(VendorRateLimitError, match="rate limited"):
-        resolve_instrument_eligibility("NVDA")
+        resolve_instrument_eligibility("NVDA", data_context=request_context())
 
 
 def test_provider_non_string_classification_cannot_be_reduced_to_equity(
@@ -250,7 +250,7 @@ def test_representative_listed_equity_matrix_is_admitted(
 ) -> None:
     observed: list[str] = []
 
-    def resolve(symbol: str):
+    def resolve(symbol: str, *, data_context):
         observed.append(symbol)
         return {"symbol": symbol, "quote_type": "EQUITY"}
 
@@ -286,7 +286,7 @@ def test_retry_revalidates_legacy_non_equity_before_requeue(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "ETF" if ticker == "SPY" else "EQUITY",
         },
@@ -311,7 +311,7 @@ def test_source_run_revalidates_legacy_non_equity_before_creation(
 ) -> None:
     observed: list[str] = []
 
-    def resolve(ticker: str):
+    def resolve(ticker: str, *, data_context):
         observed.append(ticker)
         return {
             "symbol": ticker,
@@ -346,9 +346,9 @@ def test_retry_uses_current_eligibility_config_for_legacy_snapshot(
     settings = app_settings
     observed_vendors: list[str | None] = []
 
-    def resolve(ticker: str):
+    def resolve(ticker: str, *, data_context):
         observed_vendors.append(
-            get_config()["data_vendors"].get("instrument_eligibility")
+            data_context.config["data_vendors"].get("instrument_eligibility")
         )
         return {"symbol": ticker, "quote_type": "EQUITY"}
 
@@ -388,7 +388,7 @@ def test_public_python_operations_expose_typed_admission_errors(
     ticker,
     error,
 ) -> None:
-    def resolve(symbol: str):
+    def resolve(symbol: str, *, data_context):
         if symbol == "SPY":
             return {"symbol": symbol, "quote_type": "ETF"}
         return {"symbol": symbol, "quote_type": 17}

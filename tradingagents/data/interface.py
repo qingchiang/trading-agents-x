@@ -27,7 +27,7 @@ from tradingagents.data.cn.cn_statements import (
     get_income_statement as get_cn_income_statement,
 )
 from tradingagents.data.cn.sina_finance import validate_analysis_date as validate_cn_analysis_date
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.fred import get_macro_data as get_fred_macro_data
 from tradingagents.data.instrument_identity import (
     resolve_instrument_eligibility as get_yfinance_instrument_eligibility,
@@ -548,6 +548,7 @@ def route_to_vendor(
     _provenance: bool = False,
     _stop_on_rate_limit: bool = False,
     _require_adjusted: bool = False,
+    data_context: DataRequestContext,
     **kwargs,
 ):
     """Route method calls to appropriate vendor implementation with fallback support."""
@@ -565,7 +566,7 @@ def route_to_vendor(
     # Suffix-based routing: ticker-bearing methods infer the market from their
     # first arg; ticker-less ones are market-agnostic (market=""). Read config
     # once and thread it through so the per-call deep-copy happens a single time.
-    config = get_config()
+    config = data_context.config
     market = infer_market(method, args, config.get("data_vendors_by_market", {}))
     if market in {".SS", ".SZ"}:
         if method == "get_fundamentals":
@@ -609,8 +610,7 @@ def route_to_vendor(
     first_error: Exception | None = None
     availability_notes: list[str] = []
     for vendor_index, vendor in enumerate(vendor_chain):
-        vendor_impl = VENDOR_METHODS[method][vendor]
-        impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+        impl_func = VENDOR_METHODS[method][vendor]
 
         try:
             vendor_kwargs = kwargs
@@ -620,7 +620,7 @@ def route_to_vendor(
             if _require_adjusted and method == "get_stock_data" and vendor == "jquants":
                 vendor_kwargs = {**kwargs, "require_adjusted": True}
             with stop_on_rate_limit_scope(_stop_on_rate_limit), routed_observations(fallback=vendor_index > 0):
-                result = impl_func(*args, **vendor_kwargs)
+                result = impl_func(*args, data_context=data_context, **vendor_kwargs)
             if _provenance and isinstance(result, str):
                 existing_records = extract_provenance(result)
                 record = (
@@ -747,6 +747,6 @@ def route_to_vendor(
     raise RuntimeError(f"No available vendor for '{method}'")
 
 
-def resolve_instrument_eligibility(symbol: str):
+def resolve_instrument_eligibility(symbol: str, *, data_context: DataRequestContext):
     """Resolve product admission through the configured vendor chain."""
-    return route_to_vendor("resolve_instrument_eligibility", symbol)
+    return route_to_vendor("resolve_instrument_eligibility", symbol, data_context=data_context)

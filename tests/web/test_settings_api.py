@@ -58,7 +58,7 @@ async def test_web_and_python_inherit_database_defaults_and_queued_snapshot_is_i
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
     client = TradingAgents(
-        settings, eligibility_resolver=lambda ticker: {"symbol": ticker, "quote_type": "EQUITY"}
+        settings, eligibility_resolver=lambda ticker, *, data_context: {"symbol": ticker, "quote_type": "EQUITY"}
     )
     store = client.service.configuration
     store.save(

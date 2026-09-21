@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.interface import route_to_vendor
 from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.vendor_errors import VendorRateLimitError
@@ -19,6 +20,7 @@ def collect_financial_inputs(
     route: Callable = route_to_vendor,
     include_overview: bool = True,
     stop_on_rate_limit: bool = False,
+    data_context: DataRequestContext,
 ) -> dict:
     responses = {}
     observations = []
@@ -32,7 +34,7 @@ def collect_financial_inputs(
         with capture_observations() as captured:
             try:
                 responses[method] = str(
-                    route(method, *args, _provenance=True, _stop_on_rate_limit=stop_on_rate_limit)
+                    route(method, *args, data_context=data_context, _provenance=True, _stop_on_rate_limit=stop_on_rate_limit)
                 )
             except VendorRateLimitError:
                 responses[method] = f"<{method} unavailable: VendorRateLimitError>"

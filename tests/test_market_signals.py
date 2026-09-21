@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import market_signals
 from tradingagents.research.analysts import sentiment_analyst
 from tradingagents.research.analysts.sentiment_sources import (
@@ -35,7 +36,7 @@ def test_tokyo_registry_fetches_registered_signals():
         "get_analyst_ratings_payload",
         return_value=("RATINGS", (fact,)),
     ) as ratings:
-        results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18")
+        results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18", data_context=request_context())
 
     assert {result.spec.tag for result in results} == {
         "large_holdings",
@@ -43,10 +44,10 @@ def test_tokyo_registry_fetches_registered_signals():
         "short_positions",
         "analyst_ratings",
     }
-    holdings.assert_called_once_with("9984.T", "2026-07-18")
-    margin.assert_called_once_with("9984.T", "2026-07-18")
-    shorts.assert_called_once_with("9984.T", "2026-07-18")
-    ratings.assert_called_once_with("9984.T", "2026-07-18")
+    holdings.assert_called_once_with("9984.T", "2026-07-18", data_context=request_context())
+    margin.assert_called_once_with("9984.T", "2026-07-18", data_context=request_context())
+    shorts.assert_called_once_with("9984.T", "2026-07-18", data_context=request_context())
+    ratings.assert_called_once_with("9984.T", "2026-07-18", data_context=request_context())
     analyst = next(
         result for result in results if result.spec.tag == "analyst_ratings"
     )
@@ -63,6 +64,7 @@ def test_historical_tokyo_registry_does_not_query_live_only_signal():
         results = market_signals.fetch_sentiment_signals(
             "9984.T",
             "2020-01-15",
+            data_context=request_context(),
         )
 
     ratings.assert_not_called()
@@ -93,7 +95,7 @@ def test_mainland_registry_fetches_registered_signals():
         patches[2] as research,
         patches[3] as announcements,
     ):
-        results = market_signals.fetch_sentiment_signals("600519.SS", "2026-07-18")
+        results = market_signals.fetch_sentiment_signals("600519.SS", "2026-07-18", data_context=request_context())
 
     assert {result.spec.tag for result in results} == {
         "cn_margin",
@@ -102,7 +104,7 @@ def test_mainland_registry_fetches_registered_signals():
         "cn_announcements",
     }
     for fetch in (margin, holdings, research, announcements):
-        fetch.assert_called_once_with("600519.SS", "2026-07-18")
+        fetch.assert_called_once_with("600519.SS", "2026-07-18", data_context=request_context())
 
 
 @pytest.mark.unit
@@ -112,7 +114,7 @@ def test_signal_prefetch_never_raises():
         "get_large_holdings",
         side_effect=RuntimeError("temporary failure"),
     ):
-        results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18")
+        results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18", data_context=request_context())
 
     holdings = next(
         result for result in results if result.spec.tag == "large_holdings"

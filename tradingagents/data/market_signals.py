@@ -18,6 +18,7 @@ from tradingagents.data.cn.cn_sentiment import (
     get_margin_signal as get_cn_margin_signal,
     get_research_signal_payload as get_cn_research_signal_payload,
 )
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.jp.edinet_holdings import get_large_holdings
 from tradingagents.data.jp.jquants_sentiment import get_margin_balance, get_short_positions
@@ -216,6 +217,8 @@ def sentiment_signal_specs(ticker: str) -> tuple[SentimentSignal, ...]:
 def fetch_sentiment_signals(
     ticker: str,
     curr_date: str,
+    *,
+    data_context: DataRequestContext,
 ) -> tuple[FetchedSentimentSignal, ...]:
     """Fetch all registered signals without allowing an exception to escape."""
     fetched = []
@@ -230,7 +233,7 @@ def fetch_sentiment_signals(
         else:
             try:
                 with capture_observations() as observations:
-                    result = spec.fetch(ticker, curr_date)
+                    result = spec.fetch(ticker, curr_date, data_context=data_context)
                 if isinstance(result, tuple):
                     body, structured_numeric_facts = result
                 else:

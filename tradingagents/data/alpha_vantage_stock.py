@@ -4,13 +4,14 @@ from io import StringIO
 import pandas as pd
 
 from tradingagents.data.alpha_vantage_common import _filter_csv_by_date_range, _make_api_request
+from tradingagents.data.context import DataRequestContext
 
 
 def get_stock(
     symbol: str,
     start_date: str,
     end_date: str
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """
     Returns raw daily OHLCV values, adjusted close values, and historical split/dividend events
     filtered to the specified date range.
@@ -45,13 +46,13 @@ def get_stock(
 
 def get_verified_market_snapshot(
     symbol: str, curr_date: str, look_back_days: int = 30
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """Return an Alpha Vantage-backed deterministic market snapshot."""
     # Match the J-Quants indicator warm-up: 400 calendar days plus the rendered
     # window is enough for the snapshot's longest (200-session) indicator.
     end = datetime.strptime(curr_date, "%Y-%m-%d")
     start = (end - timedelta(days=look_back_days + 400)).strftime("%Y-%m-%d")
-    raw = get_stock(symbol, start, curr_date)
+    raw = get_stock(symbol, start, curr_date, data_context=data_context)
     frame = pd.read_csv(StringIO(raw))
     columns = {str(c).strip().lower(): c for c in frame.columns}
     required = {"timestamp", "open", "high", "low", "close", "volume"}

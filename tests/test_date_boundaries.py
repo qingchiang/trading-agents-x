@@ -4,12 +4,13 @@ requested end_date (and the current day) is actually included.
 Regressions for #986 (current-day OHLCV excluded) and #987 (requested end_date
 row omitted).
 """
+
 import pandas as pd
 import pytest
 
 import tradingagents.data.stockstats_utils as su
 import tradingagents.data.y_finance as yfin
-from tradingagents.data.config import bind_config
+from tests.data_policy import configure_data, request_context
 
 
 @pytest.mark.unit
@@ -32,7 +33,7 @@ def test_get_yfin_requests_inclusive_end(monkeypatch):
             )
 
     monkeypatch.setattr(yfin.yf, "Ticker", FakeTicker)
-    out = yfin.get_YFin_data_online("AAPL", "2025-05-01", "2025-05-09")
+    out = yfin.get_YFin_data_online("AAPL", "2025-05-01", "2025-05-09", data_context=request_context())
 
     # end is requested one day past end_date so 2025-05-09 is included (#987).
     assert captured["end"] == "2025-05-10"
@@ -43,7 +44,7 @@ def test_get_yfin_requests_inclusive_end(monkeypatch):
 
 @pytest.mark.unit
 def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
-    bind_config({"data_cache_dir": str(tmp_path)})
+    configure_data({"data_cache_dir": str(tmp_path)})
     captured = {}
 
     def fake_download(symbol, start, end, **kwargs):
@@ -57,7 +58,7 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
 
     monkeypatch.setattr(su.yf, "download", fake_download)
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
-    su.load_ohlcv("AAPL", today)
+    su.load_ohlcv("AAPL", today, data_context=request_context())
 
     expected_end = (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     assert captured["end"] == expected_end  # tomorrow -> today's row included (#986)

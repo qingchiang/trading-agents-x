@@ -30,7 +30,7 @@ import os
 import threading
 from importlib import resources
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_common import to_jquants_code
 from tradingagents.domain.instruments import tokyo_securities_base
 
@@ -64,13 +64,13 @@ def _load_seed() -> dict[str, str]:
         return {}
 
 
-def _cache_path() -> str:
-    return os.path.join(get_config()["data_cache_dir"], _CACHE_FILENAME)
+def _cache_path(*, data_context: DataRequestContext) -> str:
+    return os.path.join(data_context.config["data_cache_dir"], _CACHE_FILENAME)
 
 
-def _load_learned() -> dict[str, str]:
+def _load_learned(*, data_context: DataRequestContext) -> dict[str, str]:
     """Load the runtime-learned cache, tolerating an absent or poisoned file."""
-    path = _cache_path()
+    path = _cache_path(data_context=data_context)
     if not os.path.exists(path):
         return {}
     try:
@@ -82,18 +82,18 @@ def _load_learned() -> dict[str, str]:
         return {}
 
 
-def _ensure_loaded() -> None:
+def _ensure_loaded(*, data_context: DataRequestContext) -> None:
     """Populate ``_seed`` / ``_learned`` once (caller holds ``_lock``)."""
     global _seed, _learned
     if _seed is not None:
         return
     _seed = _load_seed()
-    _learned = _load_learned()
+    _learned = _load_learned(data_context=data_context)
 
 
-def _persist(learned: dict[str, str]) -> None:
+def _persist(learned: dict[str, str], *, data_context: DataRequestContext) -> None:
     """Write the learned cache atomically (temp file + replace) under ``_lock``."""
-    path = _cache_path()
+    path = _cache_path(data_context=data_context)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -127,7 +127,7 @@ def _apply_locked(base: str, edinet: str) -> bool:
     return True
 
 
-def resolve_edinet_code(ticker: str) -> str | None:
+def resolve_edinet_code(ticker: str, *, data_context: DataRequestContext) -> str | None:
     """Return the EDINET code for a Tokyo ``ticker`` (e.g. ``9984.T``), or None.
 
     Resolves via the 4-digit base securities code, the join key shared with
@@ -137,20 +137,20 @@ def resolve_edinet_code(ticker: str) -> str | None:
     """
     base = to_jquants_code(ticker)
     with _lock:
-        _ensure_loaded()
+        _ensure_loaded(data_context=data_context)
         return _seed.get(base) or _learned.get(base)
 
 
-def learn(sec_code: str | None, edinet_code: str | None) -> None:
+def learn(sec_code: str | None, edinet_code: str | None, *, data_context: DataRequestContext) -> None:
     """Record a single ``secCode → EDINET code`` pair seen in a filing, if it is new.
 
     Thin wrapper over :func:`learn_many`; prefer the latter for a bulk scan so the
     lock is taken and the cache written once rather than once per pair.
     """
-    learn_many([(sec_code, edinet_code)])
+    learn_many([(sec_code, edinet_code)], data_context=data_context)
 
 
-def learn_many(pairs) -> None:
+def learn_many(pairs, *, data_context: DataRequestContext) -> None:
     """Apply many ``(secCode, edinetCode)`` pairs under one lock + one cache write.
 
     The holdings scan reads the whole market's daily filings, so applying pairs one
@@ -160,7 +160,7 @@ def learn_many(pairs) -> None:
     already covered by the authoritative seed.
     """
     with _lock:
-        _ensure_loaded()
+        _ensure_loaded(data_context=data_context)
         changed = False
         for sec_code, edinet_code in pairs:
             pair = _normalize(sec_code, edinet_code)
@@ -168,7 +168,7 @@ def learn_many(pairs) -> None:
                 changed = True
         if changed:
             try:
-                _persist(dict(_learned))
+                _persist(dict(_learned), data_context=data_context)
             except OSError as exc:
                 logger.warning("Could not persist EDINET learned codes: %s", exc)
 

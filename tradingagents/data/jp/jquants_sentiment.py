@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.calendar import add_business_days
 from tradingagents.data.jp.company_info import get_company_market_section
 from tradingagents.data.jp.jquants_common import fetch_records, parse_number, to_jquants_code
@@ -195,7 +196,7 @@ def _margin_week(record: dict) -> str:
 
 def get_margin_balance(
     ticker: str, curr_date: str, look_back_weeks: int = _MARGIN_LOOK_BACK_WEEKS
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """Return recent weekly margin balances for a ``.T`` ticker, else "".
 
     Empty for any non-Tokyo ticker (a future market supplies its own source) and
@@ -268,6 +269,8 @@ def get_short_positions(
     curr_date: str,
     look_back_days: int = _SHORT_LOOK_BACK_DAYS,
     max_rows: int = _SHORT_MAX_ROWS,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Return recent disclosed large short positions for a ``.T`` ticker, else "".
 

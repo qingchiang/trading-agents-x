@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 
+from tests.data_policy import request_context
 from tradingagents.data import y_finance
 
 
@@ -24,7 +25,7 @@ def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeyp
 
     monkeypatch.setattr(y_finance.yf, "Ticker", lambda _: Stock())
     with capture_observations() as observations:
-        output = y_finance.get_cashflow("GOOG", "quarterly", "2026-09-05")
+        output = y_finance.get_cashflow("GOOG", "quarterly", "2026-09-05", data_context=request_context())
     assert "150" in output
     assert len(observations) == 1
     observation = observations[0]
@@ -44,7 +45,7 @@ def test_china_statement_observations_retain_visibility_and_cumulative_basis(mon
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_: None)
     with capture_observations() as observations:
-        cn_statements.get_income_statement("600309.SS", curr_date="2026-03-21")
+        cn_statements.get_income_statement("600309.SS", curr_date="2026-03-21", data_context=request_context())
     assert observations[0].available_on == date(2026, 3, 21)
     assert observations[0].values["period_basis"] == "YTD"
     assert observations[0].values["Revenue"] == 1000
@@ -62,7 +63,7 @@ def test_japan_margin_publishes_conservative_release_date(monkeypatch):
         ],
     )
     with capture_observations() as observations:
-        jquants_sentiment.get_margin_balance("9984.T", "2026-09-05")
+        jquants_sentiment.get_margin_balance("9984.T", "2026-09-05", data_context=request_context())
     assert observations[0].effective_date == date(2026, 8, 28)
     assert observations[0].available_on == date(2026, 9, 1)
     assert "T+2" in observations[0].timing
@@ -85,7 +86,7 @@ def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch)
 
     def route(method, *args, **kwargs):
         if method == "get_cashflow":
-            return y_finance.get_cashflow(*args)
+            return y_finance.get_cashflow(*args, data_context=request_context())
         return attach_provenance(
             "live overview",
             ProvenanceRecord(
@@ -105,7 +106,7 @@ def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch)
         window_start=datetime(2026, 8, 29, tzinfo=UTC),
         window_end=now,
     )
-    result = collect_us_incremental(request, route_to_vendor=route)
+    result = collect_us_incremental(request, route_to_vendor=route, data_context=request_context())
     _, items, _ = normalize_incremental_collection(request, result, sealed_at=datetime.now(UTC))
     statement = next(item for item in items if item.evidence_type == "financial_cashflow")
     assert '"Capital Expenditure": -100.0' in statement.content
@@ -133,9 +134,9 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
     fetched = FetchedSentimentSignal(
         sentiment_signal_specs("7203.T")[1], "margin", observations=(observed,)
     )
-    monkeypatch.setattr(incremental_jp, "fetch_sentiment_signals", lambda *a: (fetched,))
+    monkeypatch.setattr(incremental_jp, "fetch_sentiment_signals", lambda *a, data_context: (fetched,))
     request = _request(enabled_domains=("social",))
-    result = incremental_jp.collect_japan_incremental(request)
+    result = incremental_jp.collect_japan_incremental(request, data_context=request_context())
     _, admitted, _ = normalize_incremental_collection(
         request,
         result,
@@ -166,7 +167,7 @@ def test_financial_release_keeps_older_comparative_periods_as_context():
                                     effective_date=period, available_on=visible)
         return "source response"
 
-    result = collect_financial_inputs("600309.SS", "2026-09-05", route=route, include_overview=False)
+    result = collect_financial_inputs("600309.SS", "2026-09-05", route=route, include_overview=False, data_context=request_context())
     assert len(result["observations"]) == 1
     observation = result["observations"][0]
     assert observation["available_on"] == "2026-08-25"
@@ -187,7 +188,7 @@ def test_financial_rate_limit_preserves_an_earlier_success():
         return "success"
 
     result = collect_financial_inputs("GOOG", "2026-09-05", route=route,
-                                      include_overview=False, stop_on_rate_limit=True)
+                                      include_overview=False, stop_on_rate_limit=True, data_context=request_context())
     assert len(result["observations"]) == 1
     assert calls == ["get_income_statement", "get_balance_sheet"]
 
@@ -238,8 +239,8 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
 def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
     from langchain_core.messages import ToolMessage
 
+    from tests.data_policy import data_config, data_policy
     from tradingagents.data import interface
-    from tradingagents.data.config import get_config, use_config
     from tradingagents.data.news_selection import NewsCandidate, finalize_news, render_candidate
     from tradingagents.data.source_observations import capture_observations, publish_observation
     from tradingagents.domain.vendor_errors import NoMarketDataError
@@ -254,8 +255,8 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
                             retrieved_at=current.isoformat())
         return finalize_news("## news\n\n" + render_candidate(row), "yfinance", "GOOG", "2026-09-01", "2026-09-05", 30)
     monkeypatch.setitem(interface.VENDOR_METHODS, "get_news", {"alpha_vantage": failed, "yfinance": fallback})
-    with use_config({**get_config(), "tool_vendors": {"get_news": "alpha_vantage,yfinance"}}), capture_observations() as observed:
-        body = interface.route_to_vendor("get_news", "GOOG", "2026-09-01", "2026-09-05", _provenance=True)
+    with data_policy({**data_config(), "tool_vendors": {"get_news": "alpha_vantage,yfinance"}}), capture_observations() as observed:
+        body = interface.route_to_vendor("get_news", "GOOG", "2026-09-01", "2026-09-05", _provenance=True, data_context=request_context())
     assert len(observed) == 1
     assert observed[0].fallback
     sealed = collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")],
@@ -267,8 +268,8 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
 
 
 def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
+    from tests.data_policy import data_config, data_policy
     from tradingagents.data import interface
-    from tradingagents.data.config import get_config, use_config
     from tradingagents.data.source_observations import capture_observations, publish_observation
     from tradingagents.domain.vendor_errors import NoMarketDataError
 
@@ -278,8 +279,8 @@ def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
         publish_observation("yfinance", "verified_market_snapshot", "GOOG", {"close": 100})
         return "snapshot"
     monkeypatch.setitem(interface.VENDOR_METHODS, "get_verified_market_snapshot", {"alpha_vantage": failed, "yfinance": snapshot})
-    with use_config({**get_config(), "tool_vendors": {"get_verified_market_snapshot": "alpha_vantage,yfinance"}}), capture_observations() as observed:
-        interface.route_to_vendor("get_verified_market_snapshot", "GOOG", "2026-09-05", 5, _provenance=True)
+    with data_policy({**data_config(), "tool_vendors": {"get_verified_market_snapshot": "alpha_vantage,yfinance"}}), capture_observations() as observed:
+        interface.route_to_vendor("get_verified_market_snapshot", "GOOG", "2026-09-05", 5, _provenance=True, data_context=request_context())
     assert len(observed) == 1 and observed[0].fallback
 
 
@@ -342,7 +343,7 @@ def test_full_structured_near_live_guard_covers_each_ingress():
 
     from langchain_core.messages import ToolMessage
 
-    from tradingagents.data.config import get_config
+    from tests.data_policy import data_config
     from tradingagents.data.news_selection import NewsCandidate, render_candidate
     from tradingagents.data.source_observations import publish_observation
     from tradingagents.domain.data import SourceObservation
@@ -364,7 +365,7 @@ def test_full_structured_near_live_guard_covers_each_ingress():
     graph.metrics = Mock()
     graph._start_node = graph._finish_node = lambda *args, **kwargs: None
     context = SimpleNamespace(request=AnalysisRequest(ticker="GOOG", analysis_date=cutoff),
-                              dataflow_config=get_config(), instrument_context="GOOG", cancel_requested=lambda: False,
+                              dataflow_config=data_config(), instrument_context="GOOG", cancel_requested=lambda: False,
                               shutdown_requested=lambda: False)
     output = graph._create_analyst_collect_node("news")({}, SimpleNamespace(context=context))
     captured = [EvidenceItem.model_validate(item) for item in output["analyst_evidence_items"]["news"]]

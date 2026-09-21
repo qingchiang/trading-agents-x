@@ -1,11 +1,13 @@
 """JP sentiment overlay: yfinance analyst-consensus rating block. It is a LIVE
 snapshot, so it is gated to live/near-live runs and self-gated to ``.T``; all
 yfinance access is mocked, so these run without network."""
+
 import unittest
 from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.jp import yfinance_sentiment as ys
 
 _LIVE = "2026-06-26"  # gating is patched, so the literal value is irrelevant
@@ -25,7 +27,7 @@ class AnalystRatingsBlockTests(unittest.TestCase):
     def _block(self, ratings, ticker="7011.T", live=True):
         with mock.patch.object(ys, "is_near_live", return_value=live), \
                 mock.patch.object(ys, "get_analyst_ratings", return_value=ratings) as gar:
-            out = ys.get_analyst_ratings_block(ticker, _LIVE)
+            out = ys.get_analyst_ratings_block(ticker, _LIVE, data_context=request_context())
         return out, gar
 
     def test_full_block_has_rating_target_and_implied_upside(self):
@@ -41,7 +43,7 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         self.assertIn("Not point-in-time historical data", out)
         with mock.patch.object(ys, "is_near_live", return_value=True), \
                 mock.patch.object(ys, "get_analyst_ratings", return_value=_FULL):
-            _body, facts = ys.get_analyst_ratings_payload("7011.T", _LIVE)
+            _body, facts = ys.get_analyst_ratings_payload("7011.T", _LIVE, data_context=request_context())
         by_key = {fact["key"]: fact for fact in facts}
         self.assertEqual(by_key["target_mean_price"]["value"], 5323.078)
         self.assertEqual(by_key["target_mean_price"]["unit"], "JPY")
@@ -118,7 +120,7 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         # Defensive: the getter degrades to {}, but a raise must not escape the prefetch.
         with mock.patch.object(ys, "is_near_live", return_value=True), \
                 mock.patch.object(ys, "get_analyst_ratings", side_effect=RuntimeError("boom")):
-            out = ys.get_analyst_ratings_block("7011.T", _LIVE)
+            out = ys.get_analyst_ratings_block("7011.T", _LIVE, data_context=request_context())
         self.assertEqual(out, "")
 
 

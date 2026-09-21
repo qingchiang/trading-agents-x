@@ -6,11 +6,13 @@ news injected future articles), #993 (empty-after-filter returned a blank body),
 and #1126 (inclusive upper bound leaked the midnight-after article; host-local
 timestamp parsing made filtering machine-dependent).
 """
+
 from datetime import UTC, datetime
 
 import pytest
 
 import tradingagents.data.yfinance_news as ynews
+from tests.data_policy import request_context
 
 
 def _epoch(date_str):
@@ -132,7 +134,7 @@ def test_global_news_future_flat_article_excluded(monkeypatch):
             self.news = [future_article, past_article]
 
     monkeypatch.setattr(ynews.yf, "Search", FakeSearch)
-    out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
+    out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10, data_context=request_context())
     assert "PAST EVENT" in out
     assert "FUTURE EVENT" not in out  # #1007
 
@@ -148,7 +150,7 @@ def test_global_news_empty_after_filter_is_informative(monkeypatch):
             self.news = [only_future]
 
     monkeypatch.setattr(ynews.yf, "Search", FakeSearch)
-    out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
+    out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10, data_context=request_context())
     assert "No global news found" in out
     assert "upstream_returned=" in out and "date_filtered=" in out
     assert "###" not in out  # no empty article body
@@ -166,13 +168,13 @@ def test_global_news_continues_past_expired_candidates_and_preserves_publication
             }]
 
     monkeypatch.setattr(ynews.yf, "Search", Search)
-    output = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=1)
+    output = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=1, data_context=request_context())
     assert "eligible" in output
     assert "Published: 2025-05-05T00:00:00+00:00" in output
 
 
 def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypatch):
-    from tradingagents.data.config import get_config, use_config
+    from tests.data_policy import data_config, data_policy
 
     def article(title, index):
         return {
@@ -200,17 +202,17 @@ def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypat
     monkeypatch.setattr(ynews.yf, "Search", Search)
     monkeypatch.setattr(ynews, "yf_retry", lambda fn, **_kwargs: fn())
     config = {
-        **get_config(),
+        **data_config(),
         "news_cache_enabled": False,
         "global_news_queries": ["first", "second"],
         "global_news_query_limit": 2,
         "global_news_candidate_limit": 10,
         "global_news_article_limit": 10,
     }
-    with use_config(config):
+    with data_policy(config):
         output = ynews.get_global_news_yfinance(
             "2025-05-09", look_back_days=7, limit=10
-        )
+        , data_context=request_context())
 
     assert queries == ["first", "second"]
     assert output.count("\n### ") == 10
@@ -222,7 +224,7 @@ def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypat
 
 @pytest.mark.parametrize("limit,expected_queries", [(1, 1), (20, 2)])
 def test_global_output_target_is_independent_of_per_query_candidates(monkeypatch, limit, expected_queries):
-    from tradingagents.data.config import get_config, use_config
+    from tests.data_policy import data_config, data_policy
 
     calls = []
     class Search:
@@ -232,17 +234,17 @@ def test_global_output_target_is_independent_of_per_query_candidates(monkeypatch
                          for i in range(news_count)]
     monkeypatch.setattr(ynews.yf, "Search", Search)
     monkeypatch.setattr(ynews, "yf_retry", lambda fn: fn())
-    with use_config({**get_config(), "news_cache_enabled": False,
+    with data_policy({**data_config(), "news_cache_enabled": False,
                      "global_news_queries": ["first", "second", "third"],
                      "global_news_candidate_limit": 10}):
-        output = ynews.get_global_news_yfinance("2025-05-09", limit=limit)
+        output = ynews.get_global_news_yfinance("2025-05-09", limit=limit, data_context=request_context())
     assert len(calls) == expected_queries
     assert all(count == 10 for _, count in calls)
     assert output.count("\n### ") == limit
 
 
 def test_global_larger_output_target_cannot_reuse_smaller_refresh(tmp_path, monkeypatch):
-    from tradingagents.data.config import get_config, use_config
+    from tests.data_policy import data_config, data_policy
 
     calls = []
     class Search:
@@ -252,11 +254,11 @@ def test_global_larger_output_target_cannot_reuse_smaller_refresh(tmp_path, monk
                          for i in range(news_count)]
     monkeypatch.setattr(ynews.yf, "Search", Search)
     monkeypatch.setattr(ynews, "yf_retry", lambda fn: fn())
-    with use_config({**get_config(), "news_cache_enabled": True, "data_cache_dir": str(tmp_path),
+    with data_policy({**data_config(), "news_cache_enabled": True, "data_cache_dir": str(tmp_path),
                      "news_cache_retention_days": 10000,
                      "global_news_queries": ["first", "second", "third"],
                      "global_news_candidate_limit": 10}):
-        ynews.get_global_news_yfinance("2025-05-09", limit=10)
-        output = ynews.get_global_news_yfinance("2025-05-09", limit=20)
+        ynews.get_global_news_yfinance("2025-05-09", limit=10, data_context=request_context())
+        output = ynews.get_global_news_yfinance("2025-05-09", limit=20, data_context=request_context())
     assert calls == ["first", "first", "second"]
     assert output.count("\n### ") == 20

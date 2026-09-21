@@ -5,7 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.data.evidence_workset import EvidenceToolArtifact, build_market_data_artifact
 from tradingagents.data.interface import route_to_vendor
-from tradingagents.research.tools.runtime import AnalysisToolRuntime, tool_runtime_scope
+from tradingagents.research.tools.runtime import AnalysisToolRuntime, analysis_cutoff
 
 
 @tool("get_stock_data", response_format="content_and_artifact")
@@ -16,10 +16,15 @@ def get_stock_data(
     runtime: AnalysisToolRuntime,
 ) -> tuple[str, EvidenceToolArtifact]:
     """Retrieve OHLCV while keeping the complete table out of model context."""
-    with tool_runtime_scope(runtime, end_date) as cutoff:
-        raw = route_to_vendor(
-            "get_stock_data", symbol, start_date, cutoff, _provenance=True
-        )
+    cutoff = analysis_cutoff(runtime, end_date)
+    raw = route_to_vendor(
+        "get_stock_data",
+        symbol,
+        start_date,
+        cutoff,
+        _provenance=True,
+        data_context=runtime.context.data_context,
+    )
     return build_market_data_artifact(
         raw,
         symbol=symbol,

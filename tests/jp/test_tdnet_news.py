@@ -1,4 +1,5 @@
 """TDnet timely-disclosure (適時開示) vendor, via the keyless code/date search."""
+
 import unittest
 from datetime import date, datetime
 from unittest import mock
@@ -7,6 +8,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
+from tests.data_policy import configure_data, data_policy, request_context
 from tradingagents.data.jp import http_util, tdnet_news as td
 
 
@@ -112,7 +114,7 @@ class ParseRowsTests(unittest.TestCase):
 @pytest.mark.unit
 class GetNewsTests(unittest.TestCase):
     def setUp(self):
-        mock.patch.object(td, "get_config", return_value={"news_article_limit": 10}).start()
+        configure_data({"news_article_limit": 10})
         mock.patch.object(td, "tokyo_today", return_value=date(2026, 7, 12)).start()
 
     def tearDown(self):
@@ -120,7 +122,7 @@ class GetNewsTests(unittest.TestCase):
 
     def _run(self, html, ticker="7203.T", start="2026-06-12", end="2026-07-12"):
         with mock.patch.object(td, "_search", return_value=html):
-            return td.get_news(ticker, start, end)
+            return td.get_news(ticker, start, end, data_context=request_context())
 
     def test_filters_by_securities_code(self):
         html = _page(_row(code="72030", title="対象"), _row(code="99840", title="他社"))
@@ -163,7 +165,7 @@ class GetNewsTests(unittest.TestCase):
             mock.patch.object(http_util, "urlopen", side_effect=[rate_limited, rate_limited]) as urlopen,
             mock.patch.object(http_util.time, "sleep") as sleep,
         ):
-            out = td.get_news("7203.T", "2026-06-12", "2026-07-12")
+            out = td.get_news("7203.T", "2026-06-12", "2026-07-12", data_context=request_context())
 
         self.assertIn("No TDnet disclosures found for 7203.T", out)
         self.assertEqual(urlopen.call_count, 2)
@@ -177,7 +179,7 @@ class GetNewsTests(unittest.TestCase):
 
     def test_capped_to_article_limit(self):
         rows = [_row(title=f"開示{i}", when=f"2026/07/1{i} 10:00") for i in range(5)]
-        with mock.patch.object(td, "get_config", return_value={"news_article_limit": 2}):
+        with data_policy({"news_article_limit": 2}, merge=True):
             out = self._run(_page(*rows))
         self.assertEqual(out.count("### 開示"), 2)
 
@@ -187,13 +189,13 @@ class GetNewsTests(unittest.TestCase):
 
     def test_historical_window_outside_free_archive_is_unavailable(self):
         with mock.patch.object(td, "_search") as search:
-            out = td.get_news("7203.T", "2026-05-01", "2026-05-31")
+            out = td.get_news("7203.T", "2026-05-01", "2026-05-31", data_context=request_context())
         search.assert_not_called()
         self.assertIn("<TDnet unavailable:", out)
 
     def test_requested_window_is_clamped_to_31_calendar_dates(self):
         with mock.patch.object(td, "_search", return_value=_page()) as search:
-            td.get_news("7203.T", "2026-01-01", "2026-07-12")
+            td.get_news("7203.T", "2026-01-01", "2026-07-12", data_context=request_context())
         search.assert_called_once_with("7203", "20260612", "20260712", 10.0)
 
     def test_warns_when_result_count_exceeds_parsed_rows(self):

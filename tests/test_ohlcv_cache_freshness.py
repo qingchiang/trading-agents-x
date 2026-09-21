@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 import tradingagents.data.stockstats_utils as su
+from tests.data_policy import configure_data, request_context
 
 TODAY = pd.Timestamp("2026-07-18")
 STALE = su.OHLCV_CACHE_TTL_SECONDS + 60
@@ -101,7 +102,7 @@ def test_load_ohlcv_refetches_stale_same_day_cache(tmp_path, monkeypatch):
     Without this, the unit tests above would still pass if the helper were never
     called from the real code path.
     """
-    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    configure_data({"data_cache_dir": str(tmp_path)})
     monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: TODAY))
     monkeypatch.setattr(su, "market_today", lambda *_args, **_kwargs: TODAY.date())
 
@@ -123,7 +124,7 @@ def test_load_ohlcv_refetches_stale_same_day_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(su.yf, "download", _fake_download)
 
-    out = su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"))
+    out = su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"), data_context=request_context())
 
     assert calls, "stale same-day cache must trigger a refetch"
     assert 222.0 in out["Close"].values, "refreshed close must reach the caller"
@@ -132,7 +133,7 @@ def test_load_ohlcv_refetches_stale_same_day_cache(tmp_path, monkeypatch):
 @pytest.mark.unit
 def test_load_ohlcv_reuses_fresh_same_day_cache(tmp_path, monkeypatch):
     # Mirror image: a fresh cache must NOT trigger a download.
-    monkeypatch.setattr(su, "get_config", lambda: {"data_cache_dir": str(tmp_path)})
+    configure_data({"data_cache_dir": str(tmp_path)})
     monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: TODAY))
     monkeypatch.setattr(su, "market_today", lambda *_args, **_kwargs: TODAY.date())
 
@@ -145,4 +146,4 @@ def test_load_ohlcv_reuses_fresh_same_day_cache(tmp_path, monkeypatch):
         raise AssertionError("fresh cache must not refetch")
 
     monkeypatch.setattr(su.yf, "download", _fail_download)
-    su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"))
+    su.load_ohlcv("AAPL", TODAY.strftime("%Y-%m-%d"), data_context=request_context())

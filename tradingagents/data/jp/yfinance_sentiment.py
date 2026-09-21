@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.jp.jquants_common import parse_number as _num
 from tradingagents.data.jp.market import is_tokyo_ticker
@@ -34,6 +35,8 @@ _MEAN_SCALE = "1=Strong Buy … 3=Hold … 5=Strong Sell"
 def get_analyst_ratings_payload(
     ticker: str,
     curr_date: str,
+    *,
+    data_context: DataRequestContext,
 ) -> tuple[str, tuple[StructuredNumericFact, ...]]:
     """Return readable consensus plus producer-owned numeric facts.
 
@@ -48,7 +51,7 @@ def get_analyst_ratings_payload(
     if not is_near_live(curr_date, ticker):
         return "", ()
     try:
-        ratings = get_analyst_ratings(ticker)
+        ratings = get_analyst_ratings(ticker, data_context=data_context)
     except Exception as exc:  # defensive: the getter already degrades to {}
         logger.warning("Analyst-ratings fetch failed for %s: %s", ticker, exc)
         return "", ()
@@ -131,7 +134,7 @@ def get_analyst_ratings_payload(
     return body, facts
 
 
-def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
+def get_analyst_ratings_block(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
     """Return the readable analyst-consensus block for direct callers."""
 
-    return get_analyst_ratings_payload(ticker, curr_date)[0]
+    return get_analyst_ratings_payload(ticker, curr_date, data_context=data_context)[0]

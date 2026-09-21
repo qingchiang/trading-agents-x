@@ -11,7 +11,7 @@ from dateutil.relativedelta import relativedelta
 from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.utils import safe_ticker_component
 from tradingagents.domain.instruments import NoMarketDataError, market_today, normalize_symbol
@@ -242,7 +242,7 @@ def _needs_same_day_refresh(
     return time.time() - os.path.getmtime(data_file) > OHLCV_CACHE_TTL_SECONDS
 
 
-def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
+def load_ohlcv(symbol: str, curr_date: str, *, data_context: DataRequestContext) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Downloads 5 years of data up to today and caches per symbol. On
@@ -255,7 +255,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     canonical = normalize_symbol(symbol)
     safe_symbol = safe_ticker_component(canonical)
 
-    config = get_config()
+    config = data_context.config
     curr_date_dt = pd.to_datetime(curr_date)
 
     # Cache uses a fixed window (5y to today) so one file per symbol.
@@ -495,8 +495,10 @@ class StockstatsUtils:
         curr_date: Annotated[
             str, "curr date for retrieving stock price data, YYYY-mm-dd"
         ],
+        *,
+        data_context: DataRequestContext,
     ):
-        data = load_ohlcv(symbol, curr_date)
+        data = load_ohlcv(symbol, curr_date, data_context=data_context)
         df = wrap(data)
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
         curr_date_str = pd.to_datetime(curr_date).strftime("%Y-%m-%d")

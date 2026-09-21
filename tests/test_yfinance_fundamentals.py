@@ -5,6 +5,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import y_finance as yf_data
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.vendor_errors import VendorRateLimitError
@@ -16,7 +17,7 @@ class TestYFinanceFundamentalsLookahead:
         with mock.patch.object(
             yf_data, "is_near_live", return_value=False
         ), mock.patch.object(yf_data.yf, "Ticker") as ticker:
-            out = yf_data.get_fundamentals("NVDA", "2020-01-15")
+            out = yf_data.get_fundamentals("NVDA", "2020-01-15", data_context=request_context())
         ticker.assert_not_called()
         assert "LIVE_DATA_UNAVAILABLE" in out
         assert "not point-in-time historical data" in out
@@ -28,7 +29,7 @@ class TestYFinanceFundamentalsLookahead:
         with mock.patch.object(
             yf_data, "is_near_live", return_value=True
         ), mock.patch.object(yf_data.yf, "Ticker", return_value=ticker_obj):
-            out = yf_data.get_fundamentals("NVDA", "2026-07-15")
+            out = yf_data.get_fundamentals("NVDA", "2026-07-15", data_context=request_context())
         assert "live yfinance snapshot" in out
         assert "Requested analysis date: 2026-07-15" in out
         assert "Retrieved at:" in out
@@ -41,7 +42,7 @@ class TestYFinanceFundamentalsLookahead:
         ), mock.patch.object(
             yf_data, "yf_retry", side_effect=VendorRateLimitError("Yahoo Finance rate limited")
         ):
-            out = yf_data.get_fundamentals("NVDA", "2026-07-15")
+            out = yf_data.get_fundamentals("NVDA", "2026-07-15", data_context=request_context())
 
         assert out == "Error retrieving fundamentals for NVDA: Yahoo Finance rate limited"
 
@@ -61,7 +62,7 @@ class TestYFinanceFundamentalsLookahead:
         ), mock.patch.object(yf_data.yf, "Ticker", return_value=RateLimitedTicker()), stop_on_rate_limit_scope(
             True
         ), pytest.raises(VendorRateLimitError, match="Yahoo Finance rate limited"):
-            yf_data.get_fundamentals("NVDA", "2026-07-15")
+            yf_data.get_fundamentals("NVDA", "2026-07-15", data_context=request_context())
 
         assert calls == ["info"]
 
@@ -79,7 +80,7 @@ class TestYFinanceFundamentalsLookahead:
         with mock.patch.object(
             yf_data, "is_near_live", return_value=False
         ), mock.patch.object(yf_data.yf, "Ticker") as ticker:
-            out = getattr(yf_data, method_name)(ticker_symbol, "quarterly", "2020-01-15")
+            out = getattr(yf_data, method_name)(ticker_symbol, "quarterly", "2020-01-15", data_context=request_context())
         ticker.assert_not_called()
         assert "HISTORICAL_DATA_UNAVAILABLE" in out
         assert "without filing timestamps" in out
@@ -102,6 +103,6 @@ class TestYFinanceFundamentalsLookahead:
             index=["Total Revenue"],
         )
         with mock.patch.object(yf_data.yf, "Ticker", return_value=ticker_obj):
-            out = yf_data.get_income_statement("9984.T", "annual", None)
+            out = yf_data.get_income_statement("9984.T", "annual", None, data_context=request_context())
         assert "not provided (treated as live retrieval)" in out
         assert "Not point-in-time historical data" in out

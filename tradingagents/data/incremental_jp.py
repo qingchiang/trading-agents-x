@@ -13,10 +13,12 @@ import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time
+from functools import partial
 from io import StringIO
 from zoneinfo import ZoneInfo
 
 from tradingagents.data.collection_progress import report_collection_progress
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.incremental_common import (
     CollectionUnavailable,
     bounded_empty,
@@ -79,11 +81,12 @@ def collect_japan_incremental(
     *,
     route_to_vendor: Callable[..., object] | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    data_context: DataRequestContext,
 ) -> IncrementalCollectionResult:
     """Collect enabled Tokyo domains through their configured routes once each."""
     if request.market != "japan":
         raise ValueError("Japanese collection requires a Japan request")
-    routed = route_to_vendor or DEFAULT_ROUTE_TO_VENDOR
+    routed = partial(route_to_vendor or DEFAULT_ROUTE_TO_VENDOR, data_context=data_context)
     domains: list[CollectionDomainResult] = []
     evidence: list[IncrementalEvidenceCandidate] = []
     stock_series: MarketSeriesResult | None = None
@@ -101,17 +104,17 @@ def collect_japan_incremental(
             evidence.extend(extra)
         elif domain == "news":
             result, candidates = _collect_news(request, routed, now)
-            result, extra = append_news_context(request, result, routed)
+            result, extra = append_news_context(request, result, routed, data_context=data_context)
             domains.append(result)
             evidence.extend(extra)
             evidence.extend(candidates)
         elif domain == "fundamentals":
             result, candidates = _collect_fundamentals(request, routed, now)
-            result, extra = append_financials(request, result, routed)
+            result, extra = append_financials(request, result, routed, data_context=data_context)
             domains.append(result)
             evidence.extend((*candidates, *extra))
         elif domain == "social":
-            result, candidates = collect_professional_signals(request, fetch_sentiment_signals)
+            result, candidates = collect_professional_signals(request, partial(fetch_sentiment_signals, data_context=data_context))
             domains.append(result)
             evidence.extend(candidates)
         else:

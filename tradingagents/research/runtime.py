@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 from tradingagents.configuration.settings import RunSettings
+from tradingagents.data.context import DataRequestContext
 from tradingagents.domain.artifacts import ResearchArtifactDraft
 from tradingagents.domain.evidence import EvidenceBundle
 from tradingagents.domain.runs import AnalysisRequest
@@ -31,6 +33,10 @@ class RunContext:
     shutdown_requested: Callable[[], bool] = lambda: False
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
     evidence_writer: Callable[[EvidenceBundle], None] = _discard_evidence
+
+    @cached_property
+    def data_context(self) -> DataRequestContext:
+        return DataRequestContext(self.dataflow_config)
 
 
 class RunCancelled(RuntimeError):

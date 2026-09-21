@@ -179,10 +179,11 @@ prefetches its inputs and has no tool-call loop. Pure language and instrument pr
 there is no mixed tool-and-prompt catalog. Full orchestration owns graph assembly,
 while `research/full/evidence.py` seals producer material and
 `research/full/state.py` owns graph state/output. Perspective objectives live in
-`research/prompts/perspectives.py`. Runs carry no historical review context. The dataflow
-`ContextVar` bridge exists only to support established adapter signatures
-during one scoped invocation; there is no mutable package configuration or
-`set_config()` operation.
+`research/prompts/perspectives.py`. Runs carry no historical review context. Routing, adapters, assemblers and source
+caches receive an explicit `DataRequestContext`; tool calls obtain it from the
+Run runtime, and Incremental collection receives it from the application service.
+No ambient configuration bridge remains. Credential redaction and bounded source
+request scopes retain their separate isolation responsibilities.
 
 Two runs with different provider, model, reasoning, language, or vendor
 settings must remain isolated even if worker concurrency changes in the future.

@@ -28,7 +28,7 @@ def _lan_app(tmp_path: Path):
     service = AnalysisService(
         settings,
         repository=repository,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },

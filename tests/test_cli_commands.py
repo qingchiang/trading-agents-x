@@ -40,7 +40,7 @@ def cli_service(cli_settings: AppSettings) -> AnalysisService:
     initialize_configuration(cli_settings)
     return AnalysisService(
         cli_settings,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },

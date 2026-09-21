@@ -11,7 +11,7 @@ from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, time, timedelta
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -25,7 +25,7 @@ from tradingagents.application.exporting import (
 from tradingagents.application.instrument_names import resolve_local_instrument_name
 from tradingagents.configuration.settings import AppSettings, RunSettings
 from tradingagents.credentials import use_credentials
-from tradingagents.data.config import use_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.instrument_identity import resolve_instrument_identity
 from tradingagents.data.interface import resolve_instrument_eligibility, validate_market_routing
 from tradingagents.domain.artifacts import ResearchArtifactDraft
@@ -94,8 +94,13 @@ from tradingagents.version import __version__
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
-EligibilityResolver = Callable[[str], Any]
 IncrementalSynthesizer = Callable[[IncrementalSynthesisInput], IncrementalSynthesis]
+
+
+class EligibilityResolver(Protocol):
+    def __call__(
+        self, symbol: str, *, data_context: DataRequestContext,
+    ) -> dict[str, Any] | list[dict[str, Any]]: ...
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -401,8 +406,7 @@ class AnalysisService:
             effective_config = dataflow_config or (
                 self.configuration.default_run_settings().dataflow_config(self.settings)
             )
-            with use_config(effective_config, merge=False):
-                result = self.eligibility_resolver(request.ticker)
+            result = self.eligibility_resolver(request.ticker, data_context=DataRequestContext(effective_config))
             validate_instrument_eligibility(request.ticker, result)
         except (
             InstrumentEligibilityUnavailableError,
@@ -496,45 +500,44 @@ class AnalysisService:
                             instrument_local_name,
                         )
                     if instrument_name is None or instrument_local_name is None:
-                        with use_config(dataflow_config, merge=False):
-                            if instrument_name is None:
-                                try:
-                                    identity = self.identity_resolver(
-                                        request.ticker,
-                                        request.analysis_date.isoformat(),
-                                    )
-                                except Exception as exc:
-                                    logger.warning(
-                                        "instrument identity resolution failed for incremental run %s: %s",
+                        if instrument_name is None:
+                            try:
+                                identity = self.identity_resolver(
+                                    request.ticker,
+                                    request.analysis_date.isoformat(),
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "instrument identity resolution failed for incremental run %s: %s",
+                                    run.id,
+                                    type(exc).__name__,
+                                )
+                            else:
+                                instrument_name = _instrument_display_name(identity)
+                                if instrument_name is not None:
+                                    self.repository.set_instrument_name(
                                         run.id,
-                                        type(exc).__name__,
+                                        instrument_name,
                                     )
-                                else:
-                                    instrument_name = _instrument_display_name(identity)
-                                    if instrument_name is not None:
-                                        self.repository.set_instrument_name(
-                                            run.id,
-                                            instrument_name,
-                                        )
-                            if instrument_local_name is None:
-                                try:
-                                    instrument_local_name = self.local_name_resolver(
-                                        request.ticker,
-                                        request.analysis_date.isoformat(),
-                                        dataflow_config,
-                                    )
-                                except Exception as exc:
-                                    logger.warning(
-                                        "local instrument name resolution failed for incremental run %s: %s",
+                        if instrument_local_name is None:
+                            try:
+                                instrument_local_name = self.local_name_resolver(
+                                    request.ticker,
+                                    request.analysis_date.isoformat(),
+                                    dataflow_config,
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "local instrument name resolution failed for incremental run %s: %s",
+                                    run.id,
+                                    type(exc).__name__,
+                                )
+                            else:
+                                if instrument_local_name is not None:
+                                    self.repository.set_instrument_local_name(
                                         run.id,
-                                        type(exc).__name__,
+                                        instrument_local_name,
                                     )
-                                else:
-                                    if instrument_local_name is not None:
-                                        self.repository.set_instrument_local_name(
-                                            run.id,
-                                            instrument_local_name,
-                                        )
                     baseline_evidence = self.repository.get_evidence(baseline.id)
                     from tradingagents.data.collection_progress import collection_progress
 
@@ -546,7 +549,7 @@ class AnalysisService:
                         )
 
                     self._emit(run.id, "incremental.collection_started", payload={}, on_event=on_event)
-                    with use_config(dataflow_config, merge=False), collection_progress(progress):
+                    with collection_progress(progress):
                         collection, evidence_items, performance, sealed_at = (
                             self._collect_incremental_preflight(
                                 instrument=request.ticker,
@@ -556,6 +559,7 @@ class AnalysisService:
                                 baseline_information_cutoff_at=baseline.information_cutoff_at,
                                 target_information_cutoff_at=run.information_cutoff_at,
                                 method_snapshot=run.method_snapshot,
+                                data_context=DataRequestContext(dataflow_config),
                             )
                         )
                     self._emit(
@@ -728,58 +732,57 @@ class AnalysisService:
                             except Exception:
                                 logger.exception("run event callback failed for %s", run.id)
                     return result
-                with use_config(dataflow_config):
+                try:
+                    identity = self.identity_resolver(
+                        request.ticker,
+                        request.analysis_date.isoformat(),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "instrument identity resolution failed for run %s: %s",
+                        run.id,
+                        type(exc).__name__,
+                    )
+                    identity = {}
+                resolved_name = _instrument_display_name(identity)
+                if resolved_name is not None:
+                    instrument_name = resolved_name
+                    self.repository.set_instrument_name(
+                        run.id,
+                        resolved_name,
+                    )
+                if instrument_local_name is None:
                     try:
-                        identity = self.identity_resolver(
+                        resolved_local_name = self.local_name_resolver(
                             request.ticker,
                             request.analysis_date.isoformat(),
+                            dataflow_config,
                         )
                     except Exception as exc:
                         logger.warning(
-                            "instrument identity resolution failed for run %s: %s",
+                            "local instrument name resolution failed for run %s: %s",
                             run.id,
                             type(exc).__name__,
                         )
-                        identity = {}
-                    resolved_name = _instrument_display_name(identity)
-                    if resolved_name is not None:
-                        instrument_name = resolved_name
-                        self.repository.set_instrument_name(
-                            run.id,
-                            resolved_name,
-                        )
-                    if instrument_local_name is None:
-                        try:
-                            resolved_local_name = self.local_name_resolver(
-                                request.ticker,
-                                request.analysis_date.isoformat(),
-                                dataflow_config,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "local instrument name resolution failed for run %s: %s",
+                    else:
+                        if resolved_local_name is not None:
+                            instrument_local_name = resolved_local_name
+                            self.repository.set_instrument_local_name(
                                 run.id,
-                                type(exc).__name__,
+                                resolved_local_name,
                             )
-                        else:
-                            if resolved_local_name is not None:
-                                instrument_local_name = resolved_local_name
-                                self.repository.set_instrument_local_name(
-                                    run.id,
-                                    resolved_local_name,
-                                )
-                    instrument_context = build_instrument_context(
-                        request.ticker,
-                        identity=identity,
-                    )
-                    llms = self.llm_factory(
-                        run_settings,
-                        callbacks=[metrics],
-                    )
-                    quick_llm = llms.quick
-                    deep_llm = llms.deep
-                    quick_serializer_llm = llms.quick_serializer
-                    deep_serializer_llm = llms.deep_serializer
+                instrument_context = build_instrument_context(
+                    request.ticker,
+                    identity=identity,
+                )
+                llms = self.llm_factory(
+                    run_settings,
+                    callbacks=[metrics],
+                )
+                quick_llm = llms.quick
+                deep_llm = llms.deep
+                quick_serializer_llm = llms.quick_serializer
+                deep_serializer_llm = llms.deep_serializer
                 graph = self.graph_factory(
                     quick_llm=quick_llm,
                     deep_llm=deep_llm,
@@ -821,14 +824,13 @@ class AnalysisService:
                             payload={"attempt": run.attempt},
                             on_event=on_event,
                         )
-                    with use_config(dataflow_config):
-                        execution = graph.execute(
-                            context,
-                            checkpointer=saver,
-                            checkpoint_thread_id=checkpoint_thread,
-                            resume=resume,
-                            on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
-                        )
+                    execution = graph.execute(
+                        context,
+                        checkpointer=saver,
+                        checkpoint_thread_id=checkpoint_thread,
+                        resume=resume,
+                        on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
+                    )
                     # Production graphs seal before deliberation. This
                     # idempotent application boundary also protects custom
                     # graph implementations from completing without durable
@@ -947,6 +949,7 @@ class AnalysisService:
         baseline_information_cutoff_at: datetime | None,
         target_information_cutoff_at: datetime | None,
         method_snapshot: dict[str, Any],
+        data_context: DataRequestContext,
     ):
         """Build and assess the deterministic collection gate before semantic work."""
         if baseline_information_cutoff_at is None or target_information_cutoff_at is None:
@@ -962,7 +965,7 @@ class AnalysisService:
             window_start=baseline_information_cutoff_at,
             window_end=target_information_cutoff_at,
         )
-        collected = self.incremental_collector(request)
+        collected = self.incremental_collector(request, data_context=data_context)
         sealed_at = self.now()
         if collected.stock_series is not None and collected.stock_series.retrieved_at > sealed_at:
             raise ValueError("stock market-series retrieval cannot be after sealing")

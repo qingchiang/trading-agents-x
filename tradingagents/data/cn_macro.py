@@ -25,6 +25,7 @@ from tradingagents.data.cn.common import (
     AkShareSchemaError,
     call_with_retry,
 )
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import SeriesCache, render_macro_report
 from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.version import BROWSER_USER_AGENT
@@ -476,10 +477,10 @@ def _release_date_from_url(url: str) -> date | None:
         return None
 
 
-def _nbs_release_page(page_index: int, end: date) -> list[_NbsRelease]:
+def _nbs_release_page(page_index: int, end: date, *, data_context: DataRequestContext) -> list[_NbsRelease]:
     """Return one bounded NBS release-index page, cached per analysis date."""
     cache_key = (f"release-index-{page_index}", end.isoformat(), 0)
-    cached = _nbs_index_cache.get(cache_key)
+    cached = _nbs_index_cache.get(cache_key, data_context=data_context)
     if isinstance(cached, dict) and isinstance(cached.get("releases"), list):
         releases = []
         for row in cached["releases"]:
@@ -521,11 +522,12 @@ def _nbs_release_page(page_index: int, end: date) -> list[_NbsRelease]:
                 for item in releases
             ]
         },
+        data_context=data_context,
     )
     return releases
 
 
-def _find_nbs_release(indicator: str, end: date) -> _NbsRelease | None:
+def _find_nbs_release(indicator: str, end: date, *, data_context: DataRequestContext) -> _NbsRelease | None:
     title_terms = {
         "cn_cpi": ("居民消费价格同比",),
         "cn_gdp": ("国内生产总值初步核算结果",),
@@ -535,7 +537,7 @@ def _find_nbs_release(indicator: str, end: date) -> _NbsRelease | None:
     for page_index in range(len(_NBS_INDEX_PAGES)):
         candidates = [
             item
-            for item in _nbs_release_page(page_index, end)
+            for item in _nbs_release_page(page_index, end, data_context=data_context)
             if item.release_date <= end and all(term in item.title for term in terms)
         ]
         if candidates:
@@ -630,8 +632,8 @@ def _parse_nbs_gdp(title: str, raw_html: str) -> _NbsObservation:
     )
 
 
-def _fetch_nbs_indicator(indicator: str, start: date, end: date) -> _Fetched | None:
-    release = _find_nbs_release(indicator, end)
+def _fetch_nbs_indicator(indicator: str, start: date, end: date, *, data_context: DataRequestContext) -> _Fetched | None:
+    release = _find_nbs_release(indicator, end, data_context=data_context)
     if release is None:
         return None
     raw_html = _request_text(release.url, label=f"NBS {indicator} release")
@@ -665,11 +667,13 @@ def _fetch_economy_chain(
     value_field: str,
     start: date,
     end: date,
+    *,
+    data_context: DataRequestContext,
 ) -> _Fetched:
     fallback_reason = "NBS returned no usable recent official release"
     primary_failed = False
     try:
-        official = _fetch_nbs_indicator(indicator, start, end)
+        official = _fetch_nbs_indicator(indicator, start, end, data_context=data_context)
         if official is not None and official.points:
             return official
     except AkShareSchemaError:
@@ -732,6 +736,8 @@ def fetch_series(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> dict | None:
     """Fetch one China macro alias in the shared structured-series shape."""
     if look_back_days is None:
@@ -748,7 +754,7 @@ def fetch_series(
         else key
     )
     cache_key = (cache_series_id, curr_date, look_back_days)
-    cached = _series_cache.get(cache_key)
+    cached = _series_cache.get(cache_key, data_context=data_context)
     if cached is not None:
         return cached
 
@@ -759,14 +765,14 @@ def fetch_series(
         "cn_10y_yield": _fetch_10y,
         "cn_cpi": lambda s, e: _fetch_economy_chain(
             "cn_cpi", "RPT_ECONOMY_CPI", "NATIONAL_SAME", s, e
-        ),
+        , data_context=data_context),
         "cn_gdp": lambda s, e: _fetch_economy_chain(
             "cn_gdp", "RPT_ECONOMY_GDP", "SUM_SAME", s, e
-        ),
+        , data_context=data_context),
         "cn_unemployment": _fetch_unemployment,
         "cn_pmi": lambda s, e: _fetch_economy_chain(
             "cn_pmi", "RPT_ECONOMY_PMI", "MAKE_INDEX", s, e
-        ),
+        , data_context=data_context),
         "usd_cny": _fetch_usd_cny,
     }
     fetched = fetchers[key](start, end)
@@ -811,7 +817,7 @@ def fetch_series(
     if fallback_reason:
         data["fallback_reason"] = fallback_reason
     data.update(metadata)
-    _series_cache.put_observation(cache_key, data)
+    _series_cache.put_observation(cache_key, data, data_context=data_context)
     return data
 
 
@@ -819,11 +825,13 @@ def get_macro_report(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> MacroReport:
     """Render China macro data and retain actual-source fallback metadata."""
     if indicator.strip().lower() not in CN_SERIES:
         raise NoMarketDataError(indicator, detail="not a China macro series")
-    data = fetch_series(indicator, curr_date, look_back_days)
+    data = fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
     if data is None:
         return MacroReport(
             f"China macro: no data for '{indicator}' in this window.",
@@ -851,6 +859,8 @@ def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Render one China macro series for the microscope tool."""
-    return get_macro_report(indicator, curr_date, look_back_days).text
+    return get_macro_report(indicator, curr_date, look_back_days, data_context=data_context).text

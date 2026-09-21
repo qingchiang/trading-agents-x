@@ -83,7 +83,7 @@ def _isolate_config():
     import tempfile
 
     import tradingagents.configuration.defaults as default_config
-    from tradingagents.data.config import bind_config, reset_config
+    from tests.data_policy import configure_data, reset_data
 
     def _fresh(cache_dir):
         cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -91,11 +91,11 @@ def _isolate_config():
         return cfg
 
     with tempfile.TemporaryDirectory() as cache_dir:
-        token = bind_config(_fresh(cache_dir), merge=False)
+        token = configure_data(_fresh(cache_dir), merge=False)
         try:
             yield
         finally:
-            reset_config(token)
+            reset_data(token)
 
 
 @pytest.fixture()

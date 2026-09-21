@@ -15,6 +15,7 @@ from typing import Any
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.stockstats_utils import yf_retry
 from tradingagents.domain.instruments import normalize_symbol
@@ -126,6 +127,8 @@ def resolve_search_identity(ticker: str) -> dict[str, str]:
 
 def resolve_instrument_eligibility(
     canonical_symbol: str,
+    *,
+    data_context: DataRequestContext,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """Resolve exact current security classification for product admission.
 

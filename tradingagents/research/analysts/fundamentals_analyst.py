@@ -25,6 +25,7 @@ def create_fundamentals_analyst(llm):
         if inputs is None:
             inputs = collect_financial_inputs(
                 state["company_of_interest"], current_date, route=route_to_vendor,
+                data_context=runtime.context.data_context,
             )
         observations = [SourceObservation.load(o) for o in inputs["observations"]]
         core = inputs["responses"].get("get_fundamentals", "")

@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 import pytest
 import requests
 
+from tests.data_policy import request_context
 from tradingagents.data.cn import calendar
 from tradingagents.data.cn.common import AkShareRateLimitError
 from tradingagents.data.incremental_cn import collect_mainland_china_incremental
@@ -23,7 +24,7 @@ from tradingagents.research.incremental.collection import (
 def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
 
 
@@ -96,6 +97,7 @@ def test_mainland_collector_uses_one_qfq_series_and_completed_sessions(
         _request(),
         route_to_vendor=lambda *_args, **_kwargs: _tencent_market_response(),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -142,6 +144,7 @@ def test_mainland_collector_retains_internal_eastmoney_fallback_provenance(
         _request(),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -154,10 +157,10 @@ def test_default_collector_dispatches_mainland_path(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
         "tradingagents.data.incremental_cn.collect_mainland_china_incremental",
-        lambda request: sentinel,
+        lambda request, *, data_context: sentinel,
     )
 
-    assert default_incremental_collector(_request()) is sentinel
+    assert default_incremental_collector(_request(), data_context=request_context()) is sentinel
 
 
 def test_mainland_collector_admits_later_published_cninfo_correction() -> None:
@@ -185,6 +188,7 @@ Effective period: 2025-12-31
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert len(collected.evidence) == 1
@@ -241,6 +245,7 @@ Disclosed: 2026-07-22 10:00 CST
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: f"{admitted}\n\n{omitted}",
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -292,6 +297,7 @@ Basic EPS: 2.0
         request,
         route_to_vendor=lambda *_args, **_kwargs: f"{live}\n\n{pit}",
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request,
@@ -336,6 +342,7 @@ def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request,
@@ -363,6 +370,7 @@ def test_mainland_collector_supports_shenzhen_a_share_identity(monkeypatch) -> N
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -415,6 +423,7 @@ Date,Open,High,Low,Close,Volume
         request,
         route_to_vendor=route,
         now=lambda: datetime(2026, 4, 6, 8, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert calls[0][1][1] == "2026-04-03"
@@ -442,7 +451,7 @@ def test_mainland_collector_stops_on_calendar_rate_limit_before_market_route(
     monkeypatch.setattr(calendar.requests, "get", rate_limited_calendar_request)
     try:
         with pytest.raises(AkShareRateLimitError, match="calendar rate limited"):
-            collect_mainland_china_incremental(_request(), route_to_vendor=route)
+            collect_mainland_china_incremental(_request(), route_to_vendor=route, data_context=request_context())
     finally:
         calendar.trading_dates.cache_clear()
 

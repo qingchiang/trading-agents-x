@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.macro_panel import get_global_macro_panel
@@ -210,13 +211,14 @@ def _context_failure_code(domain, generic_code, typed_codes):
     return ".".join(codes)
 
 
-def append_financials(request, domain, routed):
+def append_financials(request, domain, routed, *, data_context: DataRequestContext):
     inputs = collect_financial_inputs(
         request.instrument,
         request.analysis_cutoff.isoformat(),
         route=routed,
         include_overview=False,
         stop_on_rate_limit=True,
+        data_context=data_context,
     )
     responses = tuple(inputs["responses"].values())
     return retain_input_limitations(
@@ -241,7 +243,7 @@ def collect_professional_signals(request, fetch):
     )
 
 
-def append_news_context(request, domain, routed):
+def append_news_context(request, domain, routed, *, data_context: DataRequestContext):
     observations = []
     responses = []
     failed = False
@@ -250,7 +252,7 @@ def append_news_context(request, domain, routed):
         lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
                        (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
                        _provenance=True, _stop_on_rate_limit=True),
-        lambda: get_global_macro_panel(request.analysis_cutoff.isoformat()),
+        lambda: get_global_macro_panel(request.analysis_cutoff.isoformat(), data_context=data_context),
     ]
     if request.market == "japan":
         calls.append(lambda: get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat()))

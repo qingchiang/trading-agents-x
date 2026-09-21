@@ -12,7 +12,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 
-from tradingagents.data.config import use_config
 from tradingagents.domain.artifacts import (
     ArtifactGenerationObservation,
     ResearchArtifactContent,
@@ -372,7 +371,7 @@ class ResearchGraph:
             }
             from tradingagents.data.source_observations import capture_observations
 
-            with use_config(dict(context.dataflow_config)), capture_observations() as observations:
+            with capture_observations() as observations:
                 result = self._analyst_subgraphs[analyst].invoke(
                     local_state,
                     config={

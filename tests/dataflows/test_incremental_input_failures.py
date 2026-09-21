@@ -1,5 +1,6 @@
 import pytest
 
+from tests.data_policy import request_context
 from tests.dataflows.test_incremental_us_collector import _request
 from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
 from tradingagents.domain.vendor_errors import (
@@ -30,7 +31,7 @@ def test_news_context_keeps_typed_diagnostic_and_continues_macro(
         calls.append("global_news")
         raise failure
 
-    def macro(*_args):
+    def macro(*_args, data_context):
         calls.append("macro")
         return ""
 
@@ -43,7 +44,7 @@ def test_news_context_keeps_typed_diagnostic_and_continues_macro(
 
     result, candidates = incremental_inputs.append_news_context(
         _request(enabled_domains=("news",)), domain, route
-    )
+    , data_context=request_context())
 
     assert calls == ["global_news", "macro"]
     assert candidates == ()

@@ -3,6 +3,7 @@ ranking, formatting, graceful degradation, and router integration.
 
 All API access is mocked, so these run without a network connection.
 """
+
 import copy
 import unittest
 from unittest import mock
@@ -11,8 +12,8 @@ import pytest
 import requests
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface, polymarket
-from tradingagents.data.config import bind_config
 
 
 def _market(question, prob, *, volume, end_date, closed=False, wk=None):
@@ -48,7 +49,7 @@ _SEARCH = {
 class PolymarketFilterTests(unittest.TestCase):
     def test_closed_and_past_markets_are_excluded(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10)
+            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
         self.assertIn("Open big?", out)
         self.assertIn("Open small?", out)
         self.assertNotIn("Resolved already?", out)  # closed
@@ -56,12 +57,12 @@ class PolymarketFilterTests(unittest.TestCase):
 
     def test_ranked_by_volume(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10)
+            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
         self.assertLess(out.index("Open big?"), out.index("Open small?"))
 
     def test_limit_caps_results(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=1)
+            out = polymarket.get_prediction_markets("anything", limit=1, data_context=request_context())
         self.assertIn("Open big?", out)
         self.assertNotIn("Open small?", out)
 
@@ -70,7 +71,7 @@ class PolymarketFilterTests(unittest.TestCase):
 class PolymarketFormatTests(unittest.TestCase):
     def test_probability_volume_and_weekly_change_render(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10)
+            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
         self.assertIn("Yes 76%", out)
         self.assertIn("$5,000,000 volume", out)
         self.assertIn("resolves 2030-12-31", out)
@@ -79,13 +80,13 @@ class PolymarketFormatTests(unittest.TestCase):
     def test_weekly_change_omitted_when_absent(self):
         # "Open small?" has wk=None -> no 1-week clause on its line.
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10)
+            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
         small_line = next(ln for ln in out.splitlines() if "Open small?" in ln)
         self.assertNotIn("1-week", small_line)
 
     def test_no_matches_reports_clearly(self):
         with mock.patch.object(polymarket, "_request", return_value={"events": []}):
-            out = polymarket.get_prediction_markets("obscure ticker", limit=6)
+            out = polymarket.get_prediction_markets("obscure ticker", limit=6, data_context=request_context())
         self.assertIn("No open prediction markets", out)
 
 
@@ -96,7 +97,7 @@ class PolymarketResilienceTests(unittest.TestCase):
         with mock.patch.object(
             polymarket, "_request", side_effect=requests.RequestException("boom")
         ):
-            out = polymarket.get_prediction_markets("Fed rate cut")
+            out = polymarket.get_prediction_markets("Fed rate cut", data_context=request_context())
         self.assertIn("unavailable", out.lower())
         self.assertIn("Fed rate cut", out)
 
@@ -104,23 +105,23 @@ class PolymarketResilienceTests(unittest.TestCase):
 @pytest.mark.unit
 class PolymarketRoutingTests(unittest.TestCase):
     def setUp(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_category_routes_to_polymarket(self):
         self.assertEqual(
             interface.get_category_for_method("get_prediction_markets"),
             "prediction_markets",
         )
-        bind_config({"data_vendors": {"prediction_markets": "polymarket"}})
+        configure_data({"data_vendors": {"prediction_markets": "polymarket"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
             {"get_prediction_markets": {"polymarket": lambda *a, **k: "POLY_OK"}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_prediction_markets", "fed", 5)
+            out = interface.route_to_vendor("get_prediction_markets", "fed", 5, data_context=request_context())
         self.assertEqual(out, "POLY_OK")
 
 

@@ -55,7 +55,7 @@ def create_news_analyst(llm):
         # market-agnostic. get_macro_indicators stays available as a microscope
         # for drilling into a specific series beyond the panel. Never raises.
         with capture_observations() as context_observations:
-            macro_panel = get_global_macro_panel(current_date)
+            macro_panel = get_global_macro_panel(current_date, data_context=runtime.context.data_context)
             market_flow_context = (
                 get_market_investor_flows(ticker, current_date)
                 if is_tokyo_ticker(ticker)

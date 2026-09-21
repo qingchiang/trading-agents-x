@@ -5,6 +5,7 @@ The guard raises NoMarketDataError with a stale-specific detail, so the router's
 existing try-next-vendor + single-sentinel handling applies and the sentinel
 surfaces the reason.
 """
+
 import copy
 import unittest
 from datetime import datetime
@@ -17,8 +18,8 @@ import pytest
 import tradingagents.configuration.defaults as default_config
 import tradingagents.data.stockstats_utils as stockstats_utils
 import tradingagents.data.y_finance as y_finance
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface
-from tradingagents.data.config import bind_config
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale
 from tradingagents.domain.instruments import NoMarketDataError
 
@@ -93,11 +94,9 @@ def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(
             ),
         )
 
-    monkeypatch.setattr(
-        stockstats_utils,
-        "get_config",
-        lambda: {"data_cache_dir": str(tmp_path)},
-    )
+    from tests.data_policy import configure_data
+
+    configure_data({"data_cache_dir": str(tmp_path)})
     monkeypatch.setattr(stockstats_utils.yf, "download", fake_download)
     monkeypatch.setattr(
         stockstats_utils,
@@ -110,11 +109,11 @@ def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(
         lambda *_args, **_kwargs: pd.Timestamp(state["completed"]),
     )
 
-    before_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11")
+    before_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11", data_context=request_context())
     assert before_close["Date"].max() == pd.Timestamp("2026-06-10")
 
     state["completed"] = "2026-06-11"
-    after_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11")
+    after_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11", data_context=request_context())
 
     assert state["downloads"] == 2
     assert after_close.iloc[-1]["Close"] == 120.0
@@ -141,19 +140,19 @@ class StaleGuardPropagationTests(unittest.TestCase):
 
         with mock.patch.object(y_finance.yf, "Ticker", DummyTicker), \
                 self.assertRaises(NoMarketDataError):
-            y_finance.get_YFin_data_online("CB", "2026-06-01", "2026-06-11")
+            y_finance.get_YFin_data_online("CB", "2026-06-01", "2026-06-11", data_context=request_context())
 
 
 @pytest.mark.unit
 class StaleGuardRoutingTests(unittest.TestCase):
     def setUp(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_router_sentinel_surfaces_stale_reason(self):
-        bind_config({"data_vendors": {"core_stock_apis": "yfinance"}})
+        configure_data({"data_vendors": {"core_stock_apis": "yfinance"}})
 
         def _stale(symbol, *a, **k):
             raise NoMarketDataError(
@@ -167,7 +166,7 @@ class StaleGuardRoutingTests(unittest.TestCase):
         ):
             out = interface.route_to_vendor(
                 "get_stock_data", "CB", "2026-06-01", "2026-06-11"
-            )
+            , data_context=request_context())
         self.assertIn("NO_DATA_AVAILABLE", out)
         self.assertIn("stale", out)  # the typed detail is surfaced to the agent
 

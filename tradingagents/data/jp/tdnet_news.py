@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.calendar import tokyo_today
 from tradingagents.data.jp.http_util import USER_AGENT, fetch_bytes
 from tradingagents.data.jp.jquants_common import to_jquants_code
@@ -169,7 +169,7 @@ def _parse_timestamp(raw: str) -> datetime | None:
     return None
 
 
-def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0, *, data_context: DataRequestContext) -> str:
     """Return TDnet timely disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     One keyless search request (server-side filtered by code and date), then a
@@ -219,7 +219,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         return _no_disclosures(ticker, start_date, end_date) + "\n" + counts.render()
 
     matches.sort(key=lambda r: r["at"], reverse=True)  # most recent first
-    kept = matches[: source_output_limit(get_config()["news_article_limit"])]
+    kept = matches[: source_output_limit(data_context.config["news_article_limit"])]
     counts.source_truncated = len(matches) - len(kept)
     body = "\n\n".join(
         f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"

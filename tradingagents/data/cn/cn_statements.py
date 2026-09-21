@@ -14,6 +14,7 @@ from tradingagents.data.cn.sina_finance import (
     filter_visible_records,
     validate_analysis_date,
 )
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.y_finance import get_statement_frame
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorError
@@ -402,13 +403,13 @@ def _statement(
     return result + _yfinance_supplement(ticker, kind, freq, curr_date, needed=bool(missing))
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     return _statement(ticker, "income", freq, curr_date)
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     return _statement(ticker, "balance", freq, curr_date)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     return _statement(ticker, "cashflow", freq, curr_date)

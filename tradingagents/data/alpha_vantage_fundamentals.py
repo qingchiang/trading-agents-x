@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime
 
 from tradingagents.data.alpha_vantage_common import _make_api_request
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 
 
@@ -29,7 +30,7 @@ def _filter_reports_by_date(result, curr_date: str):
     return json.dumps(payload)
 
 
-def get_fundamentals(ticker: str, curr_date: str = None) -> str:
+def get_fundamentals(ticker: str, curr_date: str = None, *, data_context: DataRequestContext) -> str:
     """
     Retrieve comprehensive fundamental data for a given ticker symbol using Alpha Vantage.
 
@@ -62,19 +63,19 @@ def get_fundamentals(ticker: str, curr_date: str = None) -> str:
     )
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str = None):
+def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str = None, *, data_context: DataRequestContext):
     """Retrieve balance sheet data for a given ticker symbol using Alpha Vantage."""
     result = _make_api_request("BALANCE_SHEET", {"symbol": ticker})
     return _filter_reports_by_date(result, curr_date)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str = None):
+def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str = None, *, data_context: DataRequestContext):
     """Retrieve cash flow statement data for a given ticker symbol using Alpha Vantage."""
     result = _make_api_request("CASH_FLOW", {"symbol": ticker})
     return _filter_reports_by_date(result, curr_date)
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str = None):
+def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str = None, *, data_context: DataRequestContext):
     """Retrieve income statement data for a given ticker symbol using Alpha Vantage."""
     result = _make_api_request("INCOME_STATEMENT", {"symbol": ticker})
     return _filter_reports_by_date(result, curr_date)

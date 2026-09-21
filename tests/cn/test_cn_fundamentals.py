@@ -5,6 +5,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.cn import cn_fundamentals, common, company
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.vendor_errors import NoMarketDataError
@@ -61,7 +62,7 @@ def test_historical_analysis_never_queries_current_yfinance(monkeypatch):
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", current)
     monkeypatch.setattr(cn_fundamentals, "get_company_profile_snapshot", profile)
 
-    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01")
+    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01", data_context=request_context())
 
     current.assert_not_called()
     profile.assert_not_called()
@@ -86,9 +87,9 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
     get_yf = mock.Mock(return_value="Market Cap: 123\nPE Ratio (TTM): 10")
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", get_yf)
 
-    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-07-19")
+    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-07-19", data_context=request_context())
 
-    get_yf.assert_called_once_with("600519.SS", "2026-07-19")
+    get_yf.assert_called_once_with("600519.SS", "2026-07-19", data_context=request_context())
     assert "Current valuation and analyst snapshot (yfinance)" in output
     assert "Market Cap: 123" in output
     records = extract_provenance(output)
@@ -118,9 +119,9 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
 @pytest.mark.unit
 def test_bank_uses_financial_metric_mapping(monkeypatch):
     _install_sources(monkeypatch, bank=True)
-    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args: "")
+    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: "")
 
-    output = cn_fundamentals.get_fundamentals("000001.SZ")
+    output = cn_fundamentals.get_fundamentals("000001.SZ", data_context=request_context())
 
     assert "Entity mapping: financial" in output
     assert "Net interest margin" in output
@@ -148,9 +149,9 @@ def test_profile_failure_still_returns_disclosure_abstract(monkeypatch):
         "fetch_finance_records",
         lambda ticker, _kind: (ticker, _abstract()),
     )
-    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args: "")
+    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: "")
 
-    output = cn_fundamentals.get_fundamentals("000333.SZ")
+    output = cn_fundamentals.get_fundamentals("000333.SZ", data_context=request_context())
 
     assert "CNINFO profile source status: unavailable" in output
     assert "2025-12-31" in output
@@ -180,7 +181,7 @@ def test_both_china_sources_unavailable_raises_for_router_fallback(monkeypatch):
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", get_yf)
 
     with pytest.raises(NoMarketDataError) as exc_info:
-        cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01")
+        cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01", data_context=request_context())
     assert len(exc_info.value.availability_notes) == 2
     assert "CNINFO company profile unavailable" in exc_info.value.availability_notes[0]
     assert "Sina financial abstract unavailable" in exc_info.value.availability_notes[1]
@@ -204,7 +205,7 @@ def test_incremental_fundamentals_stop_before_later_sources_on_rate_limit(
         stop_on_rate_limit_scope(True),
         pytest.raises(common.AkShareRateLimitError, match="CNINFO 429"),
     ):
-        cn_fundamentals.get_fundamentals("600519.SS", "2026-07-24")
+        cn_fundamentals.get_fundamentals("600519.SS", "2026-07-24", data_context=request_context())
 
     later.assert_not_called()
 
@@ -217,7 +218,7 @@ def test_invalid_date_is_rejected_before_any_fundamental_source(monkeypatch):
     monkeypatch.setattr(cn_fundamentals, "fetch_finance_records", abstract)
 
     with pytest.raises(ValueError, match="expected YYYY-MM-DD"):
-        cn_fundamentals.get_fundamentals("600519.SS", "2026/04/01")
+        cn_fundamentals.get_fundamentals("600519.SS", "2026/04/01", data_context=request_context())
     profile.assert_not_called()
     abstract.assert_not_called()
 

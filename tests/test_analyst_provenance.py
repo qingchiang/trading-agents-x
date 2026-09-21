@@ -1,4 +1,3 @@
-
 import copy
 from datetime import date
 from unittest import mock
@@ -8,8 +7,8 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data
 from tests.factories import analyst_runtime
-from tradingagents.data.config import bind_config
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.fundamentals_analyst import create_fundamentals_analyst
@@ -19,7 +18,7 @@ from tradingagents.research.full.evidence import collect_evidence
 
 @pytest.fixture(autouse=True)
 def _reset_config():
-    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+    configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
     yield
 
 

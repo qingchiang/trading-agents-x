@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import exact_year_over_year, summarize_points
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
@@ -178,6 +179,8 @@ def _cell(
     source_stats: dict[str, dict[str, object]] | None = None,
     unavailable_sources: dict[str, str] | None = None,
     series_records: list[ProvenanceRecord] | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
@@ -231,7 +234,7 @@ def _cell(
         audit(None, "—", "retrieval unavailable")
         return "n/a"
     try:
-        data = _SOURCES[source].fetch_series(indicator, curr_date, look_back_days)
+        data = _SOURCES[source].fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
         summary = summarize_points(data["points"]) if data else None
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
@@ -299,7 +302,7 @@ def _cell(
     return f"{cell_label}: {rendered}" if cell_label else rendered
 
 
-def get_global_macro_panel(curr_date: str) -> str:
+def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) -> str:
     """Return a compact cross-region macro panel as of ``curr_date`` (markdown).
 
     A per-country comparison table (liquidity / inflation / activity across the
@@ -332,6 +335,7 @@ def get_global_macro_panel(curr_date: str) -> str:
                     source_stats,
                     unavailable_sources,
                     series_records,
+                    data_context=data_context,
                 )
                 for region in _REGIONS
             ]
@@ -342,7 +346,7 @@ def get_global_macro_panel(curr_date: str) -> str:
     for label, spec in _GLOBAL_RISK:
         risk_rows.append(
             f"| {label} | "
-            f"{_cell(spec, curr_date, source_stats, unavailable_sources, series_records)} |"
+            f"{_cell(spec, curr_date, source_stats, unavailable_sources, series_records, data_context=data_context)} |"
         )
     risk = "\n".join(risk_rows)
 

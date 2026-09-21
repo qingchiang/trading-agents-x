@@ -14,8 +14,8 @@ from unittest import mock
 import pandas as pd
 import pytest
 
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface, stockstats_utils
-from tradingagents.data.config import bind_config
 from tradingagents.domain.instruments import NoMarketDataError
 from tradingagents.provenance import extract_provenance
 
@@ -25,7 +25,7 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
     def setUp(self):
         self._tmp = os.path.join(os.path.dirname(__file__), "_tmp_cache")
         os.makedirs(self._tmp, exist_ok=True)
-        bind_config({"data_cache_dir": self._tmp})
+        configure_data({"data_cache_dir": self._tmp})
 
     def tearDown(self):
         for f in os.listdir(self._tmp):
@@ -36,14 +36,14 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
         empty = pd.DataFrame()
         with mock.patch.object(stockstats_utils.yf, "download", return_value=empty), \
                 self.assertRaises(NoMarketDataError):
-            stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
+            stockstats_utils.load_ohlcv("FAKE", "2026-01-01", data_context=request_context())
         # Nothing should have been written to the cache.
         self.assertEqual(os.listdir(self._tmp), [])
 
         # A second call must re-attempt the fetch (no poisoned cache served).
         with mock.patch.object(stockstats_utils.yf, "download", return_value=empty) as dl2:
             with self.assertRaises(NoMarketDataError):
-                stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
+                stockstats_utils.load_ohlcv("FAKE", "2026-01-01", data_context=request_context())
             self.assertTrue(dl2.called)
 
 
@@ -75,6 +75,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
                 "2026-05-01",
                 "2026-05-31",
                 _provenance=True,
+                data_context=request_context(),
             )
 
         self.assertIn("## Yahoo fallback news", result)
@@ -96,7 +97,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         ):
             result = interface.route_to_vendor(
                 "get_stock_data", "XAUUSD+", "2026-01-01", "2026-01-10"
-            )
+            , data_context=request_context())
         self.assertIn("NO_DATA_AVAILABLE", result)
         self.assertIn("XAUUSD+", result)
         self.assertIn("GC=F", result)
@@ -118,7 +119,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         ):
             result = interface.route_to_vendor(
                 "get_stock_data", "FAKE", "2026-01-01", "2026-01-10"
-            )
+            , data_context=request_context())
         self.assertIn("NO_DATA_AVAILABLE", result)
 
 

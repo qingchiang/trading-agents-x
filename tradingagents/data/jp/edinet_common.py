@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 import requests
 
 from tradingagents.credentials import credential
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.calendar import tokyo_today
 from tradingagents.domain.vendor_errors import VendorNotConfiguredError, VendorRateLimitError
 
@@ -147,14 +147,14 @@ def _memory_put(date_str: str, records: list[dict], *, settled: bool) -> None:
             _documents_cache.popitem(last=False)
 
 
-def _disk_dir() -> str:
+def _disk_dir(*, data_context: DataRequestContext) -> str:
     return os.path.join(
-        get_config()["data_cache_dir"], "edinet", "documents", "v2"
+        data_context.config["data_cache_dir"], "edinet", "documents", "v2"
     )
 
 
-def _disk_file(date_str: str) -> str:
-    return os.path.join(_disk_dir(), f"{date_str}.json.gz")
+def _disk_file(date_str: str, *, data_context: DataRequestContext) -> str:
+    return os.path.join(_disk_dir(data_context=data_context), f"{date_str}.json.gz")
 
 
 def _remove(path: str) -> None:
@@ -162,11 +162,11 @@ def _remove(path: str) -> None:
         os.remove(path)
 
 
-def _disk_get(date_str: str) -> list[dict] | None:
+def _disk_get(date_str: str, *, data_context: DataRequestContext) -> list[dict] | None:
     """Read a settled date from disk; corruption is a safe cache miss."""
     if not _is_settled(date_str):
         return None
-    path = _disk_file(date_str)
+    path = _disk_file(date_str, data_context=data_context)
     try:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             payload = json.load(fh)
@@ -190,12 +190,12 @@ def _disk_get(date_str: str) -> list[dict] | None:
         return None
 
 
-def _disk_put(date_str: str, records: list[dict]) -> None:
+def _disk_put(date_str: str, records: list[dict], *, data_context: DataRequestContext) -> None:
     """Persist one settled public document list atomically, best-effort."""
     if not _is_settled(date_str):
         return
-    disk_dir = _disk_dir()
-    path = _disk_file(date_str)
+    disk_dir = _disk_dir(data_context=data_context)
+    path = _disk_file(date_str, data_context=data_context)
     tmp = ""
     try:
         os.makedirs(disk_dir, exist_ok=True)
@@ -249,7 +249,7 @@ def _prune_disk(disk_dir: str) -> None:
                 _remove(path)
 
 
-def documents_on(date_str: str) -> list[dict]:
+def documents_on(date_str: str, *, data_context: DataRequestContext) -> list[dict]:
     """Return a date's filings via memory, disk, then one single-flight fetch.
 
     Settled dates persist across runs. Today's still-changing list is memory-only
@@ -269,14 +269,14 @@ def documents_on(date_str: str) -> list[dict]:
             return cached
         settled = _is_settled(date_str)
         if settled:
-            cached = _disk_get(date_str)
+            cached = _disk_get(date_str, data_context=data_context)
             if cached is not None:
                 _memory_put(date_str, cached, settled=True)
                 return cached
         records = fetch_documents(date_str)
         _memory_put(date_str, records, settled=settled)
         if settled:
-            _disk_put(date_str, records)
+            _disk_put(date_str, records, data_context=data_context)
         return records
 
 

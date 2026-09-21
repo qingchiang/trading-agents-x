@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface
 from tradingagents.data.incremental_jp import collect_japan_incremental
 from tradingagents.data.jp import edinet_news, jp_news
@@ -25,7 +26,7 @@ from tradingagents.research.incremental.collection import (
 def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
 
 
@@ -81,6 +82,7 @@ def test_japan_collector_uses_adjusted_jquants_series_and_completed_tse_sessions
         _request(),
         route_to_vendor=lambda *_args, **_kwargs: _jquants_market_response(),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -109,6 +111,7 @@ def test_japan_collector_omits_non_tse_rows_without_losing_the_adjusted_series()
         _request(),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -164,6 +167,7 @@ Date,Open,High,Low,Close,Volume
         request,
         route_to_vendor=configured_route,
         now=lambda: datetime(2019, 5, 8, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert calls[0][1][1] == "2019-04-26"
@@ -208,6 +212,7 @@ Date,Open,High,Low,Close,Volume
         request,
         route_to_vendor=configured_route,
         now=lambda: datetime(2026, 7, 29, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert calls[0][1][1] == "2026-07-23"
@@ -236,6 +241,7 @@ def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
         _request(),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert collected.stock_series is not None
@@ -257,13 +263,13 @@ def test_japan_collector_admits_disclosure_correction_by_publication_time() -> N
         mock.patch.object(
             edinet_news,
             "documents_on",
-            side_effect=lambda day: [document] if day == "2026-07-22" else [],
+            side_effect=lambda day, *, data_context: [document] if day == "2026-07-22" else [],
         ),
         mock.patch.object(jp_news, "_edinet_news", edinet_news.get_news),
         mock.patch.object(jp_news, "_tdnet_news", return_value="No TDnet disclosures found"),
         mock.patch.object(jp_news, "_google_news", return_value="No Google News found"),
     ):
-        response = jp_news.get_news("7203.T", "2026-07-20", "2026-07-24")
+        response = jp_news.get_news("7203.T", "2026-07-20", "2026-07-24", data_context=request_context())
     assert "Financial period: 2025-04-01 to 2026-03-31" in response
     assert "Effective period: 2026-03-31" in response
     request = _request(enabled_domains=("news",))
@@ -271,6 +277,7 @@ def test_japan_collector_admits_disclosure_correction_by_publication_time() -> N
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -288,7 +295,7 @@ def test_japan_collector_admits_naive_edinet_publication_with_other_assembler_fe
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args: """## EDINET
+        lambda *_args, data_context: """## EDINET
 
 ### Statutory correction (filer: Toyota)
 Submitted: 2026-07-22 10:00
@@ -298,7 +305,7 @@ Effective period: 2026-03-31
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args: """## TDnet
+        lambda *_args, data_context: """## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
@@ -307,18 +314,19 @@ Disclosed: 2026-07-22 11:00 JST
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args: """## Google News
+        lambda *_args, data_context: """## Google News
 
 ### Media coverage
 Published: 2026-07-22T03:00:00Z
 """,
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -366,6 +374,7 @@ Disclosed: 2026-07-22 10:00 JST
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -408,6 +417,7 @@ Disclosed: 2026-07-22 10:00 JST · PDF: https://www.release.tdnet.info/inbs/exam
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -435,6 +445,7 @@ New guidance was published in the Incremental window.
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -478,6 +489,7 @@ Published: 2026-07-22T01:00:00Z
             "2026-07-17",
             "2026-07-24",
             _provenance=True,
+            data_context=request_context(),
         )
 
     request = _request(enabled_domains=("news",))
@@ -485,6 +497,7 @@ Published: 2026-07-22T01:00:00Z
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -504,26 +517,27 @@ Published: 2026-07-22T01:00:00Z
 def test_japan_collector_keeps_tdnet_items_with_multiple_assembler_failure_notes(
     monkeypatch,
 ) -> None:
-    def unavailable(*_args):
+    def unavailable(*_args, data_context):
         raise RuntimeError("fixture failure")
 
     monkeypatch.setattr(jp_news, "_edinet_news", unavailable)
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args: """## TDnet
+        lambda *_args, data_context: """## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
 """,
     )
     monkeypatch.setattr(jp_news, "_google_news", unavailable)
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -546,11 +560,11 @@ Disclosed: 2026-07-22 11:00 JST
 
 
 def test_japan_collector_retains_source_omitted_by_japanese_news_global_cap(monkeypatch) -> None:
-    monkeypatch.setattr(jp_news, "get_config", lambda: {"news_article_limit": 1})
+    configure_data({"news_article_limit": 1})
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args: """## EDINET
+        lambda *_args, data_context: """## EDINET
 
 ### Statutory correction
 Submitted: 2026-07-22 10:00
@@ -559,7 +573,7 @@ Submitted: 2026-07-22 10:00
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args: """## TDnet
+        lambda *_args, data_context: """## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
@@ -568,14 +582,15 @@ Disclosed: 2026-07-22 11:00 JST
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args: "No Google News found for 7203.T between 2026-07-17 and 2026-07-24",
+        lambda *_args, data_context: "No Google News found for 7203.T between 2026-07-17 and 2026-07-24",
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
 
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -610,6 +625,7 @@ Requested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 15, 1, tzinfo=UTC)
@@ -641,6 +657,7 @@ Published: 2026-07-22T03:00:00Z
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -672,6 +689,7 @@ def test_japan_collector_omits_live_only_news_without_aware_producer_retrieval()
             _request(enabled_domains=("news",)),
             route_to_vendor=lambda *_args, _response=response, **_kwargs: _response,
             now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+            data_context=request_context(),
         )
 
         domain = collected.collection_summary.domains[0]
@@ -709,6 +727,7 @@ No reliably dated items were returned.
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -727,24 +746,25 @@ def test_japan_collector_binds_news_items_from_structured_assembler_spans(
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args: "## neutral one\n\n### Neutral filing\n2026-07-21",
+        lambda *_args, data_context: "## neutral one\n\n### Neutral filing\n2026-07-21",
     )
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args: "## neutral two\n\n### Neutral timely item\n2026-07-22",
+        lambda *_args, data_context: "## neutral two\n\n### Neutral timely item\n2026-07-22",
     )
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args: "No Google News found for 7203.T between a and b",
+        lambda *_args, data_context: "No Google News found for 7203.T between a and b",
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24")
+    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
 
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     assert [candidate.evidence.source for candidate in collected.evidence] == [
@@ -774,6 +794,7 @@ def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> No
         _request(enabled_domains=("fundamentals",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -805,6 +826,7 @@ Date,Open,High,Low,Close,Volume
         _request(enabled_domains=("market",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -833,6 +855,7 @@ Disclosed: 2026-07-22 11:00
         _request(enabled_domains=("news",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -864,6 +887,7 @@ Effective period: 2026-13-31
         _request(enabled_domains=("fundamentals",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -896,6 +920,7 @@ Effective period: 2026-03-31
         _request(enabled_domains=("fundamentals",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
@@ -929,6 +954,7 @@ def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_ret
             _request(enabled_domains=("fundamentals",)),
             route_to_vendor=lambda *_args, _response=response, **_kwargs: _response,
             now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+            data_context=request_context(),
         )
 
         domain = collected.collection_summary.domains[0]
@@ -959,6 +985,7 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert collected.collection_summary.domains[0].state.value == "partial"
     assert collected.collection_summary.domains[0].diagnostic is not None
@@ -974,6 +1001,7 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
         old_request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     old_summary, old_evidence, _bindings = normalize_incremental_collection(
         old_request, old_collected, sealed_at=datetime(2026, 7, 30, 0, 1, tzinfo=UTC)
@@ -1010,6 +1038,7 @@ def test_japan_collector_preserves_all_live_span_origins() -> None:
         _request(enabled_domains=("fundamentals",)),
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
 
     item = collected.evidence[0].evidence
@@ -1053,6 +1082,7 @@ Effective period: 2026-03-31
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert collected.collection_summary.domains[0].state.value == "data"
     assert collected.collection_summary.domains[0].diagnostic is None
@@ -1104,6 +1134,7 @@ Effective period: 2026-03-31
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 24, 3, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 3, 1, tzinfo=UTC)
@@ -1140,6 +1171,7 @@ Official correction published after the Full Baseline.
         request,
         route_to_vendor=lambda *_args, **_kwargs: response,
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
+        data_context=request_context(),
     )
     assert collected.collection_summary.domains[0].state.value == "partial"
     assert collected.collection_summary.domains[0].diagnostic is not None
@@ -1166,6 +1198,6 @@ def test_default_collector_dispatches_japan_path(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
         "tradingagents.data.incremental_jp.collect_japan_incremental",
-        lambda request: sentinel,
+        lambda request, *, data_context: sentinel,
     )
-    assert default_incremental_collector(_request()) is sentinel
+    assert default_incremental_collector(_request(), data_context=request_context()) is sentinel

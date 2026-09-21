@@ -4,11 +4,13 @@ publication-lag look-ahead, and process caching.
 All API access is mocked, so these run without a network connection (the BOJ API
 is keyless, so there is no credential to stub).
 """
+
 import unittest
 from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import boj
 from tradingagents.domain.vendor_errors import NoMarketDataError
 
@@ -70,13 +72,13 @@ class BojFetchSeriesTests(unittest.TestCase):
 
     def test_unknown_alias_raises_value_error(self):
         with self.assertRaises(ValueError):
-            boj.fetch_series("not_a_real_alias", "2026-06-20")
+            boj.fetch_series("not_a_real_alias", "2026-06-20", data_context=request_context())
 
     def test_daily_skips_nulls_and_future_dates(self):
         # 06-20 is null (non-business day); 06-21 is after curr_date -> both dropped.
         body = _body([20260618, 20260619, 20260620, 20260621], [0.7, 0.72, None, 0.9])
         with mock.patch.object(boj, "_request", return_value=body):
-            data = boj.fetch_series("jp_policy_rate", "2026-06-20")
+            data = boj.fetch_series("jp_policy_rate", "2026-06-20", data_context=request_context())
         self.assertEqual(data["points"], [("2026-06-18", "0.7"), ("2026-06-19", "0.72")])
         self.assertEqual(data["units"], "percent per annum")
         self.assertEqual(data["series_id"], "STRDCLUCON")
@@ -85,7 +87,7 @@ class BojFetchSeriesTests(unittest.TestCase):
         # As of 2026-06-20, 2026 Q2 (published ~Jul 1) is not yet available.
         body = _body([202504, 202601, 202602], [15, 17, 99], unit="% points", freq="QUARTERLY")
         with mock.patch.object(boj, "_request", return_value=body):
-            data = boj.fetch_series("jp_tankan", "2026-06-20")
+            data = boj.fetch_series("jp_tankan", "2026-06-20", data_context=request_context())
         self.assertEqual(data["points"], [("2025 Q4", "15"), ("2026 Q1", "17")])
 
     def test_empty_resultset_returns_none_and_is_not_cached(self):
@@ -96,8 +98,8 @@ class BojFetchSeriesTests(unittest.TestCase):
             return {"STATUS": 200, "RESULTSET": []}
 
         with mock.patch.object(boj, "_request", side_effect=_req):
-            self.assertIsNone(boj.fetch_series("jp_policy_rate", "2026-06-20"))
-            self.assertIsNone(boj.fetch_series("jp_policy_rate", "2026-06-20"))
+            self.assertIsNone(boj.fetch_series("jp_policy_rate", "2026-06-20", data_context=request_context()))
+            self.assertIsNone(boj.fetch_series("jp_policy_rate", "2026-06-20", data_context=request_context()))
         self.assertEqual(calls, ["getDataCode", "getDataCode"])  # miss not memoized
 
     def test_all_filtered_points_returns_none_and_is_not_cached(self):
@@ -113,8 +115,8 @@ class BojFetchSeriesTests(unittest.TestCase):
 
         with mock.patch.object(boj, "_request", side_effect=_req):
             # 2026 Q1 value is null; 2026 Q2 (avail 2026-07-01) is after curr_date.
-            self.assertIsNone(boj.fetch_series("jp_tankan", "2026-05-01"))
-            self.assertIsNone(boj.fetch_series("jp_tankan", "2026-05-01"))
+            self.assertIsNone(boj.fetch_series("jp_tankan", "2026-05-01", data_context=request_context()))
+            self.assertIsNone(boj.fetch_series("jp_tankan", "2026-05-01", data_context=request_context()))
         self.assertEqual(calls, ["getDataCode", "getDataCode"])  # miss not memoized
 
     def test_repeat_fetch_hits_cache(self):
@@ -125,8 +127,8 @@ class BojFetchSeriesTests(unittest.TestCase):
             return _body([20260619], [0.72])
 
         with mock.patch.object(boj, "_request", side_effect=_req):
-            boj.fetch_series("jp_policy_rate", "2026-06-20")
-            boj.fetch_series("jp_policy_rate", "2026-06-20")
+            boj.fetch_series("jp_policy_rate", "2026-06-20", data_context=request_context())
+            boj.fetch_series("jp_policy_rate", "2026-06-20", data_context=request_context())
         self.assertEqual(calls, ["getDataCode"])  # second served from cache
 
 
@@ -141,18 +143,18 @@ class BojGetMacroDataTests(unittest.TestCase):
     def test_foreign_alias_raises_no_market_data(self):
         # An indicator BOJ doesn't own must raise so the router chain falls through.
         with self.assertRaises(NoMarketDataError):
-            boj.get_macro_data("cpi", "2026-06-20")
+            boj.get_macro_data("cpi", "2026-06-20", data_context=request_context())
 
     def test_owned_alias_renders_markdown(self):
         body = _body([20260618, 20260619], [0.97, 0.977])
         with mock.patch.object(boj, "_request", return_value=body):
-            out = boj.get_macro_data("jp_policy_rate", "2026-06-20")
+            out = boj.get_macro_data("jp_policy_rate", "2026-06-20", data_context=request_context())
         self.assertIn("## BOJ: Japan policy rate (overnight call, avg)", out)
         self.assertIn("**Latest:** 0.977 (2026-06-19)", out)
 
     def test_owned_alias_empty_window_returns_note(self):
         with mock.patch.object(boj, "_request", return_value={"STATUS": 200, "RESULTSET": []}):
-            out = boj.get_macro_data("jp_tankan", "2026-06-20")
+            out = boj.get_macro_data("jp_tankan", "2026-06-20", data_context=request_context())
         self.assertIn("BOJ: no data", out)
 
 

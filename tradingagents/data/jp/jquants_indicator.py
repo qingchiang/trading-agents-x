@@ -8,6 +8,7 @@ from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_stock import _fetch_ohlcv_frame
 from tradingagents.data.market_data_validator import render_verified_market_snapshot
 from tradingagents.data.stockstats_utils import render_indicator_window
@@ -20,7 +21,7 @@ _WARMUP_DAYS = 400
 
 def get_indicator(
     symbol: str, indicator: str, curr_date: str, look_back_days: int
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """Return a date->value window for ``indicator`` ending at ``curr_date``."""
     start = (
         datetime.strptime(curr_date, "%Y-%m-%d")
@@ -32,7 +33,7 @@ def get_indicator(
 
 def get_verified_market_snapshot(
     symbol: str, curr_date: str, look_back_days: int = 30
-) -> str:
+, *, data_context: DataRequestContext) -> str:
     """Return a J-Quants-backed deterministic market snapshot."""
     start = (
         datetime.strptime(curr_date, "%Y-%m-%d")

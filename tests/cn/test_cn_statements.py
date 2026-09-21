@@ -5,6 +5,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.cn import cn_statements, sina_finance
 from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.provenance import extract_provenance
@@ -43,7 +44,7 @@ def test_cashflow_preserves_sina_outflows_with_alternate_labels(monkeypatch):
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_: None)
     monkeypatch.setattr(cn_statements, "fetch_finance_records", lambda *_: ("600309.SS", frame))
-    output = cn_statements.get_cashflow("600309.SS", curr_date="2026-03-21")
+    output = cn_statements.get_cashflow("600309.SS", curr_date="2026-03-21", data_context=request_context())
     assert "Missing mapped fields: Capital expenditure" not in output
     assert ",125," in output
     assert ",45," in output
@@ -125,7 +126,7 @@ def test_statement_mapping_covers_consumer_manufacturer_and_bank(
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _ticker: profile)
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_args: None)
 
-    output = cn_statements.get_income_statement(ticker, curr_date="2026-04-01")
+    output = cn_statements.get_income_statement(ticker, curr_date="2026-04-01", data_context=request_context())
 
     assert expected in output
     assert "2025-12-31" in output
@@ -157,7 +158,7 @@ def test_irrelevant_financial_template_columns_do_not_misclassify_manufacturer(
     )
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_args: None)
 
-    output = cn_statements.get_income_statement("000333.SZ", curr_date="2026-04-01")
+    output = cn_statements.get_income_statement("000333.SZ", curr_date="2026-04-01", data_context=request_context())
 
     assert "Entity mapping: general" in output
     assert "Net fee and commission income" not in output
@@ -179,7 +180,7 @@ def test_missing_sina_fields_use_labeled_non_strict_yfinance_supplement(monkeypa
     get_yf = mock.Mock(return_value=yf)
     monkeypatch.setattr(cn_statements, "get_statement_frame", get_yf)
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01")
+    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
 
     assert "Supplemental line items (yfinance)" in output
     assert "Non-strict PIT" in output
@@ -212,7 +213,7 @@ def test_all_null_sina_column_triggers_yfinance_supplement(monkeypatch):
     )
     monkeypatch.setattr(cn_statements, "get_statement_frame", get_yf)
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01")
+    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
 
     assert "Operating cost" in output
     assert "Operating cost" in output.split("# Missing mapped fields:", 1)[1].splitlines()[0]
@@ -242,7 +243,7 @@ def test_empty_yfinance_values_still_record_supplement_provenance(monkeypatch):
         ),
     )
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01")
+    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
 
     records = extract_provenance(output)
     supplement = next(r for r in records if r.source == "yfinance statement supplement")
@@ -270,7 +271,7 @@ def test_no_disclosure_visible_raises_typed_no_data(monkeypatch):
         lambda *_args: ("600519.SS", _frame()),
     )
     with pytest.raises(NoMarketDataError, match="no balance reports visible") as exc_info:
-        cn_statements.get_balance_sheet("600519.SS", curr_date="2025-01-01")
+        cn_statements.get_balance_sheet("600519.SS", curr_date="2025-01-01", data_context=request_context())
     assert len(exc_info.value.availability_notes) == 1
     assert "AkShare / Sina Balance Sheet unavailable" in exc_info.value.availability_notes[0]
 
@@ -284,7 +285,7 @@ def test_sina_statement_failure_is_preserved_for_router_fallback(monkeypatch):
     )
 
     with pytest.raises(NoMarketDataError, match="primary source unavailable") as exc_info:
-        cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01")
+        cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
 
     assert len(exc_info.value.availability_notes) == 1
     assert "AkShare / Sina Income Statement unavailable" in exc_info.value.availability_notes[0]
@@ -297,7 +298,7 @@ def test_statement_rejects_invalid_date_before_vendor_request(monkeypatch):
     monkeypatch.setattr(cn_statements, "fetch_finance_records", fetch)
 
     with pytest.raises(ValueError, match="expected YYYY-MM-DD"):
-        cn_statements.get_balance_sheet("600519.SS", curr_date="not-a-date")
+        cn_statements.get_balance_sheet("600519.SS", curr_date="not-a-date", data_context=request_context())
     fetch.assert_not_called()
 
 

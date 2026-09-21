@@ -6,6 +6,7 @@ from datetime import datetime, time, timedelta
 from typing import NamedTuple
 
 from tradingagents.data import fred
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp import mof_yield
 from tradingagents.data.jp.calendar import is_government_business_day
 from tradingagents.data.macro_common import SeriesCache, render_macro_report
@@ -31,14 +32,16 @@ def _cache_phase(requested_end, now: datetime) -> str:
     return f"{now.date().isoformat()}-{phase}"
 
 
-def _fetch_primary(start, end, *, as_of: datetime, now: datetime):
-    return mof_yield.fetch_points(start, end, as_of=as_of, now=now)
+def _fetch_primary(start, end, *, as_of: datetime, now: datetime, data_context: DataRequestContext):
+    return mof_yield.fetch_points(start, end, as_of=as_of, now=now, data_context=data_context)
 
 
 def fetch_series(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> dict | None:
     """Fetch JP10Y from MOF daily data, then use FRED monthly fallback."""
     key = indicator.strip().lower()
@@ -50,19 +53,19 @@ def fetch_series(
     end = min(requested_end, now.date())
     as_of = mof_yield.analysis_as_of(end, now)
     cache_key = (key, curr_date, look_back_days, _cache_phase(requested_end, now))
-    cached = _series_cache.get(cache_key)
+    cached = _series_cache.get(cache_key, data_context=data_context)
     if cached is not None:
         return cached
 
     start = end - timedelta(days=look_back_days)
     fallback_reason = "MOF returned no usable observations"
     try:
-        points = _fetch_primary(start, end, as_of=as_of, now=now)
+        points = _fetch_primary(start, end, as_of=as_of, now=now, data_context=data_context)
     except mof_yield.MofDataError:
         points = []
         fallback_reason = "MOF primary retrieval unavailable"
     if not points:
-        fallback = fred.fetch_series(_FRED_10Y, end.isoformat(), look_back_days)
+        fallback = fred.fetch_series(_FRED_10Y, end.isoformat(), look_back_days, data_context=data_context)
         if not fallback or not fallback.get("points"):
             return None
         data = dict(fallback)
@@ -88,7 +91,7 @@ def fetch_series(
             ),
             "actual_source": "Japan Ministry of Finance",
         }
-    _series_cache.put_observation(cache_key, data)
+    _series_cache.put_observation(cache_key, data, data_context=data_context)
     return data
 
 
@@ -96,11 +99,13 @@ def get_macro_report(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> MacroReport:
     """Render JP macro data and retain the actual vendor for provenance."""
     if indicator.strip().lower() not in JP_SERIES:
         raise NoMarketDataError(indicator, detail="not a Japan macro series")
-    data = fetch_series(indicator, curr_date, look_back_days)
+    data = fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
     if data is None:
         return MacroReport(
             f"Japan macro: no data for '{indicator}' in this window.",
@@ -123,6 +128,8 @@ def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
+    *,
+    data_context: DataRequestContext,
 ) -> str:
     """Render one Japan macro series for the microscope tool."""
-    return get_macro_report(indicator, curr_date, look_back_days).text
+    return get_macro_report(indicator, curr_date, look_back_days, data_context=data_context).text

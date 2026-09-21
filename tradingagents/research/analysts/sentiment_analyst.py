@@ -65,7 +65,7 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = route_to_vendor("get_news", ticker, news_start_date, end_date, _provenance=True)
+            news_block = route_to_vendor("get_news", ticker, news_start_date, end_date, _provenance=True, data_context=runtime.context.data_context)
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
             news_block = f"<news unavailable: {type(exc).__name__}>"
@@ -81,7 +81,7 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            fetched_market_signals = fetch_sentiment_signals(ticker, end_date)
+            fetched_market_signals = fetch_sentiment_signals(ticker, end_date, data_context=runtime.context.data_context)
         else:
             if live_run:
                 stocktwits_block = fetch_stocktwits_messages(

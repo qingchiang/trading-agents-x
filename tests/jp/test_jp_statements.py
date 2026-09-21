@@ -1,12 +1,14 @@
 """JP statement assembler: J-Quants summary (authoritative, non-optional) plus a
 curated, best-effort yfinance line-item detail block. All J-Quants/yfinance
 access is mocked, so these run without network or keys."""
+
 import unittest
 from unittest import mock
 
 import pandas as pd
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data.jp import jp_statements
 from tradingagents.domain.instruments import NoMarketDataError
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
@@ -36,7 +38,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
-            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
         self.assertEqual(
             {record.source for record in extract_provenance(out)},
@@ -57,7 +59,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
-            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertIn("Line-item detail", out)
         self.assertIn("2025-03-31", out)
         self.assertNotIn("2026-03-31", out)   # all-blank latest period dropped
@@ -68,7 +70,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
-            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertEqual(strip_provenance_markers(out), "JQ-INCOME")
 
     def test_drops_all_blank_curated_row(self):
@@ -78,7 +80,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
-            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertIn("Gross Profit", out)
         self.assertNotIn("EBITDA", out)   # all-blank curated row dropped
 
@@ -93,7 +95,7 @@ class JPStatementsTests(unittest.TestCase):
             "get_statement_frame",
             return_value=frame,
         ) as gsf:
-            out = jp_statements.get_income_statement("7011.T", "annual", None)
+            out = jp_statements.get_income_statement("7011.T", "annual", None, data_context=request_context())
         self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
         self.assertIn("No analysis date was provided", out)
         self.assertIn("treated as a live retrieval", out)
@@ -103,14 +105,14 @@ class JPStatementsTests(unittest.TestCase):
             out,
         )
         self.assertIn("Line-item detail", out)
-        jq.assert_called_once_with("7011.T", "annual", None)
+        jq.assert_called_once_with("7011.T", "annual", None, data_context=request_context())
         gsf.assert_called_once_with("7011.T", "income", "annual", None)
 
     def test_historical_date_does_not_request_yfinance_detail(self):
         with mock.patch.object(jp_statements, "is_near_live", return_value=False), \
                 mock.patch.object(jp_statements.jqf, "get_cashflow", return_value="JQ-CF"), \
                 mock.patch.object(jp_statements, "get_statement_frame") as gsf:
-            out = jp_statements.get_cashflow("7011.T", "quarterly", "2024-03-15")
+            out = jp_statements.get_cashflow("7011.T", "quarterly", "2024-03-15", data_context=request_context())
         self.assertIn("Requested analysis date: 2024-03-15", out)
         self.assertIn("do not expose point-in-time filing timestamps", out)
         gsf.assert_not_called()
@@ -120,7 +122,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=None):
-            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertEqual(strip_provenance_markers(out), "JQ-INCOME")
 
     def test_omits_detail_when_no_curated_rows_present(self):
@@ -129,7 +131,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_balance_sheet", return_value="JQ-BS"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
-            out = jp_statements.get_balance_sheet("7011.T", "annual", "2026-06-26")
+            out = jp_statements.get_balance_sheet("7011.T", "annual", "2026-06-26", data_context=request_context())
         self.assertEqual(strip_provenance_markers(out), "JQ-BS")
         self.assertNotIn("Line-item detail", out)
 
@@ -138,7 +140,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_cashflow", return_value="JQ-CF"), \
                 mock.patch.object(jp_statements, "get_statement_frame", side_effect=RuntimeError("boom")):
-            out = jp_statements.get_cashflow("7011.T", "quarterly", "2026-06-26")
+            out = jp_statements.get_cashflow("7011.T", "quarterly", "2026-06-26", data_context=request_context())
         self.assertEqual(strip_provenance_markers(out), "JQ-CF")
 
     def test_jquants_no_data_propagates(self):
@@ -147,7 +149,7 @@ class JPStatementsTests(unittest.TestCase):
         with mock.patch.object(jp_statements.jqf, "get_balance_sheet",
                                side_effect=NoMarketDataError("7011.T", "7011.T", "none")), \
                 self.assertRaises(NoMarketDataError):
-            jp_statements.get_balance_sheet("7011.T", "annual", "2026-06-26")
+            jp_statements.get_balance_sheet("7011.T", "annual", "2026-06-26", data_context=request_context())
 
     def test_live_kind_freq_and_curr_date_propagate_to_yfinance(self):
         seen = {}
@@ -159,7 +161,7 @@ class JPStatementsTests(unittest.TestCase):
         with _live(), \
                 mock.patch.object(jp_statements.jqf, "get_cashflow", return_value="JQ-CF"), \
                 mock.patch.object(jp_statements, "get_statement_frame", side_effect=fake_frame):
-            jp_statements.get_cashflow("7011.T", "quarterly", "2026-06-26")
+            jp_statements.get_cashflow("7011.T", "quarterly", "2026-06-26", data_context=request_context())
         self.assertEqual(seen, {"ticker": "7011.T", "kind": "cashflow",
                                 "freq": "quarterly", "curr_date": "2026-06-26"})
 

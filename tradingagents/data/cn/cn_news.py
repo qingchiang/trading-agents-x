@@ -12,7 +12,7 @@ from tradingagents.data.cn.news_sources import (
     get_disclosure_news as _disclosure_news,
     get_research_news as _research_news,
 )
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.news_cache import fetch_news_feed
 from tradingagents.data.news_diagnostics import candidate_filter_note
 from tradingagents.data.news_selection import candidate_scope, emit_news, merge_news_blocks
@@ -29,10 +29,10 @@ _PARTIAL_QUERY_RE = re.compile(
 )
 
 
-def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
+def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     try:
         with candidate_scope():
-            return fetch_news_feed(source, ticker, start_date, end_date, lambda: fetch(ticker, start_date, end_date), budget=get_config().get("cn_news_candidate_limit", 100), config=get_config())
+            return fetch_news_feed(source, ticker, start_date, end_date, lambda: fetch(ticker, start_date, end_date, data_context=data_context), budget=data_context.config.get("cn_news_candidate_limit", 100), config=data_context.config)
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
@@ -54,7 +54,7 @@ def _partial_query_timing(output: str) -> str | None:
     )
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     """Combine CNINFO, Eastmoney and Chinese Google News; fall back only if empty."""
     feeds = (
         ("CNINFO", _disclosure_news),
@@ -63,18 +63,18 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     )
     if stop_on_rate_limit_requested():
         rendered = [
-            _safe_feed(source, fetch, ticker, start_date, end_date)
+            _safe_feed(source, fetch, ticker, start_date, end_date, data_context=data_context)
             for source, fetch in feeds
         ]
     else:
         with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
             rendered = list(
                 pool.map(
-                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, start_date, end_date),
+                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, start_date, end_date, data_context=data_context),
                     [(copy_context(), feed) for feed in feeds],
                 )
             )
-    article_limit = max(1, int(get_config()["news_article_limit"]))
+    article_limit = max(1, int(data_context.config["news_article_limit"]))
     base_quotas = ((article_limit + 1) // 2, article_limit // 4,
                    article_limit - (article_limit + 1) // 2 - article_limit // 4)
     blocks, merged_counts = merge_news_blocks(

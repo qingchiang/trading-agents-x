@@ -25,6 +25,7 @@ from tradingagents.data.cn.common import (
     canonical_a_share,
     load_akshare,
 )
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.instruments import NoMarketDataError
@@ -450,7 +451,7 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
     ) from (errors[-1] if errors else None)
 
 
-def get_stock(symbol: str, start_date: str, end_date: str) -> str:
+def get_stock(symbol: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
     """Return AkShare qfq daily bars as compatible CSV plus source metadata."""
     result = fetch_ohlcv(symbol, start_date, end_date)
     output = result.frame.copy()

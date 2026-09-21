@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime, time
-from typing import Any
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
@@ -37,7 +38,12 @@ from tradingagents.domain.performance import (
     PerformanceObservation,
 )
 
-IncrementalCollector = Callable[[IncrementalCollectionRequest], IncrementalCollectionResult]
+
+class IncrementalCollector(Protocol):
+    def __call__(
+        self, request: IncrementalCollectionRequest, *, data_context: DataRequestContext,
+    ) -> IncrementalCollectionResult: ...
+
 
 _MARKET_IDENTITIES = {
     ".T": ("japan", ".T"),
@@ -543,20 +549,21 @@ def build_incremental_collection_request(
 
 def default_incremental_collector(
     request: IncrementalCollectionRequest,
+    *, data_context: DataRequestContext,
 ) -> IncrementalCollectionResult:
     """Dispatch the first configured market path without creating a second router."""
     if request.market == "united_states":
         from tradingagents.data.incremental_us import collect_us_incremental
 
-        return collect_us_incremental(request)
+        return collect_us_incremental(request, data_context=data_context)
     if request.market == "japan":
         from tradingagents.data.incremental_jp import collect_japan_incremental
 
-        return collect_japan_incremental(request)
+        return collect_japan_incremental(request, data_context=data_context)
     if request.market == "mainland_china":
         from tradingagents.data.incremental_cn import collect_mainland_china_incremental
 
-        return collect_mainland_china_incremental(request)
+        return collect_mainland_china_incremental(request, data_context=data_context)
     return IncrementalCollectionResult(
         collection_summary=CollectionSummary(
             version=request.version,

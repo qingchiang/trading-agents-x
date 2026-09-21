@@ -13,9 +13,9 @@ import pytest
 import requests
 
 import tradingagents.configuration.defaults as default_config
+from tests.data_policy import configure_data, request_context
 from tradingagents.credentials import use_credentials
 from tradingagents.data import interface
-from tradingagents.data.config import bind_config
 from tradingagents.data.jp import jquants_common, jquants_stock
 from tradingagents.data.jp.jquants_common import (
     JQuantsNotConfiguredError,
@@ -101,7 +101,7 @@ class StockFetchTests(unittest.TestCase):
     def test_get_stock_prefers_adjusted_prices(self):
         records = [_quote("2026-06-22", 105.0), _quote("2026-06-23", 108.0)]
         with self._patch_records(records):
-            out = get_stock("9984.T", "2026-06-20", "2026-06-23")
+            out = get_stock("9984.T", "2026-06-20", "2026-06-23", data_context=request_context())
         self.assertIn("# Stock data for 9984.T", out)
         body = out.split("\n\n", 1)[1]
         df = pd.read_csv(StringIO(body))
@@ -112,7 +112,7 @@ class StockFetchTests(unittest.TestCase):
     def test_get_stock_falls_back_to_raw_when_adjusted_missing(self):
         records = [_quote("2026-06-23", 50.0, adjusted=False)]  # only raw Close=100
         with self._patch_records(records):
-            out = get_stock("9984.T", "2026-06-20", "2026-06-23")
+            out = get_stock("9984.T", "2026-06-20", "2026-06-23", data_context=request_context())
         df = pd.read_csv(StringIO(out.split("\n\n", 1)[1]))
         self.assertEqual(df["Close"].tolist(), [100.0])
 
@@ -122,11 +122,11 @@ class StockFetchTests(unittest.TestCase):
             self._patch_records(records),
             self.assertRaisesRegex(NoMarketDataError, "adjusted close"),
         ):
-            get_stock("9984.T", "2026-06-20", "2026-06-23", require_adjusted=True)
+            get_stock("9984.T", "2026-06-20", "2026-06-23", require_adjusted=True, data_context=request_context())
 
     def test_empty_response_raises_no_market_data(self):
         with self._patch_records([]), self.assertRaises(NoMarketDataError):
-            get_stock("9984.T", "2026-06-20", "2026-06-23")
+            get_stock("9984.T", "2026-06-20", "2026-06-23", data_context=request_context())
 
     def test_fetch_is_memoized_across_calls(self):
         # The get_indicators tool calls the vendor once per indicator over the
@@ -143,7 +143,7 @@ class StockFetchTests(unittest.TestCase):
         r2 = _quote("2026-06-23", 101.0)
         del r2["AdjH"], r2["H"]  # no high for the second row
         with self._patch_records([r1, r2]):
-            out = get_stock("9984.T", "2026-06-20", "2026-06-23")
+            out = get_stock("9984.T", "2026-06-20", "2026-06-23", data_context=request_context())
         df = pd.read_csv(StringIO(out.split("\n\n", 1)[1]))
         self.assertFalse(df["High"].isna().any())
         self.assertEqual(df["High"].tolist(), [101.0, 101.0])  # filled from prior day
@@ -154,7 +154,7 @@ class StockFetchTests(unittest.TestCase):
         dates = pd.bdate_range(end="2026-06-23", periods=60)
         records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
         with self._patch_records(records):
-            out = get_indicator("9984.T", "rsi", "2026-06-23", 5)
+            out = get_indicator("9984.T", "rsi", "2026-06-23", 5, data_context=request_context())
         self.assertIn("## rsi values from", out)
         self.assertIn("2026-06-23:", out)
         self.assertIn("RSI:", out)  # description appended
@@ -227,13 +227,13 @@ class AuthTests(unittest.TestCase):
 @pytest.mark.unit
 class RoutingTests(unittest.TestCase):
     def setUp(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+        configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_tokyo_ticker_routes_to_jquants(self):
-        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
+        configure_data({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
         sentinel = mock.Mock(return_value="JQ_DATA")
         yf = mock.Mock(return_value="YF_DATA")
         with mock.patch.dict(
@@ -243,13 +243,13 @@ class RoutingTests(unittest.TestCase):
         ):
             result = interface.route_to_vendor(
                 "get_stock_data", "9984.T", "2026-06-20", "2026-06-23"
-            )
+            , data_context=request_context())
         self.assertEqual(result, "JQ_DATA")
         yf.assert_not_called()
         sentinel.assert_called_once()
 
     def test_bounded_adjusted_route_falls_back_when_jquants_lacks_adjc(self):
-        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants,yfinance"}}})
+        configure_data({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants,yfinance"}}})
         records = [_quote("2026-06-23", 50.0, adjusted=False)]
         yf = mock.Mock(return_value="YFINANCE_ADJUSTED")
         with (
@@ -269,10 +269,11 @@ class RoutingTests(unittest.TestCase):
                 "2026-06-20",
                 "2026-06-23",
                 _require_adjusted=True,
+                data_context=request_context(),
             )
 
         self.assertEqual(result, "YFINANCE_ADJUSTED")
-        yf.assert_called_once_with("9984.T", "2026-06-20", "2026-06-23")
+        yf.assert_called_once_with("9984.T", "2026-06-20", "2026-06-23", data_context=request_context())
 
     def test_jquants_registered_for_both_methods(self):
         self.assertIn("jquants", interface.VENDOR_METHODS["get_stock_data"])

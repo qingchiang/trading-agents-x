@@ -8,6 +8,7 @@ possible later enhancement for that detail.
 
 from __future__ import annotations
 
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_common import (
     from_jquants_code,
     memoized_fetch,
@@ -189,7 +190,7 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
     return "\n".join(lines)
 
 
-def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
+def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """Headline fundamentals overview from the latest disclosed period."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     r = records[0]
@@ -209,7 +210,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     ])
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """Balance-sheet summary (total assets, derived liabilities, net assets)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(
@@ -218,7 +219,7 @@ def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | Non
     )
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """Cash-flow summary (operating/investing/financing + period-end cash)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(
@@ -227,7 +228,7 @@ def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = N
     )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
     """Income-statement summary (sales, operating/ordinary/net profit, EPS, BPS)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(

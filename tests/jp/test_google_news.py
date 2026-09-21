@@ -1,10 +1,12 @@
 """Google News (JP) media-headline vendor. Network mocked."""
+
 import unittest
 from datetime import datetime
 from unittest import mock
 
 import pytest
 
+from tests.data_policy import configure_data, data_policy, request_context
 from tradingagents.data.jp import google_news as gn
 
 
@@ -50,8 +52,7 @@ class FetchItemsTests(unittest.TestCase):
 @pytest.mark.unit
 class GetNewsTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = mock.patch.object(gn, "get_config", return_value={"news_article_limit": 10})
-        self.cfg.start()
+        configure_data({"news_article_limit": 10})
         self.name = mock.patch.object(gn, "get_company_name", return_value="第一三共")
         self.name.start()
 
@@ -60,7 +61,7 @@ class GetNewsTests(unittest.TestCase):
 
     def _run(self, items, start="2026-07-04", end="2026-07-11"):
         with mock.patch.object(gn, "_fetch_items", return_value=items):
-            return gn.get_news("4568.T", start, end)
+            return gn.get_news("4568.T", start, end, data_context=request_context())
 
     def test_renders_headlines_with_source_and_date(self):
         out = self._run([_parsed("第一三共が決算を発表", "日本経済新聞")])
@@ -109,7 +110,7 @@ class GetNewsTests(unittest.TestCase):
             _parsed("第一三共が投資を発表", "Mshale", d=7),
             _parsed("第一三共の未来の決算", d=20),
         ]
-        with mock.patch.object(gn, "get_config", return_value={"news_article_limit": 1}):
+        with data_policy({"news_article_limit": 1}, merge=True):
             out = self._run(items)
 
         self.assertIn("upstream_returned=5", out)
@@ -126,7 +127,7 @@ class GetNewsTests(unittest.TestCase):
         self.assertLess(out.index("新しい決算"), out.index("古い決算"))
 
     def test_capped_to_article_limit(self):
-        with mock.patch.object(gn, "get_config", return_value={"news_article_limit": 2}):
+        with data_policy({"news_article_limit": 2}, merge=True):
             out = self._run([_parsed(f"第一三共の投資記事{i}", d=10 - i) for i in range(5)])
         self.assertEqual(out.count("### [direct]"), 2)
         self.assertIn("omitted_by_limit=3", out)
@@ -177,19 +178,19 @@ class GetNewsTests(unittest.TestCase):
                 _parsed("ソフトバンクGがAI事業へ投資", "Unknown Wire")
             ],
         ):
-            out = gn.get_news("9984.T", "2026-07-04", "2026-07-11")
+            out = gn.get_news("9984.T", "2026-07-04", "2026-07-11", data_context=request_context())
         self.assertIn("### [direct] ソフトバンクGがAI事業へ投資", out)
 
     def test_query_is_name_plus_code(self):
         # "{name} {code}" softly biases ranking to the financial context.
         with mock.patch.object(gn, "_fetch_items", return_value=[]) as fi:
-            gn.get_news("4568.T", "2026-07-04", "2026-07-11")
+            gn.get_news("4568.T", "2026-07-04", "2026-07-11", data_context=request_context())
         self.assertEqual(fi.call_args.args[0], "第一三共 4568")
 
     def test_falls_back_to_code_when_name_unresolved(self):
         with mock.patch.object(gn, "get_company_name", return_value=None), \
                 mock.patch.object(gn, "_fetch_items", return_value=[]) as fi:
-            gn.get_news("4568.T", "2026-07-04", "2026-07-11")
+            gn.get_news("4568.T", "2026-07-04", "2026-07-11", data_context=request_context())
         fi.assert_called_once()
         self.assertEqual(fi.call_args.args[0], "4568")  # bare code query
 

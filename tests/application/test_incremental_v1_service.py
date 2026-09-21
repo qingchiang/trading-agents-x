@@ -11,7 +11,6 @@ from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.factories import analyst_report, research_decision
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
 from tradingagents.application.service import AnalysisService
-from tradingagents.data.config import get_config
 from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
@@ -211,7 +210,7 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domains[request.enabled_domains.index("social")] = CollectionDomainResult(
             domain="social",
@@ -350,7 +349,7 @@ PE Ratio (TTM): 42"""
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _fundamentals_collection(request, candidate),
+        collector=lambda request, *, data_context: _fundamentals_collection(request, candidate),
         synthesizer=lambda input_: synthesis_inputs.append(input_),
     )
 
@@ -414,7 +413,7 @@ Market Cap: 456"""
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _fundamentals_collection(request, candidate),
+        collector=lambda request, *, data_context: _fundamentals_collection(request, candidate),
         synthesizer=synthesize,
     ).run(
         AnalysisRequest(
@@ -452,7 +451,7 @@ def test_incremental_service_commits_simplified_actual_result_products(
     )
     synthesis_inputs = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = []
         for domain in request.enabled_domains:
             if domain == "news":
@@ -595,7 +594,7 @@ def test_incremental_service_rejects_inconsistent_decision_outcomes_atomically(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             synthesizer=synthesize,
         ).run(
             AnalysisRequest(
@@ -633,7 +632,7 @@ def test_incremental_outcome_is_optional_only_when_reading_historical_products(
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
     ).run(
         AnalysisRequest(
             ticker="NVDA",
@@ -688,7 +687,7 @@ def test_incremental_name_resolution_failure_does_not_block_research(
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
         identity_resolver=fail_identity,
         local_name_resolver=fail_local_name,
     ).run(
@@ -863,7 +862,7 @@ def test_incremental_assessment_respects_one_repair_budget(
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1061,7 +1060,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1192,7 +1191,7 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1249,8 +1248,8 @@ def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
     )
     observed = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
-        observed.append((get_config(), request))
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
+        observed.append((dict(data_context.config), request))
         return _pit_collection(request, candidate)
 
     _incremental_service(
@@ -1290,7 +1289,7 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
     )
     calls = 0
 
-    def eligibility(symbol: str):
+    def eligibility(symbol: str, *, data_context):
         nonlocal calls
         calls += 1
         return {
@@ -1302,7 +1301,7 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             eligibility_resolver=eligibility,
         ).run(
             AnalysisRequest(
@@ -1328,14 +1327,14 @@ def test_incremental_retry_uses_the_retained_run_dataflow_configuration(
     )
     observed_news_routes = []
 
-    def eligibility(symbol: str):
-        observed_news_routes.append(get_config()["data_vendors"]["news_data"])
+    def eligibility(symbol: str, *, data_context):
+        observed_news_routes.append(data_context.config["data_vendors"]["news_data"])
         return {"symbol": symbol, "quote_type": "EQUITY"}
 
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: IncrementalCollectionResult(
+        collector=lambda request, *, data_context: IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
                 market=request.market,
@@ -1402,7 +1401,7 @@ def test_incremental_commit_revalidates_baseline_schema_after_synthesis(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             synthesizer=synthesize,
         ).run(
             AnalysisRequest(
@@ -1427,7 +1426,7 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     )
     synthesized = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1491,7 +1490,7 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         extra = IncrementalEvidenceCandidate(evidence=EvidenceItem.create(
             source="fixture.market", evidence_type="market_snapshot",
             requested_date=date(2026, 7, 24), available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
@@ -1626,7 +1625,7 @@ def test_completed_stock_session_rejects_unrelated_market_evidence(
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1694,7 +1693,7 @@ def test_incremental_service_rejects_unadmitted_stock_series_advancement(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1757,7 +1756,7 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         return _pit_collection(request, candidate).model_copy(
             update={
                 "benchmark_series": (
@@ -1835,7 +1834,7 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         fundamentals = request.enabled_domains.index("fundamentals")
         domains[fundamentals] = CollectionDomainResult(
@@ -1943,7 +1942,7 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = {
             "fundamentals": CollectionDomainResult(
                 domain="fundamentals",
@@ -2084,7 +2083,7 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         news = request.enabled_domains.index("news")
         domains[news] = CollectionDomainResult(
@@ -2143,7 +2142,7 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         available_at = datetime(
             2026,
             7,
@@ -2252,7 +2251,7 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
         }
     )
 
-    def collect_copied(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect_copied(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domain = request.enabled_domains.index("news")
         domains[domain] = CollectionDomainResult(
@@ -2344,7 +2343,7 @@ def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
         ).run(
             AnalysisRequest(
                 ticker="NVDA",
@@ -2378,7 +2377,7 @@ def test_incremental_commit_revalidates_a_baseline_trashed_during_execution(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(request: IncrementalCollectionRequest, *, data_context) -> IncrementalCollectionResult:
         if mutation_phase == "collection":
             repository.trash_runs((baseline.run_id,))
         return _pit_collection(request, candidate)
@@ -2448,7 +2447,7 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
         synthesizer=synthesize,
     )
     request = AnalysisRequest(

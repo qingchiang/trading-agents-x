@@ -30,7 +30,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 from urllib.request import Request
 
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.company_info import get_company_name
 from tradingagents.data.jp.http_util import USER_AGENT, fetch_bytes
 from tradingagents.data.jp.jquants_common import to_jquants_code
@@ -116,7 +116,7 @@ def _in_window(pub_date, start_dt, end_dt) -> bool:
     return start_dt <= pub_date < end_dt + timedelta(days=1)
 
 
-def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0) -> str:
+def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0, *, data_context: DataRequestContext) -> str:
     """Return Google-News media headlines for a Tokyo ticker in ``[start, end]``.
 
     Searches by resolved company name (falls back to the bare code). Returns a
@@ -176,7 +176,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         seen_titles.add(title_key)
         relevant.append((it, classification.tier))
 
-    kept = relevant[: source_output_limit(get_config()["news_article_limit"])]
+    kept = relevant[: source_output_limit(data_context.config["news_article_limit"])]
     counts.source_truncated = len(relevant) - len(kept)
     if not kept:
         return (

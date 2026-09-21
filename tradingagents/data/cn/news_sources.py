@@ -21,7 +21,7 @@ from tradingagents.data.cn.common import (
     call_with_retry,
     canonical_a_share,
 )
-from tradingagents.data.config import get_config
+from tradingagents.data.context import DataRequestContext
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
 from tradingagents.data.news_quality import canonical_headline
 
@@ -50,9 +50,9 @@ _CNINFO_FETCH_LOCK = RLock()
 _RESEARCH_FETCH_LOCK = RLock()
 
 
-def news_quotas() -> tuple[int, int, int]:
+def news_quotas(*, data_context: DataRequestContext) -> tuple[int, int, int]:
     """Return per-source candidate caps; the assembler owns the final total cap."""
-    total = max(1, int(get_config()["news_article_limit"]))
+    total = max(1, int(data_context.config["news_article_limit"]))
     from tradingagents.data.news_selection import in_candidate_scope, source_output_limit
 
     if in_candidate_scope():
@@ -152,14 +152,14 @@ def _response_records(payload, field: str, label: str) -> list[dict]:
     return records
 
 
-def disclosure_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None) -> list[dict]:
+def disclosure_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None, data_context: DataRequestContext) -> list[dict]:
     """Return exact-code CNINFO announcements in the inclusive Shanghai window."""
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
     counts = _counts if _counts is not None else CandidateFilterCounts()
     fetch_start = _shared_fetch_start(start, end)
-    page_size = max(1, min(int(get_config().get("cn_news_candidate_limit", 100)), 100))
+    page_size = max(1, min(int(data_context.config.get("cn_news_candidate_limit", 100)), 100))
     cache_key = ("cninfo", code, end.isoformat(), page_size)
     with _CNINFO_FETCH_LOCK:
         with _FEED_CACHE_LOCK:
@@ -241,14 +241,14 @@ def disclosure_rows(ticker: str, start_date: str, end_date: str, *, _counts: Can
     return selected
 
 
-def research_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None) -> list[dict]:
+def research_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None, data_context: DataRequestContext) -> list[dict]:
     """Return exact-code Eastmoney research reports in the inclusive window."""
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
     counts = _counts if _counts is not None else CandidateFilterCounts()
     fetch_start = _shared_fetch_start(start, end)
-    page_size = max(1, min(int(get_config().get("cn_news_candidate_limit", 100)), 100))
+    page_size = max(1, min(int(data_context.config.get("cn_news_candidate_limit", 100)), 100))
     cache_key = ("eastmoney-research", code, end.isoformat(), page_size)
     with _RESEARCH_FETCH_LOCK:
         with _FEED_CACHE_LOCK:
@@ -341,11 +341,11 @@ def _dedupe_limit(rows: list[dict], limit: int, counts: CandidateFilterCounts | 
     return kept[:limit]
 
 
-def get_disclosure_news(ticker: str, start_date: str, end_date: str) -> str:
-    disclosure_limit, _research_limit, _media_limit = news_quotas()
+def get_disclosure_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+    disclosure_limit, _research_limit, _media_limit = news_quotas(data_context=data_context)
     counts = CandidateFilterCounts()
     rows = _dedupe_limit(
-        disclosure_rows(ticker, start_date, end_date, _counts=counts),
+        disclosure_rows(ticker, start_date, end_date, _counts=counts, data_context=data_context),
         disclosure_limit, counts,
     )
     if not rows:
@@ -357,11 +357,11 @@ def get_disclosure_news(ticker: str, start_date: str, end_date: str) -> str:
     return f"## {ticker} company announcements (CNINFO), from {start_date} to {end_date}:\n\n{counts.render()}\n\n{body}"
 
 
-def get_research_news(ticker: str, start_date: str, end_date: str) -> str:
-    _disclosure_limit, research_limit, _media_limit = news_quotas()
+def get_research_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+    _disclosure_limit, research_limit, _media_limit = news_quotas(data_context=data_context)
     counts = CandidateFilterCounts()
     rows = _dedupe_limit(
-        research_rows(ticker, start_date, end_date, _counts=counts),
+        research_rows(ticker, start_date, end_date, _counts=counts, data_context=data_context),
         research_limit, counts,
     )
     if not rows:

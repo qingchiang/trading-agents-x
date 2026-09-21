@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+from tests.data_policy import request_context
 from tradingagents.data import cn_macro, macro
 
 
@@ -20,7 +21,7 @@ def clear_cn_macro_cache():
 def test_cpi_eastmoney_fallback_is_observation_period_bounded_and_non_vintage(
     monkeypatch,
 ):
-    monkeypatch.setattr(cn_macro, "_fetch_nbs_indicator", lambda *_args: None)
+    monkeypatch.setattr(cn_macro, "_fetch_nbs_indicator", lambda *_args, data_context: None)
     monkeypatch.setattr(
         cn_macro,
         "_eastmoney_rows",
@@ -30,7 +31,7 @@ def test_cpi_eastmoney_fallback_is_observation_period_bounded_and_non_vintage(
         ],
     )
 
-    data = cn_macro.fetch_series("cn_cpi", "2026-01-15", 30)
+    data = cn_macro.fetch_series("cn_cpi", "2026-01-15", 30, data_context=request_context())
 
     assert data["points"] == [("2026-01-01", "1.2")]
     assert data["actual_source"] == "Eastmoney"
@@ -58,7 +59,7 @@ def test_cpi_prefers_latest_eligible_nbs_release_and_records_dates(monkeypatch):
         lambda *_args: (_ for _ in ()).throw(AssertionError("fallback called")),
     )
 
-    data = cn_macro.fetch_series("cn_cpi", "2026-07-21", 60)
+    data = cn_macro.fetch_series("cn_cpi", "2026-07-21", 60, data_context=request_context())
 
     assert data["points"] == [("2026-06-01", "1")]
     assert data["actual_source"] == cn_macro._NBS_SOURCE
@@ -90,7 +91,7 @@ def test_gdp_nbs_primary_preserves_cumulative_yoy_not_single_quarter(monkeypatch
         lambda url, *, label: listing if url in cn_macro._NBS_INDEX_PAGES else article,
     )
 
-    data = cn_macro.fetch_series("cn_gdp", "2026-07-21", 180)
+    data = cn_macro.fetch_series("cn_gdp", "2026-07-21", 180, data_context=request_context())
 
     assert data["points"] == [("2026-06-30", "4.7")]
     assert data["release_date"] == "2026-07-16"
@@ -122,7 +123,7 @@ def test_pmi_uses_second_bounded_release_index_page(monkeypatch):
 
     monkeypatch.setattr(cn_macro, "_request_text", request_text)
 
-    data = cn_macro.fetch_series("cn_pmi", "2026-07-21", 60)
+    data = cn_macro.fetch_series("cn_pmi", "2026-07-21", 60, data_context=request_context())
 
     assert data["points"] == [("2026-06-01", "50.3")]
     assert data["release_date"] == "2026-06-30"
@@ -146,7 +147,7 @@ def test_nbs_schema_failure_falls_back_without_exposing_exception(monkeypatch):
         lambda *_args: [{"REPORT_DATE": "2026-06-01", "NATIONAL_SAME": 0.8}],
     )
 
-    data = cn_macro.fetch_series("cn_cpi", "2026-07-21", 60)
+    data = cn_macro.fetch_series("cn_cpi", "2026-07-21", 60, data_context=request_context())
 
     assert data["points"] == [("2026-06-01", "0.8")]
     assert data["actual_source"] == "Eastmoney"
@@ -159,7 +160,7 @@ def test_nbs_failure_and_empty_eastmoney_fallback_is_not_a_successful_empty_wind
 ):
     attempts = 0
 
-    def failed_primary(*_args):
+    def failed_primary(*_args, data_context):
         nonlocal attempts
         attempts += 1
         raise cn_macro.AkShareRequestError("blocked upstream detail")
@@ -175,7 +176,7 @@ def test_nbs_failure_and_empty_eastmoney_fallback_is_not_a_successful_empty_wind
                 "Eastmoney returned no usable observations"
             ),
         ):
-            cn_macro.fetch_series("cn_cpi", "2026-07-21", 60)
+            cn_macro.fetch_series("cn_cpi", "2026-07-21", 60, data_context=request_context())
 
     assert attempts == 2
 
@@ -184,10 +185,10 @@ def test_nbs_failure_and_empty_eastmoney_fallback_is_not_a_successful_empty_wind
 def test_no_recent_nbs_release_and_empty_eastmoney_remains_a_normal_empty_window(
     monkeypatch,
 ):
-    monkeypatch.setattr(cn_macro, "_fetch_nbs_indicator", lambda *_args: None)
+    monkeypatch.setattr(cn_macro, "_fetch_nbs_indicator", lambda *_args, data_context: None)
     monkeypatch.setattr(cn_macro, "_fetch_economy", lambda *_args: [])
 
-    assert cn_macro.fetch_series("cn_cpi", "2026-07-21", 1) is None
+    assert cn_macro.fetch_series("cn_cpi", "2026-07-21", 1, data_context=request_context()) is None
 
 
 @pytest.mark.unit
@@ -210,7 +211,7 @@ def test_nbs_release_after_analysis_date_is_not_injected(monkeypatch):
         lambda *_args: [{"REPORT_DATE": "2026-05-01", "NATIONAL_SAME": 0.7}],
     )
 
-    data = cn_macro.fetch_series("cn_cpi", "2026-06-30", 60)
+    data = cn_macro.fetch_series("cn_cpi", "2026-06-30", 60, data_context=request_context())
 
     assert data["points"] == [("2026-05-01", "0.7")]
     assert data["actual_source"] == "Eastmoney"
@@ -244,8 +245,8 @@ def test_nbs_listing_is_shared_across_indicators_for_same_analysis_date(monkeypa
 
     monkeypatch.setattr(cn_macro, "_request_text", request_text)
 
-    assert cn_macro.fetch_series("cn_cpi", "2026-07-21", 180)
-    assert cn_macro.fetch_series("cn_gdp", "2026-07-21", 180)
+    assert cn_macro.fetch_series("cn_cpi", "2026-07-21", 180, data_context=request_context())
+    assert cn_macro.fetch_series("cn_gdp", "2026-07-21", 180, data_context=request_context())
     assert listing_requests == 1
 
 
@@ -260,7 +261,7 @@ def test_lpr_uses_one_year_rate_and_preserves_zero(monkeypatch):
         ],
     )
 
-    data = cn_macro.fetch_series("cn_lpr", "2026-01-15", 30)
+    data = cn_macro.fetch_series("cn_lpr", "2026-01-15", 30, data_context=request_context())
 
     assert data["points"] == [("2026-01-10", "0")]
 
@@ -278,7 +279,7 @@ def test_unemployment_uses_release_date_and_latest_official_article(monkeypatch)
 
     monkeypatch.setattr(cn_macro, "_request_text", request_text)
 
-    data = cn_macro.fetch_series("cn_unemployment", "2026-01-31", 60)
+    data = cn_macro.fetch_series("cn_unemployment", "2026-01-31", 60, data_context=request_context())
 
     assert data["points"] == [("2026-01-01", "5.1")]
     assert "release-date filtered" in data["timing"]
@@ -295,7 +296,7 @@ def test_usd_cny_parses_close_and_drops_future(monkeypatch):
         },
     )
 
-    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30)
+    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30, data_context=request_context())
 
     assert data["points"] == [("2026-01-10", "7.2")]
     assert data["actual_source"] == "Eastmoney"
@@ -318,7 +319,7 @@ def test_safe_central_parity_is_primary_and_converts_per_100_usd(monkeypatch):
     with mock.patch.object(
         cn_macro, "_fetch_usd_cny_eastmoney", side_effect=AssertionError("fallback called")
     ):
-        data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30)
+        data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30, data_context=request_context())
     assert data["points"] == [("2026-01-10", "7.1234")]
     assert data["actual_source"] == "SAFE"
     assert "fallback_reason" not in data
@@ -337,7 +338,7 @@ def test_safe_central_parity_resolves_usd_by_validated_header(monkeypatch):
         ),
     )
 
-    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30)
+    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30, data_context=request_context())
 
     assert data["points"] == [("2026-01-10", "7.1234")]
 
@@ -355,7 +356,7 @@ def test_safe_missing_header_uses_eastmoney_fallback(monkeypatch):
         lambda *_args: [("2026-01-10", "7.2")],
     )
 
-    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30)
+    data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30, data_context=request_context())
 
     assert data["points"] == [("2026-01-10", "7.2")]
     assert data["actual_source"] == "Eastmoney"
@@ -376,7 +377,7 @@ def test_cn_10y_falls_back_to_latest_official_curve_point(monkeypatch):
             ]
         },
     )
-    data = cn_macro.fetch_series("cn_10y_yield", "2026-01-15", 30)
+    data = cn_macro.fetch_series("cn_10y_yield", "2026-01-15", 30, data_context=request_context())
     assert data["points"] == [("2026-01-14", "1.7")]
     assert data["frequency"] == "Latest official curve snapshot"
     assert "China Foreign Exchange Trade System" in data["timing"]
@@ -388,7 +389,7 @@ def test_china_alias_dispatch_never_reaches_fred(monkeypatch):
     monkeypatch.setattr(
         cn_macro,
         "fetch_series",
-        lambda *_args: {
+        lambda *_args, data_context: {
             "series_id": "cn_pmi",
             "title": "China PMI",
             "units": "index",
@@ -399,7 +400,7 @@ def test_china_alias_dispatch_never_reaches_fred(monkeypatch):
         },
     )
     with mock.patch.object(macro.fred, "get_macro_data", side_effect=AssertionError("FRED called")):
-        output = macro.get_macro_indicators("cn_pmi", "2026-01-15")
+        output = macro.get_macro_indicators("cn_pmi", "2026-01-15", data_context=request_context())
 
     assert "## China macro: China PMI" in output
     assert "non-vintage" in output

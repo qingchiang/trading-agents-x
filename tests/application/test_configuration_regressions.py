@@ -24,7 +24,7 @@ def configured(tmp_path):
     )
     service = AnalysisService(
         settings,
-        eligibility_resolver=lambda ticker: {"symbol": ticker, "quote_type": "EQUITY"},
+        eligibility_resolver=lambda ticker, *, data_context: {"symbol": ticker, "quote_type": "EQUITY"},
         identity_resolver=lambda ticker, date: {"company_name": ticker},
     )
     return settings, store, service
