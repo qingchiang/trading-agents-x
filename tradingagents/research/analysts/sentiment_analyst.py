@@ -98,7 +98,8 @@ def create_sentiment_analyst(llm):
         # Per-name official positioning signals replace the unavailable social
         # sources. Exchange-section investor flows belong to the News Analyst's
         # market context and must never appear as ticker sentiment here.
-        if market_suffix_of(ticker):
+        market_suffix = market_suffix_of(ticker, config["data_vendors_by_market"])
+        if market_suffix:
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
@@ -142,6 +143,7 @@ def create_sentiment_analyst(llm):
             stocktwits_retrieved_at=stocktwits_retrieved_at,
             reddit_retrieved_at=reddit_retrieved_at,
             market_signals=fetched_market_signals,
+            market_suffix=market_suffix,
         )
         confidence = sentiment_confidence(sentiment_sources)
         system_message = _build_system_message(

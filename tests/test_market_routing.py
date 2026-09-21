@@ -2,8 +2,7 @@
 a market-specific vendor chain via ``data_vendors_by_market``, while US /
 unsuffixed tickers stay on the default chain untouched.
 
-Stage 0 wiring for Japanese-market support: the mechanism is exercised here with
-mocked vendors; the real jquants/edinet/boj implementations land later.
+Provider calls are replaced with deterministic routing results.
 """
 import copy
 import unittest

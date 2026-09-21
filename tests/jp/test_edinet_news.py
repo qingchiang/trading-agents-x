@@ -326,9 +326,9 @@ class RoutingTests(unittest.TestCase):
 
     def test_global_news_stays_market_agnostic(self):
         # get_global_news is ticker-less, so a .T news route must not touch it.
-        bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
         from tradingagents.data.market_routing import infer_market
-        self.assertEqual(infer_market("get_global_news", ("2026-06-22",)), "")
+        routes = {".T": {"news_data": "edinet_news"}}
+        self.assertEqual(infer_market("get_global_news", ("2026-06-22",), routes), "")
 
 
 if __name__ == "__main__":

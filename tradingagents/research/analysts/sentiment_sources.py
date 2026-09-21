@@ -7,7 +7,6 @@ from enum import Enum, StrEnum
 from typing import Literal
 
 from tradingagents.data.evidence_workset import StructuredNumericFact
-from tradingagents.data.market_routing import market_suffix_of
 from tradingagents.data.market_signals import FetchedSentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import extract_provenance
@@ -141,6 +140,7 @@ def prepare_sentiment_sources(
     stocktwits_retrieved_at: str | None,
     reddit_retrieved_at: str | None,
     market_signals: tuple[FetchedSentimentSignal, ...],
+    market_suffix: str,
 ) -> tuple[
     tuple[SentimentSourceInput, ...],
     list[PrefetchedEvidenceBlock],
@@ -162,8 +162,6 @@ def prepare_sentiment_sources(
                 ),
             ),
         )
-
-    market_suffix = market_suffix_of(ticker)
 
     def social_status(
         body: str,

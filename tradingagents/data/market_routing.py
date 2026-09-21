@@ -14,13 +14,13 @@ hazard. This is also why, when ``news_data`` is routed for ``.T``, per-ticker
 news goes to the JP vendor while ``get_global_news`` stays global — it falls out
 of the ticker-less rule with no extra switch.
 
-With ``data_vendors_by_market`` empty (the default), ``infer_market`` always
-returns ``""`` and routing is byte-for-byte identical to before this module.
+An empty route mapping selects the default vendor chain.
 """
 
 from __future__ import annotations
 
-from tradingagents.data.config import get_config
+from collections.abc import Mapping
+
 from tradingagents.domain.instruments import match_exchange_suffix
 
 # Methods whose first positional argument is NOT a ticker. They are
@@ -31,26 +31,22 @@ TICKERLESS_METHODS = frozenset(
 )
 
 
-def market_suffix_of(symbol: str, routes: dict | None = None) -> str:
+def market_suffix_of(symbol: str, routes: Mapping[str, object]) -> str:
     """Return the configured market suffix the symbol belongs to, or "".
 
     Only suffixes present in ``data_vendors_by_market`` are considered (matched
     longest-first), so US tickers and dotted symbols like ``BRK.B`` stay on the
-    default chain unless a route is configured for that suffix. ``routes`` may be
-    passed to avoid re-reading the config on a hot path.
+    default chain unless a route is configured for that suffix.
     """
-    if routes is None:
-        routes = get_config().get("data_vendors_by_market", {})
     return match_exchange_suffix(symbol, routes)
 
 
-def infer_market(method: str, args: tuple, routes: dict | None = None) -> str:
+def infer_market(method: str, args: tuple, routes: Mapping[str, object]) -> str:
     """Infer the market suffix for a vendor call.
 
     Ticker-bearing methods derive it from their first positional arg (the
     symbol); ticker-less methods are market-agnostic and return "" (default
-    chain). ``routes`` is ``data_vendors_by_market``; pass it to reuse a config
-    snapshot the caller already holds.
+    chain). The caller supplies its ``data_vendors_by_market`` snapshot.
     """
     if method in TICKERLESS_METHODS or not args:
         return ""
