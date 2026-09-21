@@ -18,6 +18,8 @@ import requests
 from tradingagents.credentials import credential
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import SeriesCache, render_macro_report
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import VendorNotConfiguredError
 
 logger = logging.getLogger(__name__)
@@ -117,9 +119,7 @@ def _resolve_series_id(indicator: str) -> str:
 def _request(path: str, params: dict) -> dict:
     """GET a FRED endpoint, surfacing FRED's JSON error body on a bad request."""
     api_params = {**params, "api_key": get_api_key(), "file_type": "json"}
-    response = requests.get(
-        f"{FRED_API_BASE}/{path}", params=api_params, timeout=REQUEST_TIMEOUT
-    )
+    response = requests.get(f"{FRED_API_BASE}/{path}", params=api_params, timeout=REQUEST_TIMEOUT)
     # FRED returns 400 with a JSON {"error_message": ...} for unknown series IDs
     # or malformed params; turn that into a clear, actionable error.
     if response.status_code == 400:
@@ -192,9 +192,7 @@ def fetch_series(
 
     # FRED encodes a missing observation as ".".
     points = [
-        (o["date"], o["value"])
-        for o in observations
-        if o.get("value") not in (".", None, "")
+        (o["date"], o["value"]) for o in observations if o.get("value") not in (".", None, "")
     ]
 
     data = {
@@ -210,13 +208,14 @@ def fetch_series(
     return data
 
 
+@source_metadata("get_macro_indicators", "fred")
 def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult[str]:
     """Fetch a FRED macroeconomic series as a formatted markdown report.
 
     Args:
@@ -240,13 +239,13 @@ def get_macro_data(
     except FredNotConfiguredError:
         raise
     except ValueError as e:
-        return f"FRED: {e}"
+        return DataResult(f"FRED: {e}")
 
     if data is None:
         series_id = _resolve_series_id(indicator)
-        return (
+        return DataResult(
             f"FRED series '{series_id}' not found. Pass a known alias "
             f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
         )
 
-    return render_macro_report("FRED", data, curr_date)
+    return DataResult(render_macro_report("FRED", data, curr_date))

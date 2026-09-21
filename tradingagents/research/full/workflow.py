@@ -31,16 +31,13 @@ from tradingagents.domain.evidence_tables import extract_evidence_tables
 from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, DecisionBrief, ResearchWarning
-from tradingagents.provenance import (
-    strip_provenance_markers,
-)
 from tradingagents.research.analysts import (
     create_fundamentals_analyst,
     create_market_analyst,
     create_news_analyst,
     create_sentiment_analyst,
 )
-from tradingagents.research.full.evidence import collect_evidence, observation_evidence
+from tradingagents.research.full.evidence import collect_evidence
 from tradingagents.research.full.state import GraphExecution, ResearchState
 from tradingagents.research.metrics import MetricsCallback
 from tradingagents.research.prompts.perspectives import PERSPECTIVE_SPECS, RoleSpec
@@ -229,7 +226,9 @@ class ResearchGraph:
             if analyst in tool_nodes:
                 builder.add_node("tools", tool_nodes[analyst])
                 builder.add_conditional_edges(
-                    "agent", _analyst_route, {"tools": "tools", "done": END},
+                    "agent",
+                    _analyst_route,
+                    {"tools": "tools", "done": END},
                 )
                 builder.add_edge("tools", "agent")
             else:
@@ -369,18 +368,15 @@ class ResearchGraph:
                 "sentiment_confidence": None,
                 "prefetched_evidence": [],
             }
-            from tradingagents.data.source_observations import capture_observations
-
-            with capture_observations() as observations:
-                result = self._analyst_subgraphs[analyst].invoke(
-                    local_state,
-                    config={
-                        "recursion_limit": 40,
-                        "callbacks": [self.metrics],
-                        "metadata": {"research_node": node_name},
-                    },
-                    context=context,
-                )
+            result = self._analyst_subgraphs[analyst].invoke(
+                local_state,
+                config={
+                    "recursion_limit": 40,
+                    "callbacks": [self.metrics],
+                    "metadata": {"research_node": node_name},
+                },
+                context=context,
+            )
             narrative = _clean_narrative(str(result.get(report_key, "")))
             evidence = collect_evidence(
                 result.get("messages", []),
@@ -389,8 +385,6 @@ class ResearchGraph:
                 instrument=context.request.ticker,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
-            observed_items = [observation_evidence(o, context.request.analysis_date, context.request.ticker) for o in observations]
-            evidence = list({item.ref: item for item in (*evidence, *observed_items)}.values())
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
                 "confidence_override": (
@@ -525,7 +519,9 @@ class ResearchGraph:
         deduped: dict[str, EvidenceItem] = {}
         article_refs: dict[tuple[str, str], str] = {}
         analyst_items_by_role = {}
-        for role, analyst_items in sorted(state.get("analyst_evidence_items", {}).items(), key=lambda pair: pair[0] != "news"):
+        for role, analyst_items in sorted(
+            state.get("analyst_evidence_items", {}).items(), key=lambda pair: pair[0] != "news"
+        ):
             role_items = {}
             for raw in analyst_items:
                 item = EvidenceItem.model_validate(raw)
@@ -1090,9 +1086,7 @@ class ResearchGraph:
                     )
                 ),
             )
-            assumption_guidance = decision_scenario_assumption_guidance(
-                state["output_language"]
-            )
+            assumption_guidance = decision_scenario_assumption_guidance(state["output_language"])
             percentage_guidance = decision_percentage_calculation_guidance()
             with self.metrics.phase(
                 f"{node}.reason",
@@ -1159,9 +1153,7 @@ class ResearchGraph:
             )
             return {
                 "decision_brief": brief.model_dump(mode="json"),
-                "warnings": [
-                    warning.model_dump(mode="json") for warning in brief.warnings
-                ],
+                "warnings": [warning.model_dump(mode="json") for warning in brief.warnings],
             }
 
         return brief_node
@@ -1402,7 +1394,7 @@ def _analyst_route(state: AgentState) -> str:
 
 
 def _clean_narrative(value: str) -> str:
-    return strip_provenance_markers(value).strip()
+    return value.strip()
 
 
 def _structured_recovery_warnings(

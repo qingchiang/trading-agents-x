@@ -1,8 +1,16 @@
+import json
+from datetime import datetime
+
 from tradingagents.data.alpha_vantage_common import _make_api_request, format_datetime_for_api
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.news_selection import news_observations
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.news import NewsCandidate
 
 
-def get_news(ticker, start_date, end_date, *, data_context: DataRequestContext) -> dict[str, str] | str:
+@source_metadata("get_news", "alpha_vantage")
+def get_news(ticker, start_date, end_date, *, data_context: DataRequestContext) -> DataResult[str]:
     """Returns live and historical market news & sentiment data from premier news outlets worldwide.
 
     Covers stocks, cryptocurrencies, forex, and topics like fiscal policy, mergers & acquisitions, IPOs.
@@ -22,9 +30,13 @@ def get_news(ticker, start_date, end_date, *, data_context: DataRequestContext) 
         "time_to": format_datetime_for_api(end_date),
     }
 
-    return _make_api_request("NEWS_SENTIMENT", params)
+    return _news_result(_make_api_request("NEWS_SENTIMENT", params), ticker)
 
-def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50, *, data_context: DataRequestContext) -> dict[str, str] | str:
+
+@source_metadata("get_global_news", "alpha_vantage")
+def get_global_news(
+    curr_date, look_back_days: int = 7, limit: int = 50, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Returns global market news & sentiment data without ticker-specific filtering.
 
     Covers broad market topics like financial markets, economy, and more.
@@ -51,10 +63,11 @@ def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50, *, data
         "limit": str(limit),
     }
 
-    return _make_api_request("NEWS_SENTIMENT", params)
+    return _news_result(_make_api_request("NEWS_SENTIMENT", params), "", global_news=True)
 
 
-def get_insider_transactions(symbol: str, *, data_context: DataRequestContext) -> dict[str, str] | str:
+@source_metadata("get_insider_transactions", "alpha_vantage")
+def get_insider_transactions(symbol: str, *, data_context: DataRequestContext) -> DataResult[str]:
     """Returns latest and historical insider transactions by key stakeholders.
 
     Covers transactions by founders, executives, board members, etc.
@@ -70,4 +83,29 @@ def get_insider_transactions(symbol: str, *, data_context: DataRequestContext) -
         "symbol": symbol,
     }
 
-    return _make_api_request("INSIDER_TRANSACTIONS", params)
+    return DataResult(_make_api_request("INSIDER_TRANSACTIONS", params))
+
+
+def _news_result(content: str, ticker: str, *, global_news: bool = False) -> DataResult[str]:
+    payload = json.loads(content)
+    rows = []
+    for article in payload.get("feed", []):
+        published = article.get("time_published")
+        try:
+            published = datetime.strptime(published, "%Y%m%dT%H%M%S").isoformat() + "+00:00"
+        except (TypeError, ValueError):
+            published = None
+        rows.append(
+            NewsCandidate(
+                "alpha_vantage",
+                article.get("title", ""),
+                json.dumps(article, ensure_ascii=False),
+                published,
+                article.get("url"),
+            )
+        )
+    return DataResult(
+        content,
+        news=tuple(rows),
+        observations=news_observations(rows, "alpha_vantage", ticker, global_news=global_news),
+    )

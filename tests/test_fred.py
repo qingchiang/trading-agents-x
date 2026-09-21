@@ -14,6 +14,7 @@ import tradingagents.configuration.defaults as default_config
 from tests.data_policy import configure_data, request_context
 from tradingagents.credentials import use_credentials
 from tradingagents.data import fred, interface, macro_common
+from tradingagents.domain.data_result import DataResult
 
 # A small, stable set of observations to format against.
 _META = {
@@ -30,7 +31,7 @@ _OBS = {
     "observations": [
         {"date": "2025-06-01", "value": "4.1"},
         {"date": "2025-07-01", "value": "4.3"},
-        {"date": "2025-08-01", "value": "."},   # missing -> skipped
+        {"date": "2025-08-01", "value": "."},  # missing -> skipped
         {"date": "2025-09-01", "value": "4.4"},
     ]
 }
@@ -38,12 +39,14 @@ _OBS = {
 
 def _request_stub(meta=_META, obs=_OBS):
     """Build a _request replacement that dispatches on the endpoint path."""
+
     def _impl(path, params):
         if path == "series":
             return meta
         if path == "series/observations":
             return obs
         raise AssertionError(f"unexpected FRED path: {path}")
+
     return _impl
 
 
@@ -77,23 +80,26 @@ class FredResolutionTests(unittest.TestCase):
 
     def test_invalid_raw_id_never_reaches_http(self):
         with mock.patch.object(fred, "_request") as request:
-            out = fred.get_macro_data("INVALID_SERIES", "2026-01-01", data_context=request_context())
+            out = fred.get_macro_data(
+                "INVALID_SERIES", "2026-01-01", data_context=request_context()
+            )
 
         request.assert_not_called()
-        self.assertIn("not a known macro alias", out)
+        self.assertIn("not a known macro alias", out.content)
 
     def test_get_macro_data_returns_guidance_on_bad_indicator(self):
         # Invalid indicator -> actionable message, not a crash (no API call).
-        out = fred.get_macro_data("bank of japan rate", "2026-01-01", data_context=request_context())
-        self.assertIn("FRED", out)
-        self.assertIn("not a known macro alias", out)
+        out = fred.get_macro_data(
+            "bank of japan rate", "2026-01-01", data_context=request_context()
+        )
+        self.assertIn("FRED", out.content)
+        self.assertIn("not a known macro alias", out.content)
 
 
 @pytest.mark.unit
 class FredConfigTests(unittest.TestCase):
     def test_missing_key_raises_not_configured(self):
-        with use_credentials({}), \
-                self.assertRaises(fred.FredNotConfiguredError):
+        with use_credentials({}), self.assertRaises(fred.FredNotConfiguredError):
             fred.get_api_key()
 
     def test_not_configured_is_a_value_error(self):
@@ -113,34 +119,42 @@ class FredFormattingTests(unittest.TestCase):
 
     def test_report_has_header_latest_change_and_table(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
-            out = fred.get_macro_data("unemployment", "2025-09-30", 365, data_context=request_context())
-        self.assertIn("## FRED: Unemployment Rate (UNRATE)", out)
-        self.assertIn("Units: %", out)
-        self.assertIn("Frequency: Monthly (SA)", out)
-        self.assertIn("**Latest:** 4.4 (2025-09-01)", out)
+            out = fred.get_macro_data(
+                "unemployment", "2025-09-30", 365, data_context=request_context()
+            )
+        self.assertIn("## FRED: Unemployment Rate (UNRATE)", out.content)
+        self.assertIn("Units: %", out.content)
+        self.assertIn("Frequency: Monthly (SA)", out.content)
+        self.assertIn("**Latest:** 4.4 (2025-09-01)", out.content)
         # change over the window: 4.4 - 4.1 = +0.30
-        self.assertIn("+0.30", out)
-        self.assertIn("| 2025-06-01 | 4.1 | percent | % |", out)
+        self.assertIn("+0.30", out.content)
+        self.assertIn("| 2025-06-01 | 4.1 | percent | % |", out.content)
 
     def test_missing_value_is_skipped(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
-            out = fred.get_macro_data("unemployment", "2025-09-30", 365, data_context=request_context())
+            out = fred.get_macro_data(
+                "unemployment", "2025-09-30", 365, data_context=request_context()
+            )
         # the "." observation must not appear as a row
-        self.assertNotIn("2025-08-01", out)
+        self.assertNotIn("2025-08-01", out.content)
 
     def test_empty_window_reports_no_observations(self):
         empty = {"observations": []}
         with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=empty)):
-            out = fred.get_macro_data("unemployment", "2025-09-30", 30, data_context=request_context())
-        self.assertIn("No observations", out)
+            out = fred.get_macro_data(
+                "unemployment", "2025-09-30", 30, data_context=request_context()
+            )
+        self.assertIn("No observations", out.content)
 
     def test_unknown_series_returns_not_found_message(self):
         # A well-formed but unknown series ID returns guidance, not a crash, so
         # the run is not aborted over an optional macro lookup.
         no_series = {"seriess": []}
         with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)):
-            out = fred.get_macro_data("totallyunknownxyz", "2025-09-30", 30, data_context=request_context())
-        self.assertIn("not found", out)
+            out = fred.get_macro_data(
+                "totallyunknownxyz", "2025-09-30", 30, data_context=request_context()
+            )
+        self.assertIn("not found", out.content)
 
     def test_long_series_is_truncated_but_change_uses_full_range(self):
         # Build > MAX_ROWS observations deterministically.
@@ -151,11 +165,13 @@ class FredFormattingTests(unittest.TestCase):
             ]
         }
         with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=obs)):
-            out = fred.get_macro_data("unemployment", "2025-12-31", 365, data_context=request_context())
-        self.assertIn(f"most recent {macro_common.MAX_ROWS}", out)
+            out = fred.get_macro_data(
+                "unemployment", "2025-12-31", 365, data_context=request_context()
+            )
+        self.assertIn(f"most recent {macro_common.MAX_ROWS}", out.content)
         # change-over-window must reference the true first (0) and last value
-        self.assertIn("from 0 ", out)
-        body_rows = [ln for ln in out.splitlines() if ln.startswith("| 2025")]
+        self.assertIn("from 0 ", out.content)
+        body_rows = [ln for ln in out.content.splitlines() if ln.startswith("| 2025")]
         self.assertEqual(len(body_rows), macro_common.MAX_ROWS)
 
     def test_window_is_lookahead_safe(self):
@@ -217,8 +233,16 @@ class FredCacheTests(unittest.TestCase):
             return {"seriess": []}
 
         with mock.patch.object(fred, "_request", side_effect=_req):
-            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30, data_context=request_context()))
-            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30, data_context=request_context()))
+            self.assertIsNone(
+                fred.fetch_series(
+                    "totallyunknownxyz", "2025-09-30", 30, data_context=request_context()
+                )
+            )
+            self.assertIsNone(
+                fred.fetch_series(
+                    "totallyunknownxyz", "2025-09-30", 30, data_context=request_context()
+                )
+            )
         # A miss is NOT memoized (could be a transient outage), so it is retried.
         self.assertEqual(calls, ["series", "series"])
 
@@ -232,17 +256,17 @@ class FredRoutingTests(unittest.TestCase):
         configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_macro_category_routes_to_fred(self):
-        self.assertEqual(
-            interface.get_category_for_method("get_macro_indicators"), "macro_data"
-        )
+        self.assertEqual(interface.get_category_for_method("get_macro_indicators"), "macro_data")
         configure_data({"data_vendors": {"macro_data": "fred"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_macro_indicators": {"fred": lambda *a, **k: "MACRO_OK"}},
+            {"get_macro_indicators": {"fred": lambda *a, **k: DataResult("MACRO_OK")}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-06-01", 365, data_context=request_context())
-        self.assertEqual(out, "MACRO_OK")
+            out = interface.route_to_vendor(
+                "get_macro_indicators", "cpi", "2026-06-01", 365, data_context=request_context()
+            )
+        self.assertEqual(out.content, "MACRO_OK")
 
     def test_not_configured_degrades_gracefully(self):
         # macro_data is optional: with only fred and no key, the router degrades
@@ -258,8 +282,10 @@ class FredRoutingTests(unittest.TestCase):
             {"get_macro_indicators": {"fred": _unconfigured}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-06-01", 365, data_context=request_context())
-        self.assertIn("DATA_UNAVAILABLE", out)
+            out = interface.route_to_vendor(
+                "get_macro_indicators", "cpi", "2026-06-01", 365, data_context=request_context()
+            )
+        self.assertIn("DATA_UNAVAILABLE", out.content)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ class FetchItemsTests(unittest.TestCase):
         with mock.patch.object(gn, "fetch_bytes", return_value=xml):
             items = gn._fetch_items("第一三共", timeout=5)
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["title"], "大事件が起きた")   # " - source" stripped
+        self.assertEqual(items[0]["title"], "大事件が起きた")  # " - source" stripped
         self.assertEqual(items[0]["source"], "日本経済新聞")
         # 06:54:42 GMT -> 15:54:42 JST (naive).
         self.assertEqual(items[0]["pub_date"], datetime(2026, 7, 10, 15, 54, 42))
@@ -61,7 +61,7 @@ class GetNewsTests(unittest.TestCase):
 
     def _run(self, items, start="2026-07-04", end="2026-07-11"):
         with mock.patch.object(gn, "_fetch_items", return_value=items):
-            return gn.get_news("4568.T", start, end, data_context=request_context())
+            return gn.get_news("4568.T", start, end, data_context=request_context()).content
 
     def test_renders_headlines_with_source_and_date(self):
         out = self._run([_parsed("第一三共が決算を発表", "日本経済新聞")])
@@ -145,7 +145,10 @@ class GetNewsTests(unittest.TestCase):
     def test_hard_filters_blocked_source_ai_template_and_disclosure_mirror(self):
         items = [
             _parsed("第一三共が投資を発表", "Mshale"),
-            _parsed("第一三共(株)【4568】：今の株価の理由は？値動きの背景をAIが解説", "Yahoo!ファイナンス"),
+            _parsed(
+                "第一三共(株)【4568】：今の株価の理由は？値動きの背景をAIが解説",
+                "Yahoo!ファイナンス",
+            ),
             _parsed("[4568]第一三共 適時開示情報", "日経会社情報DIGITAL"),
             _parsed("第一三共が新薬へ投資", "ロイター"),
         ]
@@ -161,25 +164,26 @@ class GetNewsTests(unittest.TestCase):
         self.assertIn("### [context] 製薬業界で大型買収が相次ぐ", out)
 
     def test_unknown_source_requires_entity_and_business_context(self):
-        out = self._run([
-            _parsed("第一三共のファン交流会", "Unknown Blog"),
-            _parsed("第一三共が研究事業へ投資", "Unknown Business Wire"),
-        ])
+        out = self._run(
+            [
+                _parsed("第一三共のファン交流会", "Unknown Blog"),
+                _parsed("第一三共が研究事業へ投資", "Unknown Business Wire"),
+            ]
+        )
         self.assertNotIn("ファン交流会", out)
         self.assertIn("### [direct] 第一三共が研究事業へ投資", out)
 
     def test_japanese_group_abbreviation_is_a_company_alias(self):
-        with mock.patch.object(
-            gn, "get_company_name", return_value="ソフトバンクグループ"
-        ), mock.patch.object(
-            gn,
-            "_fetch_items",
-            return_value=[
-                _parsed("ソフトバンクGがAI事業へ投資", "Unknown Wire")
-            ],
+        with (
+            mock.patch.object(gn, "get_company_name", return_value="ソフトバンクグループ"),
+            mock.patch.object(
+                gn,
+                "_fetch_items",
+                return_value=[_parsed("ソフトバンクGがAI事業へ投資", "Unknown Wire")],
+            ),
         ):
             out = gn.get_news("9984.T", "2026-07-04", "2026-07-11", data_context=request_context())
-        self.assertIn("### [direct] ソフトバンクGがAI事業へ投資", out)
+        self.assertIn("### [direct] ソフトバンクGがAI事業へ投資", out.content)
 
     def test_query_is_name_plus_code(self):
         # "{name} {code}" softly biases ranking to the financial context.
@@ -188,8 +192,10 @@ class GetNewsTests(unittest.TestCase):
         self.assertEqual(fi.call_args.args[0], "第一三共 4568")
 
     def test_falls_back_to_code_when_name_unresolved(self):
-        with mock.patch.object(gn, "get_company_name", return_value=None), \
-                mock.patch.object(gn, "_fetch_items", return_value=[]) as fi:
+        with (
+            mock.patch.object(gn, "get_company_name", return_value=None),
+            mock.patch.object(gn, "_fetch_items", return_value=[]) as fi,
+        ):
             gn.get_news("4568.T", "2026-07-04", "2026-07-11", data_context=request_context())
         fi.assert_called_once()
         self.assertEqual(fi.call_args.args[0], "4568")  # bare code query

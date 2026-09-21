@@ -1,6 +1,5 @@
 import logging
-import re
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 
 from tradingagents.data.alpha_vantage import (
     get_balance_sheet as get_alpha_vantage_balance_sheet,
@@ -60,7 +59,6 @@ from tradingagents.data.polymarket import (
     get_prediction_markets as get_polymarket_prediction_markets,
 )
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
-from tradingagents.data.source_observations import routed_observations
 from tradingagents.data.y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -72,13 +70,13 @@ from tradingagents.data.y_finance import (
 )
 from tradingagents.data.yfinance_news import get_global_news_yfinance, get_news_yfinance
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
 from tradingagents.domain.instruments import normalize_symbol
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.provenance import attach_provenance, extract_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -358,199 +356,38 @@ def get_vendor(category: str, method: str, market: str, config: dict) -> str:
     return config.get("data_vendors", {}).get(category, "default")
 
 
-def _append_availability_notes(result, notes: list[str]):
-    """Attach composite-source warnings to a textual fallback result."""
-    if not notes or not isinstance(result, str):
+def _append_availability_notes(result: DataResult, notes: list[DataResult[str]]) -> DataResult:
+    if not notes:
         return result
-    unique_notes = list(dict.fromkeys(notes))
-    return f"{result.rstrip()}\n\n### Source availability notes\n" + "\n".join(unique_notes)
-
-
-def _provenance_for_route(
-    method: str,
-    vendor: str,
-    args: tuple,
-    config: dict,
-    result: str,
-) -> ProvenanceRecord | None:
-    """Describe the actual successful router leg without inspecting LLM prose."""
-    if method == "get_prediction_markets":
-        # The graph wrapper owns its immutable analysis date and retrieval time.
-        return None
-
-    requested = "unknown"
-    effective = "unknown"
-    timing = "source-labelled data"
-    retrieved_at = None
-
-    if method == "get_stock_data" and len(args) >= 3:
-        requested = f"{args[1]} to {args[2]}"
-        returned_dates = re.findall(
-            r"(?m)^(\d{4}-\d{2}-\d{2})(?=[ T,])",
-            result,
-        )
-        effective = (
-            f"{min(returned_dates)} to {max(returned_dates)}"
-            if returned_dates
-            else "rows filtered within requested window; actual dates unavailable"
-        )
-        timing = "market-date filtered"
-    elif method == "get_indicators" and len(args) >= 3:
-        requested = str(args[2])
-        effective = (
-            _latest_market_observation_date(result, indicator=True)
-            or f"latest trading data <= {args[2]}"
-        )
-        timing = "market-date filtered"
-    elif method == "get_verified_market_snapshot" and len(args) >= 2:
-        requested = str(args[1])
-        effective = (
-            _latest_market_observation_date(result, indicator=False)
-            or f"latest trading data <= {args[1]}"
-        )
-        timing = "market-date filtered"
-    elif method == "get_news" and len(args) >= 3:
-        requested = f"{args[1]} to {args[2]}"
-        effective = requested
-        timing = (
-            f"publication/disclosure-date filtered; returned_items={result.count(chr(10) + '### ')}"
-        )
-    elif method == "get_global_news" and args:
-        end_date = str(args[0])
-        lookback = (
-            args[1]
-            if len(args) > 1 and args[1] is not None
-            else config["global_news_lookback_days"]
-        )
-        try:
-            start_date = (
-                datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=int(lookback))
-            ).strftime("%Y-%m-%d")
-            requested = f"{start_date} to {end_date}"
-        except (TypeError, ValueError):
-            requested = f"ending {end_date}"
-        effective = requested
-        timing = f"publication-date filtered; returned_items={result.count(chr(10) + '### ')}"
-    elif method == "get_macro_indicators" and len(args) >= 2:
-        requested = str(args[1])
-        effective = f"observations <= {args[1]}"
-        timing = "observation-date filtered"
-    elif method == "get_fundamentals" and len(args) >= 2:
-        requested = str(args[1])
-        effective = f"data available for cutoff {args[1]}"
-        if "LIVE_DATA_UNAVAILABLE" in result:
-            timing = "unavailable for historical date; vendor not queried"
-        elif vendor in {"yfinance", "alpha_vantage"}:
-            timing = "live non-point-in-time"
-            retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
-        else:
-            timing = "disclosure-date filtered"
-    elif method in {"get_balance_sheet", "get_cashflow", "get_income_statement"}:
-        curr_date = args[2] if len(args) >= 3 else None
-        requested = str(curr_date or "live retrieval")
-        effective = f"fiscal period ends <= {curr_date}" if curr_date else "current statement frame"
-        if "LIVE_DATA_UNAVAILABLE" in result:
-            timing = "unavailable for historical date; vendor not queried"
-        elif vendor in {"yfinance", "alpha_vantage"}:
-            timing = "period-end filtered only; not point-in-time"
-            retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
-        else:
-            timing = "disclosure-date filtered"
-
-    lowered = result.casefold()
-    if "live_data_unavailable" in lowered:
-        effective = "—"
-        timing = (
-            "live-only; unavailable for historical or future date; vendor not queried"
-            if vendor in {"yfinance", "alpha_vantage"}
-            and method
-            in {
-                "get_fundamentals",
-                "get_balance_sheet",
-                "get_cashflow",
-                "get_income_statement",
-            }
-            else "unavailable for historical date; vendor not queried"
-        )
-        retrieved_at = None
-    elif (
-        "data_unavailable" in lowered
-        or "error fetching" in lowered
-        or "error retrieving" in lowered
-    ):
-        effective = "—"
-        timing = "retrieval unavailable"
-    elif method in {"get_news", "get_global_news"} and (
-        lowered.startswith("no ") or "no relevant news" in lowered
-    ):
-        timing = "available; no relevant items in window"
-
-    return ProvenanceRecord(
-        evidence=method,
-        source=vendor,
-        requested=requested,
-        effective=effective,
-        timing=timing,
-        retrieved_at=retrieved_at,
+    combined = DataResult.combine(notes)
+    return DataResult.combine(
+        (result, replace(combined, content="### Source availability notes\n" + combined.content))
     )
 
 
-def _latest_market_observation_date(result: str, *, indicator: bool) -> str | None:
-    """Extract an explicit successful observation date without guessing cutoff."""
-
-    labels = (
-        ("Latest valid indicator observation", "Effective trading date")
-        if indicator
-        else ("Latest trading row used", "Effective trading date")
-    )
-    for label in labels:
-        match = re.search(
-            rf"(?mi)^[#\- ]*{re.escape(label)}:\s*(\d{{4}}-\d{{2}}-\d{{2}})\s*$",
-            result,
-        )
-        if match:
-            return match.group(1)
-    if not indicator:
-        return None
-    dated_values = re.findall(
-        r"(?m)^(\d{4}-\d{2}-\d{2}):\s*(?!N/A(?:\b|:))\S.*$",
-        result,
-    )
-    return max(dated_values) if dated_values else None
-
-
-def _attach_unavailable_provenance(
-    result: str,
-    method: str,
-    vendors: list[str],
-    args: tuple,
-    config: dict,
-    timing: str,
-) -> str:
-    record = _provenance_for_route(method, " / ".join(vendors) or "unknown", args, config, result)
-    if record is None:
-        return result
-    return attach_provenance(
-        result,
+def _unavailable_result(content, method, vendors, args, timing):
+    requested = " to ".join(str(value) for value in args[1:] if value is not None)
+    return DataResult(
+        content, diagnostics=(DataDiagnostic("source_unavailable", " / ".join(vendors), timing),)
+    ).with_provenance(
         ProvenanceRecord(
-            evidence=record.evidence,
-            source=record.source,
-            requested=record.requested,
+            evidence=method,
+            source=" / ".join(vendors) or "unknown",
+            requested=requested or "unknown",
             effective="—",
             timing=timing,
-        ),
+        )
     )
 
 
 def route_to_vendor(
     method: str,
     *args,
-    _provenance: bool = False,
     _stop_on_rate_limit: bool = False,
     _require_adjusted: bool = False,
     data_context: DataRequestContext,
     **kwargs,
-):
+) -> DataResult:
     """Route method calls to appropriate vendor implementation with fallback support."""
     if method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
@@ -608,7 +445,7 @@ def route_to_vendor(
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
-    availability_notes: list[str] = []
+    availability_notes: list[DataResult[str]] = []
     for vendor_index, vendor in enumerate(vendor_chain):
         impl_func = VENDOR_METHODS[method][vendor]
 
@@ -619,39 +456,38 @@ def route_to_vendor(
             # ordinary Full routes retain their existing signatures/semantics.
             if _require_adjusted and method == "get_stock_data" and vendor == "jquants":
                 vendor_kwargs = {**kwargs, "require_adjusted": True}
-            with stop_on_rate_limit_scope(_stop_on_rate_limit), routed_observations(fallback=vendor_index > 0):
+            with stop_on_rate_limit_scope(_stop_on_rate_limit):
                 result = impl_func(*args, data_context=data_context, **vendor_kwargs)
-            if _provenance and isinstance(result, str):
-                existing_records = extract_provenance(result)
-                record = (
-                    _provenance_for_route(method, vendor, args, config, result)
-                    if not existing_records or vendor_index > 0
-                    else None
+            if vendor_index > 0:
+                timing = "fallback vendor selected"
+                if market in {".SS", ".SZ"} and method in {
+                    "get_stock_data",
+                    "get_indicators",
+                    "get_verified_market_snapshot",
+                }:
+                    timing += "; adjustment provider changed; technical indicators may differ"
+                result = replace(
+                    result,
+                    observations=tuple(replace(row, fallback=True) for row in result.observations),
                 )
-                if record is not None:
-                    if vendor_index > 0:
-                        fallback_timing = (
-                            "fallback vendor selected"
-                            if existing_records
-                            else f"fallback vendor selected; {record.timing}"
+
+                def fallback_record(record, reason=timing):
+                    return replace(record, timing=f"{reason}; {record.timing}")
+
+                result = replace(
+                    result,
+                    provenance=tuple(fallback_record(record) for record in result.provenance),
+                    spans=tuple(
+                        replace(
+                            span, records=tuple(fallback_record(record) for record in span.records)
                         )
-                        if market in {".SS", ".SZ"} and method in {
-                            "get_stock_data",
-                            "get_indicators",
-                            "get_verified_market_snapshot",
-                        }:
-                            fallback_timing += (
-                                "; adjustment provider changed; technical indicators may differ"
-                            )
-                        record = ProvenanceRecord(
-                            evidence=record.evidence,
-                            source=record.source,
-                            requested=record.requested,
-                            effective=record.effective,
-                            timing=fallback_timing,
-                            retrieved_at=record.retrieved_at,
-                        )
-                    result = attach_provenance(result, record)
+                        for span in result.spans
+                    ),
+                )
+                if not result.provenance:
+                    result = result.with_provenance(
+                        ProvenanceRecord(evidence=method, source=vendor, timing=timing)
+                    )
             # Availability notes describe failed earlier legs, not items returned
             # by this successful vendor. Append them only after provenance has
             # counted/classified the vendor's original result.
@@ -706,18 +542,11 @@ def route_to_vendor(
             f"not covered, or the vendor returned stale data. Do not estimate or "
             f"fabricate values — report that data is unavailable for this symbol."
         )
-        result = _append_availability_notes(result, availability_notes)
-        return (
-            _attach_unavailable_provenance(
-                result,
-                method,
-                vendor_chain,
-                args,
-                config,
-                "no usable data from configured vendors",
-            )
-            if _provenance
-            else result
+        return _append_availability_notes(
+            _unavailable_result(
+                result, method, vendor_chain, args, "no usable data from configured vendors"
+            ),
+            availability_notes,
         )
 
     # No vendor returned data and none reported clean "no data" — surface the
@@ -731,22 +560,13 @@ def route_to_vendor(
                 f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
                 f"({first_error}). Proceed without it; do not fabricate values."
             )
-            return (
-                _attach_unavailable_provenance(
-                    result,
-                    method,
-                    vendor_chain,
-                    args,
-                    config,
-                    "retrieval unavailable",
-                )
-                if _provenance
-                else result
-            )
+            return _unavailable_result(result, method, vendor_chain, args, "retrieval unavailable")
         raise first_error
     raise RuntimeError(f"No available vendor for '{method}'")
 
 
 def resolve_instrument_eligibility(symbol: str, *, data_context: DataRequestContext):
     """Resolve product admission through the configured vendor chain."""
-    return route_to_vendor("resolve_instrument_eligibility", symbol, data_context=data_context)
+    return route_to_vendor(
+        "resolve_instrument_eligibility", symbol, data_context=data_context
+    ).content

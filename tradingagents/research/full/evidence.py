@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -14,16 +13,12 @@ from tradingagents.data.evidence_workset import artifact_records, is_evidence_to
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.domain.data import ProvenanceRecord, SourceObservation
 from tradingagents.domain.data_quality import temporal_scope_from_records
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.evidence import (
     EvidenceItem,
     EvidenceOrigin,
     EvidenceQuality,
     EvidenceTemporalScope,
-)
-from tradingagents.provenance import (
-    extract_evidence_spans,
-    extract_provenance,
-    strip_provenance_markers,
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -36,21 +31,25 @@ def observation_evidence(
 ) -> EvidenceItem:
     """Apply the existing near-live boundary at every Full observation entrance."""
     if observation.is_pit or is_near_live(
-        requested_date.isoformat(), instrument, now=observation.retrieved_at,
+        requested_date.isoformat(),
+        instrument,
+        now=observation.retrieved_at,
     ):
         return observation.evidence(requested_date, instrument=instrument)
     timing = observation.timing + "; unavailable outside market-local near-live window"
     if observation.fallback:
         timing += "; fallback source used"
     return evidence_from_records(
-        (ProvenanceRecord(
-            evidence=observation.kind,
-            source=observation.source,
-            requested=requested_date.isoformat(),
-            effective=str(observation.effective_date or "retrieval-time snapshot"),
-            timing=timing,
-            retrieved_at=observation.retrieved_at.isoformat(),
-        ),),
+        (
+            ProvenanceRecord(
+                evidence=observation.kind,
+                source=observation.source,
+                requested=requested_date.isoformat(),
+                effective=str(observation.effective_date or "retrieval-time snapshot"),
+                timing=timing,
+                retrieved_at=observation.retrieved_at.isoformat(),
+            ),
+        ),
         requested_date=requested_date,
         content=None,
         temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
@@ -102,26 +101,30 @@ def collect_evidence(
         else:
             empty_payloads.append((records, scope))
 
+    def collect_result(result: DataResult[str]) -> None:
+        for observation in result.observations:
+            item = observation_evidence(observation, requested_date, instrument)
+            items[item.ref] = item
+        if result.news:
+            collect_payload(result.provenance, None)
+        elif result.spans:
+            for span in result.spans:
+                collect_payload(span.records, span.content, span.temporal_scope)
+        else:
+            collect_payload(
+                result.provenance,
+                result.content,
+                provenance_metadata={"structured_numeric_facts": list(result.numeric_facts)},
+            )
+
     tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
     for message in tool_messages:
-        if isinstance(message.content, str) and "<!-- news-observation:" in message.content:
-            from tradingagents.data.news_selection import emit_news
-            from tradingagents.data.source_observations import capture_observations
-
-            with capture_observations() as news_observations:
-                emit_news(message.content, "news", instrument or "", global_news=getattr(message, "name", "") == "get_global_news", metadata_only=True)
-            records = extract_provenance(message.content)
-            fallback = any("fallback vendor selected" in record.timing for record in records)
-            for observation in news_observations:
-                observation = replace(observation, fallback=observation.fallback or fallback)
-                item = observation_evidence(observation, requested_date, instrument)
-                items[item.ref] = item
-            # Preserve collection diagnostics without assigning article content or identity.
-            collect_payload(records, None)
-            # Producer metadata owns item timing, including cached revisions.
-            continue
         artifact = getattr(message, "artifact", None)
         if is_evidence_tool_artifact(artifact):
+            if "data_result" in artifact:
+                collect_result(DataResult.load(artifact["data_result"]))
+                continue
+
             records = artifact_records(artifact)
             if not records:
                 records = (
@@ -145,52 +148,29 @@ def collect_evidence(
                     "dataset_id": artifact.get("dataset_id"),
                     "analytical_views": artifact.get("analytical_views", {}),
                     "column_measurements": artifact.get("column_measurements", {}),
-                    "structured_numeric_facts": artifact.get(
-                        "structured_numeric_facts", []
-                    ),
+                    "structured_numeric_facts": artifact.get("structured_numeric_facts", []),
                 },
             )
             continue
         content = message.content if isinstance(message.content, str) else str(message.content)
-        spans = extract_evidence_spans(content)
-        if spans:
-            for span in spans:
-                records = list(span.records)
-                if not records:
-                    records = [
-                        ProvenanceRecord(
-                            evidence=getattr(message, "name", None) or f"{analyst} tool",
-                            source="unknown",
-                            requested=requested_date.isoformat(),
-                            effective="unknown",
-                            timing=(
-                                f"{span.temporal_scope} span without auditable source metadata"
-                            ),
-                        )
-                    ]
-                collect_payload(
-                    records,
-                    span.content,
-                    span.temporal_scope,
-                )
-            continue
-        records = extract_provenance(content)
-        if not records:
-            records = [
-                ProvenanceRecord(
-                    evidence=getattr(message, "name", None) or f"{analyst} tool",
-                    source="unknown",
-                    requested=requested_date.isoformat(),
-                    effective="unknown",
-                    timing="no auditable source metadata captured",
-                )
-            ]
+        records = [
+            ProvenanceRecord(
+                evidence=getattr(message, "name", None) or f"{analyst} tool",
+                source="unknown",
+                requested=requested_date.isoformat(),
+                effective="unknown",
+                timing="no auditable source metadata captured",
+            )
+        ]
         collect_payload(
             records,
-            strip_provenance_markers(content).strip() or None,
+            content.strip() or None,
         )
 
     for block in prefetched_blocks:
+        if "data_result" in block:
+            collect_result(DataResult.load(block["data_result"]))
+            continue
         if block.get("source_observation"):
             observation = SourceObservation.load(block["source_observation"])
             item = observation_evidence(observation, requested_date, instrument)
@@ -207,11 +187,7 @@ def collect_evidence(
             records,
             block.get("content"),
             block.get("temporal_scope"),
-            {
-                "structured_numeric_facts": block.get(
-                    "structured_numeric_facts", []
-                )
-            },
+            {"structured_numeric_facts": block.get("structured_numeric_facts", [])},
         )
 
     for content, scope in content_order:

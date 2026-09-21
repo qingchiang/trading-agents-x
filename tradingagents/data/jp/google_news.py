@@ -40,7 +40,10 @@ from tradingagents.data.news_quality import (
     canonical_headline,
     classify_google_article,
 )
-from tradingagents.data.news_selection import source_output_limit
+from tradingagents.data.news_selection import news_result, source_output_limit
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.news import NewsCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,7 @@ _RSS = "https://news.google.com/rss/search?{qs}"
 # converting before the window filter avoids a ~9h skew that would otherwise admit
 # early-next-JST-day headlines into a backtest (look-ahead safety).
 _JST = timezone(timedelta(hours=9))
+
 
 def _parse_pubdate(raw: str | None) -> datetime | None:
     """Parse an RFC-822 ``pubDate`` to a naive **JST** datetime, or None.
@@ -95,11 +99,13 @@ def _fetch_items(query: str, timeout: float) -> list[dict]:
         suffix = f" - {source}"
         if source and title.endswith(suffix):
             title = title[: -len(suffix)].rstrip()
-        items.append({
-            "title": title,
-            "source": source or "Unknown",
-            "pub_date": _parse_pubdate(item.findtext("pubDate")),
-        })
+        items.append(
+            {
+                "title": title,
+                "source": source or "Unknown",
+                "pub_date": _parse_pubdate(item.findtext("pubDate")),
+            }
+        )
     return items
 
 
@@ -116,7 +122,15 @@ def _in_window(pub_date, start_dt, end_dt) -> bool:
     return start_dt <= pub_date < end_dt + timedelta(days=1)
 
 
-def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_news", "google_news")
+def get_news(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    timeout: float = 10.0,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Return Google-News media headlines for a Tokyo ticker in ``[start, end]``.
 
     Searches by resolved company name (falls back to the bare code). Returns a
@@ -125,6 +139,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
     """
     # "{name} {code}" softly biases ranking to the financial context (see module
     # docstring); fall back to the bare code if the name can't be resolved.
+    counts = CandidateFilterCounts()
     code = to_jquants_code(ticker)
     name = get_company_name(ticker)
     query = f"{name} {code}" if name else code
@@ -134,9 +149,10 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
     except (TypeError, ValueError):
-        return (
+        return DataResult(
             f"No Google News found for {ticker} between {start_date} and {end_date}"
-            f"\n{counts.render()}"
+            f"\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Google News"),),
         )
 
     fetched = _fetch_items(query, timeout)
@@ -151,18 +167,17 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
             continue
         candidates.append(item)
     if not candidates:
-        return (
+        return DataResult(
             f"No Google News found for {ticker} between {start_date} and {end_date}"
-            f"\n{counts.render()}"
+            f"\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Google News"),),
         )
     aliases = build_company_aliases(ticker, name)
     candidates.sort(key=lambda it: it["pub_date"], reverse=True)
     relevant = []
     seen_titles: set[str] = set()
     for it in candidates:
-        classification = classify_google_article(
-            it["title"], it["source"], aliases
-        )
+        classification = classify_google_article(it["title"], it["source"], aliases)
         title_key = canonical_headline(it["title"])
         if classification.tier == "drop":
             counts.relevance_filtered += 1
@@ -179,10 +194,11 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
     kept = relevant[: source_output_limit(data_context.config["news_article_limit"])]
     counts.source_truncated = len(relevant) - len(kept)
     if not kept:
-        return (
+        return DataResult(
             f"No relevant Google News found for {ticker} between {start_date} and "
             f"{end_date} after quality filtering ({len(candidates)} in-window "
-            f"candidates dropped)\n{counts.render()}"
+            f"candidates dropped)\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Google News"),),
         )
 
     direct_count = sum(tier == "direct" for _, tier in kept)
@@ -190,18 +206,24 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
     context_count = sum(tier == "context" for _, tier in kept)
     dropped_count = len(candidates) - len(relevant)
     omitted_count = len(relevant) - len(kept)
-    body = "\n".join(
-        f"### [{tier}] {it['title']} (source: {it['source']})\n"
-        f"{it['pub_date'].strftime('%Y-%m-%d')}\n"
+    items = [
+        NewsCandidate(
+            "Google News",
+            it["title"],
+            f"### [{tier}] {it['title']} (source: {it['source']})\n{it['pub_date'].strftime('%Y-%m-%d')}",
+            it["pub_date"].strftime("%Y-%m-%d"),
+        )
         for it, tier in kept
-    )
+    ]
     stats = (
         f"Quality filter: upstream_returned={len(fetched)}; date_filtered={len(fetched) - len(candidates)}; candidates={len(candidates)}; relevant={len(relevant)}; "
         f"kept={len(kept)} (direct={direct_count}, candidate={candidate_count}, "
         f"context={context_count}); "
         f"dropped={dropped_count}; omitted_by_limit={omitted_count}."
     )
-    return (
+    return news_result(
         f"## {ticker} News (media, Google News), from {start_date} to {end_date}:"
-        f"\n\n{stats}\n{counts.render()}\n\n{body}"
+        f"\n\n{stats}\n{counts.render()}",
+        items,
+        diagnostics=(counts.diagnostic("Google News"),),
     )

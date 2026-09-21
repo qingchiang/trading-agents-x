@@ -34,7 +34,6 @@ from tradingagents.data.cn import (
 )
 from tradingagents.data.y_finance import get_YFin_data_online
 from tradingagents.domain.instruments import normalize_symbol
-from tradingagents.provenance import extract_provenance
 
 pytestmark = [
     pytest.mark.integration,
@@ -84,9 +83,7 @@ def _assert_ohlcv(result, canonical: str, completed_end: date) -> None:
     assert result.fallback_reason is None
     assert result.adjustment == "qfq (forward-adjusted)"
     assert not result.frame.empty
-    assert {"Date", "Open", "High", "Low", "Close", "Volume"} <= set(
-        result.frame.columns
-    )
+    assert {"Date", "Open", "High", "Low", "Close", "Volume"} <= set(result.frame.columns)
     latest = pd.to_datetime(result.frame["Date"], errors="coerce").max().date()
     assert latest == completed_end
     assert result.effective_end == completed_end.isoformat()
@@ -97,16 +94,12 @@ def _assert_ohlcv(result, canonical: str, completed_end: date) -> None:
 def _assert_finance_frame(frame: pd.DataFrame, cutoff: date) -> pd.DataFrame:
     assert not frame.empty
     assert set(frame.columns) >= _FINANCE_META_COLUMNS
-    visible = sina_finance.filter_visible_records(
-        frame, cutoff.isoformat(), limit=8
-    )
+    visible = sina_finance.filter_visible_records(frame, cutoff.isoformat(), limit=8)
     assert not visible.empty
     assert visible["ReportDate"].notna().all()
     assert visible["VisibilityDate"].notna().all()
     assert visible["VisibilityDate"].dt.date.le(cutoff).all()
-    data_columns = [
-        column for column in visible.columns if column not in _FINANCE_META_COLUMNS
-    ]
+    data_columns = [column for column in visible.columns if column not in _FINANCE_META_COLUMNS]
     assert data_columns
     assert visible[data_columns].notna().any(axis=None)
     return visible
@@ -132,8 +125,8 @@ def test_us_yfinance_daily_ohlcv_contract(live_endpoint):
         start, end = _settled_window()
         output = get_YFin_data_online("NVDA", start, end, data_context=request_context())
 
-        assert "# Actual data source: yfinance" in output
-        frame = pd.read_csv(StringIO(output[output.index("Date,") :]))
+        assert "# Actual data source: yfinance" in output.content
+        frame = pd.read_csv(StringIO(output[output.content.index("Date,") :]))
         assert {"Date", "Open", "High", "Low", "Close", "Volume"} <= set(frame.columns)
         assert not frame.empty
         assert pd.to_datetime(frame["Date"], errors="coerce").notna().all()
@@ -184,9 +177,7 @@ def test_china_company_and_sina_finance_contracts(live_endpoint):
         assert str(profile.iloc[0]["公司名称"]).strip()
 
     for kind in ("abstract", "balance", "income", "cashflow"):
-        with live_endpoint(
-            f"cn.sina.finance.{kind}.600309", source="Sina Finance"
-        ) as audit:
+        with live_endpoint(f"cn.sina.finance.{kind}.600309", source="Sina Finance") as audit:
             canonical, frame = sina_finance.fetch_finance_records("600309.SS", kind)
             assert canonical == "600309.SS"
             visible = _assert_finance_frame(frame, cutoff)
@@ -205,9 +196,7 @@ def test_china_bank_profile_and_statement_mapping_contract(live_endpoint):
         assert str(profile.iloc[0]["A股代码"]).zfill(6) == "600036"
         assert company.classify_entity(profile) == "financial"
 
-    with live_endpoint(
-        "cn.sina.finance.balance.600036", source="Sina Finance"
-    ) as audit:
+    with live_endpoint("cn.sina.finance.balance.600036", source="Sina Finance") as audit:
         canonical, frame = sina_finance.fetch_finance_records("600036.SS", "balance")
         assert canonical == "600036.SS"
         visible = _assert_finance_frame(frame, cutoff)
@@ -216,9 +205,7 @@ def test_china_bank_profile_and_statement_mapping_contract(live_endpoint):
             last_observation=visible["VisibilityDate"].max().date(),
         )
         entity_type = company.classify_entity(profile, visible.columns)
-        rendered, _missing = cn_statements._render_sina_table(
-            visible, "balance", entity_type
-        )
+        rendered, _missing = cn_statements._render_sina_table(visible, "balance", entity_type)
         mapped = pd.read_csv(StringIO(rendered))
 
         assert entity_type == "financial"
@@ -239,10 +226,10 @@ def test_china_company_news_schema_contracts(live_endpoint):
     start = end - timedelta(days=120)
     start_text, end_text = start.isoformat(), end.isoformat()
 
-    with live_endpoint(
-        "cn.cninfo.announcements.600309", source="CNINFO"
-    ) as audit:
-        disclosures = news_sources.disclosure_rows("600309.SS", start_text, end_text, data_context=request_context())
+    with live_endpoint("cn.cninfo.announcements.600309", source="CNINFO") as audit:
+        disclosures = news_sources.disclosure_rows(
+            "600309.SS", start_text, end_text, data_context=request_context()
+        )
         latest = max((row["published"].date() for row in disclosures), default="empty-window")
         audit.observe(source="CNINFO", last_observation=latest)
         assert isinstance(disclosures, list)
@@ -255,10 +242,10 @@ def test_china_company_news_schema_contracts(live_endpoint):
             assert row["published"].tzinfo is not None
             assert start <= row["published"].date() <= end
 
-    with live_endpoint(
-        "cn.eastmoney.research.600309", source="Eastmoney Research"
-    ) as audit:
-        research = news_sources.research_rows("600309.SS", start_text, end_text, data_context=request_context())
+    with live_endpoint("cn.eastmoney.research.600309", source="Eastmoney Research") as audit:
+        research = news_sources.research_rows(
+            "600309.SS", start_text, end_text, data_context=request_context()
+        )
         latest = max((row["published"] for row in research), default="empty-window")
         audit.observe(source="Eastmoney Research", last_observation=latest)
         assert isinstance(research, list)
@@ -286,8 +273,10 @@ def test_china_research_signal_source_contract(live_endpoint):
     with live_endpoint(
         "cn.research-signal.600519", source="Sina Finance -> Eastmoney Research"
     ) as audit:
-        result = cn_sentiment.get_research_signal("600519.SS", end.isoformat(), data_context=request_context())
-        records = extract_provenance(result)
+        result = cn_sentiment.get_research_signal(
+            "600519.SS", end.isoformat(), data_context=request_context()
+        )
+        records = list(result.provenance)
         assert records
         sources = " -> ".join(record.source for record in records)
         audit.observe(source=sources, last_observation=_latest_event_date(result))
@@ -304,8 +293,10 @@ def test_china_holding_change_source_contract(live_endpoint):
         "cn.holding-changes.600519",
         source="Eastmoney disclosures -> CNINFO fallback",
     ) as audit:
-        result = cn_sentiment.get_holding_changes("600519.SS", end.isoformat(), data_context=request_context())
-        records = extract_provenance(result)
+        result = cn_sentiment.get_holding_changes(
+            "600519.SS", end.isoformat(), data_context=request_context()
+        )
+        records = list(result.provenance)
         assert isinstance(result, str) and result.strip()
         assert records
         sources = " -> ".join(record.source for record in records)
@@ -323,7 +314,9 @@ def test_japan_10y_source_date_and_frequency_contract(live_endpoint):
     _start, end = _settled_window(days=180)
     requested_end = date.fromisoformat(end)
     with live_endpoint("jp.jp10y", source="MOF -> FRED") as audit:
-        data = jp_macro.fetch_series("jp_10y_yield", end, look_back_days=180, data_context=request_context())
+        data = jp_macro.fetch_series(
+            "jp_10y_yield", end, look_back_days=180, data_context=request_context()
+        )
         assert data is not None
         latest, value = _assert_macro_points(data, requested_end)
         audit.observe(source=data["actual_source"], last_observation=latest)
@@ -352,10 +345,10 @@ def test_china_recent_macro_source_contract(
     indicator, lower, upper, frequency, max_age_days, live_endpoint
 ):
     end = date.today()
-    with live_endpoint(
-        f"cn.macro.{indicator}", source="NBS -> Eastmoney"
-    ) as audit:
-        data = cn_macro.fetch_series(indicator, end.isoformat(), look_back_days=180, data_context=request_context())
+    with live_endpoint(f"cn.macro.{indicator}", source="NBS -> Eastmoney") as audit:
+        data = cn_macro.fetch_series(
+            indicator, end.isoformat(), look_back_days=180, data_context=request_context()
+        )
         assert data is not None
         latest, value = _assert_macro_points(data, end)
         audit.observe(source=data["actual_source"], last_observation=latest)
@@ -375,10 +368,10 @@ def test_china_recent_macro_source_contract(
 
 def test_china_10y_source_shape_contract(live_endpoint):
     end = date.today()
-    with live_endpoint(
-        "cn.macro.cn10y", source="Eastmoney -> ChinaMoney"
-    ) as audit:
-        data = cn_macro.fetch_series("cn_10y_yield", end.isoformat(), look_back_days=45, data_context=request_context())
+    with live_endpoint("cn.macro.cn10y", source="Eastmoney -> ChinaMoney") as audit:
+        data = cn_macro.fetch_series(
+            "cn_10y_yield", end.isoformat(), look_back_days=45, data_context=request_context()
+        )
 
         assert data is not None
         latest, value = _assert_macro_points(data, end)
@@ -399,7 +392,9 @@ def test_china_10y_source_shape_contract(live_endpoint):
 def test_usd_cny_safe_primary_and_unit_contract(live_endpoint):
     end = date.today()
     with live_endpoint("cn.macro.usd-cny", source="SAFE -> Eastmoney") as audit:
-        data = cn_macro.fetch_series("usd_cny", end.isoformat(), look_back_days=45, data_context=request_context())
+        data = cn_macro.fetch_series(
+            "usd_cny", end.isoformat(), look_back_days=45, data_context=request_context()
+        )
 
         assert data is not None
         latest, value = _assert_macro_points(data, end)

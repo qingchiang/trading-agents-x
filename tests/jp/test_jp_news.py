@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 import pytest
 
 from tests.data_policy import data_policy, request_context
+from tests.source_results import news_fixture
 from tradingagents.data.jp import http_util, jp_news, tdnet_news
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.vendor_errors import (
@@ -15,14 +16,15 @@ from tradingagents.domain.vendor_errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.provenance import extract_provenance
 
-_EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"
-_TDNET_DATA = "## 4568.T timely disclosures (TDnet 適時開示), from a to b:\n\n### 自己株式の取得"
-_MEDIA_DATA = "## 4568.T News (media, Google News), from a to b:\n\n### 決算を発表"
-_EDINET_EMPTY = "No EDINET disclosures found for 4568.T between a and b"
-_TDNET_EMPTY = "No TDnet disclosures found for 4568.T between a and b"
-_MEDIA_EMPTY = "No Google News found for 4568.T between a and b"
+_EDINET_DATA = news_fixture("## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書")
+_TDNET_DATA = news_fixture(
+    "## 4568.T timely disclosures (TDnet 適時開示), from a to b:\n\n### 自己株式の取得"
+)
+_MEDIA_DATA = news_fixture("## 4568.T News (media, Google News), from a to b:\n\n### 決算を発表")
+_EDINET_EMPTY = news_fixture("No EDINET disclosures found for 4568.T between a and b")
+_TDNET_EMPTY = news_fixture("No TDnet disclosures found for 4568.T between a and b")
+_MEDIA_EMPTY = news_fixture("No Google News found for 4568.T between a and b")
 
 
 def _spec(value):
@@ -44,19 +46,19 @@ def _run(edinet, media, tdnet=_TDNET_EMPTY):
 
 def _block(source: str, titles: list[str]) -> str:
     items = "\n\n".join(f"### {title}" for title in titles)
-    return f"## {source}\n\n{items}"
+    return news_fixture(f"## {source}\n\n{items}")
 
 
 @pytest.mark.unit
 class JpNewsAssemblerTests(unittest.TestCase):
     def test_all_present_are_combined_in_order(self):
         out = _run(_EDINET_DATA, _MEDIA_DATA, tdnet=_TDNET_DATA)
-        self.assertIn("有価証券報告書", out)
-        self.assertIn("自己株式の取得", out)
-        self.assertIn("決算を発表", out)
+        self.assertIn("有価証券報告書", out.content)
+        self.assertIn("自己株式の取得", out.content)
+        self.assertIn("決算を発表", out.content)
         # statutory filings, then timely disclosures, then media
-        self.assertLess(out.index("EDINET"), out.index("TDnet"))
-        self.assertLess(out.index("TDnet"), out.index("media"))
+        self.assertLess(out.content.index("EDINET"), out.content.index("TDnet"))
+        self.assertLess(out.content.index("TDnet"), out.content.index("media"))
 
     def test_three_sources_share_one_30_item_budget_with_official_priority(self):
         edinet_titles = [f"EDINET item {index}" for index in range(15)]
@@ -70,14 +72,14 @@ class JpNewsAssemblerTests(unittest.TestCase):
                 tdnet=_block("TDnet", tdnet_titles),
             )
 
-        self.assertEqual(out.count("\n### "), 30)
-        self.assertIn("EDINET item 14", out)
-        self.assertIn("TDnet item 14", out)
-        self.assertNotIn("Media item 0", out)
+        self.assertEqual(out.content.count("\n### "), 30)
+        self.assertIn("EDINET item 14", out.content)
+        self.assertIn("TDnet item 14", out.content)
+        self.assertNotIn("Media item 0", out.content)
         self.assertIn(
             "returned_items=15; duplicate_items=0; kept_items=0; "
             "shared_limit=30; truncated_by_global_cap=15",
-            out,
+            "; ".join(record.timing for record in out.provenance),
         )
 
     def test_cross_source_duplicate_keeps_official_item(self):
@@ -90,15 +92,21 @@ class JpNewsAssemblerTests(unittest.TestCase):
         with data_policy({"news_article_limit": 30}, merge=True):
             out = _run(edinet, media)
 
-        self.assertEqual(sum(line.startswith("### ") and "通期業績予想の修正" in line for line in out.splitlines()), 1)
-        self.assertIn("filer: Example Corp", out)
-        self.assertNotIn("source: Example News", out)
-        self.assertIn("独自取材", out)
+        self.assertEqual(
+            sum(
+                line.startswith("### ") and "通期業績予想の修正" in line
+                for line in out.content.splitlines()
+            ),
+            1,
+        )
+        self.assertIn("filer: Example Corp", out.content)
+        self.assertNotIn("source: Example News", out.content)
+        self.assertIn("独自取材", out.content)
         self.assertIn(
             "returned_items=2; duplicate_items=1; kept_items=1; shared_limit=30",
-            out,
+            "; ".join(record.timing for record in out.provenance),
         )
-        self.assertNotIn("truncated_by_global_cap", out)
+        self.assertNotIn("truncated_by_global_cap", out.content)
 
     def test_configured_limit_is_applied_after_cross_source_merge(self):
         with data_policy({"news_article_limit": 2}, merge=True):
@@ -108,40 +116,42 @@ class JpNewsAssemblerTests(unittest.TestCase):
                 tdnet=_block("TDnet", ["Official three"]),
             )
 
-        self.assertIn("Official one", out)
-        self.assertIn("Official two", out)
-        self.assertNotIn("Official three", out)
-        self.assertNotIn("Media one", out)
-        self.assertIn("truncated_by_global_cap=1", out)
+        self.assertIn("Official one", out.content)
+        self.assertIn("Official two", out.content)
+        self.assertNotIn("Official three", out.content)
+        self.assertNotIn("Media one", out.content)
+        self.assertIn(
+            "truncated_by_global_cap=1", "; ".join(record.timing for record in out.provenance)
+        )
 
     def test_tdnet_only_present(self):
         out = _run(_EDINET_EMPTY, _MEDIA_EMPTY, tdnet=_TDNET_DATA)
-        self.assertIn("自己株式の取得", out)
-        self.assertNotIn("No TDnet disclosures found", out)
+        self.assertIn("自己株式の取得", out.content)
+        self.assertNotIn("No TDnet disclosures found", out.content)
 
     def test_tdnet_error_does_not_suppress_others(self):
         out = _run(_EDINET_DATA, _MEDIA_DATA, tdnet=RuntimeError("boom"))
-        self.assertIn("有価証券報告書", out)
-        self.assertIn("決算を発表", out)
+        self.assertIn("有価証券報告書", out.content)
+        self.assertIn("決算を発表", out.content)
 
     def test_only_edinet_present_drops_empty_media_line(self):
         out = _run(_EDINET_DATA, _MEDIA_EMPTY)
-        self.assertIn("有価証券報告書", out)
-        self.assertNotIn("No Google News found", out)  # empty block omitted
+        self.assertIn("有価証券報告書", out.content)
+        self.assertNotIn("No Google News found", out.content)  # empty block omitted
 
     def test_only_media_present_drops_empty_edinet_line(self):
         out = _run(_EDINET_EMPTY, _MEDIA_DATA)
-        self.assertIn("決算を発表", out)
-        self.assertNotIn("No EDINET disclosures found", out)
+        self.assertIn("決算を発表", out.content)
+        self.assertNotIn("No EDINET disclosures found", out.content)
 
     def test_edinet_error_does_not_suppress_media(self):
         # EDINET needs a key and can raise; the keyless media feed must survive.
         out = _run(VendorNotConfiguredError("EDINET_API_KEY unset"), _MEDIA_DATA)
-        self.assertIn("決算を発表", out)
+        self.assertIn("決算を発表", out.content)
 
     def test_media_error_does_not_suppress_edinet(self):
         out = _run(_EDINET_DATA, RuntimeError("boom"))
-        self.assertIn("有価証券報告書", out)
+        self.assertIn("有価証券報告書", out.content)
 
     def test_extended_window_is_clamped_only_for_tdnet(self):
         with (
@@ -152,9 +162,15 @@ class JpNewsAssemblerTests(unittest.TestCase):
         ):
             jp_news.get_news("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
 
-        edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
-        tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17", data_context=request_context())
-        media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17", data_context=request_context())
+        edinet.assert_called_once_with(
+            "4568.T", "2026-04-19", "2026-07-17", data_context=request_context()
+        )
+        tdnet.assert_called_once_with(
+            "4568.T", "2026-06-17", "2026-07-17", data_context=request_context()
+        )
+        media.assert_called_once_with(
+            "4568.T", "2026-04-19", "2026-07-17", data_context=request_context()
+        )
 
     def test_edinet_capped_window_is_recorded_as_limited_provenance(self):
         with (
@@ -162,9 +178,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_EMPTY),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2020-01-01", "2026-07-17", data_context=request_context())
+            out = jp_news.get_news(
+                "4568.T", "2020-01-01", "2026-07-17", data_context=request_context()
+            )
 
-        record = next(record for record in extract_provenance(out) if record.source == "EDINET")
+        record = next(record for record in list(out.provenance) if record.source == "EDINET")
         self.assertEqual(record.effective, "2026-04-19 to 2026-07-17")
         self.assertIn("source_window_limited", record.timing)
 
@@ -175,9 +193,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2026-06-01", "2026-07-05", data_context=request_context())
+            out = jp_news.get_news(
+                "4568.T", "2026-06-01", "2026-07-05", data_context=request_context()
+            )
 
-        record = next(record for record in extract_provenance(out) if record.source == "TDnet")
+        record = next(record for record in list(out.provenance) if record.source == "TDnet")
         self.assertEqual(record.effective, "2026-06-12 to 2026-07-05")
         self.assertIn("source_window_limited", record.timing)
 
@@ -188,13 +208,17 @@ class JpNewsAssemblerTests(unittest.TestCase):
             mock.patch.object(
                 jp_news,
                 "_tdnet_news",
-                return_value="<TDnet unavailable: requested window is outside the rolling archive>",
+                return_value=news_fixture(
+                    "<TDnet unavailable: requested window is outside the rolling archive>"
+                ),
             ),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
-            out = jp_news.get_news("4568.T", "2026-05-01", "2026-06-01", data_context=request_context())
+            out = jp_news.get_news(
+                "4568.T", "2026-05-01", "2026-06-01", data_context=request_context()
+            )
 
-        record = next(record for record in extract_provenance(out) if record.source == "TDnet")
+        record = next(record for record in list(out.provenance) if record.source == "TDnet")
         self.assertEqual(record.effective, "outside rolling TDnet archive; no query")
         self.assertIn("source_window_limited", record.timing)
 
@@ -206,8 +230,8 @@ class JpNewsAssemblerTests(unittest.TestCase):
         with self.assertRaises(NoMarketDataError) as ctx:
             _run(RuntimeError("boom"), _MEDIA_EMPTY)
         note = ctx.exception.availability_notes[0]
-        self.assertIn("<EDINET unavailable: RuntimeError>", note)
-        records = extract_provenance(note)
+        self.assertIn("<EDINET unavailable: RuntimeError>", note.content)
+        records = list(note.provenance)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].source, "EDINET")
         self.assertEqual(records[0].timing, "unavailable")
@@ -215,8 +239,8 @@ class JpNewsAssemblerTests(unittest.TestCase):
     def test_unscoped_rate_limit_still_degrades_to_other_feeds(self):
         out = _run(VendorRateLimitError("slow down"), _MEDIA_DATA)
 
-        self.assertIn("決算を発表", out)
-        self.assertIn("<EDINET unavailable: VendorRateLimitError>", out)
+        self.assertIn("決算を発表", out.content)
+        self.assertIn("<EDINET unavailable: VendorRateLimitError>", out.content)
 
     def test_scoped_rate_limit_stops_before_later_subfeeds(self):
         edinet = mock.Mock(side_effect=VendorRateLimitError("slow down"))
@@ -265,7 +289,9 @@ class JpNewsAssemblerTests(unittest.TestCase):
         ):
             jp_news.get_news("7203.T", "2026-08-20", "2026-08-25", data_context=request_context())
 
-        self.assertIn("<TDnet unavailable: VendorTransportError>", ctx.exception.availability_notes[0])
+        self.assertIn(
+            "<TDnet unavailable: VendorTransportError>", ctx.exception.availability_notes[0].content
+        )
         media.assert_called_once()
 
 

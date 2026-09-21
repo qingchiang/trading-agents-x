@@ -18,10 +18,11 @@ from tradingagents.data.cn.sina_finance import (
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_fundamentals as get_yfinance_fundamentals
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -131,25 +132,27 @@ def _render_abstract(frame: pd.DataFrame, entity_type: str) -> tuple[str, list[s
     return output.fillna("N/A").to_csv(index=False), missing
 
 
-def _live_yfinance_block(ticker: str, curr_date: str | None, *, data_context: DataRequestContext) -> str:
+def _live_yfinance_block(
+    ticker: str, curr_date: str | None, *, data_context: DataRequestContext
+) -> DataResult[str]:
     if curr_date is not None and not is_near_live(curr_date, ticker):
-        return attach_evidence_span(
-            attach_provenance(
-                "## Current valuation and analyst snapshot (yfinance)\n"
-                "Not requested: current-only valuation and forecasts are excluded from "
-                f"historical analysis dated {curr_date}.",
+        return (
+            DataResult(
+                f"## Current valuation and analyst snapshot (yfinance)\nNot requested: current-only valuation and forecasts are excluded from historical analysis dated {curr_date}."
+            )
+            .with_provenance(
                 ProvenanceRecord(
                     evidence="get_fundamentals",
                     source="yfinance current valuation snapshot",
                     requested=curr_date,
                     effective="—",
                     timing="live-only; not queried for historical analysis",
-                ),
-            ),
-            temporal_scope="live_only",
+                )
+            )
+            .with_scope("live_only")
         )
     try:
-        result = get_yfinance_fundamentals(ticker, curr_date, data_context=data_context)
+        result = get_yfinance_fundamentals(ticker, curr_date, data_context=data_context).content
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
@@ -167,9 +170,9 @@ def _live_yfinance_block(ticker: str, curr_date: str | None, *, data_context: Da
         body = "## Current valuation and analyst snapshot (yfinance)\n" + result
         effective = curr_date or retrieved[:10]
         timing = "current-only snapshot; not historical PIT"
-    return attach_evidence_span(
-        attach_provenance(
-            body,
+    return (
+        DataResult(body)
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance current valuation snapshot",
@@ -177,13 +180,16 @@ def _live_yfinance_block(ticker: str, curr_date: str | None, *, data_context: Da
                 effective=effective,
                 timing=timing,
                 retrieved_at=retrieved,
-            ),
-        ),
-        temporal_scope="live_only",
+            )
+        )
+        .with_scope("live_only")
     )
 
 
-def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_fundamentals", "cn_fundamentals")
+def get_fundamentals(
+    ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Assemble CNINFO profile, disclosure-filtered metrics, and live valuation."""
     validate_analysis_date(curr_date)
     canonical, _code, _exchange = canonical_a_share(ticker)
@@ -192,9 +198,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
     abstract_issue: str | None = None
     if curr_date is not None and not is_near_live(curr_date, ticker):
         profile = pd.DataFrame()
-        profile_issue = (
-            "live-only company profile not queried for historical or future date"
-        )
+        profile_issue = "live-only company profile not queried for historical or future date"
     else:
         try:
             profile_snapshot = get_company_profile_snapshot(ticker)
@@ -241,8 +245,8 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
             canonical,
             f"CNINFO profile: {profile_detail}; Sina financial abstract: {abstract_detail}",
             availability_notes=(
-                f"- CNINFO company profile unavailable ({profile_detail}).",
-                f"- Sina financial abstract unavailable ({abstract_detail}).",
+                DataResult(f"- CNINFO company profile unavailable ({profile_detail})."),
+                DataResult(f"- Sina financial abstract unavailable ({abstract_detail})."),
             ),
         )
 
@@ -264,17 +268,13 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
             effective="—",
             timing=(
                 "live-only; not queried for historical or future analysis"
-                if profile_issue
-                and profile_issue.startswith("live-only")
+                if profile_issue and profile_issue.startswith("live-only")
                 else f"live-only retrieval unavailable: {profile_issue or 'no data'}"
             ),
             retrieved_at=profile_retrieved_at,
         )
     else:
-        profile_body = (
-            f"# Entity mapping: {entity_type}\n\n"
-            f"{_render_profile(profile)}"
-        )
+        profile_body = f"# Entity mapping: {entity_type}\n\n{_render_profile(profile)}"
         profile_record = ProvenanceRecord(
             evidence="get_fundamentals",
             source="AkShare / CNINFO company profile",
@@ -283,10 +283,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
             timing="live-only current company reference; not historical PIT",
             retrieved_at=profile_retrieved_at,
         )
-    profile_block = attach_evidence_span(
-        attach_provenance(profile_body, profile_record),
-        temporal_scope="live_only",
-    )
+    profile_block = DataResult(profile_body).with_provenance(profile_record).with_scope("live_only")
 
     if abstract.empty:
         abstract_body = (
@@ -326,9 +323,13 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
             timing="publication/update-date filtered; later conflicting date wins",
         )
 
-    abstract_block = attach_evidence_span(
-        attach_provenance(abstract_body, abstract_record),
-        temporal_scope="point_in_time",
+    abstract_block = (
+        DataResult(abstract_body).with_provenance(abstract_record).with_scope("point_in_time")
     )
-    base = f"{profile_block}\n\n{abstract_block}"
-    return base + "\n\n" + _live_yfinance_block(ticker, curr_date, data_context=data_context)
+    return DataResult.combine(
+        (
+            profile_block,
+            abstract_block,
+            _live_yfinance_block(ticker, curr_date, data_context=data_context),
+        )
+    )

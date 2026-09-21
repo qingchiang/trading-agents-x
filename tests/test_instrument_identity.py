@@ -52,9 +52,7 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
         self.assertEqual(identity, {})
 
     def test_fails_open_on_exception(self):
-        with patch.object(
-            identity_dataflow.yf, "Ticker", side_effect=RuntimeError("rate limited")
-        ):
+        with patch.object(identity_dataflow.yf, "Ticker", side_effect=RuntimeError("rate limited")):
             self.assertEqual(resolve_instrument_identity("TOTDY"), {})
 
     def test_result_is_cached(self):
@@ -66,21 +64,27 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_historical_identity_uses_exact_search_without_info(self):
-        search = type("SearchResult", (), {
-            "quotes": [
-                {"symbol": "TOTO", "longName": "Wrong symbol"},
-                {
-                    "symbol": "TOTDY",
-                    "longname": "TOTO LTD.",
-                    "shortname": "TOTO",
-                    "exchange": "PNK",
-                    "quoteType": "EQUITY",
-                    "sector": "Current sector must not leak",
-                },
-            ]
-        })()
-        with patch.object(identity_dataflow.yf, "Search", return_value=search) as search_mock, \
-                patch.object(identity_dataflow.yf, "Ticker") as ticker_mock:
+        search = type(
+            "SearchResult",
+            (),
+            {
+                "quotes": [
+                    {"symbol": "TOTO", "longName": "Wrong symbol"},
+                    {
+                        "symbol": "TOTDY",
+                        "longname": "TOTO LTD.",
+                        "shortname": "TOTO",
+                        "exchange": "PNK",
+                        "quoteType": "EQUITY",
+                        "sector": "Current sector must not leak",
+                    },
+                ]
+            },
+        )()
+        with (
+            patch.object(identity_dataflow.yf, "Search", return_value=search) as search_mock,
+            patch.object(identity_dataflow.yf, "Ticker") as ticker_mock,
+        ):
             identity = resolve_instrument_identity("totdy", "2020-01-02")
 
         ticker_mock.assert_not_called()
@@ -91,19 +95,22 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
         self.assertNotIn("sector", identity)
 
     def test_historical_search_failure_does_not_fall_back_to_info(self):
-        with patch.object(
-            identity_dataflow.yf, "Search", side_effect=RuntimeError("search failed")
-        ), patch.object(identity_dataflow.yf, "Ticker") as ticker_mock:
+        with (
+            patch.object(identity_dataflow.yf, "Search", side_effect=RuntimeError("search failed")),
+            patch.object(identity_dataflow.yf, "Ticker") as ticker_mock,
+        ):
             identity = resolve_instrument_identity("TOTDY", "2020-01-02")
         ticker_mock.assert_not_called()
         self.assertEqual(identity, {})
 
     def test_cache_collapses_historical_dates_but_separates_live_mode(self):
-        search = type("SearchResult", (), {
-            "quotes": [{"symbol": "TOTDY", "longName": "Historical TOTO"}]
-        })()
-        with patch.object(identity_dataflow.yf, "Search", return_value=search) as search_mock, \
-                patch.object(identity_dataflow.yf, "Ticker") as ticker_mock:
+        search = type(
+            "SearchResult", (), {"quotes": [{"symbol": "TOTDY", "longName": "Historical TOTO"}]}
+        )()
+        with (
+            patch.object(identity_dataflow.yf, "Search", return_value=search) as search_mock,
+            patch.object(identity_dataflow.yf, "Ticker") as ticker_mock,
+        ):
             ticker_mock.return_value.info = {"longName": "Live TOTO"}
             first = resolve_instrument_identity("TOTDY", "2020-01-02")
             second = resolve_instrument_identity("TOTDY", "2021-02-03")
@@ -130,8 +137,8 @@ def test_eligibility_resolver_preserves_malformed_mixed_candidates():
     with patch.object(identity_dataflow.yf, "Search", return_value=search):
         result = resolve_instrument_eligibility("NVDA", data_context=request_context())
 
-    assert isinstance(result, list)
-    assert result[1] == {"_malformed": True}
+    assert isinstance(result.content, list)
+    assert result.content[1] == {"_malformed": True}
 
 
 @pytest.mark.unit
@@ -148,7 +155,7 @@ def test_eligibility_resolver_keeps_mismatched_symbol_ambiguous():
     with patch.object(identity_dataflow.yf, "Search", return_value=search):
         result = resolve_instrument_eligibility("NVDA", data_context=request_context())
 
-    assert result == {"symbol": "NVD", "quote_type": "EQUITY"}
+    assert result.content == {"symbol": "NVD", "quote_type": "EQUITY"}
 
 
 @pytest.mark.unit
@@ -174,6 +181,7 @@ class BuildInstrumentContextTests(unittest.TestCase):
         self.assertIn("Exchange: PNK", context)
         self.assertIn("Do not substitute a different company", context)
 
+
 @pytest.mark.unit
 class GetInstrumentContextFromStateTests(unittest.TestCase):
     def test_prefers_precomputed_context(self):
@@ -188,6 +196,7 @@ class GetInstrumentContextFromStateTests(unittest.TestCase):
             )
         mock.assert_not_called()
         self.assertIn("NVDA", context)
+
 
 if __name__ == "__main__":
     unittest.main()

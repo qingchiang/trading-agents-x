@@ -5,13 +5,14 @@ import pandas as pd
 
 from tradingagents.data.alpha_vantage_common import _filter_csv_by_date_range, _make_api_request
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 
 
+@source_metadata("get_stock_data", "alpha_vantage")
 def get_stock(
-    symbol: str,
-    start_date: str,
-    end_date: str
-, *, data_context: DataRequestContext) -> str:
+    symbol: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """
     Returns raw daily OHLCV values, adjusted close values, and historical split/dividend events
     filtered to the specified date range.
@@ -41,12 +42,13 @@ def get_stock(
 
     response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
 
-    return _filter_csv_by_date_range(response, start_date, end_date)
+    return DataResult(_filter_csv_by_date_range(response, start_date, end_date))
 
 
+@source_metadata("get_verified_market_snapshot", "alpha_vantage")
 def get_verified_market_snapshot(
-    symbol: str, curr_date: str, look_back_days: int = 30
-, *, data_context: DataRequestContext) -> str:
+    symbol: str, curr_date: str, look_back_days: int = 30, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return an Alpha Vantage-backed deterministic market snapshot."""
     # Match the J-Quants indicator warm-up: 400 calendar days plus the rendered
     # window is enough for the snapshot's longest (200-session) indicator.
@@ -57,18 +59,18 @@ def get_verified_market_snapshot(
     columns = {str(c).strip().lower(): c for c in frame.columns}
     required = {"timestamp", "open", "high", "low", "close", "volume"}
     if not required <= columns.keys():
-        raise ValueError(
-            f"Alpha Vantage snapshot response lacks OHLCV columns for {symbol}."
-        )
+        raise ValueError(f"Alpha Vantage snapshot response lacks OHLCV columns for {symbol}.")
 
-    out = pd.DataFrame({
-        "Date": frame[columns["timestamp"]],
-        "Open": frame[columns["open"]],
-        "High": frame[columns["high"]],
-        "Low": frame[columns["low"]],
-        "Close": frame[columns["close"]],
-        "Volume": frame[columns["volume"]],
-    })
+    out = pd.DataFrame(
+        {
+            "Date": frame[columns["timestamp"]],
+            "Open": frame[columns["open"]],
+            "High": frame[columns["high"]],
+            "Low": frame[columns["low"]],
+            "Close": frame[columns["close"]],
+            "Volume": frame[columns["volume"]],
+        }
+    )
     # TIME_SERIES_DAILY_ADJUSTED exposes only adjusted close. Scale O/H/L by
     # the same factor so all four price fields share one corporate-action basis.
     adjusted = columns.get("adjusted_close")

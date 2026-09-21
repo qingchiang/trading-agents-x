@@ -15,8 +15,8 @@ import pandas as pd
 
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import temporal_scope_from_records
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 class EvidenceToolArtifact(TypedDict):
@@ -32,6 +32,7 @@ class EvidenceToolArtifact(TypedDict):
     analytical_views: dict[str, Any]
     column_measurements: NotRequired[dict[str, dict[str, str | None]]]
     structured_numeric_facts: NotRequired[list[dict[str, Any]]]
+    data_result: NotRequired[dict[str, Any]]
 
 
 _OHLCV_REQUIRED = {"date", "close"}
@@ -41,7 +42,7 @@ _VOLATILITY_HORIZONS = (20, 60, 252)
 
 
 def build_market_data_artifact(
-    raw: str,
+    raw: DataResult[str],
     *,
     symbol: str,
     start_date: str,
@@ -49,8 +50,8 @@ def build_market_data_artifact(
 ) -> tuple[str, EvidenceToolArtifact]:
     """Split a complete OHLCV result into a concise view and raw artifact."""
 
-    source_content = strip_provenance_markers(raw).strip()
-    records = tuple(extract_provenance(raw))
+    source_content = raw.content.strip()
+    records = raw.provenance
     frame = parse_ohlcv_frame(source_content, cutoff=end_date)
     views = market_analytical_views(
         frame,
@@ -58,9 +59,7 @@ def build_market_data_artifact(
         requested_start=start_date,
         requested_end=end_date,
     )
-    dataset_id = "ds_" + hashlib.sha256(
-        source_content.encode("utf-8")
-    ).hexdigest()[:12]
+    dataset_id = "ds_" + hashlib.sha256(source_content.encode("utf-8")).hexdigest()[:12]
     artifact: EvidenceToolArtifact = {
         "schema_version": "1",
         "kind": "source",
@@ -118,9 +117,7 @@ def artifact_records(
                     effective=str(raw.get("effective", "unknown")),
                     timing=str(raw.get("timing", "unknown")),
                     retrieved_at=(
-                        str(raw["retrieved_at"])
-                        if raw.get("retrieved_at") is not None
-                        else None
+                        str(raw["retrieved_at"]) if raw.get("retrieved_at") is not None else None
                     ),
                 )
             )
@@ -280,9 +277,7 @@ def market_analytical_views(
                 average = float(material.mean())
                 volume_views[f"{horizon}_session_average"] = _finite(average)
                 volume_views[f"latest_vs_{horizon}_session_average"] = (
-                    _finite(latest_volume / average)
-                    if average
-                    else None
+                    _finite(latest_volume / average) if average else None
                 )
         volume_views["largest_sessions"] = _volume_anomalies(frame)
 
@@ -293,15 +288,9 @@ def market_analytical_views(
         "effective_start": _date_text(frame.iloc[0]["Date"]),
         "effective_end": latest_date,
         "row_count": int(len(frame)),
-        "available_columns": [
-            column for column in _OHLCV_COLUMNS if column in frame.columns
-        ],
+        "available_columns": [column for column in _OHLCV_COLUMNS if column in frame.columns],
         "latest": {
-            column: (
-                latest_date
-                if column == "Date"
-                else _finite(float(latest[column]))
-            )
+            column: (latest_date if column == "Date" else _finite(float(latest[column])))
             for column in _OHLCV_COLUMNS
             if column in frame.columns and pd.notna(latest[column])
         },
@@ -364,11 +353,7 @@ def _monthly_view(frame: pd.DataFrame) -> list[dict[str, Any]]:
     for _, row in monthly.iterrows():
         output.append(
             {
-                key: (
-                    str(row[key])
-                    if key == "month"
-                    else _finite(float(row[key]))
-                )
+                key: (str(row[key]) if key == "month" else _finite(float(row[key])))
                 for key in monthly.columns
                 if pd.notna(row[key])
             }
@@ -417,3 +402,32 @@ def _finite(value: float) -> float | None:
 
 def _date_text(value: Any) -> str:
     return pd.Timestamp(value).date().isoformat()
+
+
+def data_tool_output(result: DataResult[str]) -> tuple[str, EvidenceToolArtifact]:
+    """Render source text once, preserving structured metadata in checkpoints."""
+    artifact: EvidenceToolArtifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_" + hashlib.sha256(result.content.encode()).hexdigest()[:12],
+        "evidence_type": result.provenance[0].evidence if result.provenance else "source",
+        "source_content": result.content,
+        "provenance": [asdict(record) for record in result.provenance],
+        "temporal_scope": temporal_scope_from_records(result.provenance),
+        "analytical_views": {},
+        "data_result": result.dump(),
+    }
+    return result.content, artifact
+
+
+def tool_message_records(messages) -> list[ProvenanceRecord]:
+    from langchain_core.messages import ToolMessage
+
+    return list(
+        dict.fromkeys(
+            record
+            for message in messages
+            if isinstance(message, ToolMessage) and is_evidence_tool_artifact(message.artifact)
+            for record in artifact_records(message.artifact)
+        )
+    )

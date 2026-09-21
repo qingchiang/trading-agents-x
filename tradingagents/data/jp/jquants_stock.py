@@ -9,7 +9,9 @@ import pandas as pd
 
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError
 
 # Process-local cache of fetched daily bars keyed by (code, from, to). The
@@ -117,6 +119,7 @@ def fetch_topix_closes(start_date: str, end_date: str) -> pd.DataFrame:
     return df
 
 
+@source_metadata("get_stock_data", "jquants")
 def get_stock(
     symbol: str,
     start_date: str,
@@ -124,7 +127,7 @@ def get_stock(
     *,
     require_adjusted: bool = False,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult[str]:
     """Return daily OHLCV for ``symbol`` over the range as a CSV string.
 
     ``require_adjusted`` is reserved for bounded Incremental routing. Ordinary
@@ -161,4 +164,4 @@ def get_stock(
         + f"# Total records: {len(out)}\n"
         + f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
-    return header + csv_string
+    return DataResult(header + csv_string)

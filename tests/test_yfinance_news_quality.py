@@ -43,25 +43,26 @@ def _run(monkeypatch, articles, *, limit=10, ticker="NVDA", identity=None):
     monkeypatch.setattr(
         ynews,
         "resolve_search_identity",
-        lambda symbol: (
-            {"company_name": "NVIDIA Corporation"}
-            if identity is None
-            else identity
-        ),
+        lambda symbol: {"company_name": "NVIDIA Corporation"} if identity is None else identity,
     )
     configure_data({"news_article_limit": limit})
-    result = ynews.get_news_yfinance(ticker, "2025-05-01", "2025-05-09", data_context=request_context())
-    return result, seen
+    result = ynews.get_news_yfinance(
+        ticker, "2025-05-01", "2025-05-09", data_context=request_context()
+    )
+    return result.content, seen
 
 
 @pytest.mark.unit
 def test_renderer_exposes_direct_candidate_and_context_tiers(monkeypatch):
-    out, _ = _run(monkeypatch, [
-        _article("NVIDIA Corporation launches a new accelerator"),
-        _article("NVIDIA launches a new accelerator"),
-        _article("Chip supply improves", "NVIDIA may benefit from the change."),
-        _article("NVDA Covered Call ETF raises distribution"),
-    ])
+    out, _ = _run(
+        monkeypatch,
+        [
+            _article("NVIDIA Corporation launches a new accelerator"),
+            _article("NVIDIA launches a new accelerator"),
+            _article("Chip supply improves", "NVIDIA may benefit from the change."),
+            _article("NVDA Covered Call ETF raises distribution"),
+        ],
+    )
 
     assert "### [direct] NVIDIA Corporation launches" in out
     assert "### [candidate] NVIDIA launches" in out
@@ -72,15 +73,20 @@ def test_renderer_exposes_direct_candidate_and_context_tiers(monkeypatch):
 
 @pytest.mark.unit
 def test_renderer_preserves_yahoo_exact_publication_timestamp(monkeypatch):
-    out, _ = _run(monkeypatch, [{
-        "content": {
-            "title": "NVIDIA Corporation launches a new accelerator",
-            "summary": "details",
-            "provider": {"displayName": "Example"},
-            "canonicalUrl": {"url": "https://example.test/article"},
-            "pubDate": "2025-05-05T14:30:00Z",
-        }
-    }])
+    out, _ = _run(
+        monkeypatch,
+        [
+            {
+                "content": {
+                    "title": "NVIDIA Corporation launches a new accelerator",
+                    "summary": "details",
+                    "provider": {"displayName": "Example"},
+                    "canonicalUrl": {"url": "https://example.test/article"},
+                    "pubDate": "2025-05-05T14:30:00Z",
+                }
+            }
+        ],
+    )
     assert "Published: 2025-05-05T14:30:00Z" in out
 
 
@@ -103,10 +109,13 @@ def test_quality_dedupe_and_limit_run_after_date_filter(monkeypatch):
 
 @pytest.mark.unit
 def test_all_irrelevant_candidates_return_explicit_no_relevant(monkeypatch):
-    out, _ = _run(monkeypatch, [
-        _article("SpaceX-linked ETF rallies after launch"),
-        _article("ASML outlines its next lithography platform"),
-    ])
+    out, _ = _run(
+        monkeypatch,
+        [
+            _article("SpaceX-linked ETF rallies after launch"),
+            _article("ASML outlines its next lithography platform"),
+        ],
+    )
     assert "No relevant news found for NVDA" in out
     assert "after quality filtering (2 in-window candidates dropped)" in out
 

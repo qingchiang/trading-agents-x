@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import re
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
+from dataclasses import replace
 
 from tradingagents.data.cn.google_news import get_news as _google_news
 from tradingagents.data.cn.news_sources import (
@@ -14,47 +14,56 @@ from tradingagents.data.cn.news_sources import (
 )
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.news_cache import fetch_news_feed
-from tradingagents.data.news_diagnostics import candidate_filter_note
-from tradingagents.data.news_selection import candidate_scope, emit_news, merge_news_blocks
+from tradingagents.data.news_selection import candidate_scope, merge_news_blocks, news_observations
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 
-_PARTIAL_QUERY_RE = re.compile(
-    r"(?P<failed>\d+) of (?P<total>\d+) (?:Google News )?name queries failed",
-    re.IGNORECASE,
-)
 
-
-def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+def _safe_feed(
+    source: str,
+    fetch,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     try:
         with candidate_scope():
-            return fetch_news_feed(source, ticker, start_date, end_date, lambda: fetch(ticker, start_date, end_date, data_context=data_context), budget=data_context.config.get("cn_news_candidate_limit", 100), config=data_context.config)
+            return fetch_news_feed(
+                source,
+                ticker,
+                start_date,
+                end_date,
+                lambda: fetch(ticker, start_date, end_date, data_context=data_context),
+                budget=data_context.config.get("cn_news_candidate_limit", 100),
+                config=data_context.config,
+            )
     except VendorRateLimitError:
         if stop_on_rate_limit_requested():
             raise
         logger.warning("CN news sub-feed %s rate-limited for %s", source, ticker)
-        return f"<{source} unavailable: VendorRateLimitError>"
+        return DataResult(
+            f"<{source} unavailable: VendorRateLimitError>",
+            diagnostics=(DataDiagnostic("source_unavailable", source, "VendorRateLimitError"),),
+        )
     except Exception as exc:  # noqa: BLE001 - each external feed is isolated
         logger.warning("CN news sub-feed %s failed for %s: %s", source, ticker, exc)
-        return f"<{source} unavailable: {type(exc).__name__}>"
+        return DataResult(
+            f"<{source} unavailable: {type(exc).__name__}>",
+            diagnostics=(DataDiagnostic("source_unavailable", source, type(exc).__name__),),
+        )
 
 
-def _partial_query_timing(output: str) -> str | None:
-    """Return an auditable status for a partially successful name-query fanout."""
-    match = _PARTIAL_QUERY_RE.search(output)
-    if match is None:
-        return None
-    return (
-        "partial coverage; "
-        f"query_failures={match.group('failed')}/{match.group('total')}"
-    )
-
-
-def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_news", "cn_news")
+def get_news(
+    ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Combine CNINFO, Eastmoney and Chinese Google News; fall back only if empty."""
     feeds = (
         ("CNINFO", _disclosure_news),
@@ -70,26 +79,41 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
         with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
             rendered = list(
                 pool.map(
-                    lambda pair: pair[0].run(_safe_feed, pair[1][0], pair[1][1], ticker, start_date, end_date, data_context=data_context),
+                    lambda pair: pair[0].run(
+                        _safe_feed,
+                        pair[1][0],
+                        pair[1][1],
+                        ticker,
+                        start_date,
+                        end_date,
+                        data_context=data_context,
+                    ),
                     [(copy_context(), feed) for feed in feeds],
                 )
             )
     article_limit = max(1, int(data_context.config["news_article_limit"]))
-    base_quotas = ((article_limit + 1) // 2, article_limit // 4,
-                   article_limit - (article_limit + 1) // 2 - article_limit // 4)
-    blocks, merged_counts = merge_news_blocks(
-        [item for item in rendered if item.startswith("## ")], article_limit,
-        start_date, end_date,
-        quotas=[q for q, item in zip(base_quotas, rendered, strict=True) if item.startswith("## ")],
+    base_quotas = (
+        (article_limit + 1) // 2,
+        article_limit // 4,
+        article_limit - (article_limit + 1) // 2 - article_limit // 4,
     )
-    notes: list[tuple[str, ProvenanceRecord]] = []
-    bound_blocks: list[str] = []
+    blocks, merged_counts = merge_news_blocks(
+        [item for item in rendered if item.news],
+        article_limit,
+        start_date,
+        end_date,
+        quotas=[q for q, item in zip(base_quotas, rendered, strict=True) if item.news],
+    )
+    notes: list[tuple[DataResult[str], ProvenanceRecord]] = []
+    bound_blocks: list[DataResult[str]] = []
     unbound_records: list[ProvenanceRecord] = []
     data_count_index = 0
     merged_index = 0
     for (source, _fetch), output in zip(feeds, rendered, strict=True):
-        partial_timing = _partial_query_timing(output)
-        if output.startswith("## "):
+        partial_timing = next(
+            (issue.detail for issue in output.diagnostics if issue.code == "query_partial"), None
+        )
+        if output.news:
             counts = merged_counts[data_count_index]
             data_count_index += 1
             timing = (
@@ -102,11 +126,15 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
                 timing += f"; truncated_by_global_cap={counts.cap_omitted}"
             if partial_timing:
                 timing += f"; {partial_timing}"
-        elif output.startswith("<"):
+        elif any(issue.code == "source_unavailable" for issue in output.diagnostics):
             timing = partial_timing or "unavailable"
         else:
             timing = "available; no relevant items in window; returned_items=0"
-        filter_note = candidate_filter_note(output)
+        filter_note = "; ".join(
+            issue.detail
+            for issue in output.diagnostics
+            if issue.code == "candidate_filter" and issue.detail
+        )
         if filter_note:
             timing += "; " + filter_note
         record = ProvenanceRecord(
@@ -116,16 +144,14 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
             effective=f"{start_date} to {end_date}",
             timing=timing,
         )
-        if output.startswith("<"):
+        if any(issue.code == "source_unavailable" for issue in output.diagnostics):
             notes.append((output, record))
-        elif output.startswith("## ") and counts.kept:
-            emit_news(blocks[merged_index], source, ticker)
-            bound_blocks.append(
-                attach_evidence_span(
-                    attach_provenance(blocks[merged_index], record),
-                    temporal_scope="point_in_time",
-                )
+        elif output.news and counts.kept:
+            selected = replace(
+                blocks[merged_index],
+                observations=news_observations(blocks[merged_index].news, source, ticker),
             )
+            bound_blocks.append(selected.with_provenance(record).with_scope("point_in_time"))
             merged_index += 1
         else:
             unbound_records.append(record)
@@ -135,18 +161,21 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
             ticker,
             detail="no CNINFO announcements, Eastmoney research, or Chinese media news in the window",
             availability_notes=(
-                *(attach_provenance(note, record) for note, record in notes),
-                *(attach_provenance("", record) for record in unbound_records if "Candidate filter:" in record.timing),
+                *(note.with_provenance(record) for note, record in notes),
+                *(
+                    DataResult("").with_provenance(record)
+                    for record in unbound_records
+                    if "Candidate filter:" in record.timing
+                ),
             ),
         )
     if notes:
         bound_blocks.append(
-            attach_provenance(
+            DataResult(
                 "### Source availability notes\n"
-                + "\n".join(note for note, _record in notes),
-                *(record for _note, record in notes),
-            )
+                + "\n".join((note.content for note, _record in notes))
+            ).with_provenance(*(record for _note, record in notes))
         )
     if unbound_records:
-        bound_blocks.append(attach_provenance("", *unbound_records))
-    return "\n\n".join(bound_blocks)
+        bound_blocks.append(DataResult("").with_provenance(*unbound_records))
+    return DataResult.combine(bound_blocks)

@@ -13,6 +13,7 @@ from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
 from tests.factories import analyst_report, research_case, research_decision
+from tests.source_results import source_message
 from tradingagents.application.exporting import (
     render_run_export_markdown,
     render_run_export_package,
@@ -32,6 +33,7 @@ from tradingagents.domain.common import (
     ScenarioReferenceCategory,
 )
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.decision import (
     AuditedRangeEndpoint,
     CalculationRecord,
@@ -72,7 +74,6 @@ from tradingagents.domain.runs import (
     RunMetrics,
     RunView,
 )
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.full.evidence import collect_evidence, evidence_from_records
 from tradingagents.research.synthesis.evidence_context import build_evidence_catalog
 
@@ -99,9 +100,9 @@ def test_composite_tool_payload_creates_one_item_with_all_origins() -> None:
         _record("filing", "EDINET", effective="2026-07-23"),
         _record("market data", "JPX", effective="2026-07-24"),
     )
-    content = attach_provenance("ONE SHARED BODY", *records)
+    content = DataResult("ONE SHARED BODY").with_provenance(*records)
     items = collect_evidence(
-        [ToolMessage(content=content, tool_call_id="fixture")],
+        [source_message(content, tool_call_id="fixture")],
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )
@@ -257,32 +258,26 @@ def test_any_future_origin_withholds_the_entire_composite_body() -> None:
 
 
 def test_explicit_temporal_spans_split_composite_tool_content() -> None:
-    pit = attach_evidence_span(
-        attach_provenance(
-            "DISCLOSURE-SAFE BODY",
-            _record(
-                "filing",
-                "EDINET",
-                timing="disclosure-date filtered",
-            ),
-        ),
-        temporal_scope="point_in_time",
+    pit = (
+        DataResult("DISCLOSURE-SAFE BODY")
+        .with_provenance(_record("filing", "EDINET", timing="disclosure-date filtered"))
+        .with_scope("point_in_time")
     )
-    live = attach_evidence_span(
-        attach_provenance(
-            "RETRIEVAL SNAPSHOT BODY",
+    live = (
+        DataResult("RETRIEVAL SNAPSHOT BODY")
+        .with_provenance(
             _record(
                 "analyst consensus",
                 "yfinance",
                 effective="retrieval-time snapshot",
                 timing="live non-point-in-time",
-            ),
-        ),
-        temporal_scope="live_only",
+            )
+        )
+        .with_scope("live_only")
     )
 
     items = collect_evidence(
-        [ToolMessage(content=f"{pit}\n\n{live}", tool_call_id="fixture")],
+        [source_message(DataResult.combine((pit, live)), tool_call_id="fixture")],
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )
@@ -297,21 +292,21 @@ def test_explicit_temporal_spans_split_composite_tool_content() -> None:
 
 
 def test_unavailable_live_span_keeps_audit_record_without_body() -> None:
-    content = attach_evidence_span(
-        attach_provenance(
-            "Vendor was not queried.",
+    content = (
+        DataResult("Vendor was not queried.")
+        .with_provenance(
             _record(
                 "analyst consensus",
                 "yfinance",
                 effective="—",
-                timing=("live-only; unavailable for historical or future date; vendor not queried"),
-            ),
-        ),
-        temporal_scope="live_only",
+                timing="live-only; unavailable for historical or future date; vendor not queried",
+            )
+        )
+        .with_scope("live_only")
     )
 
     item = collect_evidence(
-        [ToolMessage(content=content, tool_call_id="fixture")],
+        [source_message(content, tool_call_id="fixture")],
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )[0]
@@ -322,8 +317,7 @@ def test_unavailable_live_span_keeps_audit_record_without_body() -> None:
 
 
 def test_unbounded_mixed_temporal_content_fails_closed() -> None:
-    content = attach_provenance(
-        "UNSEPARATED BODY",
+    content = DataResult("UNSEPARATED BODY").with_provenance(
         _record("filing", "EDINET", timing="disclosure-date filtered"),
         _record(
             "analyst consensus",
@@ -334,7 +328,7 @@ def test_unbounded_mixed_temporal_content_fails_closed() -> None:
     )
 
     item = collect_evidence(
-        [ToolMessage(content=content, tool_call_id="fixture")],
+        [source_message(content, tool_call_id="fixture")],
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )[0]

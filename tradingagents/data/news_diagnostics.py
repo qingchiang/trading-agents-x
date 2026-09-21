@@ -2,6 +2,8 @@
 
 from dataclasses import asdict, dataclass
 
+from tradingagents.domain.data_result import DataDiagnostic
+
 
 @dataclass
 class CandidateFilterCounts:
@@ -19,10 +21,14 @@ class CandidateFilterCounts:
 
     def render(self) -> str:
         counts = asdict(self)
-        candidates = self.upstream_returned - sum(value for key, value in counts.items() if key != "upstream_returned")
-        return "Candidate filter: " + "; ".join(f"{key}={value}" for key, value in counts.items()) + f"; candidates={candidates}."
+        candidates = self.upstream_returned - sum(
+            value for key, value in counts.items() if key != "upstream_returned"
+        )
+        return (
+            "Candidate filter: "
+            + "; ".join(f"{key}={value}" for key, value in counts.items())
+            + f"; candidates={candidates}."
+        )
 
-
-def candidate_filter_note(text: str) -> str:
-    """Carry producer counts even when an assembler gives this source no slots."""
-    return "; ".join(line for line in text.splitlines() if line.startswith("Candidate filter:"))
+    def diagnostic(self, source: str) -> DataDiagnostic:
+        return DataDiagnostic("candidate_filter", source, self.render())

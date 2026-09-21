@@ -24,6 +24,9 @@ from tradingagents.data.cn.common import (
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
 from tradingagents.data.news_quality import canonical_headline
+from tradingagents.data.news_selection import news_result
+from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.news import NewsCandidate
 
 _CNINFO_STOCKS = "https://www.cninfo.com.cn/new/data/szse_stock.json"
 _CNINFO_QUERY = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
@@ -106,7 +109,11 @@ def _feed_cache_get(
 
 
 def _feed_cache_put(
-    key: tuple[str, str, str, int], start: date, end: date, rows: list[dict], counts: CandidateFilterCounts
+    key: tuple[str, str, str, int],
+    start: date,
+    end: date,
+    rows: list[dict],
+    counts: CandidateFilterCounts,
 ) -> None:
     _FEED_CACHE[key] = _FeedCacheEntry(
         expires_at=time.monotonic() + _FEED_CACHE_TTL_SECONDS,
@@ -152,7 +159,14 @@ def _response_records(payload, field: str, label: str) -> list[dict]:
     return records
 
 
-def disclosure_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None, data_context: DataRequestContext) -> list[dict]:
+def disclosure_rows(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    _counts: CandidateFilterCounts | None = None,
+    data_context: DataRequestContext,
+) -> list[dict]:
     """Return exact-code CNINFO announcements in the inclusive Shanghai window."""
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -241,7 +255,14 @@ def disclosure_rows(ticker: str, start_date: str, end_date: str, *, _counts: Can
     return selected
 
 
-def research_rows(ticker: str, start_date: str, end_date: str, *, _counts: CandidateFilterCounts | None = None, data_context: DataRequestContext) -> list[dict]:
+def research_rows(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    _counts: CandidateFilterCounts | None = None,
+    data_context: DataRequestContext,
+) -> list[dict]:
     """Return exact-code Eastmoney research reports in the inclusive window."""
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -310,9 +331,7 @@ def research_rows(ticker: str, start_date: str, end_date: str, *, _counts: Candi
                         "target_low": record.get("indvAimPriceL"),
                         "target_high": record.get("indvAimPriceT"),
                         "url": (
-                            f"https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf"
-                            if info_code
-                            else ""
+                            f"https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf" if info_code else ""
                         ),
                     }
                 )
@@ -323,7 +342,9 @@ def research_rows(ticker: str, start_date: str, end_date: str, *, _counts: Candi
     return selected
 
 
-def _dedupe_limit(rows: list[dict], limit: int, counts: CandidateFilterCounts | None = None) -> list[dict]:
+def _dedupe_limit(
+    rows: list[dict], limit: int, counts: CandidateFilterCounts | None = None
+) -> list[dict]:
     if limit <= 0:
         return []
     seen: set[str] = set()
@@ -341,35 +362,67 @@ def _dedupe_limit(rows: list[dict], limit: int, counts: CandidateFilterCounts | 
     return kept[:limit]
 
 
-def get_disclosure_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+def get_disclosure_news(
+    ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
+    counts = CandidateFilterCounts()
     disclosure_limit, _research_limit, _media_limit = news_quotas(data_context=data_context)
     counts = CandidateFilterCounts()
     rows = _dedupe_limit(
         disclosure_rows(ticker, start_date, end_date, _counts=counts, data_context=data_context),
-        disclosure_limit, counts,
+        disclosure_limit,
+        counts,
     )
     if not rows:
-        return f"No CNINFO announcements found for {ticker} between {start_date} and {end_date}\n{counts.render()}"
-    body = "\n\n".join(
-        f"### [direct] {row['title']}\nDisclosed: {row['published'].strftime('%Y-%m-%d %H:%M')} CST · Link: {row['url']}"
+        return DataResult(
+            f"No CNINFO announcements found for {ticker} between {start_date} and {end_date}\n{counts.render()}",
+            diagnostics=(counts.diagnostic("CNINFO"),),
+        )
+    articles = [
+        NewsCandidate(
+            "CNINFO",
+            row["title"],
+            f"### [direct] {row['title']}\nDisclosed: {row['published'].strftime('%Y-%m-%d %H:%M')} CST · Link: {row['url']}",
+            row["published"].strftime("%Y-%m-%d %H:%M"),
+            link=row["url"],
+        )
         for row in rows
+    ]
+    return news_result(
+        f"## {ticker} company announcements (CNINFO), from {start_date} to {end_date}:\n\n{counts.render()}",
+        articles,
+        diagnostics=(counts.diagnostic("CNINFO"),),
     )
-    return f"## {ticker} company announcements (CNINFO), from {start_date} to {end_date}:\n\n{counts.render()}\n\n{body}"
 
 
-def get_research_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+def get_research_news(
+    ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
+    counts = CandidateFilterCounts()
     _disclosure_limit, research_limit, _media_limit = news_quotas(data_context=data_context)
     counts = CandidateFilterCounts()
     rows = _dedupe_limit(
         research_rows(ticker, start_date, end_date, _counts=counts, data_context=data_context),
-        research_limit, counts,
+        research_limit,
+        counts,
     )
     if not rows:
-        return (
-            f"No Eastmoney research reports found for {ticker} between {start_date} and {end_date}\n{counts.render()}"
+        return DataResult(
+            f"No Eastmoney research reports found for {ticker} between {start_date} and {end_date}\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Eastmoney Research"),),
         )
-    body = "\n\n".join(
-        f"### [direct] {row['title']} (institution: {row['institution']})\nPublished: {row['published']} CST · Rating: {row['rating']} · PDF: {row['url'] or 'n/a'}"
+    articles = [
+        NewsCandidate(
+            "Eastmoney Research",
+            row["title"],
+            f"### [direct] {row['title']} (institution: {row['institution']})\nPublished: {row['published']} CST · Rating: {row['rating']} · PDF: {row['url'] or 'n/a'}",
+            str(row["published"]),
+            link=row["url"] or "",
+        )
         for row in rows
+    ]
+    return news_result(
+        f"## {ticker} sell-side research (Eastmoney), from {start_date} to {end_date}:\n\n{counts.render()}",
+        articles,
+        diagnostics=(counts.diagnostic("Eastmoney Research"),),
     )
-    return f"## {ticker} sell-side research (Eastmoney), from {start_date} to {end_date}:\n\n{counts.render()}\n\n{body}"

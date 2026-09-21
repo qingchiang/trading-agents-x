@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from tests.data_policy import request_context
+from tests.source_results import news_source, replace_content, source_route
 from tradingagents.data.cn import calendar
 from tradingagents.data.cn.common import AkShareRateLimitError
 from tradingagents.data.incremental_cn import collect_mainland_china_incremental
@@ -13,7 +14,6 @@ from tradingagents.domain.collection import IncrementalCollectionRequest
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.performance import PerformanceComponentStatus
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,
@@ -25,7 +25,9 @@ from tradingagents.research.incremental.collection import (
 def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult(""))
+    monkeypatch.setattr(
+        incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult("")
+    )
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
 
 
@@ -53,25 +55,15 @@ def _request(
         ),
         enabled_domains=enabled_domains,
         configured_routes={
-            "data_vendors_by_market": {
-                ".SS": {"core_stock_apis": "akshare,yfinance"}
-            }
+            "data_vendors_by_market": {".SS": {"core_stock_apis": "akshare,yfinance"}}
         },
     )
 
 
 def _tencent_market_response() -> str:
-    return attach_provenance(
-        """# Stock data for 600519.SS from 2026-07-17 to 2026-07-24
-# Price adjustment: qfq (forward-adjusted)
-# Actual data source: AkShare / Tencent
-
-Date,Open,High,Low,Close,Volume
-2026-07-17,99,101,98,100,1000
-2026-07-20,100,102,99,101,1000
-2026-07-22,102,104,101,103,1000
-2026-07-24,109,111,108,110,1000
-""",
+    return DataResult(
+        "# Stock data for 600519.SS from 2026-07-17 to 2026-07-24\n# Price adjustment: qfq (forward-adjusted)\n# Actual data source: AkShare / Tencent\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-20,100,102,99,101,1000\n2026-07-22,102,104,101,103,1000\n2026-07-24,109,111,108,110,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="AkShare / Tencent",
@@ -79,7 +71,7 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="market-date filtered; qfq adjusted; future rows excluded",
             retrieved_at="2026-07-24T08:00:00Z",
-        ),
+        )
     )
 
 
@@ -89,9 +81,7 @@ def test_mainland_collector_uses_one_qfq_series_and_completed_sessions(
     monkeypatch.setattr(
         calendar,
         "trading_dates",
-        lambda: tuple(
-            date(2026, 7, day) for day in (17, 20, 21, 22, 23, 24)
-        ),
+        lambda: tuple(date(2026, 7, day) for day in (17, 20, 21, 22, 23, 24)),
     )
 
     collected = collect_mainland_china_incremental(
@@ -114,7 +104,8 @@ def test_mainland_collector_uses_one_qfq_series_and_completed_sessions(
         candidate.evidence.ref for candidate in collected.evidence
     )
     assert [candidate.evidence.evidence_type for candidate in collected.evidence] == [
-        "adjusted_close", "market_interval",
+        "adjusted_close",
+        "market_interval",
     ]
     performance = calculate_stock_performance(_request(), collected.stock_series)
     assert performance.stock.calculation is not None
@@ -130,20 +121,19 @@ def test_mainland_collector_retains_internal_eastmoney_fallback_provenance(
         "trading_dates",
         lambda: tuple(date(2026, 7, day) for day in (17, 20, 21, 22, 23, 24)),
     )
-    response = _tencent_market_response().replace(
-        '"source":"AkShare / Tencent"',
-        '"source":"AkShare / Eastmoney"',
-    ).replace(
-        '"timing":"market-date filtered; qfq adjusted; future rows excluded"',
-        '"timing":"market-date filtered; qfq adjusted; fallback: Tencent primary retrieval unavailable"',
-    ).replace(
+    response = replace_content(
+        replace_content(
+            replace_content(_tencent_market_response(), "AkShare / Tencent", "AkShare / Eastmoney"),
+            "market-date filtered; qfq adjusted; future rows excluded",
+            "market-date filtered; qfq adjusted; fallback: Tencent primary retrieval unavailable",
+        ),
         "# Actual data source: AkShare / Tencent",
         "# Actual data source: AkShare / Eastmoney",
     )
 
     collected = collect_mainland_china_incremental(
         _request(),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -165,29 +155,21 @@ def test_default_collector_dispatches_mainland_path(monkeypatch) -> None:
 
 
 def test_mainland_collector_admits_later_published_cninfo_correction() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """## 600519.SS company announcements (CNINFO)
-
-### [direct] Annual-report correction
-Disclosed: 2026-07-22 10:00 CST
-Effective period: 2025-12-31
-""",
-            ProvenanceRecord(
-                evidence="get_news",
-                source="CNINFO",
-                requested="2026-07-17 to 2026-07-24",
-                effective="2026-07-17 to 2026-07-24",
-                timing="publication-date filtered; returned_items=1",
-                retrieved_at="2026-07-24T08:00:00Z",
-            ),
+    response = news_source(
+        "## 600519.SS company announcements (CNINFO)\n\n### [direct] Annual-report correction\nDisclosed: 2026-07-22 10:00 CST\nEffective period: 2025-12-31\n",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="CNINFO",
+            requested="2026-07-17 to 2026-07-24",
+            effective="2026-07-17 to 2026-07-24",
+            timing="publication-date filtered; returned_items=1",
+            retrieved_at="2026-07-24T08:00:00Z",
         ),
-        temporal_scope="point_in_time",
-    )
+    ).with_scope("point_in_time")
 
     collected = collect_mainland_china_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -201,50 +183,36 @@ Effective period: 2025-12-31
     assert domain.state.value == "partial"
     assert domain.temporal_bases == ("pit",)
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_mainland_news_feed"
+    assert domain.diagnostic.code == "bounded_source_observations"
 
 
 def test_mainland_collector_discloses_source_omitted_by_global_news_cap() -> None:
-    admitted = attach_evidence_span(
-        attach_provenance(
-            """## CNINFO
-
-### [direct] Official filing
-Disclosed: 2026-07-22 10:00 CST
-""",
-            ProvenanceRecord(
-                evidence="get_news",
-                source="CNINFO",
-                requested="2026-07-17 to 2026-07-24",
-                effective="2026-07-17 to 2026-07-24",
-                timing=(
-                    "publication-date filtered; returned_items=1; "
-                    "duplicate_items=0; kept_items=1; shared_limit=1"
-                ),
-                retrieved_at="2026-07-24T08:00:00Z",
-            ),
+    admitted = news_source(
+        "## CNINFO\n\n### [direct] Official filing\nDisclosed: 2026-07-22 10:00 CST\n",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="CNINFO",
+            requested="2026-07-17 to 2026-07-24",
+            effective="2026-07-17 to 2026-07-24",
+            timing="publication-date filtered; returned_items=1; duplicate_items=0; kept_items=1; shared_limit=1",
+            retrieved_at="2026-07-24T08:00:00Z",
         ),
-        temporal_scope="point_in_time",
-    )
-    omitted = attach_provenance(
+    ).with_scope("point_in_time")
+    omitted = news_source(
         "",
         ProvenanceRecord(
             evidence="get_news",
             source="Eastmoney Research",
             requested="2026-07-17 to 2026-07-24",
             effective="2026-07-17 to 2026-07-24",
-            timing=(
-                "publication-date filtered; returned_items=1; "
-                "duplicate_items=0; kept_items=0; shared_limit=1; "
-                "truncated_by_global_cap=1"
-            ),
+            timing="publication-date filtered; returned_items=1; duplicate_items=0; kept_items=0; shared_limit=1; truncated_by_global_cap=1",
             retrieved_at="2026-07-24T08:00:00Z",
         ),
     )
 
     collected = collect_mainland_china_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: f"{admitted}\n\n{omitted}",
+        route_to_vendor=lambda *_args, **_kwargs: DataResult.combine((admitted, omitted)),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -252,20 +220,17 @@ Disclosed: 2026-07-22 10:00 CST
     domain = collected.collection_summary.domains[0]
     sources = {source.source: source for source in domain.sources}
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_mainland_news_feed_with_global_cap"
+    assert domain.diagnostic.code == "upstream_inputs_limited"
     assert sources["eastmoney_research"].diagnostic is not None
     assert sources["eastmoney_research"].diagnostic.code == "truncated_by_global_cap"
 
 
 def test_mainland_collector_preserves_pit_and_near_live_fundamentals() -> None:
-    pit = attach_evidence_span(
-        attach_provenance(
-            """# China A-share Fundamentals for 600519.SS
-## Financial abstract (AkShare / Sina)
-Latest visible disclosure/update: 2026-07-22
-Effective period: 2025-12-31
-Basic EPS: 2.0
-""",
+    pit = (
+        DataResult(
+            "# China A-share Fundamentals for 600519.SS\n## Financial abstract (AkShare / Sina)\nLatest visible disclosure/update: 2026-07-22\nEffective period: 2025-12-31\nBasic EPS: 2.0\n"
+        )
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / Sina financial abstract",
@@ -273,15 +238,15 @@ Basic EPS: 2.0
                 effective="2026-07-22",
                 timing="publication/update-date filtered; later conflicting date wins",
                 retrieved_at="2026-07-24T08:00:00Z",
-            ),
-        ),
-        temporal_scope="point_in_time",
+            )
+        )
+        .with_scope("point_in_time")
     )
-    live = attach_evidence_span(
-        attach_provenance(
-            """## Company profile (CNINFO; current reference, not historical PIT)
-主营业务: 白酒生产
-""",
+    live = (
+        DataResult(
+            "## Company profile (CNINFO; current reference, not historical PIT)\n主营业务: 白酒生产\n"
+        )
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / CNINFO company profile",
@@ -289,14 +254,14 @@ Basic EPS: 2.0
                 effective="current reference",
                 timing="live-only current company reference; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
-            ),
-        ),
-        temporal_scope="live_only",
+            )
+        )
+        .with_scope("live_only")
     )
     request = _request(enabled_domains=("fundamentals",))
     collected = collect_mainland_china_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: f"{live}\n\n{pit}",
+        route_to_vendor=lambda *_args, **_kwargs: DataResult.combine((live, pit)),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -321,9 +286,9 @@ Basic EPS: 2.0
 
 
 def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            "## Current valuation snapshot\nPE: 20",
+    response = (
+        DataResult("## Current valuation snapshot\nPE: 20")
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance current valuation snapshot",
@@ -331,9 +296,9 @@ def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
                 effective="current reference",
                 timing="current-only snapshot; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
-            ),
-        ),
-        temporal_scope="live_only",
+            )
+        )
+        .with_scope("live_only")
     )
     request = _request(
         enabled_domains=("fundamentals",),
@@ -341,7 +306,7 @@ def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
     )
     collected = collect_mainland_china_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -362,14 +327,12 @@ def test_mainland_collector_supports_shenzhen_a_share_identity(monkeypatch) -> N
         "trading_dates",
         lambda: tuple(date(2026, 7, day) for day in (17, 20, 21, 22, 23, 24)),
     )
-    request = _request().model_copy(
-        update={"instrument": "000001.SZ", "route_suffix": ".SZ"}
-    )
-    response = _tencent_market_response().replace("600519.SS", "000001.SZ")
+    request = _request().model_copy(update={"instrument": "000001.SZ", "route_suffix": ".SZ"})
+    response = replace_content(_tencent_market_response(), "600519.SS", "000001.SZ")
 
     collected = collect_mainland_china_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 8, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -399,13 +362,9 @@ def test_mainland_calendar_uses_prior_completed_session_and_not_yet_observable(
         configured_routes={},
     )
     calls = []
-    response = attach_provenance(
-        """# Stock data for 600519.SS from 2026-04-03 to 2026-04-06
-# Price adjustment: qfq (forward-adjusted)
-
-Date,Open,High,Low,Close,Volume
-2026-04-03,99,101,98,100,1000
-""",
+    response = DataResult(
+        "# Stock data for 600519.SS from 2026-04-03 to 2026-04-06\n# Price adjustment: qfq (forward-adjusted)\n\nDate,Open,High,Low,Close,Volume\n2026-04-03,99,101,98,100,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="AkShare / Tencent",
@@ -413,7 +372,7 @@ Date,Open,High,Low,Close,Volume
             effective="2026-04-03",
             timing="market-date filtered; qfq adjusted",
             retrieved_at="2026-04-06T08:00:00Z",
-        ),
+        )
     )
 
     def route(method, *args, **kwargs):
@@ -452,7 +411,9 @@ def test_mainland_collector_stops_on_calendar_rate_limit_before_market_route(
     monkeypatch.setattr(calendar.requests, "get", rate_limited_calendar_request)
     try:
         with pytest.raises(AkShareRateLimitError, match="calendar rate limited"):
-            collect_mainland_china_incremental(_request(), route_to_vendor=route, data_context=request_context())
+            collect_mainland_china_incremental(
+                _request(), route_to_vendor=route, data_context=request_context()
+            )
     finally:
         calendar.trading_dates.cache_clear()
 

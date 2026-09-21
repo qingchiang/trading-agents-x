@@ -8,8 +8,8 @@ import pytest
 from tests.data_policy import request_context
 from tradingagents.data.cn import cn_fundamentals, common, company
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError
-from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 _PROFILE_RETRIEVED_AT = "2026-07-19T02:03:04+00:00"
 
@@ -62,14 +62,16 @@ def test_historical_analysis_never_queries_current_yfinance(monkeypatch):
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", current)
     monkeypatch.setattr(cn_fundamentals, "get_company_profile_snapshot", profile)
 
-    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01", data_context=request_context())
+    output = cn_fundamentals.get_fundamentals(
+        "600519.SS", "2026-04-01", data_context=request_context()
+    )
 
     current.assert_not_called()
     profile.assert_not_called()
-    assert "Not requested: current-only valuation and forecasts are excluded" in output
-    assert "Financial abstract" in output
-    assert "CNINFO profile source status: unavailable" in output
-    assert {record.source for record in extract_provenance(output)} == {
+    assert "Not requested: current-only valuation and forecasts are excluded" in output.content
+    assert "Financial abstract" in output.content
+    assert "CNINFO profile source status: unavailable" in output.content
+    assert {record.source for record in list(output.provenance)} == {
         "AkShare / CNINFO company profile",
         "AkShare / Sina financial abstract",
         "yfinance current valuation snapshot",
@@ -84,24 +86,24 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
         "is_near_live",
         lambda _date, _ticker: True,
     )
-    get_yf = mock.Mock(return_value="Market Cap: 123\nPE Ratio (TTM): 10")
+    get_yf = mock.Mock(return_value=DataResult("Market Cap: 123\nPE Ratio (TTM): 10"))
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", get_yf)
 
-    output = cn_fundamentals.get_fundamentals("600519.SS", "2026-07-19", data_context=request_context())
+    output = cn_fundamentals.get_fundamentals(
+        "600519.SS", "2026-07-19", data_context=request_context()
+    )
 
     get_yf.assert_called_once_with("600519.SS", "2026-07-19", data_context=request_context())
-    assert "Current valuation and analyst snapshot (yfinance)" in output
-    assert "Market Cap: 123" in output
-    records = extract_provenance(output)
+    assert "Current valuation and analyst snapshot (yfinance)" in output.content
+    assert "Market Cap: 123" in output.content
+    records = list(output.provenance)
     assert len(records) == 3
     assert len({record.source for record in records}) == 3
     profile_record = next(
-        record
-        for record in records
-        if record.source == "AkShare / CNINFO company profile"
+        record for record in records if record.source == "AkShare / CNINFO company profile"
     )
     assert profile_record.retrieved_at == _PROFILE_RETRIEVED_AT
-    spans = extract_evidence_spans(output)
+    spans = output.spans
     assert {span.temporal_scope for span in spans} == {
         "point_in_time",
         "live_only",
@@ -109,31 +111,29 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
     assert next(
         span.content
         for span in spans
-        if span.temporal_scope == "live_only"
-        and span.content
-        and "Market Cap: 123" in span.content
+        if span.temporal_scope == "live_only" and span.content and "Market Cap: 123" in span.content
     ).endswith("PE Ratio (TTM): 10")
-    assert "Effective period: 2025-12-31" in output
+    assert "Effective period: 2025-12-31" in output.content
 
 
 @pytest.mark.unit
 def test_bank_uses_financial_metric_mapping(monkeypatch):
     _install_sources(monkeypatch, bank=True)
-    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: "")
+    monkeypatch.setattr(
+        cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: DataResult("")
+    )
 
     output = cn_fundamentals.get_fundamentals("000001.SZ", data_context=request_context())
 
-    assert "Entity mapping: financial" in output
-    assert "Net interest margin" in output
-    assert "Non-performing loan ratio" in output
-    assert "Gross margin" not in output
+    assert "Entity mapping: financial" in output.content
+    assert "Net interest margin" in output.content
+    assert "Non-performing loan ratio" in output.content
+    assert "Gross margin" not in output.content
 
 
 @pytest.mark.unit
 def test_metric_matching_never_substitutes_growth_rate_for_amount():
-    column = cn_fundamentals._find_column(
-        ["营业总收入同比增长率"], ("营业总收入", "营业收入")
-    )
+    column = cn_fundamentals._find_column(["营业总收入同比增长率"], ("营业总收入", "营业收入"))
     assert column is None
 
 
@@ -149,13 +149,15 @@ def test_profile_failure_still_returns_disclosure_abstract(monkeypatch):
         "fetch_finance_records",
         lambda ticker, _kind: (ticker, _abstract()),
     )
-    monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: "")
+    monkeypatch.setattr(
+        cn_fundamentals, "get_yfinance_fundamentals", lambda *_args, data_context: DataResult("")
+    )
 
     output = cn_fundamentals.get_fundamentals("000333.SZ", data_context=request_context())
 
-    assert "CNINFO profile source status: unavailable" in output
-    assert "2025-12-31" in output
-    assert {r.source for r in extract_provenance(output)} == {
+    assert "CNINFO profile source status: unavailable" in output.content
+    assert "2025-12-31" in output.content
+    assert {r.source for r in list(output.provenance)} == {
         "AkShare / CNINFO company profile",
         "AkShare / Sina financial abstract",
         "yfinance current valuation snapshot",
@@ -183,8 +185,8 @@ def test_both_china_sources_unavailable_raises_for_router_fallback(monkeypatch):
     with pytest.raises(NoMarketDataError) as exc_info:
         cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01", data_context=request_context())
     assert len(exc_info.value.availability_notes) == 2
-    assert "CNINFO company profile unavailable" in exc_info.value.availability_notes[0]
-    assert "Sina financial abstract unavailable" in exc_info.value.availability_notes[1]
+    assert "CNINFO company profile unavailable" in exc_info.value.availability_notes[0].content
+    assert "Sina financial abstract unavailable" in exc_info.value.availability_notes[1].content
     get_yf.assert_not_called()
 
 
@@ -228,10 +230,7 @@ def test_cninfo_profile_transport_caches_snapshot_and_returns_defensive_copy(
     monkeypatch,
 ):
     company.clear_cache()
-    values = {
-        key: value
-        for value, (key, _label) in enumerate(company._PROFILE_FIELD_MAP)
-    }
+    values = {key: value for value, (key, _label) in enumerate(company._PROFILE_FIELD_MAP)}
     values = dict(reversed(list(values.items())))
     values["NEW_TRAILING_FIELD"] = "ignored"
     response = mock.Mock()

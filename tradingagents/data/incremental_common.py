@@ -10,7 +10,6 @@ from tradingagents.domain.collection import (
 from tradingagents.domain.data import EvidenceSpan
 from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.evidence import EvidenceOrigin
-from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 
 class CollectionUnavailable(ValueError):
@@ -33,9 +32,7 @@ def unavailable(domain, code, *, sources=()):
         domain=domain,
         state=CollectionResultState.UNAVAILABLE,
         sources=tuple(
-            source.model_copy(
-                update={"diagnostic": CollectionDiagnostic(code=code)}
-            )
+            source.model_copy(update={"diagnostic": CollectionDiagnostic(code=code)})
             for source in sources
         ),
         diagnostic=CollectionDiagnostic(code=code),
@@ -66,17 +63,11 @@ def origin_from_record(record, source, evidence_type, *, temporal_scope):
         effective_date=origin_effective_date(record.effective),
         timing=record.timing or "unknown",
         retrieved_at=(
-            record.retrieved_at
-            or source.retrieved_at.isoformat().replace("+00:00", "Z")
+            record.retrieved_at or source.retrieved_at.isoformat().replace("+00:00", "Z")
         ),
         fallback=source.fallback,
         temporal_scope=temporal_scope,
     )
-
-
-def is_news_availability_record(record):
-    timing = record.timing.casefold()
-    return "fallback vendor selected" not in timing and "unavailable" in timing
 
 
 def is_empty(body):
@@ -85,43 +76,16 @@ def is_empty(body):
 
 
 def is_failure(body):
-    return body.strip().casefold().startswith(
-        ("error fetching", "error retrieving", "error getting")
+    return (
+        body.strip().casefold().startswith(("error fetching", "error retrieving", "error getting"))
     )
 
 
 def fundamentals_spans(response, body):
-    spans = extract_evidence_spans(response)
+    spans = response.spans
     if spans:
         return tuple(spans)
-    records = tuple(extract_provenance(response))
-    return (
-        EvidenceSpan(
-            content=body,
-            records=records,
-            temporal_scope=temporal_scope_from_records(records),
-        ),
-    )
-
-
-def news_spans(response, body):
-    spans = extract_evidence_spans(response)
-    if spans:
-        return tuple(spans)
-    records = tuple(extract_provenance(response))
-    selected_fallback = tuple(
-        record
-        for record in records
-        if "fallback vendor selected" in record.timing.casefold()
-    )
-    if selected_fallback:
-        return (
-            EvidenceSpan(
-                content=body,
-                records=selected_fallback,
-                temporal_scope=temporal_scope_from_records(selected_fallback),
-            ),
-        )
+    records = tuple(response.provenance)
     return (
         EvidenceSpan(
             content=body,

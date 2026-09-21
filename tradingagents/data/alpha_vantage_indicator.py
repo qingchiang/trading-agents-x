@@ -3,8 +3,11 @@ from tradingagents.data.alpha_vantage_common import (
     _make_api_request,
 )
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 
 
+@source_metadata("get_indicators", "alpha_vantage")
 def get_indicator(
     symbol: str,
     indicator: str,
@@ -12,8 +15,10 @@ def get_indicator(
     look_back_days: int,
     interval: str = "daily",
     time_period: int = 14,
-    series_type: str = "close"
-, *, data_context: DataRequestContext) -> str:
+    series_type: str = "close",
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """
     Returns Alpha Vantage technical indicator values over a time window.
 
@@ -45,7 +50,7 @@ def get_indicator(
         "boll_ub": ("Bollinger Upper Band", "close"),
         "boll_lb": ("Bollinger Lower Band", "close"),
         "atr": ("ATR", None),
-        "vwma": ("VWMA", "close")
+        "vwma": ("VWMA", "close"),
     }
 
     indicator_descriptions = {
@@ -60,7 +65,7 @@ def get_indicator(
         "boll_ub": "Bollinger Upper Band: Typically 2 standard deviations above the middle line. Usage: Signals potential overbought conditions and breakout zones. Tips: Confirm signals with other tools; prices may ride the band in strong trends.",
         "boll_lb": "Bollinger Lower Band: Typically 2 standard deviations below the middle line. Usage: Indicates potential oversold conditions. Tips: Use additional analysis to avoid false reversal signals.",
         "atr": "ATR: Averages true range to measure volatility. Usage: Set stop-loss levels and adjust position sizes based on current market volatility. Tips: It's a reactive measure, so use it as part of a broader risk management strategy.",
-        "vwma": "VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses."
+        "vwma": "VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.",
     }
 
     if indicator not in supported_indicators:
@@ -81,84 +86,116 @@ def get_indicator(
     try:
         # Get indicator data for the period
         if indicator == "close_50_sma":
-            data = _make_api_request("SMA", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": "50",
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "SMA",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": "50",
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "close_200_sma":
-            data = _make_api_request("SMA", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": "200",
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "SMA",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": "200",
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "close_10_ema":
-            data = _make_api_request("EMA", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": "10",
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "EMA",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": "10",
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "macd" or indicator == "macds" or indicator == "macdh":
-            data = _make_api_request("MACD", {
-                "symbol": symbol,
-                "interval": interval,
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "MACD",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "rsi":
-            data = _make_api_request("RSI", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": str(time_period),
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "RSI",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": str(time_period),
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator in ["boll", "boll_ub", "boll_lb"]:
-            data = _make_api_request("BBANDS", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": "20",
-                "series_type": series_type,
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "BBANDS",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": "20",
+                    "series_type": series_type,
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "atr":
-            data = _make_api_request("ATR", {
-                "symbol": symbol,
-                "interval": interval,
-                "time_period": str(time_period),
-                "datatype": "csv"
-            })
+            data = _make_api_request(
+                "ATR",
+                {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "time_period": str(time_period),
+                    "datatype": "csv",
+                },
+            )
         elif indicator == "vwma":
             # Alpha Vantage doesn't have direct VWMA, so we'll return an informative message
             # In a real implementation, this would need to be calculated from OHLCV data
-            return f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
+            return DataResult(
+                f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
+            )
         else:
-            return f"Error: Indicator {indicator} not implemented yet."
+            return DataResult(f"Error: Indicator {indicator} not implemented yet.")
 
         # Parse CSV data and extract values for the date range
-        lines = data.strip().split('\n')
+        lines = data.strip().split("\n")
         if len(lines) < 2:
-            return f"Error: No data returned for {indicator}"
+            return DataResult(f"Error: No data returned for {indicator}")
 
         # Parse header and data
-        header = [col.strip() for col in lines[0].split(',')]
+        header = [col.strip() for col in lines[0].split(",")]
         try:
-            date_col_idx = header.index('time')
+            date_col_idx = header.index("time")
         except ValueError:
-            return f"Error: 'time' column not found in data for {indicator}. Available columns: {header}"
+            return DataResult(
+                f"Error: 'time' column not found in data for {indicator}. Available columns: {header}"
+            )
 
         # Map internal indicator names to expected CSV column names from Alpha Vantage
         col_name_map = {
-            "macd": "MACD", "macds": "MACD_Signal", "macdh": "MACD_Hist",
-            "boll": "Real Middle Band", "boll_ub": "Real Upper Band", "boll_lb": "Real Lower Band",
-            "rsi": "RSI", "atr": "ATR", "close_10_ema": "EMA",
-            "close_50_sma": "SMA", "close_200_sma": "SMA"
+            "macd": "MACD",
+            "macds": "MACD_Signal",
+            "macdh": "MACD_Hist",
+            "boll": "Real Middle Band",
+            "boll_ub": "Real Upper Band",
+            "boll_lb": "Real Lower Band",
+            "rsi": "RSI",
+            "atr": "ATR",
+            "close_10_ema": "EMA",
+            "close_50_sma": "SMA",
+            "close_200_sma": "SMA",
         }
 
         target_col_name = col_name_map.get(indicator)
@@ -170,13 +207,15 @@ def get_indicator(
             try:
                 value_col_idx = header.index(target_col_name)
             except ValueError:
-                return f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                return DataResult(
+                    f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                )
 
         result_data = []
         for line in lines[1:]:
             if not line.strip():
                 continue
-            values = line.split(',')
+            values = line.split(",")
             if len(values) > value_col_idx:
                 try:
                     date_str = values[date_col_idx].strip()
@@ -207,7 +246,7 @@ def get_indicator(
             + indicator_descriptions.get(indicator, "No description available.")
         )
 
-        return result_str
+        return DataResult(result_str)
 
     except AlphaVantageNotConfiguredError:
         # Vendor unavailable (no API key). Let it propagate so the router can
@@ -216,4 +255,4 @@ def get_indicator(
         raise
     except Exception as e:
         print(f"Error getting Alpha Vantage indicator data for {indicator}: {e}")
-        return f"Error retrieving {indicator} data: {str(e)}"
+        return DataResult(f"Error retrieving {indicator} data: {str(e)}")

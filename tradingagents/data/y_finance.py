@@ -8,6 +8,7 @@ from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.macro_common import SeriesCache
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
     StockstatsUtils,
@@ -19,17 +20,19 @@ from tradingagents.data.stockstats_utils import (
     render_indicator_window,
     yf_retry,
 )
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError, normalize_symbol
 from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 
+@source_metadata("get_stock_data", "yfinance")
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
     *,
     data_context: DataRequestContext,
-):
+) -> DataResult[str]:
 
     datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -54,9 +57,7 @@ def get_YFin_data_online(
     # instead of returning prose: the routing layer turns it into a single
     # unambiguous "no data" signal so the agent never fabricates a price.
     if data.empty:
-        raise NoMarketDataError(
-            symbol, canonical, f"no rows between {start_date} and {end_date}"
-        )
+        raise NoMarketDataError(symbol, canonical, f"no rows between {start_date} and {end_date}")
 
     # Remove timezone info from index for cleaner output
     if data.index.tz is not None:
@@ -96,18 +97,18 @@ def get_YFin_data_online(
     header += f"# Total records: {len(data)}\n"
     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-    return header + csv_string
+    return DataResult(header + csv_string)
 
+
+@source_metadata("get_indicators", "yfinance")
 def get_stock_stats_indicators_window(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
-    curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
-    ],
+    curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"],
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult[str]:
 
     if indicator not in INDICATOR_DESCRIPTIONS:
         raise ValueError(
@@ -128,10 +129,9 @@ def get_stock_stats_indicators_window(
                 "# Actual data source: yfinance\n"
                 "# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)\n"
                 f"# Requested analysis date: {curr_date}\n"
-                f"# Effective trading date: {effective}\n\n"
-                + rendered
+                f"# Effective trading date: {effective}\n\n" + rendered
             )
-        return rendered
+        return DataResult(rendered)
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
@@ -144,12 +144,12 @@ def get_stock_stats_indicators_window(
     day = curr_date_dt
     while day >= before:
         indicator_value = get_stockstats_indicator(
-            symbol, indicator, day.strftime("%Y-%m-%d")
-        , data_context=data_context)
+            symbol, indicator, day.strftime("%Y-%m-%d"), data_context=data_context
+        )
         ind_string += f"{day.strftime('%Y-%m-%d')}: {indicator_value}\n"
         day = day - relativedelta(days=1)
 
-    return (
+    return DataResult(
         f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {curr_date}:\n\n"
         + ind_string
         + "\n\n"
@@ -160,9 +160,7 @@ def get_stock_stats_indicators_window(
 def get_stockstats_indicator(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
-    curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
-    ],
+    curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
     *,
     data_context: DataRequestContext,
 ) -> str:
@@ -188,14 +186,17 @@ def get_stockstats_indicator(
     return str(indicator_value)
 
 
+@source_metadata("get_fundamentals", "yfinance")
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "requested analysis date; live .info has no history"] = None
-, *, data_context: DataRequestContext):
+    curr_date: Annotated[str, "requested analysis date; live .info has no history"] = None,
+    *,
+    data_context: DataRequestContext,
+):
     """Get a live company overview, refusing to inject it into old backtests."""
     canonical = normalize_symbol(ticker)
     if curr_date is not None and not is_near_live(curr_date, canonical):
-        return (
+        return DataResult(
             f"LIVE_DATA_UNAVAILABLE: yfinance .info for {canonical} is a current "
             f"snapshot, not point-in-time historical data, and was not requested "
             f"for historical analysis date {curr_date}. Use get_balance_sheet, "
@@ -265,7 +266,7 @@ def get_fundamentals(
         header += f"# Retrieved at: {retrieved_at}\n"
         header += "# Not point-in-time historical data.\n\n"
 
-        return header + "\n".join(lines)
+        return DataResult(header + "\n".join(lines))
 
     except NoMarketDataError:
         raise
@@ -275,9 +276,9 @@ def get_fundamentals(
         # behaviour if a caller supplies this vendor error outside that scope.
         if stop_on_rate_limit_requested():
             raise
-        return f"Error retrieving fundamentals for {ticker}: {str(exc)}"
+        return DataResult(f"Error retrieving fundamentals for {ticker}: {str(exc)}")
     except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+        return DataResult(f"Error retrieving fundamentals for {ticker}: {str(e)}")
 
 
 # yfinance ``.info`` is one HTTP round-trip returning ALL fields, and both
@@ -304,7 +305,9 @@ def _yf_info(canonical: str, *, data_context: DataRequestContext) -> dict:
     return info
 
 
-def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext):
+def get_analyst_forward(
+    ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext
+):
     """Return ``(forward_eps, num_analysts)`` from yfinance ``.info``, else ``(None, None)``.
 
     The analyst-consensus forward EPS and the number of contributing analysts.
@@ -331,7 +334,9 @@ _RATING_FIELDS = (
 )
 
 
-def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext) -> dict:
+def get_analyst_ratings(
+    ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext
+) -> dict:
     """Return yfinance analyst-consensus rating fields as a dict, else ``{}``.
 
     Sell-side rating (buy/hold/sell), its 1–5 mean, the contributing analyst
@@ -369,9 +374,7 @@ def _statement_header(title: str, canonical: str, freq: str, curr_date: str | No
     )
 
 
-def _historical_statement_unavailable(
-    ticker: str, curr_date: str | None
-) -> str | None:
+def _historical_statement_unavailable(ticker: str, curr_date: str | None) -> str | None:
     """Fail closed when a dated historical request reaches current statements.
 
     ``curr_date=None`` retains the public dataflow's legacy live-retrieval mode;
@@ -423,15 +426,19 @@ def get_statement_frame(
     return data if not data.empty else None
 
 
+@source_metadata("get_balance_sheet", "yfinance")
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-, *, data_context: DataRequestContext):
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+    *,
+    data_context: DataRequestContext,
+):
     """Get balance sheet data from yfinance."""
+    observations = []
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
-        return unavailable
+        return DataResult(unavailable, observations=tuple(observations))
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -446,29 +453,39 @@ def get_balance_sheet(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no balance sheet data")
 
-        from tradingagents.data.source_observations import publish_yahoo_statement
+        from tradingagents.data.source_observations import yahoo_statement_observations
 
-        publish_yahoo_statement(data, canonical, "balance", freq)
+        observations.extend(yahoo_statement_observations(data, canonical, "balance", freq))
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        return _statement_header("Balance Sheet", canonical, freq, curr_date) + csv_string
+        return DataResult(
+            _statement_header("Balance Sheet", canonical, freq, curr_date) + csv_string,
+            observations=tuple(observations),
+        )
 
     except NoMarketDataError:
         raise
     except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+        return DataResult(
+            f"Error retrieving balance sheet for {ticker}: {str(e)}",
+            observations=tuple(observations),
+        )
 
 
+@source_metadata("get_cashflow", "yfinance")
 def get_cashflow(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-, *, data_context: DataRequestContext):
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+    *,
+    data_context: DataRequestContext,
+):
     """Get cash flow data from yfinance."""
+    observations = []
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
-        return unavailable
+        return DataResult(unavailable, observations=tuple(observations))
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -483,29 +500,38 @@ def get_cashflow(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no cash flow data")
 
-        from tradingagents.data.source_observations import publish_yahoo_statement
+        from tradingagents.data.source_observations import yahoo_statement_observations
 
-        publish_yahoo_statement(data, canonical, "cashflow", freq)
+        observations.extend(yahoo_statement_observations(data, canonical, "cashflow", freq))
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        return _statement_header("Cash Flow", canonical, freq, curr_date) + csv_string
+        return DataResult(
+            _statement_header("Cash Flow", canonical, freq, curr_date) + csv_string,
+            observations=tuple(observations),
+        )
 
     except NoMarketDataError:
         raise
     except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+        return DataResult(
+            f"Error retrieving cash flow for {ticker}: {str(e)}", observations=tuple(observations)
+        )
 
 
+@source_metadata("get_income_statement", "yfinance")
 def get_income_statement(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-, *, data_context: DataRequestContext):
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+    *,
+    data_context: DataRequestContext,
+):
     """Get income statement data from yfinance."""
+    observations = []
     unavailable = _historical_statement_unavailable(ticker, curr_date)
     if unavailable:
-        return unavailable
+        return DataResult(unavailable, observations=tuple(observations))
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -520,23 +546,30 @@ def get_income_statement(
         if data.empty:
             raise NoMarketDataError(ticker, canonical, "no income statement data")
 
-        from tradingagents.data.source_observations import publish_yahoo_statement
+        from tradingagents.data.source_observations import yahoo_statement_observations
 
-        publish_yahoo_statement(data, canonical, "income", freq)
+        observations.extend(yahoo_statement_observations(data, canonical, "income", freq))
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        return _statement_header("Income Statement", canonical, freq, curr_date) + csv_string
+        return DataResult(
+            _statement_header("Income Statement", canonical, freq, curr_date) + csv_string,
+            observations=tuple(observations),
+        )
 
     except NoMarketDataError:
         raise
     except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+        return DataResult(
+            f"Error retrieving income statement for {ticker}: {str(e)}",
+            observations=tuple(observations),
+        )
 
 
+@source_metadata("get_insider_transactions", "yfinance")
 def get_insider_transactions(
-    ticker: Annotated[str, "ticker symbol of the company"]
-, *, data_context: DataRequestContext):
+    ticker: Annotated[str, "ticker symbol of the company"], *, data_context: DataRequestContext
+):
     """Get insider transactions data from yfinance."""
     canonical = normalize_symbol(ticker)
     try:
@@ -546,7 +579,7 @@ def get_insider_transactions(
         # Empty is normal here (many valid symbols have no insider filings),
         # so report it plainly rather than treating the symbol as invalid.
         if data is None or data.empty:
-            return f"No insider transactions reported for symbol '{canonical}'"
+            return DataResult(f"No insider transactions reported for symbol '{canonical}'")
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
@@ -555,7 +588,7 @@ def get_insider_transactions(
         header = f"# Insider Transactions data for {canonical}\n"
         header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + csv_string
+        return DataResult(header + csv_string)
 
     except Exception as e:
-        return f"Error retrieving insider transactions for {ticker}: {str(e)}"
+        return DataResult(f"Error retrieving insider transactions for {ticker}: {str(e)}")

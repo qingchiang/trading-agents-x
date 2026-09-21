@@ -16,8 +16,8 @@ import pytest
 
 from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface, stockstats_utils
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError
-from tradingagents.provenance import extract_provenance
 
 
 @pytest.mark.unit
@@ -34,8 +34,10 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
     def test_empty_download_raises_and_does_not_cache(self):
         empty = pd.DataFrame()
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty), \
-                self.assertRaises(NoMarketDataError):
+        with (
+            mock.patch.object(stockstats_utils.yf, "download", return_value=empty),
+            self.assertRaises(NoMarketDataError),
+        ):
             stockstats_utils.load_ohlcv("FAKE", "2026-01-01", data_context=request_context())
         # Nothing should have been written to the cache.
         self.assertEqual(os.listdir(self._tmp), [])
@@ -54,37 +56,33 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             raise NoMarketDataError(
                 symbol,
                 detail="no composite rows",
-                availability_notes=("<TDnet unavailable: outside rolling archive>",),
+                availability_notes=(DataResult("<TDnet unavailable: outside rolling archive>"),),
             )
 
         patched = {
             "jp_news": composite_no_data,
-            "yfinance": lambda *a, **k: (
-                "## Yahoo fallback news\n\n"
-                "### [direct] One article\nPublished: 2026-05-30"
+            "yfinance": lambda *a, **k: DataResult(
+                "## Yahoo fallback news\n\n### [direct] One article\nPublished: 2026-05-30"
             ),
         }
-        with mock.patch.dict(
-            interface.VENDOR_METHODS, {"get_news": patched}, clear=False
-        ), mock.patch.object(
-            interface, "get_vendor", return_value="jp_news,yfinance"
+        with (
+            mock.patch.dict(interface.VENDOR_METHODS, {"get_news": patched}, clear=False),
+            mock.patch.object(interface, "get_vendor", return_value="jp_news,yfinance"),
         ):
             result = interface.route_to_vendor(
                 "get_news",
                 "9984.T",
                 "2026-05-01",
                 "2026-05-31",
-                _provenance=True,
                 data_context=request_context(),
             )
 
-        self.assertIn("## Yahoo fallback news", result)
-        self.assertIn("### Source availability notes", result)
-        self.assertIn("<TDnet unavailable: outside rolling archive>", result)
+        self.assertIn("## Yahoo fallback news", result.content)
+        self.assertIn("### Source availability notes", result.content)
+        self.assertIn("<TDnet unavailable: outside rolling archive>", result.content)
         self.assertEqual(
-            extract_provenance(result)[0].timing,
-            "fallback vendor selected; publication/disclosure-date filtered; "
-            "returned_items=1",
+            list(result.provenance)[0].timing,
+            "fallback vendor selected",
         )
 
     def test_no_data_from_all_vendors_returns_sentinel(self):
@@ -92,16 +90,18 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             raise NoMarketDataError(symbol, "GC=F", "no rows")
 
         patched = {"yfinance": raises_no_data, "alpha_vantage": raises_no_data}
-        with mock.patch.dict(
-            interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
-        ):
+        with mock.patch.dict(interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False):
             result = interface.route_to_vendor(
-                "get_stock_data", "XAUUSD+", "2026-01-01", "2026-01-10"
-            , data_context=request_context())
-        self.assertIn("NO_DATA_AVAILABLE", result)
-        self.assertIn("XAUUSD+", result)
-        self.assertIn("GC=F", result)
-        self.assertIn("Do not estimate", result)
+                "get_stock_data",
+                "XAUUSD+",
+                "2026-01-01",
+                "2026-01-10",
+                data_context=request_context(),
+            )
+        self.assertIn("NO_DATA_AVAILABLE", result.content)
+        self.assertIn("XAUUSD+", result.content)
+        self.assertIn("GC=F", result.content)
+        self.assertIn("Do not estimate", result.content)
 
     def test_unconfigured_fallback_does_not_mask_no_data(self):
         # When the primary vendor reports no data and the fallback is simply
@@ -114,13 +114,11 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             raise ValueError("ALPHA_VANTAGE_API_KEY environment variable is not set.")
 
         patched = {"yfinance": raises_no_data, "alpha_vantage": raises_unavailable}
-        with mock.patch.dict(
-            interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
-        ):
+        with mock.patch.dict(interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False):
             result = interface.route_to_vendor(
-                "get_stock_data", "FAKE", "2026-01-01", "2026-01-10"
-            , data_context=request_context())
-        self.assertIn("NO_DATA_AVAILABLE", result)
+                "get_stock_data", "FAKE", "2026-01-01", "2026-01-10", data_context=request_context()
+            )
+        self.assertIn("NO_DATA_AVAILABLE", result.content)
 
 
 if __name__ == "__main__":

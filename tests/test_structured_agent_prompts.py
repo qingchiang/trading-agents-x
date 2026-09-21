@@ -8,6 +8,7 @@ import pytest
 
 import tradingagents.research.analysts.sentiment_analyst as sentiment
 from tests.factories import analyst_runtime
+from tradingagents.domain.data_result import DataResult
 from tradingagents.research.prompts.constraints import NO_EXTERNAL_TOOLS
 
 
@@ -26,7 +27,7 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
     monkeypatch.setattr(
         sentiment,
         "route_to_vendor",
-        lambda *args, **kwargs: "news",
+        lambda *args, **kwargs: DataResult("news"),
         raising=False,
     )
     monkeypatch.setattr(sentiment, "is_near_live", lambda _date, _ticker: True)
@@ -48,10 +49,7 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
         analyst_runtime(),
     )
 
-    text = "\n".join(
-        str(getattr(message, "content", message))
-        for message in captured["prompt"]
-    )
+    text = "\n".join(str(getattr(message, "content", message)) for message in captured["prompt"])
     assert NO_EXTERNAL_TOOLS in text
     assert "tool-call date ranges" not in text
 

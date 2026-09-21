@@ -38,8 +38,11 @@ from tradingagents.data.jp.calendar import tokyo_today
 from tradingagents.data.jp.http_util import USER_AGENT, fetch_bytes
 from tradingagents.data.jp.jquants_common import to_jquants_code
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
-from tradingagents.data.news_selection import source_output_limit
+from tradingagents.data.news_selection import news_result, source_output_limit
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
 from tradingagents.domain.instruments import tokyo_securities_base
+from tradingagents.domain.news import NewsCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -148,14 +151,16 @@ def _parse_rows(page_html: str, *, counts: CandidateFilterCounts | None = None) 
         if not title:
             counts.invalid_records += 1
             continue
-        rows.append({
-            "code": _clean(code_m.group(1)),
-            "title": title,
-            # href is normally root-relative ("/inbs/…"); urljoin also handles an
-            # absolute or bare-relative href without producing a malformed URL.
-            "pdf": urljoin(_HOST, html.unescape(anchor.group("href").strip())),
-            "at": at,
-        })
+        rows.append(
+            {
+                "code": _clean(code_m.group(1)),
+                "title": title,
+                # href is normally root-relative ("/inbs/…"); urljoin also handles an
+                # absolute or bare-relative href without producing a malformed URL.
+                "pdf": urljoin(_HOST, html.unescape(anchor.group("href").strip())),
+                "at": at,
+            }
+        )
     return rows
 
 
@@ -169,7 +174,15 @@ def _parse_timestamp(raw: str) -> datetime | None:
     return None
 
 
-def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_news", "tdnet_news")
+def get_news(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    timeout: float = 10.0,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Return TDnet timely disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     One keyless search request (server-side filtered by code and date), then a
@@ -178,6 +191,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
     disclosures" line when the company disclosed nothing in the window (a normal
     outcome — never raises, matching the other news vendors).
     """
+    counts = CandidateFilterCounts()
     code = to_jquants_code(ticker)
     window = effective_window(start_date, end_date)
     if window is None:
@@ -185,14 +199,23 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
             end = datetime.strptime(end_date, "%Y-%m-%d").date()
             retained_start = tokyo_today() - timedelta(days=_MAX_LOOKBACK_DAYS)
         except (TypeError, ValueError):
-            return _no_disclosures(ticker, start_date, end_date)
+            return DataResult(
+                _no_disclosures(ticker, start_date, end_date),
+                diagnostics=(counts.diagnostic("TDnet"),),
+            )
         if end < retained_start:
-            return (
+            return DataResult(
                 "<TDnet unavailable: the free service exposes only 31 calendar dates "
                 f"including today; requested historical window {start_date} to {end_date} "
-                "is outside the rolling archive>"
+                "is outside the rolling archive>",
+                diagnostics=(
+                    counts.diagnostic("TDnet"),
+                    DataDiagnostic("source_unavailable", "TDnet", "source returned unavailable"),
+                ),
             )
-        return _no_disclosures(ticker, start_date, end_date)
+        return DataResult(
+            _no_disclosures(ticker, start_date, end_date), diagnostics=(counts.diagnostic("TDnet"),)
+        )
     # Clamp both to 31 dates ending on the requested analysis date and to what
     # remains in today's rolling free archive. Headers below use these effective
     # dates so a partial historical window is never presented as complete.
@@ -216,18 +239,29 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0,
         else:
             matches.append(row)
     if not matches:
-        return _no_disclosures(ticker, start_date, end_date) + "\n" + counts.render()
+        return DataResult(
+            _no_disclosures(ticker, start_date, end_date) + "\n" + counts.render(),
+            diagnostics=(counts.diagnostic("TDnet"),),
+        )
 
     matches.sort(key=lambda r: r["at"], reverse=True)  # most recent first
     kept = matches[: source_output_limit(data_context.config["news_article_limit"])]
     counts.source_truncated = len(matches) - len(kept)
-    body = "\n\n".join(
-        f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"
+    items = [
+        NewsCandidate(
+            "TDnet",
+            r["title"],
+            f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}",
+            r["at"].strftime("%Y-%m-%d %H:%M"),
+            link=r["pdf"],
+        )
         for r in kept
-    )
-    return (
+    ]
+    return news_result(
         f"## {ticker} timely disclosures (TDnet 適時開示), "
-        f"from {start_date} to {end_date}:\n\n{counts.render()}\n\n{body}"
+        f"from {start_date} to {end_date}:\n\n{counts.render()}",
+        items,
+        diagnostics=(counts.diagnostic("TDnet"),),
     )
 
 
@@ -245,5 +279,7 @@ def _warn_if_truncated(page_html: str | None, code: str, parsed: int) -> None:
     if count_m and int(count_m.group(1)) > parsed:
         logger.warning(
             "TDnet reported %s results for %s but parsed %d rows — possible pagination.",
-            count_m.group(1), code, parsed,
+            count_m.group(1),
+            code,
+            parsed,
         )

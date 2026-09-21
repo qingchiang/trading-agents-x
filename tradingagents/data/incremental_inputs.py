@@ -12,7 +12,6 @@ from tradingagents.data.context import DataRequestContext
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.macro_panel import get_global_macro_panel
-from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
@@ -22,13 +21,13 @@ from tradingagents.domain.collection import (
     IncrementalEvidenceCandidate,
 )
 from tradingagents.domain.data import SourceObservation
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
     VendorTransportError,
 )
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 def observation_candidates(request, observations):
@@ -52,7 +51,11 @@ def observation_candidates(request, observations):
             if not 0 <= age <= request.near_live_max_age_days:
                 continue
         candidates.append(
-            IncrementalEvidenceCandidate(evidence=observation.evidence(request.analysis_cutoff, instrument=request.instrument))
+            IncrementalEvidenceCandidate(
+                evidence=observation.evidence(
+                    request.analysis_cutoff, instrument=request.instrument
+                )
+            )
         )
     return tuple(candidates)
 
@@ -70,8 +73,11 @@ def augment_domain(request, domain, observations):
                 source=re.sub(r"[^a-z0-9_.-]+", "_", origin.source.casefold()).strip("_"),
                 retrieved_at=datetime.fromisoformat(origin.retrieved_at),
                 fallback=candidate.evidence.fallback,
-                diagnostic=(CollectionDiagnostic(code="news_cache_refresh_failed")
-                            if "news cache refresh failed" in origin.timing else None),
+                diagnostic=(
+                    CollectionDiagnostic(code="news_cache_refresh_failed")
+                    if "news cache refresh failed" in origin.timing
+                    else None
+                ),
             )
         )
         bases.append("pit" if candidate.evidence.available_at else "near_live_advisory")
@@ -96,7 +102,9 @@ def augment_domain(request, domain, observations):
         evidence_refs=domain.evidence_refs + tuple(c.evidence.ref for c in candidates),
         observed_from=domain.observed_from,
         observed_through=domain.observed_through,
-        diagnostic=domain.diagnostic if preserve_data else CollectionDiagnostic(code="bounded_source_observations"),
+        diagnostic=domain.diagnostic
+        if preserve_data
+        else CollectionDiagnostic(code="bounded_source_observations"),
     ), candidates
 
 
@@ -107,22 +115,31 @@ def retain_input_limitations(result, records, *, failure_code=None, now=None):
     limited = False
     for record in records:
         timing = record.timing.casefold()
-        code = next((code for token, code in (
-            ("cache refresh failed", "news_cache_refresh_failed"),
-            ("unavailable", "upstream_source_unavailable"),
-            ("partial", "upstream_source_partial"),
-            ("source_window_limited", "source_window_limited"),
-            ("truncated_by_global_cap", "truncated_by_global_cap"),
-        ) if token in timing), None)
+        code = next(
+            (
+                code
+                for token, code in (
+                    ("cache refresh failed", "news_cache_refresh_failed"),
+                    ("unavailable", "upstream_source_unavailable"),
+                    ("partial", "upstream_source_partial"),
+                    ("truncated_by_global_cap", "truncated_by_global_cap"),
+                    ("source_window_limited", "source_window_limited"),
+                )
+                if token in timing
+            ),
+            None,
+        )
         if code is None or "fallback vendor selected" in timing:
             continue
         limited = True
         name = re.sub(r"[^a-z0-9_.-]+", "_", record.source.casefold()).strip("_")
         previous = sources.get(name)
         if previous is not None:
-            sources[name] = previous.model_copy(update={
-                "diagnostic": previous.diagnostic or CollectionDiagnostic(code=code),
-            })
+            sources[name] = previous.model_copy(
+                update={
+                    "diagnostic": previous.diagnostic or CollectionDiagnostic(code=code),
+                }
+            )
         else:
             try:
                 stamp = datetime.fromisoformat(record.retrieved_at or "")
@@ -131,19 +148,27 @@ def retain_input_limitations(result, records, *, failure_code=None, now=None):
             except ValueError:
                 stamp = now() if now else datetime.now(UTC)
             sources[name] = CollectionSourceProvenance(
-                source=name, retrieved_at=stamp, diagnostic=CollectionDiagnostic(code=code),
+                source=name,
+                retrieved_at=stamp,
+                diagnostic=CollectionDiagnostic(code=code),
             )
     if limited or failure_code:
         diagnostic = domain.diagnostic
-        if diagnostic is None or diagnostic.code == "bounded_source_observations" or not domain.sources:
+        if (
+            diagnostic is None
+            or diagnostic.code in {"bounded_source_observations", "bounded_no_admitted_articles"}
+            or not domain.sources
+        ):
             diagnostic = CollectionDiagnostic(code=failure_code or "upstream_inputs_limited")
         elif failure_code and failure_code not in diagnostic.code.split("."):
             diagnostic = CollectionDiagnostic(code=f"{diagnostic.code}.{failure_code}")
-        domain = domain.model_copy(update={
-            "sources": tuple(sources.values()),
-            "state": CollectionResultState.PARTIAL if domain.evidence_refs else domain.state,
-            "diagnostic": diagnostic,
-        })
+        domain = domain.model_copy(
+            update={
+                "sources": tuple(sources.values()),
+                "state": CollectionResultState.PARTIAL if domain.evidence_refs else domain.state,
+                "diagnostic": diagnostic,
+            }
+        )
     return domain, candidates
 
 
@@ -155,36 +180,52 @@ def collect_news_observations(
     object,
     tuple[CollectionDomainResult, tuple[IncrementalEvidenceCandidate, ...]] | None,
 ]:
-    """Collect shared news records, leaving text-only responses to market adapters."""
-    with capture_observations() as observations:
-        response = routed(
-            "get_news",
-            request.instrument,
-            request.baseline_analysis_cutoff.isoformat(),
-            request.analysis_cutoff.isoformat(),
-            _provenance=True,
-            _stop_on_rate_limit=True,
-        )
-    if not observations:
-        return response, None
-    fallback = any(
-        "fallback vendor selected" in record.timing
-        for record in extract_provenance(response)
+    """Admit only producer-owned news observations through the shared PIT policy."""
+    response = routed(
+        "get_news",
+        request.instrument,
+        request.baseline_analysis_cutoff.isoformat(),
+        request.analysis_cutoff.isoformat(),
+        _stop_on_rate_limit=True,
+    )
+    observations = response.observations
+    fallback = any("fallback vendor selected" in record.timing for record in response.provenance)
+    sources = {}
+    for record in () if observations else response.provenance:
+        name = re.sub(r"[^a-z0-9_.-]+", "_", record.source.casefold()).strip("_")
+        if name:
+            try:
+                retrieved = datetime.fromisoformat(record.retrieved_at or "")
+                if retrieved.tzinfo is None:
+                    raise ValueError("unaware retrieval")
+            except ValueError:
+                retrieved = now()
+            sources[name] = CollectionSourceProvenance(
+                source=name, retrieved_at=retrieved, fallback=fallback
+            )
+    usable_source = any(
+        "unavailable" not in record.timing.casefold() for record in response.provenance
     )
     result = augment_domain(
         request,
         CollectionDomainResult(
             domain="news",
-            state="unavailable",
+            state="empty" if sources and usable_source else "unavailable",
+            sources=tuple(sources.values()),
             diagnostic=CollectionDiagnostic(code="bounded_no_admitted_articles"),
         ),
         [replace(row, fallback=row.fallback or fallback) for row in observations],
     )
-    return response, retain_input_limitations(result, extract_provenance(response), now=now)
+    return response, retain_input_limitations(
+        result,
+        response.provenance,
+        now=now,
+        failure_code="news_retrieval_failed" if sources and not usable_source else None,
+    )
 
 
 def _input_failed(response):
-    body = strip_provenance_markers(str(response)).strip().casefold()
+    body = response.strip().casefold()
     return body.startswith(("error", "failed")) or bool(
         re.fullmatch(r"<[^<>]*unavailable[^<>]*>", body)
     )
@@ -219,11 +260,15 @@ def append_financials(request, domain, routed, *, data_context: DataRequestConte
         stop_on_rate_limit=True,
         data_context=data_context,
     )
-    responses = tuple(inputs["responses"].values())
+    responses = tuple(DataResult.load(payload) for payload in inputs["responses"].values())
     return retain_input_limitations(
-        augment_domain(request, domain, [SourceObservation.load(o) for o in inputs["observations"]]),
-        [record for response in responses for record in extract_provenance(response)],
-        failure_code="financial_inputs_partial" if any(map(_input_failed, responses)) else None,
+        augment_domain(
+            request, domain, [SourceObservation.load(o) for o in inputs["observations"]]
+        ),
+        [record for response in responses for record in response.provenance],
+        failure_code="financial_inputs_partial"
+        if any(_input_failed(response.content) for response in responses)
+        else None,
     )
 
 
@@ -250,26 +295,37 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
     failed = False
     typed_failures = []
     calls = [
-        lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
-                       (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
-                       _provenance=True, _stop_on_rate_limit=True),
+        lambda: routed(
+            "get_global_news",
+            request.analysis_cutoff.isoformat(),
+            (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
+            _stop_on_rate_limit=True,
+        ),
     ]
     for call in calls:
-        with capture_observations() as captured:
-            try:
-                response = call()
-            except Exception as exc:
-                failed = True
-                code = _typed_vendor_failure_code(exc)
-                if code is not None:
-                    typed_failures.append(code)
-                continue
-            responses.append(response)
-            failed = failed or _input_failed(response)
-            observations.extend(captured)
-    context_sources = [lambda: get_global_macro_panel(request.analysis_cutoff.isoformat(), data_context=data_context)]
+        try:
+            response = call()
+        except Exception as exc:
+            failed = True
+            code = _typed_vendor_failure_code(exc)
+            if code is not None:
+                typed_failures.append(code)
+            continue
+        responses.append(response.content)
+        records.extend(response.provenance)
+        failed = failed or _input_failed(response.content)
+        observations.extend(response.observations)
+    context_sources = [
+        lambda: get_global_macro_panel(
+            request.analysis_cutoff.isoformat(), data_context=data_context
+        )
+    ]
     if request.market == "japan":
-        context_sources.append(lambda: get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat()))
+        context_sources.append(
+            lambda: get_market_investor_flows(
+                request.instrument, request.analysis_cutoff.isoformat()
+            )
+        )
     for fetch in context_sources:
         try:
             context = fetch()
@@ -285,7 +341,7 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
             failed = failed or _input_failed(context.content)
     return retain_input_limitations(
         augment_domain(request, domain, observations),
-        [*records, *(record for response in responses for record in extract_provenance(response))],
+        records,
         failure_code=(
             _context_failure_code(domain, "news_context_partial", typed_failures)
             if failed
@@ -296,11 +352,13 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
 
 def append_market_context(request, domain, series, routed):
     observations = []
-    response = ""
+    response = DataResult("")
     failed = False
     typed_failures = []
     if series is not None:
-        points = [p for p in series.points if request.window_start < p.completed_at <= request.window_end]
+        points = [
+            p for p in series.points if request.window_start < p.completed_at <= request.window_end
+        ]
         if points:
             baseline_points = [p for p in series.points if p.completed_at <= request.window_start]
             if baseline_points:
@@ -311,37 +369,54 @@ def append_market_context(request, domain, series, routed):
             for close in closes:
                 peak = max(peak, close)
                 drawdown = min(drawdown, close / peak - 1)
-            observations.append(SourceObservation(
-                series.source, "market_interval", request.instrument,
-                {"start_session": points[0].session.isoformat(), "end_session": points[-1].session.isoformat(),
-                 "close_change": closes[-1] / closes[0] - 1, "min_close": min(closes),
-                 "max_close": max(closes), "maximum_drawdown": drawdown,
-                 "adjustment_basis": series.adjustment_basis, "completed_rows": len(points)},
-                series.retrieved_at, effective_date=points[-1].session,
-                available_at=points[-1].completed_at,
-                fallback=series.fallback,
-                timing=("completed observations including the latest available baseline endpoint"
-                        if baseline_points else "baseline endpoint unavailable; completed observed subinterval")
-                       + "; one provider and adjustment basis",
-            ))
-    with capture_observations() as captured:
-        try:
-            response = routed("get_verified_market_snapshot", request.instrument,
-                   request.analysis_cutoff.isoformat(), 5, _provenance=True, _stop_on_rate_limit=True)
-        except Exception as exc:
-            failed = True
-            code = _typed_vendor_failure_code(exc)
-            if code is not None:
-                typed_failures.append(code)
-        else:
-            observations.extend(captured)
-    snapshot_failed = failed or _input_failed(response)
-    return retain_input_limitations(
-        augment_domain(request, domain, observations), extract_provenance(response),
-        failure_code=(
-            _context_failure_code(
-                domain, "market_snapshot_unavailable", typed_failures
+            observations.append(
+                SourceObservation(
+                    series.source,
+                    "market_interval",
+                    request.instrument,
+                    {
+                        "start_session": points[0].session.isoformat(),
+                        "end_session": points[-1].session.isoformat(),
+                        "close_change": closes[-1] / closes[0] - 1,
+                        "min_close": min(closes),
+                        "max_close": max(closes),
+                        "maximum_drawdown": drawdown,
+                        "adjustment_basis": series.adjustment_basis,
+                        "completed_rows": len(points),
+                    },
+                    series.retrieved_at,
+                    effective_date=points[-1].session,
+                    available_at=points[-1].completed_at,
+                    fallback=series.fallback,
+                    timing=(
+                        "completed observations including the latest available baseline endpoint"
+                        if baseline_points
+                        else "baseline endpoint unavailable; completed observed subinterval"
+                    )
+                    + "; one provider and adjustment basis",
+                )
             )
+    try:
+        response = routed(
+            "get_verified_market_snapshot",
+            request.instrument,
+            request.analysis_cutoff.isoformat(),
+            5,
+            _stop_on_rate_limit=True,
+        )
+    except Exception as exc:
+        failed = True
+        code = _typed_vendor_failure_code(exc)
+        if code is not None:
+            typed_failures.append(code)
+    else:
+        observations.extend(response.observations)
+    snapshot_failed = failed or _input_failed(response.content)
+    return retain_input_limitations(
+        augment_domain(request, domain, observations),
+        response.provenance,
+        failure_code=(
+            _context_failure_code(domain, "market_snapshot_unavailable", typed_failures)
             if snapshot_failed
             else None
         ),
@@ -364,9 +439,14 @@ def dedupe_news_domains(domains, candidates):
             key = None
             if observation.get("kind") == "news_article":
                 record = values.get("link") or values.get("url")
-                key = (observation.get("source"), record or (
-                    canonical_headline(values.get("title", "")), observation.get("effective_date")
-                ))
+                key = (
+                    observation.get("source"),
+                    record
+                    or (
+                        canonical_headline(values.get("title", "")),
+                        observation.get("effective_date"),
+                    ),
+                )
             if key and key in seen:
                 continue
             if key:
@@ -377,8 +457,13 @@ def dedupe_news_domains(domains, candidates):
             code = "articles_already_in_news"
             if domain.diagnostic and domain.diagnostic.code != "bounded_source_observations":
                 code = f"{domain.diagnostic.code}.{code}"
-            updates.update(state="empty", temporal_bases=(), observed_from=None, observed_through=None,
-                           diagnostic=CollectionDiagnostic(code=code))
+            updates.update(
+                state="empty",
+                temporal_bases=(),
+                observed_from=None,
+                observed_through=None,
+                diagnostic=CollectionDiagnostic(code=code),
+            )
         elif len(refs) < len(domain.evidence_refs):
             sources = {}
             for ref in refs:
@@ -395,11 +480,18 @@ def dedupe_news_domains(domains, candidates):
                     # Failed/limited inputs remain part of the collection even
                     # when their successful articles were already used in news.
                     retained = sources.get(source.source, source)
-                    sources[source.source] = retained.model_copy(update={"diagnostic": source.diagnostic})
+                    sources[source.source] = retained.model_copy(
+                        update={"diagnostic": source.diagnostic}
+                    )
             updates["sources"] = tuple(sources.values())
-            updates["temporal_bases"] = tuple(dict.fromkeys(
-                "pit" if items[ref].evidence.available_at else "near_live_advisory" for ref in refs
-            ))
-        output[domain.domain] = CollectionDomainResult.model_validate({**domain.model_dump(), **updates})
+            updates["temporal_bases"] = tuple(
+                dict.fromkeys(
+                    "pit" if items[ref].evidence.available_at else "near_live_advisory"
+                    for ref in refs
+                )
+            )
+        output[domain.domain] = CollectionDomainResult.model_validate(
+            {**domain.model_dump(), **updates}
+        )
     retained = {ref for domain in output.values() for ref in domain.evidence_refs}
     return [output[d.domain] for d in domains], [c for ref, c in items.items() if ref in retained]

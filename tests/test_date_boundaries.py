@@ -27,19 +27,26 @@ def test_get_yfin_requests_inclusive_end(monkeypatch):
             captured["auto_adjust"] = auto_adjust
             idx = pd.to_datetime(["2025-05-08", "2025-05-09"])
             return pd.DataFrame(
-                {"Open": [1.0, 2.0], "High": [1.0, 2.0], "Low": [1.0, 2.0],
-                 "Close": [1.0, 2.0], "Volume": [1, 2]},
+                {
+                    "Open": [1.0, 2.0],
+                    "High": [1.0, 2.0],
+                    "Low": [1.0, 2.0],
+                    "Close": [1.0, 2.0],
+                    "Volume": [1, 2],
+                },
                 index=idx,
             )
 
     monkeypatch.setattr(yfin.yf, "Ticker", FakeTicker)
-    out = yfin.get_YFin_data_online("AAPL", "2025-05-01", "2025-05-09", data_context=request_context())
+    out = yfin.get_YFin_data_online(
+        "AAPL", "2025-05-01", "2025-05-09", data_context=request_context()
+    )
 
     # end is requested one day past end_date so 2025-05-09 is included (#987).
     assert captured["end"] == "2025-05-10"
     assert captured["auto_adjust"] is True
     # Header still reflects the requested range, not the internal +1 day.
-    assert "to 2025-05-09" in out
+    assert "to 2025-05-09" in out.content
 
 
 @pytest.mark.unit
@@ -51,8 +58,7 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
         captured["end"] = end
         idx = pd.to_datetime([pd.Timestamp.today().normalize()])
         return pd.DataFrame(
-            {"Open": [100.0], "High": [100.0], "Low": [100.0],
-             "Close": [100.0], "Volume": [1]},
+            {"Open": [100.0], "High": [100.0], "Low": [100.0], "Close": [100.0], "Volume": [1]},
             index=idx,
         )
 

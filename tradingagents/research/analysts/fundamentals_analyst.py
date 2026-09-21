@@ -1,14 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.runtime import Runtime
 
+from tradingagents.data.evidence_workset import tool_message_records
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.interface import route_to_vendor
 from tradingagents.domain.data import SourceObservation
-from tradingagents.provenance import extract_provenance
 from tradingagents.research.prompts.instrument import get_instrument_context_from_state
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
-from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
+from tradingagents.research.state import missing_evidence_blocks
 from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet,
     get_cashflow,
@@ -24,18 +24,22 @@ def create_fundamentals_analyst(llm):
         inputs = state.get("fundamental_inputs")
         if inputs is None:
             inputs = collect_financial_inputs(
-                state["company_of_interest"], current_date, route=route_to_vendor,
+                state["company_of_interest"],
+                current_date,
+                route=route_to_vendor,
                 data_context=runtime.context.data_context,
             )
         observations = [SourceObservation.load(o) for o in inputs["observations"]]
-        core = inputs["responses"].get("get_fundamentals", "")
+        core = inputs["responses"].get("get_fundamentals", {}).get("content", "")
         core += "\n\n" + "\n\n".join(
             f"{o.content}\nSource: {o.source}; {o.timing}; retrieved: {o.retrieved_at.isoformat()}"
             for o in observations
         )
         if not observations:
             core += "\n\n" + "\n\n".join(
-                value for method, value in inputs["responses"].items() if method != "get_fundamentals"
+                value["content"]
+                for method, value in inputs["responses"].items()
+                if method != "get_fundamentals"
             )
 
         tools = [
@@ -83,23 +87,20 @@ def create_fundamentals_analyst(llm):
         result = chain.invoke(state["messages"])
 
         report = ""
-        prefetched_evidence = [
-            prefetched_evidence_block(body, extract_provenance(body))
-            for body in inputs["responses"].values()
-        ]
-        prefetched_evidence.extend({
-            "content": o.content, "records": [],
-            "temporal_scope": "point_in_time" if o.is_pit else "live_only",
-            "source_observation": o.dump(),
-        } for o in observations)
+        prefetched_evidence = [{"data_result": body} for body in inputs["responses"].values()]
+        prefetched_evidence.extend(
+            {
+                "content": o.content,
+                "records": [],
+                "temporal_scope": "point_in_time" if o.is_pit else "live_only",
+                "source_observation": o.dump(),
+            }
+            for o in observations
+        )
 
         if len(result.tool_calls) == 0:
-            report = (
-                result.content
-                if isinstance(result.content, str)
-                else str(result.content)
-            )
-            records = extract_provenance(state["messages"])
+            report = result.content if isinstance(result.content, str) else str(result.content)
+            records = tool_message_records(state["messages"])
             attempted = {
                 *inputs["responses"],
                 *(record.evidence for record in records),

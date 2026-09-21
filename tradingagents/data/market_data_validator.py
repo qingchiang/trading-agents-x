@@ -16,16 +16,25 @@ import pandas as pd
 from stockstats import wrap
 
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, load_ohlcv
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import attach_provenance
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
-    "close_10_ema", "close_50_sma", "close_200_sma",
-    "rsi", "boll", "boll_ub", "boll_lb",
-    "macd", "macds", "macdh", "atr",
+    "close_10_ema",
+    "close_50_sma",
+    "close_200_sma",
+    "rsi",
+    "boll",
+    "boll_ub",
+    "boll_lb",
+    "macd",
+    "macds",
+    "macdh",
+    "atr",
 )
 
 
@@ -67,6 +76,7 @@ def _fmt(value) -> str:
     return str(value)
 
 
+@source_metadata("get_verified_market_snapshot", "yfinance")
 def build_verified_market_snapshot(
     symbol: str,
     curr_date: str,
@@ -74,7 +84,7 @@ def build_verified_market_snapshot(
     indicators: Iterable[str] | None = None,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult[str]:
     """Build a yfinance-backed snapshot (the default US vendor implementation)."""
     return render_verified_market_snapshot(
         load_ohlcv(symbol, curr_date, data_context=data_context),
@@ -97,11 +107,12 @@ def render_verified_market_snapshot(
     source: str,
     adjustment: str | None = None,
     provenance_timing: str | None = None,
-) -> str:
+) -> DataResult[str]:
     """Render a deterministic snapshot from a vendor-supplied OHLCV frame."""
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
     # Volume); stockstats `wrap()` lowercases columns and adds indicator
     # columns, so read raw prices from `df` and indicators from `stock_df`.
+    observations = []
     df = _verified_rows(data, symbol, curr_date)
     # Some generic vendor loaders only apply a date range. Enforce freshness at
     # the shared verification boundary so a stale but non-empty frame triggers
@@ -114,9 +125,17 @@ def render_verified_market_snapshot(
     indicator_values: dict[str, str] = {}
     for name in selected:
         required = {
-            "close_10_ema": 10, "close_50_sma": 50, "close_200_sma": 200,
-            "rsi": 15, "boll": 20, "boll_ub": 20, "boll_lb": 20,
-            "macd": 35, "macds": 35, "macdh": 35, "atr": 15,
+            "close_10_ema": 10,
+            "close_50_sma": 50,
+            "close_200_sma": 200,
+            "rsi": 15,
+            "boll": 20,
+            "boll_ub": 20,
+            "boll_lb": 20,
+            "macd": 35,
+            "macds": 35,
+            "macdh": 35,
+            "atr": 15,
         }.get(name, 1)
         if len(stock_df) < required:
             indicator_values[name] = f"N/A (requires {required} observations; got {len(stock_df)})"
@@ -147,29 +166,29 @@ def render_verified_market_snapshot(
         "|---|---:|---|---|",
     ]
     for field in ("Open", "High", "Low", "Close", "Volume"):
-        measurement, unit = (
-            ("quantity", "shares")
-            if field == "Volume"
-            else ("currency", currency)
-        )
-        lines.append(
-            f"| {field} | {_fmt(latest.get(field))} | {measurement} | {unit} |"
-        )
+        measurement, unit = ("quantity", "shares") if field == "Volume" else ("currency", currency)
+        lines.append(f"| {field} | {_fmt(latest.get(field))} | {measurement} | {unit} |")
 
-    lines += ["", "### Verified technical indicators (latest row)", "",
-              "| Indicator | Value | Measurement | Unit |", "|---|---:|---|---|"]
+    lines += [
+        "",
+        "### Verified technical indicators (latest row)",
+        "",
+        "| Indicator | Value | Measurement | Unit |",
+        "|---|---:|---|---|",
+    ]
     for name, value in indicator_values.items():
         measurement, unit = _indicator_measurement(name, currency)
-        lines.append(
-            f"| {name} | {value} | {measurement} | {unit or '—'} |"
-        )
+        lines.append(f"| {name} | {value} | {measurement} | {unit or '—'} |")
 
-    lines += ["", f"### Recent verified closes (last {len(recent)} rows)", "",
-              "| Date | Close | Measurement | Unit |", "|---|---:|---|---|"]
+    lines += [
+        "",
+        f"### Recent verified closes (last {len(recent)} rows)",
+        "",
+        "| Date | Close | Measurement | Unit |",
+        "|---|---:|---|---|",
+    ]
     for _, row in recent.iterrows():
-        lines.append(
-            f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} | currency | {currency} |"
-        )
+        lines.append(f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} | currency | {currency} |")
 
     lines += [
         "",
@@ -180,25 +199,32 @@ def render_verified_market_snapshot(
         "percentage moves unless directly supported by tool output with concrete "
         "dates and prices.",
     ]
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        source, "verified_market_snapshot", symbol,
-        {"latest": {field: latest.get(field) for field in ("Open", "High", "Low", "Close", "Volume")},
-         "indicators": indicator_values, "currency": currency, "adjustment_basis": adjustment},
-        effective_date=latest_date, available_on=latest_date,
-        timing="market-date filtered snapshot; conservatively available at market day end",
+    observations.append(
+        make_observation(
+            source,
+            "verified_market_snapshot",
+            symbol,
+            {
+                "latest": {
+                    field: latest.get(field) for field in ("Open", "High", "Low", "Close", "Volume")
+                },
+                "indicators": indicator_values,
+                "currency": currency,
+                "adjustment_basis": adjustment,
+            },
+            effective_date=latest_date,
+            available_on=latest_date,
+            timing="market-date filtered snapshot; conservatively available at market day end",
+        )
     )
-    return attach_provenance(
-        "\n".join(lines),
+    return DataResult("\n".join(lines), observations=tuple(observations)).with_provenance(
         ProvenanceRecord(
             evidence="get_verified_market_snapshot",
             source=source,
             requested=curr_date,
             effective=latest_date,
-            timing=(
-                provenance_timing
-                or "market-date filtered; rows after cutoff excluded"
-            ),
-        ),
+            timing=provenance_timing or "market-date filtered; rows after cutoff excluded",
+        )
     )

@@ -1,13 +1,13 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.runtime import Runtime
 
+from tradingagents.data.evidence_workset import tool_message_records
 from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.jp.market import is_tokyo_ticker
 from tradingagents.data.lookahead import lookback_start_date
 from tradingagents.data.macro_panel import get_global_macro_panel
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
-from tradingagents.provenance import extract_provenance
 from tradingagents.research.prompts.instrument import get_instrument_context_from_state
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
@@ -54,7 +54,9 @@ def create_news_analyst(llm):
         # LLM to tool-call): it's context every analysis needs and macro is
         # market-agnostic. get_macro_indicators stays available as a microscope
         # for drilling into a specific series beyond the panel. Never raises.
-        macro_input = get_global_macro_panel(current_date, data_context=runtime.context.data_context)
+        macro_input = get_global_macro_panel(
+            current_date, data_context=runtime.context.data_context
+        )
         macro_panel = macro_input.content
         market_flows = (
             get_market_investor_flows(ticker, current_date)
@@ -109,11 +111,15 @@ def create_news_analyst(llm):
         result = chain.invoke(state["messages"])
 
         report = ""
-        prefetched_evidence = [{
-            "content": o.content, "records": [],
-            "temporal_scope": "point_in_time" if o.is_pit else "live_only",
-            "source_observation": o.dump(),
-        } for o in context_observations]
+        prefetched_evidence = [
+            {
+                "content": o.content,
+                "records": [],
+                "temporal_scope": "point_in_time" if o.is_pit else "live_only",
+                "source_observation": o.dump(),
+            }
+            for o in context_observations
+        ]
 
         if len(result.tool_calls) == 0:
             macro_records = list(macro_input.provenance)
@@ -148,9 +154,7 @@ def create_news_analyst(llm):
                         timing=flow_timing,
                     )
                 )
-            prefetched_evidence.append(
-                prefetched_evidence_block(macro_panel, macro_records)
-            )
+            prefetched_evidence.append(prefetched_evidence_block(macro_panel, macro_records))
             if market_flow_context:
                 prefetched_evidence.append(
                     prefetched_evidence_block(
@@ -159,7 +163,7 @@ def create_news_analyst(llm):
                     )
                 )
             all_records = [
-                *extract_provenance(state["messages"]),
+                *tool_message_records(state["messages"]),
                 *macro_records,
                 *flow_records,
             ]
@@ -170,11 +174,7 @@ def create_news_analyst(llm):
                     requested_date=current_date,
                 )
             )
-            report = (
-                result.content
-                if isinstance(result.content, str)
-                else str(result.content)
-            )
+            report = result.content if isinstance(result.content, str) else str(result.content)
 
         return {
             "messages": [result],

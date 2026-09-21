@@ -8,7 +8,6 @@ import pytest
 from tests.data_policy import request_context
 from tradingagents.data.cn import cn_statements, sina_finance
 from tradingagents.domain.vendor_errors import NoMarketDataError
-from tradingagents.provenance import extract_provenance
 
 
 def _frame(*, bank: bool = False) -> pd.DataFrame:
@@ -44,10 +43,12 @@ def test_cashflow_preserves_sina_outflows_with_alternate_labels(monkeypatch):
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_: None)
     monkeypatch.setattr(cn_statements, "fetch_finance_records", lambda *_: ("600309.SS", frame))
-    output = cn_statements.get_cashflow("600309.SS", curr_date="2026-03-21", data_context=request_context())
-    assert "Missing mapped fields: Capital expenditure" not in output
-    assert ",125," in output
-    assert ",45," in output
+    output = cn_statements.get_cashflow(
+        "600309.SS", curr_date="2026-03-21", data_context=request_context()
+    )
+    assert "Missing mapped fields: Capital expenditure" not in output.content
+    assert ",125," in output.content
+    assert ",45," in output.content
 
 
 @pytest.mark.unit
@@ -126,17 +127,19 @@ def test_statement_mapping_covers_consumer_manufacturer_and_bank(
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _ticker: profile)
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_args: None)
 
-    output = cn_statements.get_income_statement(ticker, curr_date="2026-04-01", data_context=request_context())
+    output = cn_statements.get_income_statement(
+        ticker, curr_date="2026-04-01", data_context=request_context()
+    )
 
-    assert expected in output
-    assert "2025-12-31" in output
+    assert expected in output.content
+    assert "2025-12-31" in output.content
     if bank:
-        assert "Net interest income" in output
-        assert "Gross profit" not in output
+        assert "Net interest income" in output.content
+        assert "Gross profit" not in output.content
     else:
-        assert "Revenue" in output
-        assert "Net interest income" not in output
-    sources = {record.source for record in extract_provenance(output)}
+        assert "Revenue" in output.content
+        assert "Net interest income" not in output.content
+    sources = {record.source for record in list(output.provenance)}
     assert "AkShare / Sina CompanyFinanceService" in sources
 
 
@@ -158,10 +161,12 @@ def test_irrelevant_financial_template_columns_do_not_misclassify_manufacturer(
     )
     monkeypatch.setattr(cn_statements, "get_statement_frame", lambda *_args: None)
 
-    output = cn_statements.get_income_statement("000333.SZ", curr_date="2026-04-01", data_context=request_context())
+    output = cn_statements.get_income_statement(
+        "000333.SZ", curr_date="2026-04-01", data_context=request_context()
+    )
 
-    assert "Entity mapping: general" in output
-    assert "Net fee and commission income" not in output
+    assert "Entity mapping: general" in output.content
+    assert "Net fee and commission income" not in output.content
 
 
 @pytest.mark.unit
@@ -180,13 +185,15 @@ def test_missing_sina_fields_use_labeled_non_strict_yfinance_supplement(monkeypa
     get_yf = mock.Mock(return_value=yf)
     monkeypatch.setattr(cn_statements, "get_statement_frame", get_yf)
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
+    output = cn_statements.get_income_statement(
+        "600519.SS", curr_date="2026-04-01", data_context=request_context()
+    )
 
-    assert "Supplemental line items (yfinance)" in output
-    assert "Non-strict PIT" in output
-    assert "may contain later revisions" in output
+    assert "Supplemental line items (yfinance)" in output.content
+    assert "Non-strict PIT" in output.content
+    assert "may contain later revisions" in output.content
     get_yf.assert_called_once_with("600519.SS", "income", "quarterly", "2026-04-01")
-    assert {r.source for r in extract_provenance(output)} == {
+    assert {r.source for r in list(output.provenance)} == {
         "AkShare / Sina CompanyFinanceService",
         "yfinance statement supplement",
     }
@@ -207,17 +214,19 @@ def test_all_null_sina_column_triggers_yfinance_supplement(monkeypatch):
         lambda *_args: pd.DataFrame({"所属行业": ["制造业"]}),
     )
     get_yf = mock.Mock(
-        return_value=pd.DataFrame(
-            {pd.Timestamp("2025-12-31"): [800.0]}, index=["Gross Profit"]
-        )
+        return_value=pd.DataFrame({pd.Timestamp("2025-12-31"): [800.0]}, index=["Gross Profit"])
     )
     monkeypatch.setattr(cn_statements, "get_statement_frame", get_yf)
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
+    output = cn_statements.get_income_statement(
+        "600519.SS", curr_date="2026-04-01", data_context=request_context()
+    )
 
-    assert "Operating cost" in output
-    assert "Operating cost" in output.split("# Missing mapped fields:", 1)[1].splitlines()[0]
-    assert "Supplemental line items (yfinance)" in output
+    assert "Operating cost" in output.content
+    assert (
+        "Operating cost" in output.content.split("# Missing mapped fields:", 1)[1].splitlines()[0]
+    )
+    assert "Supplemental line items (yfinance)" in output.content
     get_yf.assert_called_once()
 
 
@@ -238,14 +247,14 @@ def test_empty_yfinance_values_still_record_supplement_provenance(monkeypatch):
     monkeypatch.setattr(
         cn_statements,
         "get_statement_frame",
-        lambda *_args: pd.DataFrame(
-            {pd.Timestamp("2025-12-31"): [pd.NA]}, index=["Gross Profit"]
-        ),
+        lambda *_args: pd.DataFrame({pd.Timestamp("2025-12-31"): [pd.NA]}, index=["Gross Profit"]),
     )
 
-    output = cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
+    output = cn_statements.get_income_statement(
+        "600519.SS", curr_date="2026-04-01", data_context=request_context()
+    )
 
-    records = extract_provenance(output)
+    records = list(output.provenance)
     supplement = next(r for r in records if r.source == "yfinance statement supplement")
     assert supplement.timing == "available; curated line items contained no values"
 
@@ -271,7 +280,9 @@ def test_no_disclosure_visible_raises_typed_no_data(monkeypatch):
         lambda *_args: ("600519.SS", _frame()),
     )
     with pytest.raises(NoMarketDataError, match="no balance reports visible") as exc_info:
-        cn_statements.get_balance_sheet("600519.SS", curr_date="2025-01-01", data_context=request_context())
+        cn_statements.get_balance_sheet(
+            "600519.SS", curr_date="2025-01-01", data_context=request_context()
+        )
     assert len(exc_info.value.availability_notes) == 1
     assert "AkShare / Sina Balance Sheet unavailable" in exc_info.value.availability_notes[0]
 
@@ -285,7 +296,9 @@ def test_sina_statement_failure_is_preserved_for_router_fallback(monkeypatch):
     )
 
     with pytest.raises(NoMarketDataError, match="primary source unavailable") as exc_info:
-        cn_statements.get_income_statement("600519.SS", curr_date="2026-04-01", data_context=request_context())
+        cn_statements.get_income_statement(
+            "600519.SS", curr_date="2026-04-01", data_context=request_context()
+        )
 
     assert len(exc_info.value.availability_notes) == 1
     assert "AkShare / Sina Income Statement unavailable" in exc_info.value.availability_notes[0]
@@ -298,7 +311,9 @@ def test_statement_rejects_invalid_date_before_vendor_request(monkeypatch):
     monkeypatch.setattr(cn_statements, "fetch_finance_records", fetch)
 
     with pytest.raises(ValueError, match="expected YYYY-MM-DD"):
-        cn_statements.get_balance_sheet("600519.SS", curr_date="not-a-date", data_context=request_context())
+        cn_statements.get_balance_sheet(
+            "600519.SS", curr_date="not-a-date", data_context=request_context()
+        )
     fetch.assert_not_called()
 
 

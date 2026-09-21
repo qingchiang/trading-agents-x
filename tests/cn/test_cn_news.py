@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from tests.data_policy import configure_data, request_context
+from tests.source_results import news_fixture
 from tradingagents.data import interface
 from tradingagents.data.cn import cn_news, google_news, news_sources
 from tradingagents.data.cn.common import AkShareSchemaError
@@ -15,8 +16,8 @@ from tradingagents.data.news_quality import (
 )
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
 from tradingagents.domain.data_quality import provenance_quality_issues
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +41,12 @@ def test_cninfo_empty_window_is_normal_empty_not_key_error(monkeypatch):
     )
     monkeypatch.setattr(news_sources, "_request_json", lambda *_args, **_kwargs: next(responses))
 
-    assert news_sources.disclosure_rows("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()) == []
+    assert (
+        news_sources.disclosure_rows(
+            "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+        )
+        == []
+    )
 
 
 @pytest.mark.unit
@@ -51,12 +57,12 @@ def test_cninfo_missing_announcements_field_is_schema_failure(monkeypatch):
             {"error": "blocked"},
         ]
     )
-    monkeypatch.setattr(
-        news_sources, "_request_json", lambda *_args, **_kwargs: next(responses)
-    )
+    monkeypatch.setattr(news_sources, "_request_json", lambda *_args, **_kwargs: next(responses))
 
     with pytest.raises(AkShareSchemaError, match="announcements"):
-        news_sources.disclosure_rows("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+        news_sources.disclosure_rows(
+            "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+        )
 
 
 @pytest.mark.unit
@@ -93,7 +99,9 @@ def test_cninfo_rechecks_exact_code_and_shanghai_date(monkeypatch):
         },
     )
 
-    rows = news_sources.disclosure_rows("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    rows = news_sources.disclosure_rows(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
     assert [row["title"] for row in rows] == ["业绩公告"]
 
@@ -119,7 +127,9 @@ def test_research_rows_drop_future_and_other_stock(monkeypatch):
         },
     )
 
-    rows = news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
+    rows = news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
     assert [row["title"] for row in rows] == ["银行研报"]
     assert rows[0]["rating_change"] == "中性 -> 买入"
@@ -132,7 +142,9 @@ def test_research_missing_data_field_is_schema_failure(monkeypatch):
     )
 
     with pytest.raises(AkShareSchemaError, match="data"):
-        news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
+        news_sources.research_rows(
+            "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+        )
 
 
 @pytest.mark.unit
@@ -147,18 +159,14 @@ def test_cninfo_short_and_wider_windows_share_one_same_cutoff_superset(monkeypat
                 {
                     "secCode": "600519",
                     "announcementTitle": "older announcement",
-                    "announcementTime": int(
-                        datetime(2025, 12, 25, tzinfo=UTC).timestamp() * 1000
-                    ),
+                    "announcementTime": int(datetime(2025, 12, 25, tzinfo=UTC).timestamp() * 1000),
                     "announcementId": "old",
                     "orgId": "org",
                 },
                 {
                     "secCode": "600519",
                     "announcementTitle": "recent announcement",
-                    "announcementTime": int(
-                        datetime(2026, 1, 5, tzinfo=UTC).timestamp() * 1000
-                    ),
+                    "announcementTime": int(datetime(2026, 1, 5, tzinfo=UTC).timestamp() * 1000),
                     "announcementId": "new",
                     "orgId": "org",
                 },
@@ -167,8 +175,12 @@ def test_cninfo_short_and_wider_windows_share_one_same_cutoff_superset(monkeypat
 
     monkeypatch.setattr(news_sources, "_request_json", request)
 
-    short = news_sources.disclosure_rows("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
-    wider = news_sources.disclosure_rows("600519.SS", "2025-12-20", "2026-01-10", data_context=request_context())
+    short = news_sources.disclosure_rows(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    wider = news_sources.disclosure_rows(
+        "600519.SS", "2025-12-20", "2026-01-10", data_context=request_context()
+    )
 
     assert [row["title"] for row in short] == ["recent announcement"]
     assert {row["title"] for row in wider} == {
@@ -202,8 +214,12 @@ def test_research_short_and_wider_windows_share_one_same_cutoff_superset(monkeyp
 
     monkeypatch.setattr(news_sources, "_request_json", request)
 
-    short = news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
-    wider = news_sources.research_rows("000001.SZ", "2025-12-20", "2026-01-10", data_context=request_context())
+    short = news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    wider = news_sources.research_rows(
+        "000001.SZ", "2025-12-20", "2026-01-10", data_context=request_context()
+    )
 
     assert [row["title"] for row in short] == ["recent report"]
     assert {row["title"] for row in wider} == {"older report", "recent report"}
@@ -221,8 +237,12 @@ def test_low_frequency_cache_never_reuses_a_later_cutoff(monkeypatch):
 
     monkeypatch.setattr(news_sources, "_request_json", request)
 
-    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
-    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-09", data_context=request_context())
+    news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-09", data_context=request_context()
+    )
 
     assert calls == ["2026-01-10", "2026-01-09"]
 
@@ -242,11 +262,19 @@ def test_low_frequency_cache_expires_and_does_not_cache_schema_failures(monkeypa
     monkeypatch.setattr(news_sources, "_request_json", request)
 
     with pytest.raises(AkShareSchemaError):
-        news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
-    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
-    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
+        news_sources.research_rows(
+            "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+        )
+    news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
     clock[0] = news_sources._FEED_CACHE_TTL_SECONDS + 1
-    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context())
+    news_sources.research_rows(
+        "000001.SZ", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
     assert calls == [0.0, 0.0, news_sources._FEED_CACHE_TTL_SECONDS + 1]
 
@@ -292,10 +320,12 @@ def test_google_news_deduplicates_and_drops_future(monkeypatch):
         ],
     )
 
-    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = google_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert result.count("### [direct]") == 1
-    assert "未来事项" not in result
+    assert result.content.count("### [direct]") == 1
+    assert "未来事项" not in result.content
 
 
 @pytest.mark.unit
@@ -305,7 +335,7 @@ def test_google_news_reports_separate_source_filter_counts(monkeypatch):
         "_company_names",
         lambda _ticker: ("贵州茅台酒股份有限公司", "贵州茅台酒股份有限公司"),
     )
-    monkeypatch.setattr(google_news, "news_quotas", lambda*, data_context: (1, 1, 1))
+    monkeypatch.setattr(google_news, "news_quotas", lambda *, data_context: (1, 1, 1))
     monkeypatch.setattr(
         google_news,
         "_fetch_items",
@@ -338,14 +368,16 @@ def test_google_news_reports_separate_source_filter_counts(monkeypatch):
         ],
     )
 
-    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = google_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert "upstream_returned=5" in result
-    assert "date_filtered=1" in result
-    assert "relevance_filtered=1" in result
-    assert "duplicates=1" in result
-    assert "source_truncated=1" in result
-    assert "candidates=1" in result
+    assert "upstream_returned=5" in result.content
+    assert "date_filtered=1" in result.content
+    assert "relevance_filtered=1" in result.content
+    assert "duplicates=1" in result.content
+    assert "source_truncated=1" in result.content
+    assert "candidates=1" in result.content
 
 
 @pytest.mark.unit
@@ -362,14 +394,16 @@ def test_google_news_queries_short_and_legal_names(monkeypatch):
         lambda query: queries.append(query) or [],
     )
 
-    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = google_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
     assert set(queries) == {
         '"贵州茅台" 600519 股票',
         '"贵州茅台酒股份有限公司" 600519 股票',
     }
-    assert "upstream_returned=0" in result
-    assert "candidates=0" in result
+    assert "upstream_returned=0" in result.content
+    assert "candidates=0" in result.content
 
 
 @pytest.mark.unit
@@ -393,10 +427,12 @@ def test_google_news_keeps_successful_name_query_when_other_fails(monkeypatch):
 
     monkeypatch.setattr(google_news, "_fetch_items", fetch)
 
-    result = google_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = google_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert "贵州茅台发布业绩" in result
-    assert "1 of 2 Google News name queries failed" in result
+    assert "贵州茅台发布业绩" in result.content
+    assert "1 of 2 Google News name queries failed" in result.content
 
 
 @pytest.mark.unit
@@ -418,7 +454,9 @@ def test_google_news_incremental_scope_stops_name_fanout_on_rate_limit(monkeypat
         stop_on_rate_limit_scope(True),
         pytest.raises(VendorRateLimitError, match="Google News 429"),
     ):
-        google_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+        google_news.get_news(
+            "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+        )
 
     assert fetch.call_count == 1
 
@@ -432,15 +470,23 @@ def test_small_total_limit_keeps_every_cn_source_eligible(monkeypatch):
 
 @pytest.mark.unit
 def test_cn_assembler_preserves_other_sources_when_one_fails(monkeypatch):
-    monkeypatch.setattr(cn_news, "_disclosure_news", lambda *_args, data_context: "## DISCLOSURES\n\n### item")
+    monkeypatch.setattr(
+        cn_news,
+        "_disclosure_news",
+        lambda *_args, data_context: news_fixture("## DISCLOSURES\n\n### item"),
+    )
     monkeypatch.setattr(cn_news, "_research_news", mock.Mock(side_effect=TimeoutError))
-    monkeypatch.setattr(cn_news, "_google_news", lambda *_args, data_context: "No media")
+    monkeypatch.setattr(
+        cn_news, "_google_news", lambda *_args, data_context: news_fixture("No media")
+    )
 
-    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = cn_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert "DISCLOSURES" in result
-    assert "<Eastmoney Research unavailable: TimeoutError>" in result
-    assert '"source":"CNINFO"' in result
+    assert "DISCLOSURES" in result.content
+    assert "<Eastmoney Research unavailable: TimeoutError>" in result.content
+    assert "CNINFO" in {record.source for record in result.provenance}
 
 
 @pytest.mark.unit
@@ -468,23 +514,25 @@ def test_cn_assembler_binds_each_rendered_source_to_a_pit_span(monkeypatch):
     monkeypatch.setattr(
         cn_news,
         "_disclosure_news",
-        lambda *_args, data_context: (
-            "## DISCLOSURES\n\n### [direct] official item\n"
-            "Disclosed: 2026-01-09 10:00 CST"
+        lambda *_args, data_context: news_fixture(
+            "## DISCLOSURES\n\n### [direct] official item\nDisclosed: 2026-01-09 10:00 CST"
         ),
     )
     monkeypatch.setattr(
         cn_news,
         "_research_news",
-        lambda *_args, data_context: (
-            "## RESEARCH\n\n### [direct] broker item\n"
-            "Published: 2026-01-08 CST"
+        lambda *_args, data_context: news_fixture(
+            "## RESEARCH\n\n### [direct] broker item\nPublished: 2026-01-08 CST"
         ),
     )
-    monkeypatch.setattr(cn_news, "_google_news", lambda *_args, data_context: "No media")
+    monkeypatch.setattr(
+        cn_news, "_google_news", lambda *_args, data_context: news_fixture("No media")
+    )
 
-    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
-    spans = [span for span in extract_evidence_spans(result) if span.content]
+    result = cn_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    spans = [span for span in result.spans if span.content]
 
     assert [span.temporal_scope for span in spans] == [
         "point_in_time",
@@ -516,13 +564,19 @@ def test_cn_assembler_promotes_partial_google_query_failure_to_provenance_warnin
     monkeypatch.setattr(
         cn_news,
         "_disclosure_news",
-        lambda *_args, data_context: "## DISCLOSURES\n\n### [direct] official item",
+        lambda *_args, data_context: news_fixture("## DISCLOSURES\n\n### [direct] official item"),
     )
-    monkeypatch.setattr(cn_news, "_research_news", lambda *_args, data_context: "No research")
-    monkeypatch.setattr(cn_news, "_google_news", lambda *_args, data_context: google_output)
+    monkeypatch.setattr(
+        cn_news, "_research_news", lambda *_args, data_context: news_fixture("No research")
+    )
+    monkeypatch.setattr(
+        cn_news, "_google_news", lambda *_args, data_context: news_fixture(google_output)
+    )
 
-    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
-    records = extract_provenance(result)
+    result = cn_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
+    records = list(result.provenance)
     google_record = next(record for record in records if record.source == "Google News China")
     issues = provenance_quality_issues(records)
 
@@ -537,32 +591,38 @@ def test_cn_assembler_promotes_partial_google_query_failure_to_provenance_warnin
 
 @pytest.mark.unit
 def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
-    monkeypatch.setattr(cn_news, "_disclosure_news", lambda *_args, data_context: "No disclosures")
-    monkeypatch.setattr(cn_news, "_research_news", lambda *_args, data_context: "No research")
+    monkeypatch.setattr(
+        cn_news, "_disclosure_news", lambda *_args, data_context: news_fixture("No disclosures")
+    )
+    monkeypatch.setattr(
+        cn_news, "_research_news", lambda *_args, data_context: news_fixture("No research")
+    )
     monkeypatch.setattr(
         cn_news,
         "_google_news",
-        lambda *_args, data_context: (
+        lambda *_args, data_context: news_fixture(
             "<Google News China partially unavailable: 1 of 2 name queries failed; "
             "successful queries returned no relevant items>"
         ),
     )
-    fallback = mock.Mock(return_value="## FALLBACK\n\n### fallback item")
+    fallback = mock.Mock(return_value=DataResult("## FALLBACK\n\n### fallback item"))
 
-    with mock.patch.dict(
-        interface.VENDOR_METHODS,
-        {"get_news": {"cn_news": cn_news.get_news, "yfinance": fallback}},
-    ), mock.patch.object(interface, "get_vendor", return_value="cn_news,yfinance"):
+    with (
+        mock.patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_news": {"cn_news": cn_news.get_news, "yfinance": fallback}},
+        ),
+        mock.patch.object(interface, "get_vendor", return_value="cn_news,yfinance"),
+    ):
         result = interface.route_to_vendor(
             "get_news",
             "600519.SS",
             "2026-01-01",
             "2026-01-10",
-            _provenance=True,
             data_context=request_context(),
         )
 
-    records = extract_provenance(result)
+    records = list(result.provenance)
     issues = provenance_quality_issues(records)
 
     assert any(
@@ -571,8 +631,7 @@ def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
         for record in records
     )
     assert any(
-        record.source == "yfinance"
-        and record.timing.startswith("fallback vendor selected;")
+        record.source == "yfinance" and record.timing.startswith("fallback vendor selected")
         for record in records
     )
     assert any(
@@ -580,8 +639,7 @@ def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
         for issue in issues
     )
     assert any(
-        issue.source == "yfinance" and issue.reason == "fallback source used"
-        for issue in issues
+        issue.source == "yfinance" and issue.reason == "fallback source used" for issue in issues
     )
 
 
@@ -590,26 +648,40 @@ def test_cn_assembler_deduplicates_normalized_titles_across_sources(monkeypatch)
     monkeypatch.setattr(
         cn_news,
         "_disclosure_news",
-        lambda *_args, data_context: "## DISCLOSURES\n\n### [direct] 公司发布业绩\nOfficial",
+        lambda *_args, data_context: news_fixture(
+            "## DISCLOSURES\n\n### [direct] 公司发布业绩\nOfficial"
+        ),
     )
     monkeypatch.setattr(
         cn_news,
         "_research_news",
-        lambda *_args, data_context: "## RESEARCH\n\n### [direct] 公司：发布业绩 (institution: Broker)\nReport",
+        lambda *_args, data_context: news_fixture(
+            "## RESEARCH\n\n### [direct] 公司：发布业绩 (institution: Broker)\nReport"
+        ),
     )
-    monkeypatch.setattr(cn_news, "_google_news", lambda *_args, data_context: "No media")
+    monkeypatch.setattr(
+        cn_news, "_google_news", lambda *_args, data_context: news_fixture("No media")
+    )
 
-    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = cn_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert result.count("### [direct]") == 1
-    assert "## RESEARCH" not in result
+    assert result.content.count("### [direct]") == 1
+    assert "## RESEARCH" not in result.content
 
 
 @pytest.mark.unit
 def test_cn_assembler_raises_for_router_fallback_only_when_all_empty(monkeypatch):
-    monkeypatch.setattr(cn_news, "_disclosure_news", lambda *_args, data_context: "No disclosures")
-    monkeypatch.setattr(cn_news, "_research_news", lambda *_args, data_context: "No research")
-    monkeypatch.setattr(cn_news, "_google_news", lambda *_args, data_context: "No media")
+    monkeypatch.setattr(
+        cn_news, "_disclosure_news", lambda *_args, data_context: news_fixture("No disclosures")
+    )
+    monkeypatch.setattr(
+        cn_news, "_research_news", lambda *_args, data_context: news_fixture("No research")
+    )
+    monkeypatch.setattr(
+        cn_news, "_google_news", lambda *_args, data_context: news_fixture("No media")
+    )
 
     with pytest.raises(NoMarketDataError):
         cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
@@ -619,15 +691,23 @@ def test_cn_assembler_raises_for_router_fallback_only_when_all_empty(monkeypatch
 def test_cn_assembler_enforces_total_limit_after_source_collection(monkeypatch):
     configure_data({"news_article_limit": 1})
     monkeypatch.setattr(
-        cn_news, "_disclosure_news", lambda *_args, data_context: "## A\n\n### [direct] A item"
+        cn_news,
+        "_disclosure_news",
+        lambda *_args, data_context: news_fixture("## A\n\n### [direct] A item"),
     )
     monkeypatch.setattr(
-        cn_news, "_research_news", lambda *_args, data_context: "## B\n\n### [direct] B item"
+        cn_news,
+        "_research_news",
+        lambda *_args, data_context: news_fixture("## B\n\n### [direct] B item"),
     )
     monkeypatch.setattr(
-        cn_news, "_google_news", lambda *_args, data_context: "## C\n\n### [candidate] C item"
+        cn_news,
+        "_google_news",
+        lambda *_args, data_context: news_fixture("## C\n\n### [candidate] C item"),
     )
 
-    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10", data_context=request_context())
+    result = cn_news.get_news(
+        "600519.SS", "2026-01-01", "2026-01-10", data_context=request_context()
+    )
 
-    assert result.count("### [") == 1
+    assert result.content.count("### [") == 1

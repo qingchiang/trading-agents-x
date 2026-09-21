@@ -18,8 +18,9 @@ owners per cell, so panel and microscope agree on any indicator.
 
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.domain.data import ProvenanceRecord
-from tradingagents.provenance import attach_provenance
+from tradingagents.domain.data_result import DataResult
 
 
 def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, str]:
@@ -34,38 +35,53 @@ def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, s
     return f"observations <= {curr_date}", "observation-date filtered"
 
 
+@source_metadata("get_macro_indicators", "macro")
 def get_macro_indicators(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult[str]:
     """Dispatch ``indicator`` to its owning macro vendor and return its report."""
     key = indicator.strip().lower()
     source_timing = None
     if key in cn_macro.CN_SERIES:
-        report = cn_macro.get_macro_report(indicator, curr_date, look_back_days, data_context=data_context)
+        report = cn_macro.get_macro_report(
+            indicator, curr_date, look_back_days, data_context=data_context
+        )
         source, result, source_timing = report.source, report.text, report.timing
     elif key in jp_macro.JP_SERIES:
-        report = jp_macro.get_macro_report(indicator, curr_date, look_back_days, data_context=data_context)
+        report = jp_macro.get_macro_report(
+            indicator, curr_date, look_back_days, data_context=data_context
+        )
         source, result, source_timing = report.source, report.text, report.timing
     elif key in estat.ESTAT_SERIES:
-        source, result = "e-Stat", estat.get_macro_data(indicator, curr_date, look_back_days, data_context=data_context)
+        source, result = (
+            "e-Stat",
+            estat.get_macro_data(indicator, curr_date, look_back_days, data_context=data_context),
+        )
     elif key in boj.BOJ_SERIES:
-        source, result = "BOJ", boj.get_macro_data(indicator, curr_date, look_back_days, data_context=data_context)
+        source, result = (
+            "BOJ",
+            boj.get_macro_data(indicator, curr_date, look_back_days, data_context=data_context),
+        )
     else:
-        source, result = "FRED", fred.get_macro_data(indicator, curr_date, look_back_days, data_context=data_context)
+        source, result = (
+            "FRED",
+            fred.get_macro_data(
+                indicator, curr_date, look_back_days, data_context=data_context
+            ).content,
+        )
     effective, timing = _provenance_status(result, source, curr_date)
     if source_timing is not None:
         timing = source_timing
-    return attach_provenance(
-        result,
+    return DataResult(result).with_provenance(
         ProvenanceRecord(
             evidence="get_macro_indicators",
             source=source,
             requested=curr_date,
             effective=effective,
             timing=timing,
-        ),
+        )
     )

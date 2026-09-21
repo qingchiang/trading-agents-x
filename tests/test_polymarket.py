@@ -14,6 +14,7 @@ import requests
 import tradingagents.configuration.defaults as default_config
 from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface, polymarket
+from tradingagents.domain.data_result import DataResult
 
 
 def _market(question, prob, *, volume, end_date, closed=False, wk=None):
@@ -35,8 +36,16 @@ _SEARCH = {
     "events": [
         {
             "markets": [
-                _market("Open big?", 0.76, volume=5_000_000, end_date="2030-12-31T00:00:00Z", wk=-0.045),
-                _market("Resolved already?", 1.0, volume=9_000_000, end_date="2030-12-31T00:00:00Z", closed=True),
+                _market(
+                    "Open big?", 0.76, volume=5_000_000, end_date="2030-12-31T00:00:00Z", wk=-0.045
+                ),
+                _market(
+                    "Resolved already?",
+                    1.0,
+                    volume=9_000_000,
+                    end_date="2030-12-31T00:00:00Z",
+                    closed=True,
+                ),
                 _market("Past event?", 0.5, volume=8_000_000, end_date="2020-01-01T00:00:00Z"),
                 _market("Open small?", 0.30, volume=1_000, end_date="2030-06-30T00:00:00Z"),
             ]
@@ -49,45 +58,57 @@ _SEARCH = {
 class PolymarketFilterTests(unittest.TestCase):
     def test_closed_and_past_markets_are_excluded(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
-        self.assertIn("Open big?", out)
-        self.assertIn("Open small?", out)
-        self.assertNotIn("Resolved already?", out)  # closed
-        self.assertNotIn("Past event?", out)         # endDate in the past
+            out = polymarket.get_prediction_markets(
+                "anything", limit=10, data_context=request_context()
+            )
+        self.assertIn("Open big?", out.content)
+        self.assertIn("Open small?", out.content)
+        self.assertNotIn("Resolved already?", out.content)  # closed
+        self.assertNotIn("Past event?", out.content)  # endDate in the past
 
     def test_ranked_by_volume(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
-        self.assertLess(out.index("Open big?"), out.index("Open small?"))
+            out = polymarket.get_prediction_markets(
+                "anything", limit=10, data_context=request_context()
+            )
+        self.assertLess(out.content.index("Open big?"), out.content.index("Open small?"))
 
     def test_limit_caps_results(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=1, data_context=request_context())
-        self.assertIn("Open big?", out)
-        self.assertNotIn("Open small?", out)
+            out = polymarket.get_prediction_markets(
+                "anything", limit=1, data_context=request_context()
+            )
+        self.assertIn("Open big?", out.content)
+        self.assertNotIn("Open small?", out.content)
 
 
 @pytest.mark.unit
 class PolymarketFormatTests(unittest.TestCase):
     def test_probability_volume_and_weekly_change_render(self):
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
-        self.assertIn("Yes 76%", out)
-        self.assertIn("$5,000,000 volume", out)
-        self.assertIn("resolves 2030-12-31", out)
-        self.assertIn("1-week -4.5pp", out)  # -0.045 -> -4.5pp
+            out = polymarket.get_prediction_markets(
+                "anything", limit=10, data_context=request_context()
+            )
+        self.assertIn("Yes 76%", out.content)
+        self.assertIn("$5,000,000 volume", out.content)
+        self.assertIn("resolves 2030-12-31", out.content)
+        self.assertIn("1-week -4.5pp", out.content)  # -0.045 -> -4.5pp
 
     def test_weekly_change_omitted_when_absent(self):
         # "Open small?" has wk=None -> no 1-week clause on its line.
         with mock.patch.object(polymarket, "_request", return_value=_SEARCH):
-            out = polymarket.get_prediction_markets("anything", limit=10, data_context=request_context())
-        small_line = next(ln for ln in out.splitlines() if "Open small?" in ln)
+            out = polymarket.get_prediction_markets(
+                "anything", limit=10, data_context=request_context()
+            )
+        small_line = next(ln for ln in out.content.splitlines() if "Open small?" in ln)
         self.assertNotIn("1-week", small_line)
 
     def test_no_matches_reports_clearly(self):
         with mock.patch.object(polymarket, "_request", return_value={"events": []}):
-            out = polymarket.get_prediction_markets("obscure ticker", limit=6, data_context=request_context())
-        self.assertIn("No open prediction markets", out)
+            out = polymarket.get_prediction_markets(
+                "obscure ticker", limit=6, data_context=request_context()
+            )
+        self.assertIn("No open prediction markets", out.content)
 
 
 @pytest.mark.unit
@@ -98,8 +119,8 @@ class PolymarketResilienceTests(unittest.TestCase):
             polymarket, "_request", side_effect=requests.RequestException("boom")
         ):
             out = polymarket.get_prediction_markets("Fed rate cut", data_context=request_context())
-        self.assertIn("unavailable", out.lower())
-        self.assertIn("Fed rate cut", out)
+        self.assertIn("unavailable", out.content.lower())
+        self.assertIn("Fed rate cut", out.content)
 
 
 @pytest.mark.unit
@@ -118,11 +139,13 @@ class PolymarketRoutingTests(unittest.TestCase):
         configure_data({"data_vendors": {"prediction_markets": "polymarket"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_prediction_markets": {"polymarket": lambda *a, **k: "POLY_OK"}},
+            {"get_prediction_markets": {"polymarket": lambda *a, **k: DataResult("POLY_OK")}},
             clear=False,
         ):
-            out = interface.route_to_vendor("get_prediction_markets", "fed", 5, data_context=request_context())
-        self.assertEqual(out, "POLY_OK")
+            out = interface.route_to_vendor(
+                "get_prediction_markets", "fed", 5, data_context=request_context()
+            )
+        self.assertEqual(out.content, "POLY_OK")
 
 
 if __name__ == "__main__":

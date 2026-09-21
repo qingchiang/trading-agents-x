@@ -22,7 +22,6 @@ def get_stock_data(
         symbol,
         start_date,
         cutoff,
-        _provenance=True,
         data_context=runtime.context.data_context,
     )
     return build_market_data_artifact(

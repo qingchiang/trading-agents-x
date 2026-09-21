@@ -11,9 +11,9 @@ from langgraph.prebuilt import ToolNode
 
 from tests.data_policy import request_context
 from tradingagents.data.context import DataRequestContext
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence.configuration import ConfigurationStore
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.tools.core_stock_tools import get_stock_data
 from tradingagents.research.tools.macro_data_tools import get_macro_indicators
@@ -86,16 +86,14 @@ def test_market_and_news_tool_schemas_hide_workflow_dates():
         properties = analysis_tool.tool_call_schema.model_json_schema()["properties"]
         assert "curr_date" not in properties
         assert "end_date" not in properties
-    assert set(
-        get_news.tool_call_schema.model_json_schema()["properties"]
-    ) == {"ticker", "window"}
+    assert set(get_news.tool_call_schema.model_json_schema()["properties"]) == {"ticker", "window"}
 
 
 @pytest.mark.unit
 def test_market_tool_node_injects_trade_date_as_end_date():
     with mock.patch(
         "tradingagents.research.tools.core_stock_tools.route_to_vendor",
-        return_value="SAFE",
+        return_value=DataResult("SAFE"),
     ) as router:
         result = _invoke_tool(
             get_stock_data,
@@ -107,7 +105,6 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         "NVDA",
         "2019-12-01",
         "2020-01-15",
-        _provenance=True,
         data_context=request_context(),
     )
     message = result["messages"][0]
@@ -124,7 +121,9 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         ticker="NVDA",
         analysis_date="2020-01-15",
     )
-    settings = ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1]
+    settings = ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[
+        1
+    ]
     context = RunContext(
         run_id="typed-tool-runtime",
         request=request,
@@ -137,7 +136,7 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
     with (
         mock.patch(
             "tradingagents.research.tools.core_stock_tools.route_to_vendor",
-            return_value="SAFE",
+            return_value=DataResult("SAFE"),
         ) as router,
         warnings.catch_warnings(record=True) as caught,
     ):
@@ -153,7 +152,6 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         "NVDA",
         "2019-12-01",
         "2020-01-15",
-        _provenance=True,
         data_context=context.data_context,
     )
     message = result["messages"][0]
@@ -172,7 +170,7 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
     with (
         mock.patch(
             "tradingagents.research.tools.news_data_tools.route_to_vendor",
-            return_value="SAFE",
+            return_value=DataResult("SAFE"),
         ) as router,
     ):
         _invoke_tool(get_news, {"ticker": "9984.T"})
@@ -182,7 +180,6 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
         "9984.T",
         "2020-01-01",
         "2020-01-15",
-        _provenance=True,
         data_context=request_context(),
     )
 
@@ -191,7 +188,7 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
 def test_news_tool_node_supports_bounded_extended_window():
     with mock.patch(
         "tradingagents.research.tools.news_data_tools.route_to_vendor",
-        return_value="SAFE",
+        return_value=DataResult("SAFE"),
     ) as router:
         _invoke_tool(
             get_news,
@@ -203,7 +200,6 @@ def test_news_tool_node_supports_bounded_extended_window():
         "9984.T",
         "2019-10-18",
         "2020-01-15",
-        _provenance=True,
         data_context=request_context(),
     )
 
@@ -216,13 +212,14 @@ def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
     with (
         mock.patch(
             "tradingagents.research.tools.news_data_tools.route_to_vendor",
-            return_value="SAFE",
+            return_value=DataResult("SAFE"),
         ) as router,
     ):
         _invoke_tool(get_news, {"ticker": "9984.T"}, config=config)
         _invoke_tool(
             get_news,
-            {"ticker": "9984.T", "window": "extended"}, config=config,
+            {"ticker": "9984.T", "window": "extended"},
+            config=config,
         )
 
     expected = mock.call(
@@ -230,7 +227,6 @@ def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
         "9984.T",
         "2019-09-17",
         "2020-01-15",
-        _provenance=True,
         data_context=DataRequestContext(config),
     )
     assert router.call_args_list == [expected, expected]
@@ -245,7 +241,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
 
     def live_result(*_args, data_context):
         assert not clock.now.called
-        return "LIVE"
+        return DataResult("LIVE")
 
     router = mock.Mock(side_effect=live_result)
     monkeypatch.setattr(
@@ -274,10 +270,12 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
         {"topic": "Fed rate cut", "limit": 3},
         trade_date="2026-07-17",
     )
-    router.assert_called_once_with("get_prediction_markets", "Fed rate cut", 3, data_context=request_context())
+    router.assert_called_once_with(
+        "get_prediction_markets", "Fed rate cut", 3, data_context=request_context()
+    )
     content = live["messages"][0].content
-    assert strip_provenance_markers(content) == "LIVE"
-    record = extract_provenance(content)[0]
+    assert content == "LIVE"
+    record = DataResult.load(live["messages"][0].artifact["data_result"]).provenance[0]
     assert record.source == "Polymarket"
     assert record.requested == "2026-07-17"
     assert record.timing == "live non-point-in-time"

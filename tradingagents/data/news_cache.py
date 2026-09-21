@@ -10,8 +10,10 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from tradingagents.data.news_selection import NewsCandidate, render_candidate, split_candidates
+from tradingagents.data.news_selection import news_result
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
 from tradingagents.domain.instruments import market_timezone
+from tradingagents.domain.news import NewsCandidate
 
 
 def _hash(value):
@@ -37,7 +39,7 @@ def _connect(config):
 def _eligible(rows, start, end):
     # Keep the newest version visible to this request; never backdate revisions.
     latest = {}
-    for payload, in rows:
+    for (payload,) in rows:
         row = NewsCandidate(**json.loads(payload))
         if row.day is None or not start <= row.day.isoformat() <= end:
             continue
@@ -73,11 +75,19 @@ def fetch_news_feed(
     calendar_timezone = UTC if global_feed else market_timezone(scope_key)
     # Only non-secret selection/routing settings participate; credentials are
     # neither persisted nor logged. A disabled source is never invoked here.
-    settings = {k: config.get(k) for k in (
-        "data_vendors", "data_vendors_by_market", "tool_vendors", "global_news_queries",
-        "global_news_query_limit", "global_news_candidate_limit", "news_selection_version",
-    )}
-    scope_parts = [source, scope_key, settings]
+    settings = {
+        k: config.get(k)
+        for k in (
+            "data_vendors",
+            "data_vendors_by_market",
+            "tool_vendors",
+            "global_news_queries",
+            "global_news_query_limit",
+            "global_news_candidate_limit",
+            "news_selection_version",
+        )
+    }
+    scope_parts = ["typed-source-result-v1", source, scope_key, settings]
     if global_feed:
         scope_parts.insert(2, "utc_global")
     scope = _hash(scope_parts)
@@ -93,16 +103,20 @@ def fetch_news_feed(
         ).fetchone()
         failure = None
         fresh = []
+        diagnostics = ()
         retrieved = current
         if receipt and 0 <= current.timestamp() - receipt[0] < interval:
-            header = receipt[1]
+            saved = json.loads(receipt[1])
+            header = saved["text"]
+            diagnostics = tuple(DataDiagnostic(**issue) for issue in saved["diagnostics"])
         else:
             try:
                 fetched = fetch()
                 retrieved = current if now else datetime.now(UTC)
-                if fetched.startswith(("Error", "<")):
+                diagnostics = fetched.diagnostics
+                if any(issue.code == "source_unavailable" for issue in diagnostics):
                     failure = "source returned unavailable"
-                header, fresh = split_candidates(fetched, source)
+                header, fresh = fetched.news_header or fetched.content, list(fetched.news)
                 normalized = []
                 for row in fresh:
                     try:
@@ -112,8 +126,11 @@ def fetch_news_feed(
                         stamp = datetime.fromisoformat(clean_date.replace("Z", "+00:00"))
                         if stamp.tzinfo is None:
                             stamp = stamp.replace(tzinfo=calendar_timezone)
-                        row = replace(row, published=stamp.isoformat(),
-                                      market_day=stamp.astimezone(calendar_timezone).date().isoformat())
+                        row = replace(
+                            row,
+                            published=stamp.isoformat(),
+                            market_day=stamp.astimezone(calendar_timezone).date().isoformat(),
+                        )
                     except (ValueError, TypeError, AttributeError):
                         pass
                     normalized.append(row)
@@ -136,17 +153,32 @@ def fetch_news_feed(
                         ).fetchone()
                         if existing:
                             previous = NewsCandidate(**json.loads(existing[1]))
-                            if version == _hash([previous.title, previous.content, previous.published]):
+                            if version == _hash(
+                                [previous.title, previous.content, previous.published]
+                            ):
                                 continue
                             # A -> B -> A is a newly observed revision, not a
                             # cache hit on A's original historical occurrence.
                             version = _hash([version, existing[0]])
                         revision = existing is not None
-                        row = replace(row, retrieved_at=retrieved.isoformat(), revision=revision,
-                                      market_day=retrieved.astimezone(calendar_timezone).date().isoformat() if revision else row.market_day)
+                        row = replace(
+                            row,
+                            retrieved_at=retrieved.isoformat(),
+                            revision=revision,
+                            market_day=retrieved.astimezone(calendar_timezone).date().isoformat()
+                            if revision
+                            else row.market_day,
+                        )
                         connection.execute(
                             "INSERT OR IGNORE INTO articles VALUES (?,?,?,?,?,?)",
-                            (scope, item, version, row.day.isoformat(), retrieved.timestamp(), json.dumps(asdict(row))),
+                            (
+                                scope,
+                                item,
+                                version,
+                                row.day.isoformat(),
+                                retrieved.timestamp(),
+                                json.dumps(asdict(row)),
+                            ),
                         )
                     connection.execute("DELETE FROM articles WHERE published < ?", (oldest,))
                     connection.execute(
@@ -157,16 +189,39 @@ def fetch_news_feed(
                         "DELETE FROM articles WHERE rowid IN (SELECT rowid FROM articles ORDER BY retrieved DESC LIMIT -1 OFFSET ?)",
                         (max(1, int(config.get("news_cache_total_limit", 50000))),),
                     )
-                    connection.execute("DELETE FROM refreshes WHERE fetched < ?", (current.timestamp() - interval,))
+                    connection.execute(
+                        "DELETE FROM refreshes WHERE fetched < ?", (current.timestamp() - interval,)
+                    )
                     if all(row.day is not None for row in fresh):
-                        connection.execute("INSERT OR REPLACE INTO refreshes VALUES (?,?,?,?)", (scope, signature, current.timestamp(), header))
+                        connection.execute(
+                            "INSERT OR REPLACE INTO refreshes VALUES (?,?,?,?)",
+                            (
+                                scope,
+                                signature,
+                                current.timestamp(),
+                                json.dumps(
+                                    {
+                                        "text": header,
+                                        "diagnostics": [asdict(issue) for issue in diagnostics],
+                                    }
+                                ),
+                            ),
+                        )
                     else:
                         # Undated live items are not persisted as dated history;
                         # do not certify a hot refresh that would lose them.
-                        connection.execute("DELETE FROM refreshes WHERE scope=? AND signature=?", (scope, signature))
-        rows = _eligible(connection.execute(
-            "SELECT payload FROM articles WHERE scope=? AND published>=? ORDER BY retrieved", (scope, oldest)
-        ).fetchall(), start, end)
+                        connection.execute(
+                            "DELETE FROM refreshes WHERE scope=? AND signature=?",
+                            (scope, signature),
+                        )
+        rows = _eligible(
+            connection.execute(
+                "SELECT payload FROM articles WHERE scope=? AND published>=? ORDER BY retrieved",
+                (scope, oldest),
+            ).fetchall(),
+            start,
+            end,
+        )
         if failure and not rows:
             if fetched is not None:
                 return fetched
@@ -176,15 +231,25 @@ def fetch_news_feed(
         rows = [replace(row, refresh_failure=failure) for row in rows]
         rows.extend(replace(r, retrieved_at=retrieved.isoformat()) for r in fresh if r.day is None)
         if not rows:
-            return fetched if fetched is not None else header
+            return (
+                fetched
+                if fetched is not None
+                else DataResult(header, news_header=header, diagnostics=diagnostics)
+            )
         if not header.startswith("## "):
             header = f"## {source} news for {scope_key}"
         fresh_keys = {r.record_id or r.link or r.title for r in fresh}
         added = sum((r.record_id or r.link or r.title) not in fresh_keys for r in rows)
-        status = "refresh failed: " + failure if failure else ("refresh reused" if not fresh and receipt else "refreshed")
-        note = (f"Source cache: {status}; cached_candidates={len(rows)}; cache_added={added}. "
-                "Accumulated observed material only; interval completeness is unknown.")
-        return header + "\n\n" + note + "\n\n" + "\n\n".join(render_candidate(r) for r in rows)
+        status = (
+            "refresh failed: " + failure
+            if failure
+            else ("refresh reused" if not fresh and receipt else "refreshed")
+        )
+        note = (
+            f"Source cache: {status}; cached_candidates={len(rows)}; cache_added={added}. "
+            "Accumulated observed material only; interval completeness is unknown."
+        )
+        return news_result(header + "\n\n" + note, rows, diagnostics=diagnostics)
     except (sqlite3.Error, OSError, ValueError, TypeError, KeyError):
         if attempted_error is not None:
             raise attempted_error from None

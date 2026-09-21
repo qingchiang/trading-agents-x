@@ -13,6 +13,7 @@ from tradingagents.domain.data import (
     TemporalScopeName,
 )
 from tradingagents.domain.data_quality import temporal_scope_from_records
+from tradingagents.domain.news import NewsCandidate
 
 
 class StructuredNumericFact(TypedDict):
@@ -34,15 +35,17 @@ class DataDiagnostic:
 
 
 @dataclass(frozen=True)
-class DataResult:
+class DataResult[T]:
     """Source content and audit metadata travel together without text encoding."""
 
-    content: str
+    content: T
     observations: tuple[SourceObservation, ...] = ()
     provenance: tuple[ProvenanceRecord, ...] = ()
     diagnostics: tuple[DataDiagnostic, ...] = ()
     spans: tuple[EvidenceSpan, ...] = ()
     numeric_facts: tuple[StructuredNumericFact, ...] = ()
+    news: tuple[NewsCandidate, ...] = ()
+    news_header: str | None = None
 
     def with_scope(self, scope: TemporalScopeName) -> DataResult:
         return replace(self, spans=(EvidenceSpan(self.content or None, self.provenance, scope),))
@@ -73,6 +76,7 @@ class DataResult:
                 )
             ),
             numeric_facts=tuple(fact for part in parts for fact in part.numeric_facts),
+            news=tuple(row for part in parts for row in part.news),
         )
 
     def dump(self) -> dict[str, Any]:
@@ -83,6 +87,8 @@ class DataResult:
             "diagnostics": [asdict(issue) for issue in self.diagnostics],
             "spans": [asdict(span) for span in self.spans],
             "numeric_facts": list(self.numeric_facts),
+            "news": [asdict(row) for row in self.news],
+            "news_header": self.news_header,
         }
 
     @classmethod
@@ -101,4 +107,6 @@ class DataResult:
                 for span in payload["spans"]
             ),
             numeric_facts=tuple(payload["numeric_facts"]),
+            news=tuple(NewsCandidate(**row) for row in payload["news"]),
+            news_header=payload["news_header"],
         )

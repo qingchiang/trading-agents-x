@@ -49,18 +49,11 @@ from tradingagents.domain.performance import (
     MarketSeriesResult,
 )
 from tradingagents.domain.vendor_errors import VendorRateLimitError
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 _NEW_YORK = ZoneInfo("America/New_York")
 _BENCHMARKS = (("S&P 500", "^GSPC"), ("Nasdaq 100", "^NDX"))
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
 DEFAULT_STOCKTWITS_FETCH = _default_stocktwits_fetch
-_NEWS_ENTRY = re.compile(
-    r"^### \[[^]]+\] (?P<title>.+?) \(source: .*?\)\n"
-    r"(?:Published: (?P<published>[^\n]+)\n)?"
-    r"(?P<body>.*?)(?=^### \[|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
 
 
 class _Unavailable(ValueError):
@@ -176,7 +169,6 @@ def _collect_market(
             instrument,
             _expanded_market_start(request.baseline_analysis_cutoff).isoformat(),
             request.analysis_cutoff.isoformat(),
-            _provenance=True,
             _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
@@ -256,7 +248,6 @@ def _collect_benchmark(
             symbol,
             _expanded_market_start(request.baseline_analysis_cutoff).isoformat(),
             request.analysis_cutoff.isoformat(),
-            _provenance=True,
             _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
@@ -276,83 +267,10 @@ def _collect_benchmark(
         )
 
 
-def _collect_news(
-    request: IncrementalCollectionRequest,
-    *,
-    route_to_vendor: Callable[..., object],
-    now: Callable[[], datetime],
-) -> tuple[CollectionDomainResult, tuple[IncrementalEvidenceCandidate, ...]]:
+def _collect_news(request, *, route_to_vendor, now):
     try:
-        response, structured = collect_news_observations(request, route_to_vendor, now)
-        if structured is not None:
-            return structured
-        source, body = _routed_text(response, now=now)
-
-        if _is_failure_response(body):
-            return _unavailable_domain("news", "news_retrieval_failed", source=source), ()
-        if _is_empty_response(body):
-            return _bounded_empty("news", source), ()
-        candidates = []
-        observed = []
-        for match in _NEWS_ENTRY.finditer(body):
-            published = match.group("published")
-            if published is None:
-                continue
-            available_at, published_on = _parse_news_publication(published)
-            if available_at is not None:
-                if not request.window_start < available_at <= request.window_end:
-                    continue
-            elif (
-                not request.baseline_analysis_cutoff < published_on <= request.analysis_cutoff
-                or (
-                    published_on == request.analysis_cutoff
-                    and _market_day_end(published_on) > request.window_end
-                )
-            ):
-                continue
-            content = f"{match.group('title').strip()}\n{match.group('body').strip()}".strip()
-            item = EvidenceItem.create(
-                source=source.source,
-                evidence_type="news_article",
-                requested_date=request.analysis_cutoff,
-                effective_date=published_on,
-                available_at=available_at,
-                content=content,
-                fallback=source.fallback,
-                origins=(_pit_origin(source, "news_article", published_on),),
-            )
-            candidates.append(
-                IncrementalEvidenceCandidate(
-                    evidence=item,
-                    available_on=published_on if available_at is None else None,
-                )
-            )
-            observed.append(available_at or _market_day_end(published_on))
-        if not candidates:
-            return (
-                CollectionDomainResult(
-                    domain="news",
-                    state=CollectionResultState.EMPTY,
-                    sources=(source,),
-                    diagnostic=CollectionDiagnostic(code="no_reliably_dated_news_records"),
-                ),
-                (),
-            )
-        return (
-            CollectionDomainResult(
-                domain="news",
-                state=CollectionResultState.PARTIAL,
-                sources=(source,),
-                observed_from=min(observed),
-                observed_through=max(observed),
-                temporal_bases=(CollectionTemporalBasis.PIT,),
-                evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
-                diagnostic=CollectionDiagnostic(code="bounded_news_feed"),
-            ),
-            tuple(candidates),
-        )
-    except _Unavailable as exc:
-        return _unavailable_domain("news", exc.code), ()
+        _response, collected = collect_news_observations(request, route_to_vendor, now)
+        return collected
     except VendorRateLimitError:
         raise
     except Exception:
@@ -370,7 +288,6 @@ def _collect_fundamentals(
             "get_fundamentals",
             request.instrument,
             request.analysis_cutoff.isoformat(),
-            _provenance=True,
             _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
@@ -468,22 +385,26 @@ def _routed_text(
     *,
     now: Callable[[], datetime],
 ) -> tuple[CollectionSourceProvenance, str]:
-    if not isinstance(response, str):
+    if not isinstance(response.content, str):
         raise _Unavailable("non_text_routed_response")
-    if response.startswith(("NO_DATA_AVAILABLE:", "DATA_UNAVAILABLE:", "LIVE_DATA_UNAVAILABLE:")):
+    if response.content.startswith(
+        ("NO_DATA_AVAILABLE:", "DATA_UNAVAILABLE:", "LIVE_DATA_UNAVAILABLE:")
+    ):
         raise _Unavailable("routed_source_unavailable")
-    records = extract_provenance(response)
+    records = response.provenance
     if len(records) != 1:
         raise _Unavailable("missing_actual_source_provenance")
     record = records[0]
-    retrieved_at = _parse_retrieved_at(record.retrieved_at) if record.retrieved_at else _aware_now(now)
+    retrieved_at = (
+        _parse_retrieved_at(record.retrieved_at) if record.retrieved_at else _aware_now(now)
+    )
     return (
         CollectionSourceProvenance(
             source=record.source,
             fallback="fallback vendor selected" in record.timing.casefold(),
             retrieved_at=retrieved_at,
         ),
-        strip_provenance_markers(response).strip(),
+        response.content.strip(),
     )
 
 
@@ -511,11 +432,7 @@ def _market_series(
             session = date.fromisoformat(str(row["Date"]).strip())
             raw_value = row.get("Close") or row.get("Adj Close")
             value = float(raw_value) if raw_value is not None else math.nan
-            if (
-                not math.isfinite(value)
-                or value <= 0
-                or not _is_nyse_session(session)
-            ):
+            if not math.isfinite(value) or value <= 0 or not _is_nyse_session(session):
                 omitted = True
                 continue
             completed_at = _market_close_at(session)
@@ -607,31 +524,6 @@ def _unavailable_domain(
 def _is_empty_response(body: str) -> bool:
     lowered = body.strip().casefold()
     return not lowered or lowered.startswith(("no ", "<no stocktwits messages"))
-
-
-def _is_failure_response(body: str) -> bool:
-    """Recognize adapter failure prose before it can masquerade as an empty feed."""
-    lowered = body.strip().casefold()
-    return lowered.startswith((
-        "error fetching news",
-        "error retrieving news",
-        "error getting news",
-    ))
-
-
-def _parse_news_publication(value: str) -> tuple[datetime | None, date]:
-    """Keep provider timestamps exact; date-only fixtures remain conservative."""
-    rendered = value.strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", rendered):
-        return None, date.fromisoformat(rendered)
-    try:
-        published = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise _Unavailable("invalid_news_publication_time") from exc
-    if published.tzinfo is None or published.utcoffset() is None:
-        raise _Unavailable("invalid_news_publication_time")
-    published = published.astimezone(UTC)
-    return published, published.astimezone(_NEW_YORK).date()
 
 
 def _expanded_market_start(baseline: date) -> date:

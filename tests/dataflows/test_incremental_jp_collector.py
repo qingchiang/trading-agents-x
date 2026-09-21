@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from tests.data_policy import configure_data, request_context
+from tests.source_results import news_fixture, news_source, replace_content, source_route
 from tradingagents.data import interface
 from tradingagents.data.incremental_jp import collect_japan_incremental
 from tradingagents.data.jp import edinet_news, jp_news
@@ -14,7 +15,6 @@ from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.performance import PerformanceComponentStatus
 from tradingagents.domain.vendor_errors import NoMarketDataError
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,
@@ -25,9 +25,19 @@ from tradingagents.research.incremental.collection import (
 
 @pytest.fixture(autouse=True)
 def _isolate_shared_background(monkeypatch):
-    from tradingagents.data import incremental_inputs
+    from tradingagents.data import incremental_inputs, news_cache, source_observations
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult(""))
+    class ProducerClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 7, 24, 15, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr(news_cache, "datetime", ProducerClock)
+    monkeypatch.setattr(source_observations, "datetime", ProducerClock)
+
+    monkeypatch.setattr(
+        incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult("")
+    )
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
 
 
@@ -53,16 +63,9 @@ def _request(
 
 
 def _jquants_market_response() -> str:
-    return attach_provenance(
-        """# Stock data for 7203.T from 2026-07-13 to 2026-07-24
-# Price adjustment: J-Quants split/dividend-adjusted close (AdjC; raw fallback unavailable for Incremental Performance)
-
-Date,Open,High,Low,Close,Volume
-2026-07-17,99,101,98,100,1000
-2026-07-21,100,102,99,101,1000
-2026-07-22,102,104,101,103,1000
-2026-07-24,109,111,108,110,1000
-""",
+    return DataResult(
+        "# Stock data for 7203.T from 2026-07-13 to 2026-07-24\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC; raw fallback unavailable for Incremental Performance)\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-21,100,102,99,101,1000\n2026-07-22,102,104,101,103,1000\n2026-07-24,109,111,108,110,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="jquants",
@@ -70,12 +73,16 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="market-date filtered",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
 
 
 def _pit_span(content: str, record: ProvenanceRecord) -> str:
-    return attach_evidence_span(attach_provenance(content, record), temporal_scope="point_in_time")
+    return (
+        news_source(content, record)
+        if record.evidence == "get_news"
+        else DataResult(content).with_provenance(record)
+    ).with_scope("point_in_time")
 
 
 def test_japan_collector_uses_adjusted_jquants_series_and_completed_tse_sessions() -> None:
@@ -99,18 +106,20 @@ def test_japan_collector_uses_adjusted_jquants_series_and_completed_tse_sessions
         candidate.evidence.ref for candidate in collected.evidence
     )
     assert [candidate.evidence.evidence_type for candidate in collected.evidence] == [
-        "adjusted_close", "market_interval",
+        "adjusted_close",
+        "market_interval",
     ]
 
 
 def test_japan_collector_omits_non_tse_rows_without_losing_the_adjusted_series() -> None:
-    response = _jquants_market_response().replace(
+    response = replace_content(
+        _jquants_market_response(),
         "2026-07-21,100,102,99,101,1000\n",
         "2026-07-20,100,102,99,101,1000\n2026-07-21,100,102,99,101,1000\n",
     )
     collected = collect_japan_incremental(
         _request(),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -140,15 +149,9 @@ def test_japan_collector_requests_baseline_completed_tse_session_after_golden_we
             "data_vendors_by_market": {".T": {"core_stock_apis": "jquants,yfinance"}}
         },
     )
-    response = attach_provenance(
-        """# Stock data for 7203.T from 2019-04-26 to 2019-05-08
-# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)
-
-Date,Open,High,Low,Close,Volume
-2019-04-26,99,101,98,100,1000
-2019-05-07,100,102,99,101,1000
-2019-05-08,102,104,101,103,1000
-""",
+    response = DataResult(
+        "# Stock data for 7203.T from 2019-04-26 to 2019-05-08\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2019-04-26,99,101,98,100,1000\n2019-05-07,100,102,99,101,1000\n2019-05-08,102,104,101,103,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="jquants",
@@ -156,7 +159,7 @@ Date,Open,High,Low,Close,Volume
             effective="2019-04-26 to 2019-05-08",
             timing="market-date filtered",
             retrieved_at="2019-05-08T15:00:00Z",
-        ),
+        )
     )
     calls = []
 
@@ -185,15 +188,9 @@ def test_japan_collector_uses_baseline_information_cutoff_before_tse_close() -> 
             "window_end": datetime(2026, 7, 28, 15, tzinfo=UTC),
         }
     )
-    response = attach_provenance(
-        """# Stock data for 7203.T from 2026-07-23 to 2026-07-28
-# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)
-
-Date,Open,High,Low,Close,Volume
-2026-07-23,99,101,98,100,1000
-2026-07-27,100,102,99,101,1000
-2026-07-28,102,104,101,103,1000
-""",
+    response = DataResult(
+        "# Stock data for 7203.T from 2026-07-23 to 2026-07-28\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2026-07-23,99,101,98,100,1000\n2026-07-27,100,102,99,101,1000\n2026-07-28,102,104,101,103,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="jquants",
@@ -201,7 +198,7 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-23 to 2026-07-28",
             timing="market-date filtered",
             retrieved_at="2026-07-29T15:00:00Z",
-        ),
+        )
     )
     calls = []
 
@@ -223,24 +220,24 @@ Date,Open,High,Low,Close,Volume
 
 
 def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
-    response = attach_provenance(
+    response = DataResult(
         _jquants_market_response()
-        .split("\n", 1)[1]
-        .replace(
+        .content.replace(
             "J-Quants split/dividend-adjusted close (AdjC; raw fallback unavailable for Incremental Performance)",
             "auto-adjusted prices (yfinance auto_adjust=True)",
         )
-        .replace('source="jquants"', 'source="yfinance"'),
+        .replace('source="jquants"', 'source="yfinance"')
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
             timing="fallback vendor selected; market-date filtered",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
     collected = collect_japan_incremental(
         _request(),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -267,16 +264,22 @@ def test_japan_collector_admits_disclosure_correction_by_publication_time() -> N
             side_effect=lambda day, *, data_context: [document] if day == "2026-07-22" else [],
         ),
         mock.patch.object(jp_news, "_edinet_news", edinet_news.get_news),
-        mock.patch.object(jp_news, "_tdnet_news", return_value="No TDnet disclosures found"),
-        mock.patch.object(jp_news, "_google_news", return_value="No Google News found"),
+        mock.patch.object(
+            jp_news, "_tdnet_news", return_value=news_fixture("No TDnet disclosures found")
+        ),
+        mock.patch.object(
+            jp_news, "_google_news", return_value=news_fixture("No Google News found")
+        ),
     ):
-        response = jp_news.get_news("7203.T", "2026-07-20", "2026-07-24", data_context=request_context())
-    assert "Financial period: 2025-04-01 to 2026-03-31" in response
-    assert "Effective period: 2026-03-31" in response
+        response = jp_news.get_news(
+            "7203.T", "2026-07-20", "2026-07-24", data_context=request_context()
+        )
+    assert "Financial period: 2025-04-01 to 2026-03-31" in response.content
+    assert "Effective period: 2026-03-31" in response.content
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -296,36 +299,38 @@ def test_japan_collector_admits_naive_edinet_publication_with_other_assembler_fe
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args, data_context: """## EDINET
+        lambda *_args, data_context: news_fixture("""## EDINET
 
 ### Statutory correction (filer: Toyota)
 Submitted: 2026-07-22 10:00
 Effective period: 2026-03-31
-""",
+"""),
     )
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args, data_context: """## TDnet
+        lambda *_args, data_context: news_fixture("""## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
-""",
+"""),
     )
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args, data_context: """## Google News
+        lambda *_args, data_context: news_fixture("""## Google News
 
 ### Media coverage
 Published: 2026-07-22T03:00:00Z
-""",
+"""),
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
+    response = jp_news.get_news(
+        "7203.T", "2026-07-17", "2026-07-24", data_context=request_context()
+    )
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -341,7 +346,7 @@ Published: 2026-07-22T03:00:00Z
 
 
 def test_japan_collector_keeps_actual_edinet_and_tdnet_provenance_without_empty_subfeeds() -> None:
-    response = "\n\n".join(
+    response = DataResult.combine(
         (
             _pit_span(
                 """## 7203.T disclosures
@@ -373,7 +378,7 @@ Disclosed: 2026-07-22 10:00 JST
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -384,7 +389,7 @@ Disclosed: 2026-07-22 10:00 JST
 
 
 def test_japan_collector_parses_tdnet_pdf_suffix_without_losing_other_assembler_sources() -> None:
-    response = "\n\n".join(
+    response = DataResult.combine(
         (
             _pit_span(
                 """## 7203.T disclosures
@@ -416,24 +421,21 @@ Disclosed: 2026-07-22 10:00 JST · PDF: https://www.release.tdnet.info/inbs/exam
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
 
     domain = collected.collection_summary.domains[0]
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_japanese_news_feed"
+    assert domain.diagnostic.code == "bounded_source_observations"
     assert [source.source for source in domain.sources] == ["edinet", "tdnet"]
     assert len(domain.evidence_refs) == 2
 
 
 def test_japan_collector_admits_published_yfinance_fallback_news() -> None:
-    response = attach_provenance(
-        """### [direct] Toyota raises outlook (source: Reuters)
-Published: 2026-07-22T01:00:00Z
-New guidance was published in the Incremental window.
-""",
+    response = news_source(
+        "### [direct] Toyota raises outlook (source: Reuters)\nPublished: 2026-07-22T01:00:00Z\nNew guidance was published in the Incremental window.\n",
         ProvenanceRecord(
             evidence="get_news",
             source="yfinance",
@@ -444,7 +446,7 @@ New guidance was published in the Incremental window.
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -458,7 +460,7 @@ New guidance was published in the Incremental window.
 
 
 def test_japan_collector_keeps_yfinance_fallback_items_with_upstream_availability_note() -> None:
-    upstream_note = attach_provenance(
+    upstream_note = news_source(
         "<EDINET unavailable: VendorNotConfiguredError>",
         ProvenanceRecord(
             evidence="get_news",
@@ -472,9 +474,15 @@ def test_japan_collector_keeps_yfinance_fallback_items_with_upstream_availabilit
         side_effect=NoMarketDataError("7203.T", availability_notes=(upstream_note,))
     )
     fallback = mock.Mock(
-        return_value="""### [direct] Toyota raises outlook
-Published: 2026-07-22T01:00:00Z
-"""
+        return_value=news_source(
+            "### [direct] Toyota raises outlook\nPublished: 2026-07-22T01:00:00Z",
+            ProvenanceRecord(
+                "get_news",
+                "yfinance",
+                timing="publication-date filtered",
+                retrieved_at="2026-07-24T15:00:00Z",
+            ),
+        )
     )
     with (
         mock.patch.dict(
@@ -489,14 +497,13 @@ Published: 2026-07-22T01:00:00Z
             "7203.T",
             "2026-07-17",
             "2026-07-24",
-            _provenance=True,
             data_context=request_context(),
         )
 
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -508,7 +515,7 @@ Published: 2026-07-22T01:00:00Z
     assert evidence[0].fallback is True
     domain = collected.collection_summary.domains[0]
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_upstream_unavailable"
+    assert domain.diagnostic.code == "upstream_inputs_limited"
     sources = {source.source: source for source in domain.sources}
     assert sources["yfinance"].fallback is True
     assert sources["edinet_news"].diagnostic is not None
@@ -525,18 +532,20 @@ def test_japan_collector_keeps_tdnet_items_with_multiple_assembler_failure_notes
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args, data_context: """## TDnet
+        lambda *_args, data_context: news_fixture("""## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
-""",
+"""),
     )
     monkeypatch.setattr(jp_news, "_google_news", unavailable)
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
+    response = jp_news.get_news(
+        "7203.T", "2026-07-17", "2026-07-24", data_context=request_context()
+    )
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -547,7 +556,7 @@ Disclosed: 2026-07-22 11:00 JST
     assert [item.source for item in evidence] == ["tdnet"]
     domain = collected.collection_summary.domains[0]
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_upstream_unavailable"
+    assert domain.diagnostic.code == "upstream_inputs_limited"
     diagnostics = {
         source.source: source.diagnostic.code if source.diagnostic else None
         for source in domain.sources
@@ -557,7 +566,10 @@ Disclosed: 2026-07-22 11:00 JST
         "edinet": "upstream_source_unavailable",
         "google_news": "upstream_source_unavailable",
     }
-    assert derive_research_availability(collected.collection_summary).domains[0].status.value == "limited"
+    assert (
+        derive_research_availability(collected.collection_summary).domains[0].status.value
+        == "limited"
+    )
 
 
 def test_japan_collector_retains_source_omitted_by_japanese_news_global_cap(monkeypatch) -> None:
@@ -565,31 +577,35 @@ def test_japan_collector_retains_source_omitted_by_japanese_news_global_cap(monk
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args, data_context: """## EDINET
+        lambda *_args, data_context: news_fixture("""## EDINET
 
 ### Statutory correction
 Submitted: 2026-07-22 10:00
-""",
+"""),
     )
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args, data_context: """## TDnet
+        lambda *_args, data_context: news_fixture("""## TDnet
 
 ### Timely guidance revision
 Disclosed: 2026-07-22 11:00 JST
-""",
+"""),
     )
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args, data_context: "No Google News found for 7203.T between 2026-07-17 and 2026-07-24",
+        lambda *_args, data_context: news_fixture(
+            "No Google News found for 7203.T between 2026-07-17 and 2026-07-24"
+        ),
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
+    response = jp_news.get_news(
+        "7203.T", "2026-07-17", "2026-07-24", data_context=request_context()
+    )
 
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -599,32 +615,27 @@ Disclosed: 2026-07-22 11:00 JST
     assert [candidate.evidence.source for candidate in collected.evidence] == ["edinet"]
     assert domain.state.value == "partial"
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_global_cap"
+    assert domain.diagnostic.code == "upstream_inputs_limited"
     assert sources["tdnet"].diagnostic is not None
     assert sources["tdnet"].diagnostic.code == "truncated_by_global_cap"
 
 
 def test_japan_collector_admits_explicit_live_only_news_without_pit_availability() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """### Analyst consensus update
-Requested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 8%; analyst count: 10
-""",
-            ProvenanceRecord(
-                evidence="get_news",
-                source="yfinance analyst consensus",
-                requested="2026-07-24",
-                effective="retrieval-time analyst snapshot",
-                timing="live non-point-in-time",
-                retrieved_at="2026-07-24T15:00:00Z",
-            ),
+    response = news_source(
+        "### Analyst consensus update\nRequested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 8%; analyst count: 10\n",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="yfinance analyst consensus",
+            requested="2026-07-24",
+            effective="retrieval-time analyst snapshot",
+            timing="live non-point-in-time",
+            retrieved_at="2026-07-24T15:00:00Z",
         ),
-        temporal_scope="live_only",
-    )
+    ).with_scope("live_only")
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -637,76 +648,8 @@ Requested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 
     assert evidence[0].origins[0].temporal_scope.value == "live_only"
 
 
-def test_japan_collector_omits_unknown_news_temporal_scope_with_limitation() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """### Unclassified vendor item
-Published: 2026-07-22T03:00:00Z
-""",
-            ProvenanceRecord(
-                evidence="get_news",
-                source="yfinance",
-                requested="2026-07-24",
-                effective="live retrieval",
-                timing="vendor response",
-                retrieved_at="2026-07-24T15:00:00Z",
-            ),
-        ),
-        temporal_scope="unknown",
-    )
-    collected = collect_japan_incremental(
-        _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
-        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
-        data_context=request_context(),
-    )
-
-    domain = collected.collection_summary.domains[0]
-    assert collected.evidence == ()
-    assert domain.state.value == "empty"
-    assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "unknown_news_temporal_scope"
-    assert domain.sources[0].diagnostic is not None
-    assert domain.sources[0].diagnostic.code == "unknown_news_temporal_scope"
-
-
-def test_japan_collector_omits_live_only_news_without_aware_producer_retrieval() -> None:
-    for retrieved_at in (None, "2026-07-24T15:00:00"):
-        response = attach_evidence_span(
-            attach_provenance(
-                "### Analyst consensus update\nEPS: 100; PE: 12",
-                ProvenanceRecord(
-                    evidence="get_news",
-                    source="yfinance analyst consensus",
-                    requested="2026-07-24",
-                    effective="retrieval-time analyst snapshot",
-                    timing="live non-point-in-time",
-                    retrieved_at=retrieved_at,
-                ),
-            ),
-            temporal_scope="live_only",
-        )
-        collected = collect_japan_incremental(
-            _request(enabled_domains=("news",)),
-            route_to_vendor=lambda *_args, _response=response, **_kwargs: _response,
-            now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
-            data_context=request_context(),
-        )
-
-        domain = collected.collection_summary.domains[0]
-        assert collected.evidence == ()
-        assert domain.state.value == "empty"
-        assert domain.diagnostic is not None
-        assert domain.diagnostic.code == "unreliable_live_news_retrieval_time"
-        assert domain.sources[0].diagnostic is not None
-        assert domain.sources[0].diagnostic.code == "unreliable_live_news_retrieval_time"
-
-
 def test_japan_collector_keeps_bounded_transport_failure_distinct_from_valid_empty() -> None:
-    response = attach_provenance(
-        """### Fallback news response
-No reliably dated items were returned.
-""",
+    response = DataResult("No reliably dated items were returned.").with_provenance(
         ProvenanceRecord(
             evidence="get_news",
             source="yfinance",
@@ -726,7 +669,7 @@ No reliably dated items were returned.
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -735,7 +678,7 @@ No reliably dated items were returned.
     sources = {source.source: source for source in domain.sources}
     assert domain.state.value == "empty"
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "bounded_japanese_news_feed_with_upstream_unavailable"
+    assert domain.diagnostic.code == "upstream_inputs_limited"
     assert sources["tdnet"].diagnostic is not None
     assert sources["tdnet"].diagnostic.code == "upstream_source_unavailable"
 
@@ -747,23 +690,31 @@ def test_japan_collector_binds_news_items_from_structured_assembler_spans(
     monkeypatch.setattr(
         jp_news,
         "_edinet_news",
-        lambda *_args, data_context: "## neutral one\n\n### Neutral filing\n2026-07-21",
+        lambda *_args, data_context: news_fixture(
+            "## neutral one\n\n### Neutral filing\n2026-07-21"
+        ),
     )
     monkeypatch.setattr(
         jp_news,
         "_tdnet_news",
-        lambda *_args, data_context: "## neutral two\n\n### Neutral timely item\n2026-07-22",
+        lambda *_args, data_context: news_fixture(
+            "## neutral two\n\n### Neutral timely item\n2026-07-22"
+        ),
     )
     monkeypatch.setattr(
         jp_news,
         "_google_news",
-        lambda *_args, data_context: "No Google News found for 7203.T between a and b",
+        lambda *_args, data_context: news_fixture(
+            "No Google News found for 7203.T between a and b"
+        ),
     )
-    response = jp_news.get_news("7203.T", "2026-07-17", "2026-07-24", data_context=request_context())
+    response = jp_news.get_news(
+        "7203.T", "2026-07-17", "2026-07-24", data_context=request_context()
+    )
 
     collected = collect_japan_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -779,8 +730,9 @@ def test_japan_collector_binds_news_items_from_structured_assembler_spans(
 
 
 def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> None:
-    response = attach_provenance(
-        "Error retrieving fundamentals for 7203.T: Yahoo Finance response unavailable",
+    response = DataResult(
+        "Error retrieving fundamentals for 7203.T: Yahoo Finance response unavailable"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_fundamentals",
             source="yfinance",
@@ -788,12 +740,12 @@ def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> No
             effective="live retrieval",
             timing="fallback vendor selected; live non-point-in-time",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
 
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -801,19 +753,16 @@ def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> No
     domain = collected.collection_summary.domains[0]
     assert domain.state.value == "unavailable"
     assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "fundamentals_retrieval_failed.financial_inputs_partial"
+    assert domain.diagnostic.code == "fundamentals_retrieval_failed"
     assert domain.sources[0].source == "yfinance"
     assert domain.sources[0].fallback is True
     assert collected.evidence == ()
 
 
 def test_japan_collector_preserves_jquants_source_after_adjustment_validation_failure() -> None:
-    response = attach_provenance(
-        """# Stock data for 7203.T from 2026-07-17 to 2026-07-24
-
-Date,Open,High,Low,Close,Volume
-2026-07-22,102,104,101,103,1000
-""",
+    response = DataResult(
+        "# Stock data for 7203.T from 2026-07-17 to 2026-07-24\n\nDate,Open,High,Low,Close,Volume\n2026-07-22,102,104,101,103,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="jquants",
@@ -821,11 +770,11 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="market-date filtered",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("market",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -836,35 +785,6 @@ Date,Open,High,Low,Close,Volume
     assert domain.diagnostic.code == "jquants_adjustment_basis_unverified"
     assert domain.sources[0].source == "jquants"
     assert domain.sources[0].diagnostic.code == "jquants_adjustment_basis_unverified"
-
-
-def test_japan_collector_preserves_news_source_after_publication_validation_failure() -> None:
-    response = _pit_span(
-        """### Timely guidance revision
-Disclosed: 2026-07-22 11:00
-""",
-        ProvenanceRecord(
-            evidence="get_news",
-            source="TDnet",
-            requested="2026-07-17 to 2026-07-24",
-            effective="2026-07-17 to 2026-07-24",
-            timing="publication/disclosure-date filtered",
-            retrieved_at="2026-07-24T15:00:00Z",
-        ),
-    )
-    collected = collect_japan_incremental(
-        _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
-        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
-        data_context=request_context(),
-    )
-
-    domain = collected.collection_summary.domains[0]
-    assert domain.state.value == "unavailable"
-    assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "invalid_disclosure_publication_time"
-    assert domain.sources[0].source == "tdnet"
-    assert domain.sources[0].diagnostic.code == "invalid_disclosure_publication_time"
 
 
 def test_japan_collector_preserves_fundamentals_source_after_effective_period_validation_failure() -> (
@@ -886,7 +806,7 @@ Effective period: 2026-13-31
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -900,12 +820,11 @@ Effective period: 2026-13-31
 
 
 def test_japan_collector_omits_unknown_fundamentals_temporal_scope_with_disclosure_body() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """# Fundamentals overview for 7203.T
-Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22)
-Effective period: 2026-03-31
-""",
+    response = (
+        DataResult(
+            "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22)\nEffective period: 2026-03-31\n"
+        )
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -913,13 +832,13 @@ Effective period: 2026-03-31
                 effective="2026-07-22",
                 timing="disclosure-date filtered",
                 retrieved_at="2026-07-24T15:00:00Z",
-            ),
-        ),
-        temporal_scope="unknown",
+            )
+        )
+        .with_scope("unknown")
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -933,13 +852,11 @@ Effective period: 2026-03-31
     assert domain.sources[0].diagnostic.code == "unknown_fundamentals_temporal_scope"
 
 
-def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_retrieval() -> (
-    None
-):
+def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_retrieval() -> None:
     for retrieved_at in (None, "2026-07-24T15:00:00"):
-        response = attach_evidence_span(
-            attach_provenance(
-                "Live analyst consensus snapshot: EPS 100; PE 12",
+        response = (
+            DataResult("Live analyst consensus snapshot: EPS 100; PE 12")
+            .with_provenance(
                 ProvenanceRecord(
                     evidence="get_fundamentals",
                     source="yfinance analyst consensus",
@@ -947,9 +864,9 @@ def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_ret
                     effective="retrieval-time analyst snapshot",
                     timing="live non-point-in-time",
                     retrieved_at=retrieved_at,
-                ),
-            ),
-            temporal_scope="live_only",
+                )
+            )
+            .with_scope("live_only")
         )
         collected = collect_japan_incremental(
             _request(enabled_domains=("fundamentals",)),
@@ -970,8 +887,9 @@ def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_ret
 def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after_five_days() -> (
     None
 ):
-    response = attach_provenance(
-        "# Requested analysis date: 2026-07-24\n# Retrieved at: 2026-07-30T00:00:00Z\nLive analyst consensus snapshot",
+    response = DataResult(
+        "# Requested analysis date: 2026-07-24\n# Retrieved at: 2026-07-30T00:00:00Z\nLive analyst consensus snapshot"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_fundamentals",
             source="yfinance",
@@ -979,12 +897,12 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
             effective="live retrieval",
             timing="live non-point-in-time",
             retrieved_at="2026-07-30T00:00:00Z",
-        ),
+        )
     )
     request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 25))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -1000,7 +918,7 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
     old_request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 24))
     old_collected = collect_japan_incremental(
         old_request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -1013,9 +931,9 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
 
 
 def test_japan_collector_preserves_all_live_span_origins() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            "Two live-only analyst sources from the configured fallback response.",
+    response = (
+        DataResult("Two live-only analyst sources from the configured fallback response.")
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance analyst consensus",
@@ -1032,12 +950,12 @@ def test_japan_collector_preserves_all_live_span_origins() -> None:
                 timing="fallback vendor selected; live non-point-in-time",
                 retrieved_at="2026-07-24T15:00:00Z",
             ),
-        ),
-        temporal_scope="live_only",
+        )
+        .with_scope("live_only")
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -1051,12 +969,11 @@ def test_japan_collector_preserves_all_live_span_origins() -> None:
 
 
 def test_japan_collector_preserves_mixed_pit_fundamentals_origin_semantics() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """# Fundamentals overview for 7203.T
-Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)
-Effective period: 2026-03-31
-""",
+    response = (
+        DataResult(
+            "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\n"
+        )
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -1073,15 +990,15 @@ Effective period: 2026-03-31
                 timing="market-date filtered",
                 retrieved_at="2026-07-24T15:00:00Z",
             ),
-        ),
-        temporal_scope="point_in_time",
+        )
+        .with_scope("point_in_time")
     )
     request = _request(enabled_domains=("fundamentals",)).model_copy(
         update={"window_end": datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)}
     )
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -1103,12 +1020,11 @@ Effective period: 2026-03-31
 
 
 def test_japan_collector_does_not_treat_summary_cutoff_as_current_market_observation() -> None:
-    response = attach_evidence_span(
-        attach_provenance(
-            """# Fundamentals overview for 7203.T
-Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)
-Effective period: 2026-03-31
-""",
+    response = (
+        DataResult(
+            "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\n"
+        )
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -1125,15 +1041,15 @@ Effective period: 2026-03-31
                 timing="market-date filtered",
                 retrieved_at="2026-07-24T03:00:00Z",
             ),
-        ),
-        temporal_scope="point_in_time",
+        )
+        .with_scope("point_in_time")
     )
     request = _request(enabled_domains=("fundamentals",)).model_copy(
         update={"window_end": datetime(2026, 7, 24, 3, 0, tzinfo=UTC)}
     )
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 3, 1, tzinfo=UTC),
         data_context=request_context(),
     )
@@ -1146,31 +1062,45 @@ Effective period: 2026-03-31
 
 
 def test_japan_collector_keeps_pit_fundamentals_when_a_nested_live_span_ages_out() -> None:
-    response = attach_provenance(
-        """# Fundamentals overview for 7203.T (J-Quants summary)
-Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)
-Effective period: 2026-03-31
-Official correction published after the Full Baseline.
-
-<!-- tradingagents-evidence-span:v1 {\"temporal_scope\":\"live_only\"} --><!-- tradingagents-provenance:v1 {\"evidence\":\"get_fundamentals\",\"source\":\"yfinance analyst consensus\",\"requested\":\"2026-07-24\",\"effective\":\"retrieval-time analyst snapshot\",\"timing\":\"live non-point-in-time\",\"retrieved_at\":\"2026-07-30T00:00:00Z\"} -->- Forward PE: analyst consensus live only<!-- /tradingagents-evidence-span:v1 -->
-""",
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="J-Quants official summary",
-            timing="disclosure-date filtered",
-            retrieved_at="2026-07-30T00:00:00Z",
-        ),
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="J-Quants adjusted OHLCV",
-            timing="market-date filtered",
-            retrieved_at="2026-07-30T00:00:00Z",
-        ),
+    official = (
+        DataResult(
+            "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\nOfficial correction published after the Full Baseline."
+        )
+        .with_provenance(
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants official summary",
+                timing="disclosure-date filtered",
+                retrieved_at="2026-07-30T00:00:00Z",
+            ),
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants adjusted OHLCV",
+                timing="market-date filtered",
+                retrieved_at="2026-07-30T00:00:00Z",
+            ),
+        )
+        .with_scope("point_in_time")
     )
+    live = (
+        DataResult("- Forward PE: analyst consensus live only")
+        .with_provenance(
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="yfinance analyst consensus",
+                requested="2026-07-24",
+                effective="retrieval-time analyst snapshot",
+                timing="live non-point-in-time",
+                retrieved_at="2026-07-30T00:00:00Z",
+            )
+        )
+        .with_scope("live_only")
+    )
+    response = DataResult.combine((official, live))
     request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 24))
     collected = collect_japan_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 30, 0, 1, tzinfo=UTC),
         data_context=request_context(),
     )

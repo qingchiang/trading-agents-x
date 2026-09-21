@@ -17,6 +17,7 @@ from tradingagents.data.alpha_vantage_common import (
     AlphaVantageRateLimitError,
 )
 from tradingagents.data.fred import FredNotConfiguredError
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorError,
@@ -44,6 +45,7 @@ class HierarchyTests(unittest.TestCase):
 
     def test_symbol_utils_reexports_no_market_data_error(self):
         from tradingagents.domain.instruments import NoMarketDataError as ReExported
+
         self.assertIs(ReExported, NoMarketDataError)
 
 
@@ -64,11 +66,18 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
 
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _throttled, "yfinance": lambda *a, **k: "YF"}},
+            {
+                "get_stock_data": {
+                    "alpha_vantage": _throttled,
+                    "yfinance": lambda *a, **k: DataResult("YF"),
+                }
+            },
             clear=False,
         ):
-            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
-        self.assertEqual(out, "YF")
+            out = interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context()
+            )
+        self.assertEqual(out.content, "YF")
 
     def test_focused_incremental_route_does_not_fall_back_after_rate_limit(self):
         configure_data({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
@@ -76,14 +85,20 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         def _throttled(*a, **k):
             raise AlphaVantageRateLimitError("slow down")
 
-        fallback = mock.Mock(return_value="YF")
-        with mock.patch.dict(
-            interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _throttled, "yfinance": fallback}},
-            clear=False,
-        ), self.assertRaises(AlphaVantageRateLimitError):
+        fallback = mock.Mock(return_value=DataResult("YF"))
+        with (
+            mock.patch.dict(
+                interface.VENDOR_METHODS,
+                {"get_stock_data": {"alpha_vantage": _throttled, "yfinance": fallback}},
+                clear=False,
+            ),
+            self.assertRaises(AlphaVantageRateLimitError),
+        ):
             interface.route_to_vendor(
-                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10",
+                "get_stock_data",
+                "AAPL",
+                "2026-01-01",
+                "2026-01-10",
                 _stop_on_rate_limit=True,
                 data_context=request_context(),
             )
@@ -97,11 +112,18 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
 
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _unconfigured, "yfinance": lambda *a, **k: "YF"}},
+            {
+                "get_stock_data": {
+                    "alpha_vantage": _unconfigured,
+                    "yfinance": lambda *a, **k: DataResult("YF"),
+                }
+            },
             clear=False,
         ):
-            out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
-        self.assertEqual(out, "YF")
+            out = interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context()
+            )
+        self.assertEqual(out.content, "YF")
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
         # With no fallback, the not-configured condition must surface (not vanish).
@@ -110,12 +132,17 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
 
-        with mock.patch.dict(
-            interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _unconfigured}},
-            clear=False,
-        ), self.assertRaises(AlphaVantageNotConfiguredError):
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context())
+        with (
+            mock.patch.dict(
+                interface.VENDOR_METHODS,
+                {"get_stock_data": {"alpha_vantage": _unconfigured}},
+                clear=False,
+            ),
+            self.assertRaises(AlphaVantageNotConfiguredError),
+        ):
+            interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10", data_context=request_context()
+            )
 
 
 if __name__ == "__main__":

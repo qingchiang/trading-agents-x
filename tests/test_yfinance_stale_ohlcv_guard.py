@@ -53,9 +53,7 @@ class StaleGuardUnitTests(unittest.TestCase):
 
     def test_empty_frame_is_left_to_caller(self):
         # Empty is a no-data condition handled elsewhere, not a staleness one.
-        _assert_ohlcv_not_stale(
-            pd.DataFrame(columns=["Date", "Close"]), "2026-06-11", "X"
-        )
+        _assert_ohlcv_not_stale(pd.DataFrame(columns=["Date", "Close"]), "2026-06-11", "X")
 
     def test_long_holiday_gap_within_threshold_is_accepted(self):
         _assert_ohlcv_not_stale(_frame("2026-06-02"), "2026-06-11", "X")  # 9 days
@@ -71,9 +69,7 @@ class StaleGuardUnitTests(unittest.TestCase):
 
 
 @pytest.mark.unit
-def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(
-    monkeypatch, tmp_path
-):
+def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(monkeypatch, tmp_path):
     """A pre-close raw candle must not become the post-close verified candle."""
     state = {"completed": "2026-06-10", "downloads": 0}
 
@@ -109,11 +105,15 @@ def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(
         lambda *_args, **_kwargs: pd.Timestamp(state["completed"]),
     )
 
-    before_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11", data_context=request_context())
+    before_close = stockstats_utils.load_ohlcv(
+        "600519.SS", "2026-06-11", data_context=request_context()
+    )
     assert before_close["Date"].max() == pd.Timestamp("2026-06-10")
 
     state["completed"] = "2026-06-11"
-    after_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11", data_context=request_context())
+    after_close = stockstats_utils.load_ohlcv(
+        "600519.SS", "2026-06-11", data_context=request_context()
+    )
 
     assert state["downloads"] == 2
     assert after_close.iloc[-1]["Close"] == 120.0
@@ -124,8 +124,11 @@ class StaleGuardPropagationTests(unittest.TestCase):
     def test_get_yfin_data_online_raises_on_stale_frame(self):
         stale = pd.DataFrame(
             {
-                "Open": [280.0], "High": [286.0], "Low": [278.0],
-                "Close": [284.45], "Volume": [1_000_000],
+                "Open": [280.0],
+                "High": [286.0],
+                "Low": [278.0],
+                "Close": [284.45],
+                "Volume": [1_000_000],
             },
             index=pd.DatetimeIndex([pd.Timestamp("2025-06-11")], name="Date"),
         )
@@ -138,9 +141,13 @@ class StaleGuardPropagationTests(unittest.TestCase):
                 assert auto_adjust is True
                 return stale
 
-        with mock.patch.object(y_finance.yf, "Ticker", DummyTicker), \
-                self.assertRaises(NoMarketDataError):
-            y_finance.get_YFin_data_online("CB", "2026-06-01", "2026-06-11", data_context=request_context())
+        with (
+            mock.patch.object(y_finance.yf, "Ticker", DummyTicker),
+            self.assertRaises(NoMarketDataError),
+        ):
+            y_finance.get_YFin_data_online(
+                "CB", "2026-06-01", "2026-06-11", data_context=request_context()
+            )
 
 
 @pytest.mark.unit
@@ -165,10 +172,10 @@ class StaleGuardRoutingTests(unittest.TestCase):
             clear=False,
         ):
             out = interface.route_to_vendor(
-                "get_stock_data", "CB", "2026-06-01", "2026-06-11"
-            , data_context=request_context())
-        self.assertIn("NO_DATA_AVAILABLE", out)
-        self.assertIn("stale", out)  # the typed detail is surfaced to the agent
+                "get_stock_data", "CB", "2026-06-01", "2026-06-11", data_context=request_context()
+            )
+        self.assertIn("NO_DATA_AVAILABLE", out.content)
+        self.assertIn("stale", out.content)  # the typed detail is surfaced to the agent
 
 
 if __name__ == "__main__":

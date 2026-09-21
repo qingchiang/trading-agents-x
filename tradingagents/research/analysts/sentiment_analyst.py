@@ -19,6 +19,7 @@ from tradingagents.data.market_signals import FetchedSentimentSignal, fetch_sent
 from tradingagents.data.reddit import fetch_reddit_posts
 from tradingagents.data.stocktwits import fetch_stocktwits_messages
 from tradingagents.domain.common import report_language_prompt_label
+from tradingagents.domain.data_result import DataResult
 from tradingagents.research.analysts.sentiment_sources import (
     SentimentSourceInput,
     prepare_sentiment_sources,
@@ -65,10 +66,16 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = route_to_vendor("get_news", ticker, news_start_date, end_date, _provenance=True, data_context=runtime.context.data_context)
+            news_block = route_to_vendor(
+                "get_news",
+                ticker,
+                news_start_date,
+                end_date,
+                data_context=runtime.context.data_context,
+            )
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
-            news_block = f"<news unavailable: {type(exc).__name__}>"
+            news_block = DataResult(f"<news unavailable: {type(exc).__name__}>")
         # StockTwits and Reddit are US-retail platforms with no coverage of
         # other markets, so for a routed market (e.g. .T, future .SS) skip the
         # pointless network calls and hand the LLM a clear placeholder — prompt
@@ -81,7 +88,9 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            fetched_market_signals = fetch_sentiment_signals(ticker, end_date, data_context=runtime.context.data_context)
+            fetched_market_signals = fetch_sentiment_signals(
+                ticker, end_date, data_context=runtime.context.data_context
+            )
         else:
             if live_run:
                 stocktwits_block = fetch_stocktwits_messages(
@@ -90,21 +99,16 @@ def create_sentiment_analyst(llm):
                     start_date=social_start_date,
                     end_date=end_date,
                 )
-                stocktwits_retrieved_at = datetime.now(UTC).isoformat(
-                    timespec="seconds"
-                )
+                stocktwits_retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
                 reddit_block = fetch_reddit_posts(
                     ticker,
                     start_date=social_start_date,
                     end_date=end_date,
                 )
-                reddit_retrieved_at = datetime.now(UTC).isoformat(
-                    timespec="seconds"
-                )
+                reddit_retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
             else:
                 historical = (
-                    "<live-only source unavailable for historical or future "
-                    f"trade_date {end_date}>"
+                    f"<live-only source unavailable for historical or future trade_date {end_date}>"
                 )
                 stocktwits_block = historical
                 reddit_block = historical
@@ -130,7 +134,7 @@ def create_sentiment_analyst(llm):
             social_start_date=social_start_date,
             end_date=end_date,
             output_language=report_language_prompt_label(runtime.context.settings.output_language),
-            news_block=news_block,
+            news_block=news_block.content,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
             market_signals=fetched_market_signals,
@@ -146,8 +150,7 @@ def create_sentiment_analyst(llm):
                     # prompt, so tool-range wording would only invite a
                     # hallucinated tool call (#1130).
                     " Today's date is {current_date}; treat it as 'now' for all analysis. {instrument_context}"
-                    " " + NO_EXTERNAL_TOOLS +
-                    "\n{system_message}",
+                    " " + NO_EXTERNAL_TOOLS + "\n{system_message}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -239,27 +242,20 @@ def _build_system_message(
         )
         for result in market_signals
     )
-    applicable_sources = tuple(
-        source for source in sentiment_sources if source.applicable
-    )
-    excluded_sources = tuple(
-        source for source in sentiment_sources if not source.applicable
-    )
+    applicable_sources = tuple(source for source in sentiment_sources if source.applicable)
+    excluded_sources = tuple(source for source in sentiment_sources if not source.applicable)
     source_contract = "\n".join(
         (
             "Discuss every applicable source below in its own report subsection. "
             "Preserve the source_id and status labels so the later audit can "
             "link the narrative to the sealed evidence.",
             *(
-                f"- `{source.source_id}` — {source.label}; "
-                f"status=`{source.status.value}`"
+                f"- `{source.source_id}` — {source.label}; status=`{source.status.value}`"
                 for source in applicable_sources
             ),
             (
                 "Do not return assessments for these non-applicable sources: "
-                + ", ".join(
-                    f"`{source.source_id}`" for source in excluded_sources
-                )
+                + ", ".join(f"`{source.source_id}`" for source in excluded_sources)
                 if excluded_sources
                 else "There are no non-applicable sources in this run."
             ),
@@ -275,8 +271,7 @@ def _build_system_message(
     ).strip()
     if not language_instruction:
         language_instruction = (
-            "Write all explanatory prose in every structured text field "
-            f"in {output_language}."
+            f"Write all explanatory prose in every structured text field in {output_language}."
         )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
 

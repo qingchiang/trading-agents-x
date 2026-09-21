@@ -17,7 +17,9 @@ from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import yf_retry
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import normalize_symbol
 from tradingagents.domain.vendor_errors import VendorError, VendorRateLimitError
 
@@ -106,11 +108,7 @@ def resolve_instrument_identity(ticker: str, curr_date: str | None = None) -> di
     and historical mode never calls ``.info`` to fill missing fields.
     """
     canonical = normalize_symbol(ticker)
-    mode = (
-        "live"
-        if curr_date is None or is_near_live(curr_date, canonical)
-        else "historical"
-    )
+    mode = "live" if curr_date is None or is_near_live(curr_date, canonical) else "historical"
     return _resolve_cached(canonical, mode)
 
 
@@ -125,11 +123,12 @@ def resolve_search_identity(ticker: str) -> dict[str, str]:
     return _resolve_cached(normalize_symbol(ticker), "historical")
 
 
+@source_metadata("resolve_instrument_eligibility", "yfinance")
 def resolve_instrument_eligibility(
     canonical_symbol: str,
     *,
     data_context: DataRequestContext,
-) -> dict[str, Any] | list[dict[str, Any]]:
+) -> DataResult[dict | list[dict]]:
     """Resolve exact current security classification for product admission.
 
     This is intentionally separate from :func:`resolve_instrument_identity`.
@@ -140,7 +139,7 @@ def resolve_instrument_eligibility(
     """
     canonical = str(canonical_symbol).strip()
     if not canonical:
-        return {}
+        return DataResult({})
     try:
         search = yf_retry(
             lambda: yf.Search(
@@ -151,9 +150,7 @@ def resolve_instrument_eligibility(
             )
         )
     except YFRateLimitError as exc:
-        raise VendorRateLimitError(
-            "Yahoo Finance eligibility lookup was rate limited"
-        ) from exc
+        raise VendorRateLimitError("Yahoo Finance eligibility lookup was rate limited") from exc
     except VendorError:
         raise
     except Exception as exc:
@@ -191,14 +188,13 @@ def resolve_instrument_eligibility(
     exact = [
         row
         for row in rows
-        if isinstance(row.get("symbol"), str)
-        and row["symbol"].casefold() == canonical.casefold()
+        if isinstance(row.get("symbol"), str) and row["symbol"].casefold() == canonical.casefold()
     ]
     malformed = [row for row in rows if row.get("_malformed") is True]
     candidates = exact + malformed if exact else rows
     if len(candidates) == 1:
-        return candidates[0]
-    return candidates
+        return DataResult(candidates[0])
+    return DataResult(candidates)
 
 
 def clear_instrument_identity_cache() -> None:

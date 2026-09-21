@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.runtime import Runtime
 
-from tradingagents.provenance import extract_provenance
+from tradingagents.data.evidence_workset import tool_message_records
 from tradingagents.research.prompts.instrument import get_instrument_context_from_state
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
@@ -92,12 +92,8 @@ Write a detailed and nuanced research report of the trends you observe. Provide 
         prefetched_evidence = []
 
         if len(result.tool_calls) == 0:
-            report = (
-                result.content
-                if isinstance(result.content, str)
-                else str(result.content)
-            )
-            records = extract_provenance(state["messages"])
+            report = result.content if isinstance(result.content, str) else str(result.content)
+            records = tool_message_records(state["messages"])
             prefetched_evidence = missing_evidence_blocks(
                 records,
                 (("get_verified_market_snapshot", "verified market snapshot"),),

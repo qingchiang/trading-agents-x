@@ -8,8 +8,7 @@ from typing import Literal
 
 from tradingagents.data.market_signals import FetchedSentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
-from tradingagents.domain.data_result import StructuredNumericFact
-from tradingagents.provenance import extract_provenance
+from tradingagents.domain.data_result import DataResult, StructuredNumericFact
 from tradingagents.research.state import PrefetchedEvidenceBlock, prefetched_evidence_block
 
 
@@ -64,14 +63,11 @@ def sentiment_confidence(
 
     applicable = tuple(source for source in sources if source.applicable)
     substantive = tuple(
-        source
-        for source in applicable
-        if source.status is SentimentSourceStatus.SUBSTANTIVE
+        source for source in applicable if source.status is SentimentSourceStatus.SUBSTANTIVE
     )
     reliable = tuple(source for source in substantive if not source.degraded)
     has_degradation = any(
-        source.status is not SentimentSourceStatus.SUBSTANTIVE
-        or source.degraded
+        source.status is not SentimentSourceStatus.SUBSTANTIVE or source.degraded
         for source in applicable
     )
     if len(reliable) >= 2 and not has_degradation:
@@ -134,7 +130,7 @@ def prepare_sentiment_sources(
     news_start_date: str,
     social_start_date: str,
     live_run: bool,
-    news_block: str,
+    news_block: DataResult[str],
     stocktwits_block: str,
     reddit_block: str,
     stocktwits_retrieved_at: str | None,
@@ -147,7 +143,7 @@ def prepare_sentiment_sources(
 ]:
     """Build the source whitelist and matching audit blocks once."""
 
-    news_records = tuple(extract_provenance(news_block))
+    news_records = news_block.provenance
     if not news_records:
         news_records = (
             ProvenanceRecord(
@@ -157,7 +153,7 @@ def prepare_sentiment_sources(
                 effective="unknown",
                 timing=(
                     "unavailable"
-                    if "unavailable" in news_block.lower()
+                    if "unavailable" in news_block.content.lower()
                     else "no auditable source metadata captured"
                 ),
             ),
@@ -172,8 +168,7 @@ def prepare_sentiment_sources(
         if not live_run:
             return (
                 "—",
-                "live-only; unavailable for historical or future date; "
-                "vendor not queried",
+                "live-only; unavailable for historical or future date; vendor not queried",
                 None,
             )
         lowered = body.casefold()
@@ -191,8 +186,8 @@ def prepare_sentiment_sources(
             retrieved_at,
         )
 
-    stocktwits_effective, stocktwits_timing, stocktwits_retrieved = (
-        social_status(stocktwits_block, stocktwits_retrieved_at)
+    stocktwits_effective, stocktwits_timing, stocktwits_retrieved = social_status(
+        stocktwits_block, stocktwits_retrieved_at
     )
     reddit_effective, reddit_timing, reddit_retrieved = social_status(
         reddit_block,
@@ -216,7 +211,15 @@ def prepare_sentiment_sources(
     )
 
     sources: list[SentimentSourceInput] = []
-    evidence_blocks: list[PrefetchedEvidenceBlock] = []
+    evidence_blocks: list[PrefetchedEvidenceBlock] = [
+        {
+            "content": row.content,
+            "records": [],
+            "temporal_scope": "point_in_time" if row.is_pit else "live_only",
+            "source_observation": row.dump(),
+        }
+        for row in news_block.observations
+    ]
 
     def add_source(
         *,
@@ -243,7 +246,7 @@ def prepare_sentiment_sources(
     add_source(
         source_id="news",
         label="Routed ticker news",
-        body=news_block,
+        body=news_block.content,
         records=news_records,
         temporal_scope="point_in_time",
         applicable=True,
@@ -283,8 +286,7 @@ def prepare_sentiment_sources(
                 record_effective = spec.effective(end_date)
             elif spec.live_only:
                 record_timing = (
-                    "live-only; unavailable for historical or future "
-                    "date; vendor not queried"
+                    "live-only; unavailable for historical or future date; vendor not queried"
                     if not live_run
                     else "no analyst snapshot returned; retrieval success unknown"
                 )
@@ -307,18 +309,19 @@ def prepare_sentiment_sources(
             label=spec.title,
             body=body,
             records=body_records,
-            temporal_scope=(
-                "live_only" if spec.live_only else "point_in_time"
-            ),
+            temporal_scope=("live_only" if spec.live_only else "point_in_time"),
             applicable=not (spec.live_only and not live_run),
             structured_numeric_facts=result.result.numeric_facts,
         )
         for observation in result.result.observations:
-            evidence_blocks.append({
-                "content": observation.content, "records": [],
-                "temporal_scope": "point_in_time" if observation.is_pit else "live_only",
-                "source_observation": observation.dump(),
-            })
+            evidence_blocks.append(
+                {
+                    "content": observation.content,
+                    "records": [],
+                    "temporal_scope": "point_in_time" if observation.is_pit else "live_only",
+                    "source_observation": observation.dump(),
+                }
+            )
 
     source_ids = [source.source_id for source in sources]
     if len(source_ids) != len(set(source_ids)):

@@ -27,7 +27,10 @@ from tradingagents.data.news_quality import (
     canonical_headline,
     classify_chinese_google_article,
 )
+from tradingagents.data.news_selection import news_result
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
+from tradingagents.domain.news import NewsCandidate
 from tradingagents.domain.vendor_errors import VendorRateLimitError
 from tradingagents.version import USER_AGENT
 
@@ -109,8 +112,11 @@ def _safe_query(query: str) -> tuple[list[dict], Exception | None]:
         return [], exc
 
 
-def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+def get_news(
+    ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return entity-filtered Chinese media headlines within CST calendar days."""
+    counts = CandidateFilterCounts()
     counts = CandidateFilterCounts()
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d")
@@ -120,16 +126,21 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
     # code biases ranking but never establishes direct evidence by itself.
     query_names = tuple(dict.fromkeys(name for name in (short_name, full_name) if name))
     if not query_names:
-        return f"No Google News China coverage identity for {ticker}\n{counts.render()}"
+        return DataResult(
+            f"No Google News China coverage identity for {ticker}\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Google News China"),),
+        )
     queries = tuple(f'"{name}" {code} 股票' for name in query_names)
     if stop_on_rate_limit_requested():
         query_results = [_safe_query(query) for query in queries]
     else:
         with ThreadPoolExecutor(max_workers=len(queries)) as pool:
-            query_results = list(pool.map(
-                lambda item: item[0].run(_safe_query, item[1]),
-                [(copy_context(), query) for query in queries],
-            ))
+            query_results = list(
+                pool.map(
+                    lambda item: item[0].run(_safe_query, item[1]),
+                    [(copy_context(), query) for query in queries],
+                )
+            )
     failures = [exc for _items, exc in query_results if exc is not None]
     if len(failures) == len(query_results):
         raise failures[0]
@@ -168,28 +179,66 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
     counts.source_truncated = len(relevant) - len(kept)
     if not kept:
         if failures:
-            return (
+            return DataResult(
                 f"<Google News China partially unavailable: {len(failures)} of "
                 f"{len(query_results)} name queries failed; successful queries returned "
-                f"no relevant items>\n{counts.render()}"
+                f"no relevant items>\n{counts.render()}",
+                diagnostics=(
+                    counts.diagnostic("Google News China"),
+                    DataDiagnostic(
+                        "source_unavailable", "Google News China", "source returned unavailable"
+                    ),
+                    *(
+                        (
+                            DataDiagnostic(
+                                "query_partial",
+                                "Google News China",
+                                f"partial coverage; query_failures={len(failures)}/{len(query_results)}",
+                            ),
+                        )
+                        if failures
+                        else ()
+                    ),
+                ),
             )
-        return (
+        return DataResult(
             f"No relevant Google News China found for {ticker} between {start_date} "
             f"and {end_date} after quality filtering ({len(items)} candidates dropped)"
-            f"\n{counts.render()}"
+            f"\n{counts.render()}",
+            diagnostics=(counts.diagnostic("Google News China"),),
         )
-    body = "\n\n".join(
-        f"### [{tier}] {item['title']} (source: {item['source']})\n"
-        f"Published: {item['published'].strftime('%Y-%m-%d %H:%M')} CST"
+    articles = [
+        NewsCandidate(
+            "Google News China",
+            item["title"],
+            f"### [{tier}] {item['title']} (source: {item['source']})\n"
+            f"Published: {item['published'].strftime('%Y-%m-%d %H:%M')} CST",
+            item["published"].strftime("%Y-%m-%d %H:%M"),
+        )
         for item, tier in kept
-    )
+    ]
     availability = ""
     if failures:
         availability = (
             f"\n\nQuery availability note: {len(failures)} of "
             f"{len(query_results)} Google News name queries failed."
         )
-    return (
+    return news_result(
         f"## {ticker} media headlines (Google News China), from {start_date} "
-        f"to {end_date}:\n\n{counts.render()}{availability}\n\n{body}"
+        f"to {end_date}:\n\n{counts.render()}{availability}",
+        articles,
+        diagnostics=(
+            counts.diagnostic("Google News China"),
+            *(
+                (
+                    DataDiagnostic(
+                        "query_partial",
+                        "Google News China",
+                        f"partial coverage; query_failures={len(failures)}/{len(query_results)}",
+                    ),
+                )
+                if failures
+                else ()
+            ),
+        ),
     )

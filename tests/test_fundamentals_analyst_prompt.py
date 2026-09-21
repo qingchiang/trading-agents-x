@@ -10,6 +10,7 @@ from langgraph.prebuilt import ToolNode
 
 import tradingagents.research.analysts.fundamentals_analyst as fa
 from tests.factories import analyst_runtime
+from tradingagents.domain.data_result import DataResult
 from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet,
     get_cashflow,
@@ -26,11 +27,13 @@ def test_full_prefetches_financial_core_and_reuses_it_on_next_model_call(monkeyp
 
     def route(method, *args, **kwargs):
         calls.append(method)
-        return f"core data {method}"
+        return DataResult(f"core data {method}")
 
     class Model:
         def bind_tools(self, tools):
-            return RunnableLambda(lambda prompt: prompts.append(prompt.to_string()) or AIMessage(content="report"))
+            return RunnableLambda(
+                lambda prompt: prompts.append(prompt.to_string()) or AIMessage(content="report")
+            )
 
     monkeypatch.setattr(fa, "route_to_vendor", route)
     node = fa.create_fundamentals_analyst(Model())
@@ -82,28 +85,31 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
         "messages": [
             AIMessage(
                 content="",
-                tool_calls=[{
-                    "name": "get_balance_sheet",
-                    "args": {"ticker": "9984.T", "freq": "annual"},
-                    "id": "call-1",
-                    "type": "tool_call",
-                }],
+                tool_calls=[
+                    {
+                        "name": "get_balance_sheet",
+                        "args": {"ticker": "9984.T", "freq": "annual"},
+                        "id": "call-1",
+                        "type": "tool_call",
+                    }
+                ],
             )
         ],
     }
 
     with mock.patch(
         "tradingagents.research.tools.fundamental_data_tools.route_to_vendor",
-        return_value="SAFE",
+        return_value=DataResult("SAFE"),
     ) as router:
-        result = graph.invoke(state, context=analyst_runtime(analysis_date=state["trade_date"]).context)
+        result = graph.invoke(
+            state, context=analyst_runtime(analysis_date=state["trade_date"]).context
+        )
 
     router.assert_called_once_with(
         "get_balance_sheet",
         "9984.T",
         "annual",
         "2020-01-15",
-        _provenance=True,
         data_context=analyst_runtime(analysis_date=state["trade_date"]).context.data_context,
     )
     assert result["messages"][0].content == "SAFE"

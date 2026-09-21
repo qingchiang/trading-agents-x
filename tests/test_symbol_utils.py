@@ -4,6 +4,7 @@ import unittest
 
 import pytest
 
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import (
     NoMarketDataError,
     infer_mainland_equity_suffix,
@@ -27,7 +28,7 @@ class TestNormalizeSymbol(unittest.TestCase):
 
     def test_metal_aliases_map_to_futures(self):
         self.assertEqual(normalize_symbol("XAUUSD"), "GC=F")
-        self.assertEqual(normalize_symbol("XAUUSD+"), "GC=F")   # broker CFD suffix
+        self.assertEqual(normalize_symbol("XAUUSD+"), "GC=F")  # broker CFD suffix
         self.assertEqual(normalize_symbol("xauusd+"), "GC=F")
         self.assertEqual(normalize_symbol("GOLD"), "GC=F")
         self.assertEqual(normalize_symbol("XAGUSD"), "SI=F")
@@ -92,10 +93,8 @@ class TestNoMarketDataError(unittest.TestCase):
         self.assertEqual(err.canonical, "FOOBAR")
 
     def test_availability_notes_are_preserved(self):
-        err = NoMarketDataError(
-            "FOOBAR", availability_notes=("<source unavailable>", "")
-        )
-        self.assertEqual(err.availability_notes, ("<source unavailable>",))
+        err = NoMarketDataError("FOOBAR", availability_notes=(DataResult("<source unavailable>"),))
+        self.assertEqual(err.availability_notes, (DataResult("<source unavailable>"),))
 
 
 @pytest.mark.unit

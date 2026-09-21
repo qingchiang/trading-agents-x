@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 import requests
 
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,7 @@ DEFAULT_LIMIT = 6
 
 
 def _request(path: str, params: dict) -> dict:
-    response = requests.get(
-        f"{GAMMA_BASE}/{path}", params=params, timeout=REQUEST_TIMEOUT
-    )
+    response = requests.get(f"{GAMMA_BASE}/{path}", params=params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
@@ -68,7 +68,10 @@ def _is_forward_looking(market: dict, now: datetime) -> bool:
     )
 
 
-def get_prediction_markets(topic: str, limit: int | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_prediction_markets", "polymarket")
+def get_prediction_markets(
+    topic: str, limit: int | None = None, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return live prediction-market probabilities for an event topic.
 
     Args:
@@ -89,7 +92,7 @@ def get_prediction_markets(topic: str, limit: int | None = None, *, data_context
         data = _request("public-search", {"q": topic, "limit_per_type": 20})
     except requests.RequestException as e:
         logger.warning("Polymarket search failed for %r: %s", topic, e)
-        return (
+        return DataResult(
             f"Polymarket data is currently unavailable (network error: {e}). "
             f"Proceed without prediction-market signal for '{topic}'."
         )
@@ -111,10 +114,13 @@ def get_prediction_markets(topic: str, limit: int | None = None, *, data_context
     )
 
     if not candidates:
-        return header + (
-            f"No open prediction markets matched '{topic}'. Polymarket coverage "
-            f"is concentrated in macro, political, geopolitical, and crypto "
-            f"events; a specific equity may have none."
+        return DataResult(
+            header
+            + (
+                f"No open prediction markets matched '{topic}'. Polymarket coverage "
+                f"is concentrated in macro, political, geopolitical, and crypto "
+                f"events; a specific equity may have none."
+            )
         )
 
     lines = []
@@ -129,14 +135,10 @@ def get_prediction_markets(topic: str, limit: int | None = None, *, data_context
         volume = m.get("volumeNum") or 0
         end_date = (m.get("endDate") or "")[:10]
         wk = m.get("oneWeekPriceChange")
-        wk_str = (
-            f", 1-week {wk * 100:+.1f}pp"
-            if isinstance(wk, (int, float)) and wk
-            else ""
-        )
+        wk_str = f", 1-week {wk * 100:+.1f}pp" if isinstance(wk, (int, float)) and wk else ""
         lines.append(
             f"- **{m.get('question')}** — {label} {prob:.0%} "
             f"(${volume:,.0f} volume, resolves {end_date}{wk_str})"
         )
 
-    return header + "\n".join(lines) + "\n"
+    return DataResult(header + "\n".join(lines) + "\n")

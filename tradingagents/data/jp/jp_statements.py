@@ -26,9 +26,10 @@ from datetime import UTC, datetime
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp import jquants_fundamentals as jqf
 from tradingagents.data.lookahead import is_near_live
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_statement_frame
 from tradingagents.domain.data import ProvenanceRecord
-from tradingagents.provenance import attach_evidence_span, attach_provenance
+from tradingagents.domain.data_result import DataResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +38,33 @@ logger = logging.getLogger(__name__)
 # (missing rows are skipped), rendered in this order.
 _CURATED = {
     "income": [
-        "Cost Of Revenue", "Gross Profit", "Selling General And Administration",
-        "EBITDA", "EBIT", "Interest Expense", "Pretax Income",
+        "Cost Of Revenue",
+        "Gross Profit",
+        "Selling General And Administration",
+        "EBITDA",
+        "EBIT",
+        "Interest Expense",
+        "Pretax Income",
     ],
     "balance": [
-        "Cash And Cash Equivalents", "Accounts Receivable", "Inventory",
-        "Current Assets", "Net PPE", "Current Liabilities", "Total Debt",
-        "Net Debt", "Working Capital", "Retained Earnings",
+        "Cash And Cash Equivalents",
+        "Accounts Receivable",
+        "Inventory",
+        "Current Assets",
+        "Net PPE",
+        "Current Liabilities",
+        "Total Debt",
+        "Net Debt",
+        "Working Capital",
+        "Retained Earnings",
     ],
     "cashflow": [
-        "Capital Expenditure", "Free Cash Flow", "Depreciation And Amortization",
-        "Change In Working Capital", "Cash Dividends Paid", "Repurchase Of Capital Stock",
+        "Capital Expenditure",
+        "Free Cash Flow",
+        "Depreciation And Amortization",
+        "Change In Working Capital",
+        "Cash Dividends Paid",
+        "Repurchase Of Capital Stock",
     ],
 }
 
@@ -89,27 +106,26 @@ def _detail_status_marker(
     kind: str,
     curr_date: str | None,
     timing: str,
-) -> str:
+) -> DataResult[str]:
     """Return metadata-only yfinance status without a visible empty block."""
     return _detail_evidence_span(
-        attach_provenance(
-            "",
+        DataResult("").with_provenance(
             ProvenanceRecord(
                 evidence=_EVIDENCE_BY_KIND[kind],
                 source="yfinance curated detail",
                 requested=_requested_date_label(curr_date),
                 effective="—",
                 timing=f"live-only {timing}",
-            ),
+            )
         ),
     )
 
 
 def _detail_evidence_span(content: str) -> str:
-    return attach_evidence_span(content, temporal_scope="live_only")
+    return content.with_scope("live_only")
 
 
-def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> str:
+def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> DataResult[str]:
     """Curated live yfinance line-item block, or a safe historical note.
 
     Historical/malformed dates never trigger yfinance. A missing date preserves
@@ -117,20 +133,19 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
     request, any failure or absence of curated rows returns '' so the official
     J-Quants summary still renders on its own.
     """
+    observations = []
     if curr_date is not None and not is_near_live(curr_date, ticker):
         return _detail_evidence_span(
-            attach_provenance(
-                _historical_detail_note(curr_date),
+            DataResult(
+                _historical_detail_note(curr_date), observations=tuple(observations)
+            ).with_provenance(
                 ProvenanceRecord(
                     evidence=_EVIDENCE_BY_KIND[kind],
                     source="yfinance curated detail",
                     requested=curr_date,
                     effective="—",
-                    timing=(
-                        "live-only; unavailable for historical or future "
-                        "date; vendor not queried"
-                    ),
-                ),
+                    timing="live-only; unavailable for historical or future date; vendor not queried",
+                )
             ),
         )
     try:
@@ -144,32 +159,30 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
     if not rows:
         # Frame present but no curated label matched — likely a yfinance label
         # rename; log so the silent degradation is detectable.
-        logger.debug("JP statements: no curated %s rows matched for %s (label drift?)", kind, ticker)
-        return _detail_status_marker(
-            kind, curr_date, "available; no curated line items matched"
+        logger.debug(
+            "JP statements: no curated %s rows matched for %s (label drift?)", kind, ticker
         )
+        return _detail_status_marker(kind, curr_date, "available; no curated line items matched")
     # Drop periods/rows yfinance hasn't filled (its line items lag the J-Quants
     # summary ~1 FY, leaving an all-blank latest column or an empty curated row).
     sub = frame.loc[rows].dropna(axis=1, how="all").dropna(axis=0, how="all")
     if sub.empty:
-        return _detail_status_marker(
-            kind, curr_date, "available; curated line items were empty"
-        )
+        return _detail_status_marker(kind, curr_date, "available; curated line items were empty")
     retrieved = datetime.now(UTC).isoformat(timespec="seconds")
-    from tradingagents.data.source_observations import publish_yahoo_statement
+    from tradingagents.data.source_observations import yahoo_statement_observations
 
-    publish_yahoo_statement(sub, ticker, kind, freq, source="yfinance curated detail")
+    observations.extend(
+        yahoo_statement_observations(sub, ticker, kind, freq, source="yfinance curated detail")
+    )
     block = (
         "\n\n## Line-item detail (yfinance, curated live snapshot, may lag)\n"
         f"Requested analysis date: {_requested_date_label(curr_date)}\n"
         f"Retrieval timestamp: {retrieved}\n"
         "Not point-in-time historical data; fiscal-period-end filtering does not "
-        "establish when these values were published.\n"
-        + sub.to_csv()
+        "establish when these values were published.\n" + sub.to_csv()
     )
     return _detail_evidence_span(
-        attach_provenance(
-            block,
+        DataResult(block, observations=tuple(observations)).with_provenance(
             ProvenanceRecord(
                 evidence=_EVIDENCE_BY_KIND[kind],
                 source="yfinance curated detail",
@@ -177,53 +190,96 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
                 effective="current statement frame; fiscal period ends only",
                 timing="live non-point-in-time; may lag",
                 retrieved_at=retrieved,
-            ),
+            )
         ),
     )
 
 
-def _with_official_provenance(
-    text: str, kind: str, curr_date: str | None
-) -> str:
+def _with_official_provenance(text: str, kind: str, curr_date: str | None) -> str:
     requested = _requested_date_label(curr_date)
     effective = (
-        f"disclosures <= {curr_date}"
-        if curr_date is not None
-        else "latest disclosure at retrieval"
+        f"disclosures <= {curr_date}" if curr_date is not None else "latest disclosure at retrieval"
     )
     timing = (
         "disclosure-date filtered"
         if curr_date is not None
         else "live retrieval; no historical cutoff supplied"
     )
-    return attach_provenance(
-        text,
+    return text.with_provenance(
         ProvenanceRecord(
             evidence=_EVIDENCE_BY_KIND[kind],
             source="J-Quants official summary",
             requested=requested,
             effective=effective,
             timing=timing,
-        ),
+        )
     )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_income_statement", "jp_statements")
+def get_income_statement(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """J-Quants income summary + curated yfinance line items."""
     base = jqf.get_income_statement(ticker, freq, curr_date, data_context=data_context)
-    result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "income", freq, curr_date)
-    return _with_official_provenance(result, "income", curr_date)
+    official = _with_official_provenance(base, "income", curr_date).with_scope(
+        "point_in_time" if curr_date else "unknown"
+    )
+    return DataResult.combine(
+        (
+            official,
+            DataResult(_no_date_live_note(curr_date)),
+            _detail_block(ticker, "income", freq, curr_date),
+        ),
+        separator="",
+    )
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_balance_sheet", "jp_statements")
+def get_balance_sheet(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """J-Quants balance-sheet summary + curated yfinance line items."""
     base = jqf.get_balance_sheet(ticker, freq, curr_date, data_context=data_context)
-    result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "balance", freq, curr_date)
-    return _with_official_provenance(result, "balance", curr_date)
+    official = _with_official_provenance(base, "balance", curr_date).with_scope(
+        "point_in_time" if curr_date else "unknown"
+    )
+    return DataResult.combine(
+        (
+            official,
+            DataResult(_no_date_live_note(curr_date)),
+            _detail_block(ticker, "balance", freq, curr_date),
+        ),
+        separator="",
+    )
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_cashflow", "jp_statements")
+def get_cashflow(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """J-Quants cash-flow summary + curated yfinance line items."""
     base = jqf.get_cashflow(ticker, freq, curr_date, data_context=data_context)
-    result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "cashflow", freq, curr_date)
-    return _with_official_provenance(result, "cashflow", curr_date)
+    official = _with_official_provenance(base, "cashflow", curr_date).with_scope(
+        "point_in_time" if curr_date else "unknown"
+    )
+    return DataResult.combine(
+        (
+            official,
+            DataResult(_no_date_live_note(curr_date)),
+            _detail_block(ticker, "cashflow", freq, curr_date),
+        ),
+        separator="",
+    )

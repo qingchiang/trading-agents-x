@@ -9,7 +9,6 @@ from langgraph.graph import MessagesState
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.data_result import StructuredNumericFact
-from tradingagents.provenance import strip_provenance_markers
 
 
 class PrefetchedEvidenceBlock(TypedDict):
@@ -20,6 +19,12 @@ class PrefetchedEvidenceBlock(TypedDict):
     temporal_scope: str
     structured_numeric_facts: NotRequired[list[StructuredNumericFact]]
     source_observation: NotRequired[dict]
+
+
+class PrefetchedDataResult(TypedDict):
+    """Serialized adapter result carried by prefetching analysts."""
+
+    data_result: dict
 
 
 class AgentState(MessagesState):
@@ -36,7 +41,7 @@ class AgentState(MessagesState):
         "Locally calculated confidence shared with the research graph",
     ]
     prefetched_evidence: Annotated[
-        list[PrefetchedEvidenceBlock],
+        list[PrefetchedEvidenceBlock | PrefetchedDataResult],
         "Evidence fetched before an analyst LLM call",
     ]
 
@@ -51,7 +56,7 @@ def prefetched_evidence_block(
     """Serialize one prefetch response independently from report rendering."""
 
     records = tuple(records)
-    content = strip_provenance_markers(body).strip()
+    content = body.strip()
     unavailable = records and all(
         any(
             token in record.timing.casefold()
@@ -64,19 +69,14 @@ def prefetched_evidence_block(
         )
         for record in records
     )
-    if (
-        not content
-        or unavailable
-        or (content.startswith("<") and content.endswith(">"))
-    ):
+    if not content or unavailable or (content.startswith("<") and content.endswith(">")):
         content = None
     block: PrefetchedEvidenceBlock = {
         "content": content,
         "records": [asdict(record) for record in records],
         "temporal_scope": (
             temporal_scope
-            if temporal_scope
-            in {"point_in_time", "live_only", "unknown"}
+            if temporal_scope in {"point_in_time", "live_only", "unknown"}
             else temporal_scope_from_records(records)
         ),
     }

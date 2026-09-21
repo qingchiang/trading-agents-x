@@ -10,9 +10,9 @@ from tradingagents.data.evidence_workset import (
     parse_ohlcv_frame,
 )
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.evidence import EvidenceItem, MeasurementKind
 from tradingagents.domain.evidence_tables import extract_evidence_tables
-from tradingagents.provenance import attach_provenance
 
 
 def _ohlcv(rows: int = 488) -> str:
@@ -28,15 +28,14 @@ def _ohlcv(rows: int = 488) -> str:
             f"{current.isoformat()},{close - 1:.2f},{close + 2:.2f},"
             f"{close - 2:.2f},{close:.2f},{1000000 + index * 1000}"
         )
-    return attach_provenance(
-        "\n".join(lines),
+    return DataResult("\n".join(lines)).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="fixture",
             requested=f"{start.isoformat()} to {(start + timedelta(days=rows - 1)).isoformat()}",
             effective=f"{start.isoformat()} to {(start + timedelta(days=rows - 1)).isoformat()}",
             timing="market-date filtered",
-        ),
+        )
     )
 
 
@@ -87,7 +86,7 @@ def test_ohlcv_artifact_carries_producer_owned_column_measurements() -> None:
 
 @pytest.mark.unit
 def test_analytical_views_are_reproducible_and_cutoff_safe() -> None:
-    frame = parse_ohlcv_frame(_ohlcv(40), cutoff="2024-01-31")
+    frame = parse_ohlcv_frame(_ohlcv(40).content, cutoff="2024-01-31")
     views = market_analytical_views(
         frame,
         symbol="FIXTURE",
@@ -106,7 +105,7 @@ def test_analytical_views_are_reproducible_and_cutoff_safe() -> None:
 @pytest.mark.unit
 def test_non_tabular_vendor_result_degrades_without_exposing_secrets() -> None:
     overview, artifact = build_market_data_artifact(
-        "SAFE",
+        DataResult("SAFE"),
         symbol="NVDA",
         start_date="2019-12-01",
         end_date="2020-01-15",

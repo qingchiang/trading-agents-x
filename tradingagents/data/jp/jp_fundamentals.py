@@ -30,6 +30,7 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -40,10 +41,11 @@ from tradingagents.data.jp import jquants_fundamentals as jqf
 from tradingagents.data.jp.jquants_common import parse_number as _num
 from tradingagents.data.jp.jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
 from tradingagents.data.lookahead import is_near_live
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_analyst_forward
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,9 @@ def _minus_one_year(date_str) -> str | None:
     input is missing/malformed (so the TTM roll degrades to FY instead of crashing
     the whole valuation block on a partial feed)."""
     try:
-        return (datetime.strptime(date_str, "%Y-%m-%d") - relativedelta(years=1)).strftime("%Y-%m-%d")
+        return (datetime.strptime(date_str, "%Y-%m-%d") - relativedelta(years=1)).strftime(
+            "%Y-%m-%d"
+        )
     except (TypeError, ValueError):
         return None
 
@@ -123,7 +127,9 @@ def _ttm(field: str, statements: list[dict]) -> tuple[float | None, str]:
     return None, ""
 
 
-def _ttm_flows(statements: list[dict], fy: dict) -> tuple[float | None, float | None, float | None, str]:
+def _ttm_flows(
+    statements: list[dict], fy: dict
+) -> tuple[float | None, float | None, float | None, str]:
     """Return ``(eps, np, sales, basis)`` for the flow trio on ONE shared basis.
 
     Each of EPS/NP/Sales rolls to TTM independently; if they don't all roll
@@ -149,7 +155,9 @@ def _forward_eps(statements: list[dict]) -> float | None:
     latest_feps = _num(statements[0].get("FEPS"))
     if latest_feps is not None:
         return latest_feps
-    return next((_num(r.get("NxFEPS")) for r in statements if _num(r.get("NxFEPS")) is not None), None)
+    return next(
+        (_num(r.get("NxFEPS")) for r in statements if _num(r.get("NxFEPS")) is not None), None
+    )
 
 
 def _money(value: float | None) -> str:
@@ -202,11 +210,14 @@ def _sign(value: float) -> int:
 
 
 def _analyst_forward_line(
-    ticker: str, price: float | None, ttm_eps: float | None,
-    company_growth: float | None, curr_date: str,
+    ticker: str,
+    price: float | None,
+    ttm_eps: float | None,
+    company_growth: float | None,
+    curr_date: str,
     *,
     data_context: DataRequestContext,
-) -> str | None:
+) -> DataResult[str] | None:
     """Live-only analyst-consensus forward line, or None in backtest / when absent.
 
     Only rendered on a near-live run: yfinance's ``.info`` forward
@@ -247,13 +258,11 @@ def _analyst_forward_line(
     if n_analysts is not None:
         rows.append(f"| analyst_count | {n_analysts} | count | analysts |")
     content = (
-        line
-        + "\n\n| Metric | Value | Measurement | Unit |\n|---|---:|---|---|\n"
-        + "\n".join(rows)
+        line + "\n\n| Metric | Value | Measurement | Unit |\n|---|---:|---|---|\n" + "\n".join(rows)
     )
-    return attach_evidence_span(
-        attach_provenance(
-            content,
+    return (
+        DataResult(content)
+        .with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance analyst consensus",
@@ -261,9 +270,9 @@ def _analyst_forward_line(
                 effective="retrieval-time analyst snapshot",
                 timing="live non-point-in-time",
                 retrieved_at=retrieved,
-            ),
-        ),
-        temporal_scope="live_only",
+            )
+        )
+        .with_scope("live_only")
     )
 
 
@@ -274,7 +283,9 @@ def _history_frame(ticker: str, curr_date: str):
     fetch failure (no coverage, stale, halted) degrades to None rather than
     breaking the whole overview — the official summary must still render.
     """
-    start = (datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    start = (
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=_HISTORY_WINDOW_DAYS)
+    ).strftime("%Y-%m-%d")
     try:
         return _fetch_ohlcv_frame(ticker, start, curr_date)
     except Exception as exc:
@@ -291,7 +302,11 @@ def _price_stats(df, curr_date: str) -> tuple[float | None, str, float | None, f
     if df is None or df.empty:
         return None, "", None, None
     last = df.iloc[-1]
-    price_date = last["Date"].strftime("%Y-%m-%d") if hasattr(last["Date"], "strftime") else str(last["Date"])
+    price_date = (
+        last["Date"].strftime("%Y-%m-%d")
+        if hasattr(last["Date"], "strftime")
+        else str(last["Date"])
+    )
     year = df[df["Date"] >= pd.Timestamp(curr_date) - pd.Timedelta(days=_PRICE_WINDOW_DAYS)]
     return float(last["Close"]), price_date, float(year["High"].max()), float(year["Low"].min())
 
@@ -332,12 +347,12 @@ def _beta(hist, curr_date: str) -> float | None:
     return beta if pd.notna(beta) else None  # never emit a NaN/inf beta
 
 
-def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
+def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> DataResult[str]:
     """Render the computed, date-safe valuation block for ``ticker`` as of ``curr_date``."""
     _canonical, records = jqf.fetch_periods(ticker, curr_date)
     statements = [r for r in records if _is_statement(r)]
     if not statements:
-        return "\n\n## Valuation (computed)\n(unavailable: no statement disclosures)"
+        return DataResult("\n\n## Valuation (computed)\n(unavailable: no statement disclosures)")
 
     latest_fy = next((r for r in statements if r.get("CurPerType") == "FY"), None)
     fy = latest_fy or {}  # balance-point fields live on the full-year filing
@@ -377,6 +392,9 @@ def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestCo
 
     price_line = f"{_ratio(price)} (as of {price_date})" if price is not None else "N/A"
     growth_note = f", 1yr growth {growth * 100:+.1f}%" if growth is not None else ""
+    analyst_forward = _analyst_forward_line(
+        ticker, price, ttm_eps, growth, curr_date, data_context=data_context
+    )
     lines = [
         "",
         f"\n## Valuation (computed from J-Quants summary + price, date-safe as of {curr_date})",
@@ -389,28 +407,38 @@ def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestCo
         f"    PEG: {_ratio(peg)} (company-guidance{growth_note})",
         # Live-only analyst-consensus forward, right below the (date-safe) company
         # guidance; None → dropped by the join filter in a backtest / when absent.
-        _analyst_forward_line(ticker, price, ttm_eps, growth, curr_date, data_context=data_context),
+        analyst_forward.content if analyst_forward is not None else None,
         f"- Net margin: {_pct(net_margin)} ({flow_basis})    ROE: {_pct(roe)}    ROA: {_pct(roa)}"
         f"    Equity ratio: {_ratio(eqar)}",
         f"- 52-week range: {_ratio(wk_low)} – {_ratio(wk_high)}"
         f"    Beta (vs {_MARKET_INDEX}, 3yr weekly): {_ratio(beta)}",
     ]
-    result = "\n".join(line for line in lines if line is not None)
+    official_lines = [
+        line
+        for line in lines
+        if line is not None and (analyst_forward is None or line != analyst_forward.content)
+    ]
+    result = DataResult("\n".join(official_lines))
     if price_date:
-        result = attach_provenance(
-            result,
+        result = result.with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants adjusted OHLCV",
                 requested=curr_date,
                 effective=price_date,
                 timing="market-date filtered",
-            ),
+            )
         )
+    if analyst_forward is not None:
+        combined = DataResult.combine((result, analyst_forward))
+        return replace(combined, content="\n".join(line for line in lines if line is not None))
     return result
 
 
-def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_fundamentals", "jp_fundamentals")
+def get_fundamentals(
+    ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Official J-Quants overview plus a date-safe computed valuation block.
 
     The base overview comes from :func:`jquants_fundamentals.get_fundamentals`
@@ -422,25 +450,26 @@ def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context:
     base = jqf.get_fundamentals(ticker, curr_date, data_context=data_context)
     as_of = curr_date or datetime.now().strftime("%Y-%m-%d")
     try:
-        result = base + _valuation_block(ticker, as_of, data_context=data_context)
+        result = DataResult.combine(
+            (base, _valuation_block(ticker, as_of, data_context=data_context)), separator=""
+        )
     except Exception as exc:  # never let ratio math break the official overview
         logger.warning("JP fundamentals: valuation block failed for %s: %s", ticker, exc)
-        result = base + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"
-    return attach_provenance(
-        result,
+        result = replace(
+            base,
+            content=base.content
+            + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)",
+        )
+    return result.with_provenance(
         ProvenanceRecord(
             evidence="get_fundamentals",
             source="J-Quants official summary",
             requested=curr_date or "live retrieval",
-            effective=(
-                f"disclosures <= {curr_date}"
-                if curr_date
-                else "latest disclosure at retrieval"
-            ),
-            timing=(
-                "disclosure-date filtered"
-                if curr_date
-                else "live retrieval; no historical cutoff supplied"
-            ),
-        ),
+            effective=f"disclosures <= {curr_date}"
+            if curr_date
+            else "latest disclosure at retrieval",
+            timing="disclosure-date filtered"
+            if curr_date
+            else "live retrieval; no historical cutoff supplied",
+        )
     )

@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
+from tradingagents.data.evidence_workset import EvidenceToolArtifact, data_tool_output
 from tradingagents.data.interface import route_to_vendor
 from tradingagents.data.lookahead import lookback_start_date
 from tradingagents.research.tools.runtime import AnalysisToolRuntime, analysis_cutoff
@@ -13,7 +14,7 @@ from tradingagents.research.tools.runtime import AnalysisToolRuntime, analysis_c
 EXTENDED_TICKER_NEWS_LOOKBACK_DAYS = 89
 
 
-@tool("get_news")
+@tool("get_news", response_format="content_and_artifact")
 def get_news(
     ticker: Annotated[str, "Ticker symbol"],
     end_date: Annotated[str, InjectedState("trade_date")],
@@ -22,7 +23,7 @@ def get_news(
         Literal["recent", "extended"],
         "Use 'recent' first; use 'extended' only to investigate an older catalyst",
     ] = "recent",
-) -> str:
+) -> tuple[str, EvidenceToolArtifact]:
     """Retrieve recent or at-least-90-date news ending on the analysis date."""
     cutoff = analysis_cutoff(runtime, end_date)
     configured_lookback = runtime.context.dataflow_config["ticker_news_lookback_days"]
@@ -39,17 +40,18 @@ def get_news(
         if window == "extended"
         else recent_start_date
     )
-    return route_to_vendor(
-        "get_news",
-        ticker,
-        start_date,
-        cutoff,
-        _provenance=True,
-        data_context=runtime.context.data_context,
+    return data_tool_output(
+        route_to_vendor(
+            "get_news",
+            ticker,
+            start_date,
+            cutoff,
+            data_context=runtime.context.data_context,
+        )
     )
 
 
-@tool("get_global_news")
+@tool("get_global_news", response_format="content_and_artifact")
 def get_global_news(
     curr_date: Annotated[str, InjectedState("trade_date")],
     runtime: AnalysisToolRuntime,
@@ -59,14 +61,15 @@ def get_global_news(
     limit: Annotated[
         int | None, "Max articles to return; omit to use the configured default"
     ] = None,
-) -> str:
+) -> tuple[str, EvidenceToolArtifact]:
     """Retrieve global news ending on the workflow's immutable analysis date."""
     cutoff = analysis_cutoff(runtime, curr_date)
-    return route_to_vendor(
-        "get_global_news",
-        cutoff,
-        look_back_days,
-        limit,
-        _provenance=True,
-        data_context=runtime.context.data_context,
+    return data_tool_output(
+        route_to_vendor(
+            "get_global_news",
+            cutoff,
+            look_back_days,
+            limit,
+            data_context=runtime.context.data_context,
+        )
     )

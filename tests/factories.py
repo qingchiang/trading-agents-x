@@ -40,11 +40,7 @@ def analyst_report(
         analyst=analyst,
         markdown=(
             "# Overview\n\n"
-            + (
-                f"{executive_summary}\n\n"
-                if executive_summary is not None
-                else ""
-            )
+            + (f"{executive_summary}\n\n" if executive_summary is not None else "")
             + narrative
             + f"\n\n[^{evidence_ref}]"
         ),
@@ -74,6 +70,7 @@ def analyst_report(
         warnings=warnings,
     )
 
+
 def research_decision(
     *,
     rating: ResearchRating = ResearchRating.HOLD,
@@ -83,9 +80,7 @@ def research_decision(
     evidence_refs: tuple[str, ...] = (_DEFAULT_REF,),
     catalysts: tuple[str, ...] = (),
     risks: tuple[str, ...] = ("Fixture downside risk.",),
-    invalidation_conditions: tuple[str, ...] = (
-        "New evidence contradicts the fixture thesis.",
-    ),
+    invalidation_conditions: tuple[str, ...] = ("New evidence contradicts the fixture thesis.",),
     unresolved_questions: tuple[str, ...] = (),
     time_horizon: str = "6-12 months",
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = (),
@@ -126,8 +121,7 @@ def research_case(
     return ResearchCase(
         role=role,
         markdown=(
-            f"# {role.title()} case\n\n"
-            f"Fixture case statement grounded in [^{evidence_ref}]."
+            f"# {role.title()} case\n\nFixture case statement grounded in [^{evidence_ref}]."
         ),
     )
 
@@ -144,14 +138,16 @@ def analyst_runtime(config=None, *, analysis_date="2020-01-15"):
     from tradingagents.research.runtime import RunContext
 
     values = deepcopy(DEFAULT_CONFIG if config is None else config)
-    return Runtime(context=RunContext(
-        run_id="offline-analyst",
-        request=AnalysisRequest(ticker="NVDA", analysis_date=analysis_date),
-        settings=model_settings(data_config=values, output_language=values["output_language"]),
-        dataflow_config=values,
-        instrument_context="",
-        cancel_requested=lambda: False,
-    ))
+    return Runtime(
+        context=RunContext(
+            run_id="offline-analyst",
+            request=AnalysisRequest(ticker="NVDA", analysis_date=analysis_date),
+            settings=model_settings(data_config=values, output_language=values["output_language"]),
+            dataflow_config=values,
+            instrument_context="",
+            cancel_requested=lambda: False,
+        )
+    )
 
 
 def captured_analyst_prompt(monkeypatch, role, *, language="English"):
@@ -166,10 +162,16 @@ def captured_analyst_prompt(monkeypatch, role, *, language="English"):
 
     module = import_module(f"tradingagents.research.analysts.{role}_analyst")
     if role == "news":
-        monkeypatch.setattr(module, "get_global_macro_panel", lambda *_, data_context: DataResult("Offline macro input"))
+        monkeypatch.setattr(
+            module,
+            "get_global_macro_panel",
+            lambda *_, data_context: DataResult("Offline macro input"),
+        )
     if role == "sentiment":
         monkeypatch.setattr(module, "is_near_live", lambda *_: False)
-        monkeypatch.setattr(module, "route_to_vendor", lambda *_, **__: "Offline news input")
+        monkeypatch.setattr(
+            module, "route_to_vendor", lambda *_, **__: DataResult("Offline news input")
+        )
     captured = []
 
     def invoke(prompt):
@@ -181,8 +183,13 @@ def captured_analyst_prompt(monkeypatch, role, *, language="English"):
     model.bind_tools.return_value = RunnableLambda(invoke)
     model.invoke.side_effect = invoke
     node = getattr(module, f"create_{role}_analyst")(model)
-    node({
-        "company_of_interest": "NVDA", "trade_date": "2026-01-15", "messages": [],
-        "fundamental_inputs": {"responses": {}, "observations": []},
-    }, analyst_runtime({**DEFAULT_CONFIG, "output_language": language}))
+    node(
+        {
+            "company_of_interest": "NVDA",
+            "trade_date": "2026-01-15",
+            "messages": [],
+            "fundamental_inputs": {"responses": {}, "observations": []},
+        },
+        analyst_runtime({**DEFAULT_CONFIG, "output_language": language}),
+    )
     return captured[0]

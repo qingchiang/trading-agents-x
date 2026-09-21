@@ -12,8 +12,13 @@ from tests.data_policy import configure_data, data_policy, request_context
 from tradingagents.data.jp import http_util, tdnet_news as td
 
 
-def _row(code="72030", title="2026年3月期決算短信", pdf="/inbs/140120260710590974.pdf",
-         when="2026/07/10 16:00", cls="odd"):
+def _row(
+    code="72030",
+    title="2026年3月期決算短信",
+    pdf="/inbs/140120260710590974.pdf",
+    when="2026/07/10 16:00",
+    cls="odd",
+):
     return (
         f'<tr class="{cls}">'
         f'<td class="time" nowrap>{when}</td>'
@@ -72,9 +77,7 @@ class ParseRowsTests(unittest.TestCase):
         self.assertEqual(r["code"], "72030")
         self.assertEqual(r["title"], "2026年3月期決算短信")
         self.assertEqual(r["at"], datetime(2026, 7, 10, 16, 0))
-        self.assertEqual(
-            r["pdf"], "https://www.release.tdnet.info/inbs/140120260710590974.pdf"
-        )
+        self.assertEqual(r["pdf"], "https://www.release.tdnet.info/inbs/140120260710590974.pdf")
 
     def test_decodes_html_entities_in_title(self):
         rows = td._parse_rows(_page(_row(title="M&amp;A・株式交換に関するお知らせ")))
@@ -106,8 +109,7 @@ class ParseRowsTests(unittest.TestCase):
         self.assertEqual(td._parse_rows(_page(broken)), [])
 
     def test_parses_odd_and_even_rows(self):
-        rows = td._parse_rows(_page(_row(code="72030", cls="odd"),
-                                    _row(code="67580", cls="even")))
+        rows = td._parse_rows(_page(_row(code="72030", cls="odd"), _row(code="67580", cls="even")))
         self.assertEqual([r["code"] for r in rows], ["72030", "67580"])
 
 
@@ -122,7 +124,7 @@ class GetNewsTests(unittest.TestCase):
 
     def _run(self, html, ticker="7203.T", start="2026-06-12", end="2026-07-12"):
         with mock.patch.object(td, "_search", return_value=html):
-            return td.get_news(ticker, start, end, data_context=request_context())
+            return td.get_news(ticker, start, end, data_context=request_context()).content
 
     def test_filters_by_securities_code(self):
         html = _page(_row(code="72030", title="対象"), _row(code="99840", title="他社"))
@@ -134,7 +136,7 @@ class GetNewsTests(unittest.TestCase):
         # The search tolerates loose ranges, so out-of-window rows must be dropped
         # client-side: only the row inside [start, end] survives.
         html = _page(
-            _row(title="前", when="2026/06/10 10:00"),   # before start
+            _row(title="前", when="2026/06/10 10:00"),  # before start
             _row(title="窓内", when="2026/06/20 10:00"),  # inside
             _row(title="未来", when="2026/07/20 10:00"),  # after end
         )
@@ -162,18 +164,22 @@ class GetNewsTests(unittest.TestCase):
     def test_unscoped_429_retries_once_then_degrades(self):
         rate_limited = HTTPError("https://example.test", 429, "Too Many", {}, None)
         with (
-            mock.patch.object(http_util, "urlopen", side_effect=[rate_limited, rate_limited]) as urlopen,
+            mock.patch.object(
+                http_util, "urlopen", side_effect=[rate_limited, rate_limited]
+            ) as urlopen,
             mock.patch.object(http_util.time, "sleep") as sleep,
         ):
             out = td.get_news("7203.T", "2026-06-12", "2026-07-12", data_context=request_context())
 
-        self.assertIn("No TDnet disclosures found for 7203.T", out)
+        self.assertIn("No TDnet disclosures found for 7203.T", out.content)
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once()
 
     def test_newest_first(self):
-        html = _page(_row(title="古い", when="2026/06/13 09:00"),
-                     _row(title="新しい", when="2026/07/10 15:00"))
+        html = _page(
+            _row(title="古い", when="2026/06/13 09:00"),
+            _row(title="新しい", when="2026/07/10 15:00"),
+        )
         out = self._run(html)
         self.assertLess(out.index("新しい"), out.index("古い"))
 
@@ -191,7 +197,7 @@ class GetNewsTests(unittest.TestCase):
         with mock.patch.object(td, "_search") as search:
             out = td.get_news("7203.T", "2026-05-01", "2026-05-31", data_context=request_context())
         search.assert_not_called()
-        self.assertIn("<TDnet unavailable:", out)
+        self.assertIn("<TDnet unavailable:", out.content)
 
     def test_requested_window_is_clamped_to_31_calendar_dates(self):
         with mock.patch.object(td, "_search", return_value=_page()) as search:
@@ -217,6 +223,7 @@ class GetNewsTests(unittest.TestCase):
 class RegistrationTests(unittest.TestCase):
     def test_tdnet_news_registered_for_get_news(self):
         from tradingagents.data import interface
+
         self.assertIn("tdnet_news", interface.VENDOR_METHODS["get_news"])
         self.assertIn("tdnet_news", interface.VENDOR_LIST)
 

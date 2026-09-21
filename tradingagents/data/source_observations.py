@@ -6,74 +6,9 @@ it never parses rendered reports or changes provider routing.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import replace
 from datetime import UTC, datetime
 
 from tradingagents.domain.data import SourceObservation, as_date, scalar
-
-_sink: ContextVar[list[SourceObservation] | None] = ContextVar("source_observations", default=None)
-
-
-@contextmanager
-def capture_observations() -> Iterator[list[SourceObservation]]:
-    observations: list[SourceObservation] = []
-    token = _sink.set(observations)
-    try:
-        yield observations
-    finally:
-        _sink.reset(token)
-
-
-@contextmanager
-def routed_observations(*, fallback: bool) -> Iterator[None]:
-    """Publish only the successful route leg, with its actual fallback status."""
-    parent = _sink.get()
-    if parent is None:
-        yield
-        return
-    with capture_observations() as observations:
-        yield
-    parent.extend(replace(row, fallback=row.fallback or fallback) for row in observations)
-
-
-def publish_observation(
-    source: str,
-    kind: str,
-    key: str,
-    values: dict,
-    *,
-    effective_date=None,
-    available_on=None,
-    available_at=None,
-    retrieved_at: datetime | None = None,
-    timing: str | None = None,
-    fallback: bool = False,
-) -> None:
-    sink = _sink.get()
-    if sink is None:
-        return
-    sink.append(
-        SourceObservation(
-            source=source,
-            kind=kind,
-            key=str(key),
-            values=scalar(values),
-            effective_date=as_date(effective_date),
-            available_on=as_date(available_on),
-            available_at=available_at,
-            retrieved_at=retrieved_at or datetime.now(UTC),
-            timing=timing
-            or (
-                "publication-date filtered"
-                if available_on or available_at
-                else "near-live snapshot; publication time unavailable"
-            ),
-            fallback=fallback,
-        )
-    )
 
 
 def make_observation(
@@ -107,6 +42,7 @@ def make_observation(
         fallback=fallback,
     )
 
+
 _FINANCIAL_FIELDS = {
     "income": ("Total Revenue", "Operating Income", "Net Income", "Basic EPS"),
     "balance": (
@@ -128,9 +64,10 @@ _FINANCIAL_FIELDS = {
 }
 
 
-def publish_yahoo_statement(frame, ticker: str, kind: str, freq: str, *, source="yfinance"):
+def yahoo_statement_observations(frame, ticker: str, kind: str, freq: str, *, source="yfinance"):
     from tradingagents.domain.measurement import instrument_currency
 
+    observations = []
     for period in sorted(frame.columns, reverse=True)[:4]:
         values = {
             label: scalar(frame.loc[label, period])
@@ -146,10 +83,13 @@ def publish_yahoo_statement(frame, ticker: str, kind: str, freq: str, *, source=
             frequency=freq,
             period_basis="provider fiscal period; not a filing timestamp",
         )
-        publish_observation(
-            source,
-            f"financial_{kind}",
-            f"{ticker}:{as_date(period)}",
-            values,
-            effective_date=period,
+        observations.append(
+            make_observation(
+                source,
+                f"financial_{kind}",
+                f"{ticker}:{as_date(period)}",
+                values,
+                effective_date=period,
+            )
         )
+    return tuple(observations)

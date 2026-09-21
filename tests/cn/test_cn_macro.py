@@ -171,10 +171,7 @@ def test_nbs_failure_and_empty_eastmoney_fallback_is_not_a_successful_empty_wind
     for _ in range(2):
         with pytest.raises(
             cn_macro.AkShareRequestError,
-            match=(
-                "NBS primary retrieval unavailable; "
-                "Eastmoney returned no usable observations"
-            ),
+            match=("NBS primary retrieval unavailable; Eastmoney returned no usable observations"),
         ):
             cn_macro.fetch_series("cn_cpi", "2026-07-21", 60, data_context=request_context())
 
@@ -279,7 +276,9 @@ def test_unemployment_uses_release_date_and_latest_official_article(monkeypatch)
 
     monkeypatch.setattr(cn_macro, "_request_text", request_text)
 
-    data = cn_macro.fetch_series("cn_unemployment", "2026-01-31", 60, data_context=request_context())
+    data = cn_macro.fetch_series(
+        "cn_unemployment", "2026-01-31", 60, data_context=request_context()
+    )
 
     assert data["points"] == [("2026-01-01", "5.1")]
     assert "release-date filtered" in data["timing"]
@@ -402,5 +401,5 @@ def test_china_alias_dispatch_never_reaches_fred(monkeypatch):
     with mock.patch.object(macro.fred, "get_macro_data", side_effect=AssertionError("FRED called")):
         output = macro.get_macro_indicators("cn_pmi", "2026-01-15", data_context=request_context())
 
-    assert "## China macro: China PMI" in output
-    assert "non-vintage" in output
+    assert "## China macro: China PMI" in output.content
+    assert any("non-vintage" in record.timing for record in output.provenance)

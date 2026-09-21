@@ -15,6 +15,8 @@ from tradingagents.data.jp.jquants_common import (
     parse_number as _num,
     to_jquants_code,
 )
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError
 
 # How many recent disclosed periods to show in each statement.
@@ -165,74 +167,134 @@ def _select(records: list[dict], freq: str) -> list[dict]:
     return (rows or records)[:_PERIOD_LIMIT]
 
 
-def _render_periods(canonical, records, freq, title, field_specs) -> str:
+def _render_periods(canonical, records, freq, title, field_specs) -> DataResult[str]:
     """Render one line per period; ``field_specs`` is ``(label, key-or-callable)``."""
+    observations = []
     rows = _select(records, freq)
     lines = [f"# {title} for {canonical} (J-Quants summary, latest {len(rows)} periods)"]
     for r in rows:
         parts = []
-        values = {"currency": "JPY", "unit": "JPY; EPS/BPS in JPY per share", "period_basis": "YTD", "reporting_basis": _reporting_basis(r)}
+        values = {
+            "currency": "JPY",
+            "unit": "JPY; EPS/BPS in JPY per share",
+            "period_basis": "YTD",
+            "reporting_basis": _reporting_basis(r),
+        }
         for label, spec in field_specs:
             value = _fmt(spec(r)) if callable(spec) else _fmt_field(r, spec)
             parts.append(f"{label}={value}")
             values[label] = spec(r) if callable(spec) else r.get(spec)
-        from tradingagents.data.source_observations import publish_observation
+        from tradingagents.data.source_observations import make_observation
 
-        kind = "balance" if title.startswith("Balance") else "cashflow" if title.startswith("Cash") else "income"
+        kind = (
+            "balance"
+            if title.startswith("Balance")
+            else "cashflow"
+            if title.startswith("Cash")
+            else "income"
+        )
         if kind == "balance":
             values["period_basis"] = "instant"
-        publish_observation(
-            "J-Quants", f"financial_{kind}",
-            f"{canonical}:{r.get('CurPerEn')}:{r.get('DocType')}", values,
-            effective_date=r.get("CurPerEn"), available_on=r.get("DiscDate"),
+        observations.append(
+            make_observation(
+                "J-Quants",
+                f"financial_{kind}",
+                f"{canonical}:{r.get('CurPerEn')}:{r.get('DocType')}",
+                values,
+                effective_date=r.get("CurPerEn"),
+                available_on=r.get("DiscDate"),
+            )
         )
         lines.append(f"- {_period_label(r)}: " + ", ".join(parts))
-    return "\n".join(lines)
+    return DataResult("\n".join(lines), observations=tuple(observations))
 
 
-def get_fundamentals(ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_fundamentals", "jquants")
+def get_fundamentals(
+    ticker: str, curr_date: str | None = None, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Headline fundamentals overview from the latest disclosed period."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     r = records[0]
-    return "\n".join([
-        f"# Fundamentals overview for {canonical} (J-Quants summary)",
-        f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
-        f"Reporting basis: {_reporting_basis(r)}",
-        f"Net sales: {_fmt(r.get('Sales'))}",
-        f"Operating profit: {_fmt_field(r, 'OP')}    "
-        f"Ordinary profit: {_fmt_field(r, 'OdP')}",
-        f"Net profit: {_fmt(r.get('NP'))}",
-        f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
-        f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
-        f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
-        f"financing: {_fmt(r.get('CFF'))}",
-        f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
-    ])
+    return DataResult(
+        "\n".join(
+            [
+                f"# Fundamentals overview for {canonical} (J-Quants summary)",
+                f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
+                f"Reporting basis: {_reporting_basis(r)}",
+                f"Net sales: {_fmt(r.get('Sales'))}",
+                f"Operating profit: {_fmt_field(r, 'OP')}    "
+                f"Ordinary profit: {_fmt_field(r, 'OdP')}",
+                f"Net profit: {_fmt(r.get('NP'))}",
+                f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
+                f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
+                f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
+                f"financing: {_fmt(r.get('CFF'))}",
+                f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
+            ]
+        )
+    )
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_balance_sheet", "jquants")
+def get_balance_sheet(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Balance-sheet summary (total assets, derived liabilities, net assets)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(
-        canonical, records, freq, "Balance sheet summary",
+        canonical,
+        records,
+        freq,
+        "Balance sheet summary",
         [("TotalAssets", "TA"), ("TotalLiabilities", _liabilities), ("NetAssets", "Eq")],
     )
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_cashflow", "jquants")
+def get_cashflow(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Cash-flow summary (operating/investing/financing + period-end cash)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(
-        canonical, records, freq, "Cash flow summary",
+        canonical,
+        records,
+        freq,
+        "Cash flow summary",
         [("Operating", "CFO"), ("Investing", "CFI"), ("Financing", "CFF"), ("CashEnd", "CashEq")],
     )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_income_statement", "jquants")
+def get_income_statement(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Income-statement summary (sales, operating/ordinary/net profit, EPS, BPS)."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     return _render_periods(
-        canonical, records, freq, "Income statement summary",
-        [("NetSales", "Sales"), ("OperatingProfit", "OP"), ("OrdinaryProfit", "OdP"),
-         ("NetProfit", "NP"), ("EPS", "EPS"), ("BPS", "BPS")],
+        canonical,
+        records,
+        freq,
+        "Income statement summary",
+        [
+            ("NetSales", "Sales"),
+            ("OperatingProfit", "OP"),
+            ("OrdinaryProfit", "OdP"),
+            ("NetProfit", "NP"),
+            ("EPS", "EPS"),
+            ("BPS", "BPS"),
+        ],
     )

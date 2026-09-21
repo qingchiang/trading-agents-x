@@ -27,9 +27,10 @@ from tradingagents.data.cn.common import (
 )
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError
-from tradingagents.provenance import attach_provenance
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
@@ -40,15 +41,9 @@ _TENCENT_PAGE_SIZE = 640
 _TENCENT_MAX_PAGES = 128
 _LOG_DETAIL_MAX_CHARS = 400
 _LATEST_ROW_RE = re.compile(r"latest row is (\d{4}-\d{2}-\d{2})", re.IGNORECASE)
-_SENSITIVE_QUERY_RE = re.compile(
-    r"(?i)\b(api[_-]?key|token|secret|authorization)=([^&\s]+)"
-)
-ADJUSTMENT_FALLBACK_NOTE = (
-    "adjustment provider changed; technical indicators may differ"
-)
-_LOT_BASED_VOLUME_SOURCES = frozenset(
-    {"AkShare / Eastmoney", "AkShare / Tencent"}
-)
+_SENSITIVE_QUERY_RE = re.compile(r"(?i)\b(api[_-]?key|token|secret|authorization)=([^&\s]+)")
+ADJUSTMENT_FALLBACK_NOTE = "adjustment provider changed; technical indicators may differ"
+_LOT_BASED_VOLUME_SOURCES = frozenset({"AkShare / Eastmoney", "AkShare / Tencent"})
 _SHARES_PER_LOT = 100
 
 
@@ -136,15 +131,12 @@ def _normalize_frame(
     expected_end: str,
 ) -> pd.DataFrame:
     if raw is None or raw.empty:
-        raise NoMarketDataError(
-            symbol, canonical, f"{source} returned no qfq rows"
-        )
+        raise NoMarketDataError(symbol, canonical, f"{source} returned no qfq rows")
     frame = raw.rename(columns=_COLUMN_ALIASES).copy()
     missing = [column for column in _REQUIRED_COLUMNS if column not in frame.columns]
     if missing:
         raise AkShareSchemaError(
-            f"{source} response is missing required columns {missing}; "
-            f"received {list(raw.columns)}"
+            f"{source} response is missing required columns {missing}; received {list(raw.columns)}"
         )
     frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
     numeric = [column for column in (*_REQUIRED_COLUMNS[1:], *_EXTENDED_COLUMNS) if column in frame]
@@ -153,13 +145,14 @@ def _normalize_frame(
     if source in _LOT_BASED_VOLUME_SOURCES:
         frame["Volume"] = frame["Volume"] * _SHARES_PER_LOT
     frame = frame[
-        (frame["Date"] >= pd.Timestamp(start_date))
-        & (frame["Date"] <= pd.Timestamp(expected_end))
+        (frame["Date"] >= pd.Timestamp(start_date)) & (frame["Date"] <= pd.Timestamp(expected_end))
     ]
     frame = frame.sort_values("Date").drop_duplicates("Date", keep="last")
-    finite_required = frame[list(_REQUIRED_COLUMNS[1:])].apply(
-        lambda column: column.map(math.isfinite)
-    ).all(axis=1)
+    finite_required = (
+        frame[list(_REQUIRED_COLUMNS[1:])]
+        .apply(lambda column: column.map(math.isfinite))
+        .all(axis=1)
+    )
     valid_prices = (
         finite_required
         & (frame["High"] >= frame[["Open", "Close", "Low"]].max(axis=1))
@@ -207,10 +200,7 @@ def _fetch_tencent_page(
     """Fetch and validate one bounded Tencent qfq page."""
     params = {
         "_var": f"kline_dayqfq{end_date.replace('-', '')}",
-        "param": (
-            f"{prefixed_code},day,{start_date},{end_date},"
-            f"{_TENCENT_PAGE_SIZE},qfq"
-        ),
+        "param": (f"{prefixed_code},day,{start_date},{end_date},{_TENCENT_PAGE_SIZE},qfq"),
         "r": "0.8205512681390605",
     }
 
@@ -235,14 +225,12 @@ def _fetch_tencent_page(
         stock_data = payload.get("data", {}).get(prefixed_code, {})
     except Exception as exc:  # noqa: BLE001 - upstream payload failures vary
         raise AkShareSchemaError(
-            f"AkShare Tencent response for {start_date} to {end_date} "
-            f"could not be decoded: {exc}"
+            f"AkShare Tencent response for {start_date} to {end_date} could not be decoded: {exc}"
         ) from exc
     if not isinstance(stock_data, dict) or "qfqday" not in stock_data:
         keys = sorted(stock_data) if isinstance(stock_data, dict) else []
         raise AkShareSchemaError(
-            "AkShare Tencent qfq response is missing qfqday; "
-            f"received keys {keys}"
+            f"AkShare Tencent qfq response is missing qfqday; received keys {keys}"
         )
     rows = stock_data.get("qfqday") or []
     if not isinstance(rows, list):
@@ -257,18 +245,12 @@ def _fetch_tencent_page(
     if frame["date"].isna().any():
         raise AkShareSchemaError("AkShare Tencent qfq response contains invalid dates.")
     duplicate_rows = frame[frame["date"].duplicated(keep=False)]
-    if not duplicate_rows.empty and (
-        duplicate_rows.groupby("date", sort=False).nunique(dropna=False).max(axis=1)
-        > 1
-    ).any():
-        raise AkShareSchemaError(
-            "AkShare Tencent qfq page contains conflicting duplicate dates."
-        )
-    frame = (
-        frame.drop_duplicates("date", keep="last")
-        .sort_values("date")
-        .reset_index(drop=True)
-    )
+    if (
+        not duplicate_rows.empty
+        and (duplicate_rows.groupby("date", sort=False).nunique(dropna=False).max(axis=1) > 1).any()
+    ):
+        raise AkShareSchemaError("AkShare Tencent qfq page contains conflicting duplicate dates.")
+    frame = frame.drop_duplicates("date", keep="last").sort_values("date").reset_index(drop=True)
     frame.attrs["raw_count"] = len(rows)
     return frame
 
@@ -316,9 +298,7 @@ def _fetch_tencent(prefixed_code: str, start_date: str, end_date: str) -> pd.Dat
                 "AkShare Tencent qfq page returned rows after its requested end."
             )
         if previous_earliest is not None and latest >= previous_earliest:
-            raise AkShareSchemaError(
-                "AkShare Tencent qfq pagination did not move backward."
-            )
+            raise AkShareSchemaError("AkShare Tencent qfq pagination did not move backward.")
         frames.append(page)
         raw_count = int(page.attrs.get("raw_count", len(page)))
         if earliest <= requested_start or raw_count < _TENCENT_PAGE_SIZE:
@@ -335,12 +315,9 @@ def _fetch_tencent(prefixed_code: str, start_date: str, end_date: str) -> pd.Dat
     frame = pd.concat(frames, ignore_index=True)
     conflicts = frame.groupby("date", sort=False).nunique(dropna=False).max(axis=1)
     if (conflicts > 1).any():
-        raise AkShareSchemaError(
-            "AkShare Tencent qfq pages returned conflicting duplicate dates."
-        )
+        raise AkShareSchemaError("AkShare Tencent qfq pages returned conflicting duplicate dates.")
     frame = frame[
-        (frame["date"] >= pd.Timestamp(start_date))
-        & (frame["date"] <= pd.Timestamp(end_date))
+        (frame["date"] >= pd.Timestamp(start_date)) & (frame["date"] <= pd.Timestamp(end_date))
     ]
     return frame.drop_duplicates("date", keep="last").sort_values("date")
 
@@ -371,7 +348,10 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
         )
 
     attempts = (
-        ("AkShare / Tencent", lambda: _fetch_tencent(f"{exchange}{code}", effective_start, expected_end)),
+        (
+            "AkShare / Tencent",
+            lambda: _fetch_tencent(f"{exchange}{code}", effective_start, expected_end),
+        ),
         ("AkShare / Eastmoney", lambda: _fetch_eastmoney(code, effective_start, expected_end)),
     )
     errors: list[Exception] = []
@@ -405,8 +385,7 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
             _remember(key, result)
             elapsed_ms = round((time.monotonic() - started) * 1000)
             logger.info(
-                "%s healthy for %s: schema=valid rows=%d latest=%s "
-                "latency_ms=%d adjustment=qfq",
+                "%s healthy for %s: schema=valid rows=%d latest=%s latency_ms=%d adjustment=qfq",
                 source,
                 canonical,
                 len(frame),
@@ -428,8 +407,7 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
             elapsed_ms = round((time.monotonic() - started) * 1000)
             status, latest, detail = _health_failure(exc)
             logger.warning(
-                "%s unhealthy for %s: status=%s latest=%s latency_ms=%d "
-                "error=%s detail=%s",
+                "%s unhealthy for %s: status=%s latest=%s latency_ms=%d error=%s detail=%s",
                 source,
                 canonical,
                 status,
@@ -451,7 +429,10 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
     ) from (errors[-1] if errors else None)
 
 
-def get_stock(symbol: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_stock_data", "akshare")
+def get_stock(
+    symbol: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return AkShare qfq daily bars as compatible CSV plus source metadata."""
     result = fetch_ohlcv(symbol, start_date, end_date)
     output = result.frame.copy()
@@ -470,16 +451,13 @@ def get_stock(symbol: str, start_date: str, end_date: str, *, data_context: Data
     )
     timing = "market-date filtered; qfq adjusted; future rows excluded"
     if result.fallback_reason:
-        timing += (
-            f"; fallback: {result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
-        )
-    return attach_provenance(
-        header + output.to_csv(index=False),
+        timing += f"; fallback: {result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
+    return DataResult(header + output.to_csv(index=False)).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source=result.source,
             requested=f"{start_date} to {end_date}",
             effective=f"{output.iloc[0]['Date']} to {result.effective_end}",
             timing=timing,
-        ),
+        )
     )

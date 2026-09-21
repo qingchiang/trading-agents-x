@@ -29,6 +29,7 @@ def _patched_get(body, capture=None):
         if capture is not None:
             capture.update(kwargs)
         return _FakeResponse(body)
+
     return fake_get
 
 
@@ -52,27 +53,35 @@ def test_rate_limit_detected(monkeypatch):
 def test_invalid_key_not_mislabeled_as_rate_limit(monkeypatch):
     # AV's invalid-key notice mentions "API key"; it must NOT be treated as a
     # (transient) rate limit, but surface as a real configuration error (#991).
-    body = ('{"Information": "the parameter apikey is invalid or missing. '
-            'Please claim your free API key on (https://www.alphavantage.co/support/#api-key)."}')
+    body = (
+        '{"Information": "the parameter apikey is invalid or missing. '
+        'Please claim your free API key on (https://www.alphavantage.co/support/#api-key)."}'
+    )
     monkeypatch.setattr(av.requests, "get", _patched_get(body))
     with pytest.raises(av.AlphaVantageNotConfiguredError):
         av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
     with pytest.raises(av.AlphaVantageRateLimitError):  # sanity: rate-limit path still distinct
-        monkeypatch.setattr(av.requests, "get", _patched_get('{"Note": "API call frequency is 5 calls per minute."}'))
+        monkeypatch.setattr(
+            av.requests,
+            "get",
+            _patched_get('{"Note": "API call frequency is 5 calls per minute."}'),
+        )
         av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
 
 
-_FUNDAMENTALS_JSON = json.dumps({
-    "symbol": "AAPL",
-    "annualReports": [
-        {"fiscalDateEnding": "2025-12-31", "totalAssets": "1"},   # future -> must drop
-        {"fiscalDateEnding": "2023-12-31", "totalAssets": "2"},   # past   -> must keep
-    ],
-    "quarterlyReports": [
-        {"fiscalDateEnding": "2024-06-30", "totalAssets": "3"},   # future -> must drop
-        {"fiscalDateEnding": "2023-09-30", "totalAssets": "4"},   # past   -> must keep
-    ],
-})
+_FUNDAMENTALS_JSON = json.dumps(
+    {
+        "symbol": "AAPL",
+        "annualReports": [
+            {"fiscalDateEnding": "2025-12-31", "totalAssets": "1"},  # future -> must drop
+            {"fiscalDateEnding": "2023-12-31", "totalAssets": "2"},  # past   -> must keep
+        ],
+        "quarterlyReports": [
+            {"fiscalDateEnding": "2024-06-30", "totalAssets": "3"},  # future -> must drop
+            {"fiscalDateEnding": "2023-09-30", "totalAssets": "4"},  # past   -> must keep
+        ],
+    }
+)
 
 
 @pytest.mark.unit
@@ -81,8 +90,8 @@ def test_fundamentals_look_ahead_filter_runs_on_json_string(monkeypatch):
     # future-dated fiscal periods leak into historical runs.
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: _FUNDAMENTALS_JSON)
     out = avf.get_balance_sheet("AAPL", curr_date="2024-01-01", data_context=request_context())
-    assert isinstance(out, str)  # callers still receive a str
-    parsed = json.loads(out)
+    assert isinstance(out.content, str)  # callers still receive a str
+    parsed = json.loads(out.content)
     assert [r["fiscalDateEnding"] for r in parsed["annualReports"]] == ["2023-12-31"]
     assert [r["fiscalDateEnding"] for r in parsed["quarterlyReports"]] == ["2023-09-30"]
 
@@ -90,13 +99,19 @@ def test_fundamentals_look_ahead_filter_runs_on_json_string(monkeypatch):
 @pytest.mark.unit
 def test_fundamentals_no_curr_date_passes_through(monkeypatch):
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: _FUNDAMENTALS_JSON)
-    assert avf.get_income_statement("AAPL", data_context=request_context()) == _FUNDAMENTALS_JSON
+    assert (
+        avf.get_income_statement("AAPL", data_context=request_context()).content
+        == _FUNDAMENTALS_JSON
+    )
 
 
 @pytest.mark.unit
 def test_fundamentals_non_json_body_unchanged(monkeypatch):
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: "not-json")
-    assert avf.get_cashflow("AAPL", curr_date="2024-01-01", data_context=request_context()) == "not-json"
+    assert (
+        avf.get_cashflow("AAPL", curr_date="2024-01-01", data_context=request_context()).content
+        == "not-json"
+    )
 
 
 @pytest.mark.unit
@@ -107,8 +122,8 @@ def test_historical_overview_does_not_query_current_snapshot(monkeypatch):
     out = avf.get_fundamentals("AAPL", curr_date="2020-01-15", data_context=request_context())
 
     vendor.assert_not_called()
-    assert "LIVE_DATA_UNAVAILABLE" in out
-    assert "Requested analysis date: 2020-01-15" in out
+    assert "LIVE_DATA_UNAVAILABLE" in out.content
+    assert "Requested analysis date: 2020-01-15" in out.content
 
 
 @pytest.mark.unit
@@ -118,7 +133,7 @@ def test_live_overview_labels_retrieval_time_and_non_point_in_time(monkeypatch):
 
     out = avf.get_fundamentals("AAPL", curr_date="2026-07-17", data_context=request_context())
 
-    assert "Requested analysis date: 2026-07-17" in out
-    assert "Retrieval timestamp:" in out
-    assert "not point-in-time historical data" in out
-    assert '"PERatio":"30"' in out
+    assert "Requested analysis date: 2026-07-17" in out.content
+    assert "Retrieval timestamp:" in out.content
+    assert "not point-in-time historical data" in out.content
+    assert '"PERatio":"30"' in out.content

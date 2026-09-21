@@ -34,12 +34,14 @@ from tradingagents.data.jp.edinet_common import (
     filing_detail_line,
     filing_period_detail,
     iter_window_dates,
-    render_filings,
 )
 from tradingagents.data.jp.jquants_common import to_jquants_code
 from tradingagents.data.news_diagnostics import CandidateFilterCounts
-from tradingagents.data.news_selection import source_output_limit
+from tradingagents.data.news_selection import news_result, source_output_limit
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import tokyo_securities_base
+from tradingagents.domain.news import NewsCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,10 @@ def _format_filing(record: dict) -> str:
     return f"{line}\n{detail}" if detail else line
 
 
-def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_news", "edinet_news")
+def get_news(
+    ticker: str, start_date: str, end_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return EDINET disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     Iterates the window day by day, keeping filings whose securities code matches
@@ -63,6 +68,7 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
     disclosures" line when the company filed nothing in the window (a normal,
     common outcome — not a data-availability failure).
     """
+    counts = CandidateFilterCounts()
     code = to_jquants_code(ticker)
     limit = source_output_limit(data_context.config["news_article_limit"])
     dates = list(iter_window_dates(start_date, end_date))
@@ -70,21 +76,40 @@ def get_news(ticker: str, start_date: str, end_date: str, *, data_context: DataR
 
     # EDINET carries the 5-digit securities code (``99840``); reduce it to the
     # 4-digit base so it compares equal to the ticker's J-Quants code (``9984``).
-    records = [record for date_str in dates for record in documents_on(date_str, data_context=data_context)]
+    records = [
+        record for date_str in dates for record in documents_on(date_str, data_context=data_context)
+    ]
     matches = [record for record in records if tokyo_securities_base(record.get("secCode")) == code]
     counts = CandidateFilterCounts(
-        upstream_returned=len(records), relevance_filtered=len(records) - len(matches),
+        upstream_returned=len(records),
+        relevance_filtered=len(records) - len(matches),
         source_truncated=max(0, len(matches) - limit),
     )
 
     if not matches:
-        return (
+        return DataResult(
             f"No EDINET disclosures found for {ticker} between {scanned_start} and "
-            f"{end_date}\n{counts.render()}"
+            f"{end_date}\n{counts.render()}",
+            diagnostics=(counts.diagnostic("EDINET"),),
         )
 
     # Most recent first, capped like the other news vendors.
-    items = render_filings(matches, _format_filing, limit)
-    return (
-        f"## {ticker} EDINET disclosures, from {scanned_start} to {end_date}:\n\n{counts.render()}\n\n{items}"
+    selected = sorted(matches, key=lambda row: row.get("submitDateTime") or "", reverse=True)[
+        :limit
+    ]
+    items = [
+        NewsCandidate(
+            "EDINET",
+            str(row.get("docDescription") or row.get("docTypeCode") or "Disclosure"),
+            _format_filing(row),
+            row.get("submitDateTime"),
+            record_id=str(row.get("docID") or ""),
+            effective_date=row.get("periodEnd"),
+        )
+        for row in selected
+    ]
+    return news_result(
+        f"## {ticker} EDINET disclosures, from {scanned_start} to {end_date}:\n\n{counts.render()}",
+        items,
+        diagnostics=(counts.diagnostic("EDINET"),),
     )

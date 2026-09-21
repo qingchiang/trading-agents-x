@@ -13,7 +13,6 @@ from tests.factories import analyst_runtime
 from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
-from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.sentiment_analyst import create_sentiment_analyst
 from tradingagents.research.analysts.sentiment_sources import (
     SentimentConfidence,
@@ -86,9 +85,11 @@ def _run(
         if news_side_effect:
             news.side_effect = news_side_effect
         else:
-            news.return_value = "NEWS_DATA"
+            news.return_value = DataResult("NEWS_DATA")
         llm = llm or _capturing_llm(captured)
-        result = create_sentiment_analyst(llm)(_state(ticker, trade_date), analyst_runtime(data_config()))
+        result = create_sentiment_analyst(llm)(
+            _state(ticker, trade_date), analyst_runtime(data_config())
+        )
     return captured, stocktwits, reddit, market_signals, news, result
 
 
@@ -162,7 +163,9 @@ def test_markdown_draft_is_persisted_with_local_confidence():
 def test_us_run_uses_social_sources_and_separate_windows():
     captured, stocktwits, reddit, signals, news, _ = _run()
 
-    news.assert_called_once_with("get_news", "NVDA", "2026-01-01", "2026-01-15", _provenance=True, data_context=request_context())
+    news.assert_called_once_with(
+        "get_news", "NVDA", "2026-01-01", "2026-01-15", data_context=request_context()
+    )
     stocktwits.assert_called_once_with(
         "NVDA",
         limit=30,
@@ -217,9 +220,7 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(ticker, route):
     assert "`reddit`" in prompt
     assert result["sentiment_confidence"] == 0.55
     signal_block = next(
-        block
-        for block in result["prefetched_evidence"]
-        if block["content"] == "SIGNAL_DATA"
+        block for block in result["prefetched_evidence"] if block["content"] == "SIGNAL_DATA"
     )
     assert signal_block["records"][0]["source"] == "official source"
 
@@ -238,9 +239,7 @@ def test_historical_us_run_never_queries_live_social_sources():
         map(str, captured["prompt"])
     )
     assert result["prefetched_evidence"][1]["content"] is None
-    assert "vendor not queried" in (
-        result["prefetched_evidence"][1]["records"][0]["timing"]
-    )
+    assert "vendor not queried" in (result["prefetched_evidence"][1]["records"][0]["timing"])
 
 
 @pytest.mark.unit
@@ -291,20 +290,19 @@ def test_japan_margin_figure_becomes_resolvable_evidence():
         effective=lambda value: value,
         timing="publication-date filtered",
     )
-    body = attach_provenance(
-        "Margin buying balance: JPY 12,345,678.",
+    body = DataResult("Margin buying balance: JPY 12,345,678.").with_provenance(
         ProvenanceRecord(
             evidence="margin trading balance",
             source="JPX",
             requested="2026-01-15",
             effective="2026-01-14",
             timing="publication-date filtered",
-        ),
+        )
     )
     result = _run(
         ticker="2802.T",
         routes={".T": {"news_data": "jp_news"}},
-        signals=(FetchedSentimentSignal(spec=spec, result=DataResult(body)),),
+        signals=(FetchedSentimentSignal(spec=spec, result=body),),
     )[-1]
 
     evidence = collect_evidence(
@@ -313,10 +311,6 @@ def test_japan_margin_figure_becomes_resolvable_evidence():
         analyst="social",
         prefetched_blocks=result["prefetched_evidence"],
     )
-    margin = next(
-        item
-        for item in evidence
-        if item.evidence_type == "margin trading balance"
-    )
+    margin = next(item for item in evidence if item.evidence_type == "margin trading balance")
     assert margin.content == "Margin buying balance: JPY 12,345,678."
     assert margin.source == "JPX"

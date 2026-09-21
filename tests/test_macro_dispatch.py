@@ -17,7 +17,6 @@ import tradingagents.configuration.defaults as default_config
 from tests.data_policy import configure_data, request_context
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
 from tradingagents.data.interface import route_to_vendor
-from tradingagents.provenance import extract_provenance
 
 
 def _data(series_id, title, points):
@@ -52,9 +51,11 @@ class MacroDispatchTests(unittest.TestCase):
             mock.patch.object(estat, "fetch_series", return_value=None),
             mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")),
         ):
-            out = route_to_vendor("get_macro_indicators", "jp_cpi", "2026-06-20", data_context=request_context())
-        self.assertIn("e-Stat: no data", out)
-        record = extract_provenance(out)[0]
+            out = route_to_vendor(
+                "get_macro_indicators", "jp_cpi", "2026-06-20", data_context=request_context()
+            )
+        self.assertIn("e-Stat: no data", out.content)
+        record = list(out.provenance)[0]
         self.assertEqual(record.effective, "—")
         self.assertEqual(
             record.timing,
@@ -73,7 +74,7 @@ class MacroDispatchTests(unittest.TestCase):
                 "2026-06-20",
                 data_context=request_context(),
             )
-        record = extract_provenance(out)[0]
+        record = list(out.provenance)[0]
         self.assertEqual(record.effective, "—")
         self.assertEqual(record.timing, "invalid indicator or vendor request")
 
@@ -87,8 +88,10 @@ class MacroDispatchTests(unittest.TestCase):
             mock.patch.object(boj, "fetch_series", side_effect=AssertionError("boj called")),
             mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")),
         ):
-            out = route_to_vendor("get_macro_indicators", "jp_cpi", "2026-06-20", data_context=request_context())
-        self.assertIn("## e-Stat: Japan CPI", out)
+            out = route_to_vendor(
+                "get_macro_indicators", "jp_cpi", "2026-06-20", data_context=request_context()
+            )
+        self.assertIn("## e-Stat: Japan CPI", out.content)
 
     def test_japan_policy_rate_falls_through_estat_to_boj(self):
         # estat doesn't own jp_policy_rate -> NoMarketDataError -> boj serves it.
@@ -100,8 +103,13 @@ class MacroDispatchTests(unittest.TestCase):
             ),
             mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")),
         ):
-            out = route_to_vendor("get_macro_indicators", "jp_policy_rate", "2026-06-20", data_context=request_context())
-        self.assertIn("## BOJ: Japan policy rate", out)
+            out = route_to_vendor(
+                "get_macro_indicators",
+                "jp_policy_rate",
+                "2026-06-20",
+                data_context=request_context(),
+            )
+        self.assertIn("## BOJ: Japan policy rate", out.content)
 
     def test_japan_10y_provenance_records_actual_fallback_source_and_frequency(self):
         data = _data("jp_10y_yield", "Japan 10Y", [("2026-06-01", "1.9")])
@@ -110,9 +118,11 @@ class MacroDispatchTests(unittest.TestCase):
             timing="FRED monthly fallback; observation-date filtered",
         )
         with mock.patch.object(jp_macro, "fetch_series", return_value=data):
-            out = route_to_vendor("get_macro_indicators", "jp_10y_yield", "2026-06-20", data_context=request_context())
+            out = route_to_vendor(
+                "get_macro_indicators", "jp_10y_yield", "2026-06-20", data_context=request_context()
+            )
 
-        record = extract_provenance(out)[0]
+        record = list(out.provenance)[0]
         self.assertEqual(record.source, "FRED")
         self.assertIn("Monthly", record.timing)
         self.assertIn("fallback", record.timing)
@@ -123,8 +133,10 @@ class MacroDispatchTests(unittest.TestCase):
             "fetch_series",
             return_value=_data("CPIAUCSL", "US CPI", [("2026-05-01", "333.9")]),
         ):
-            out = route_to_vendor("get_macro_indicators", "cpi", "2026-06-20", data_context=request_context())
-        self.assertIn("## FRED: US CPI", out)
+            out = route_to_vendor(
+                "get_macro_indicators", "cpi", "2026-06-20", data_context=request_context()
+            )
+        self.assertIn("## FRED: US CPI", out.content)
 
     def test_china_indicator_routes_to_cn_macro(self):
         with (
@@ -135,8 +147,10 @@ class MacroDispatchTests(unittest.TestCase):
             ),
             mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")),
         ):
-            out = route_to_vendor("get_macro_indicators", "cn_lpr", "2026-06-20", data_context=request_context())
-        self.assertIn("## China macro: China LPR", out)
+            out = route_to_vendor(
+                "get_macro_indicators", "cn_lpr", "2026-06-20", data_context=request_context()
+            )
+        self.assertIn("## China macro: China LPR", out.content)
 
     def test_china_fallback_provenance_uses_actual_source_and_reason(self):
         data = _data("usd_cny", "USD/CNY", [("2026-06-19", "7.1")])
@@ -146,9 +160,11 @@ class MacroDispatchTests(unittest.TestCase):
             fallback_reason="SAFE primary retrieval unavailable",
         )
         with mock.patch.object(cn_macro, "fetch_series", return_value=data):
-            out = route_to_vendor("get_macro_indicators", "usd_cny", "2026-06-20", data_context=request_context())
+            out = route_to_vendor(
+                "get_macro_indicators", "usd_cny", "2026-06-20", data_context=request_context()
+            )
 
-        record = extract_provenance(out)[0]
+        record = list(out.provenance)[0]
         self.assertEqual(record.source, "Eastmoney")
         self.assertIn("Monthly", record.timing)
         self.assertIn("fallback: SAFE primary retrieval unavailable", record.timing)
@@ -160,11 +176,13 @@ class MacroDispatchTests(unittest.TestCase):
         with mock.patch.object(
             fred, "fetch_series", side_effect=fred.FredNotConfiguredError("FRED_API_KEY not set")
         ):
-            out = route_to_vendor("get_macro_indicators", "cpi", "2026-06-20", data_context=request_context())
-        self.assertIn("DATA_UNAVAILABLE", out)
-        self.assertIn("FRED_API_KEY", out)
-        self.assertNotIn("not a BOJ series", out)
-        self.assertNotIn("NO_DATA_AVAILABLE", out)
+            out = route_to_vendor(
+                "get_macro_indicators", "cpi", "2026-06-20", data_context=request_context()
+            )
+        self.assertIn("DATA_UNAVAILABLE", out.content)
+        self.assertIn("FRED_API_KEY", out.content)
+        self.assertNotIn("not a BOJ series", out.content)
+        self.assertNotIn("NO_DATA_AVAILABLE", out.content)
 
 
 @pytest.mark.unit

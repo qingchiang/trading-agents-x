@@ -19,6 +19,10 @@ they share ``NoMarketDataError`` and differ only in the free-text ``detail``.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tradingagents.domain.data_result import DataResult
 
 
 class VendorError(Exception):
@@ -40,7 +44,7 @@ class NoMarketDataError(VendorError):
         canonical: str | None = None,
         detail: str = "",
         *,
-        availability_notes: Iterable[str] = (),
+        availability_notes: Iterable[DataResult[str]] = (),
     ):
         self.symbol = symbol
         self.canonical = canonical or symbol
@@ -49,9 +53,7 @@ class NoMarketDataError(VendorError):
         # even when it has no usable rows itself. Keep that metadata attached to
         # the typed no-data outcome so the router can preserve it after a
         # successful fallback instead of silently discarding it.
-        self.availability_notes = tuple(
-            note for note in availability_notes if isinstance(note, str) and note
-        )
+        self.availability_notes = tuple(availability_notes)
         msg = f"No market data for {symbol!r}"
         if canonical and canonical != symbol:
             msg += f" (queried as {canonical!r})"

@@ -15,10 +15,11 @@ from tradingagents.data.cn.sina_finance import (
     validate_analysis_date,
 )
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_statement_frame
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorError
-from tradingagents.provenance import attach_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -129,16 +130,22 @@ _FIELDS = {
             ("Cash paid to suppliers", ("购买商品、接受劳务支付的现金",)),
             ("Cash paid to employees", ("支付给职工以及为职工支付的现金",)),
             ("Net operating cash flow", ("经营活动产生的现金流量净额",)),
-            ("Capital expenditure", (
-                "购建固定资产、无形资产和其他长期资产支付的现金",
-                "购建固定资产、无形资产和其他长期资产所支付的现金",
-            )),
+            (
+                "Capital expenditure",
+                (
+                    "购建固定资产、无形资产和其他长期资产支付的现金",
+                    "购建固定资产、无形资产和其他长期资产所支付的现金",
+                ),
+            ),
             ("Net investing cash flow", ("投资活动产生的现金流量净额",)),
             ("Borrowing proceeds", ("取得借款收到的现金",)),
-            ("Dividends and interest paid", (
-                "分配股利、利润或偿付利息支付的现金",
-                "分配股利、利润或偿付利息所支付的现金",
-            )),
+            (
+                "Dividends and interest paid",
+                (
+                    "分配股利、利润或偿付利息支付的现金",
+                    "分配股利、利润或偿付利息所支付的现金",
+                ),
+            ),
             ("Net financing cash flow", ("筹资活动产生的现金流量净额",)),
             ("Net increase in cash", ("现金及现金等价物净增加额",)),
             ("Ending cash balance", ("期末现金及现金等价物余额",)),
@@ -249,9 +256,10 @@ def _yfinance_supplement(
     curr_date: str | None,
     *,
     needed: bool,
-) -> str:
+) -> DataResult[str]:
+    observations = []
     if not needed:
-        return ""
+        return DataResult("")
     try:
         frame = get_statement_frame(ticker, kind, freq, curr_date)
     except Exception as exc:  # noqa: BLE001 - supplement never hides Sina base
@@ -260,44 +268,45 @@ def _yfinance_supplement(
     requested = curr_date or "not provided (live retrieval)"
     evidence = _EVIDENCE[kind]
     if frame is None:
-        return attach_provenance(
-            "",
+        return DataResult("", observations=tuple(observations)).with_provenance(
             ProvenanceRecord(
                 evidence=evidence,
                 source="yfinance statement supplement",
                 requested=requested,
                 effective="—",
                 timing="retrieval unavailable",
-            ),
+            )
         )
     rows = [row for row in _YF_ROWS[kind] if row in frame.index]
     if not rows:
-        return attach_provenance(
-            "",
+        return DataResult("", observations=tuple(observations)).with_provenance(
             ProvenanceRecord(
                 evidence=evidence,
                 source="yfinance statement supplement",
                 requested=requested,
                 effective="—",
                 timing="available; no curated line items matched",
-            ),
+            )
         )
     sub = frame.loc[rows].dropna(axis=1, how="all").dropna(axis=0, how="all")
     if sub.empty:
-        return attach_provenance(
-            "",
+        return DataResult("", observations=tuple(observations)).with_provenance(
             ProvenanceRecord(
                 evidence=evidence,
                 source="yfinance statement supplement",
                 requested=requested,
                 effective="—",
                 timing="available; curated line items contained no values",
-            ),
+            )
         )
     retrieved = datetime.now(UTC).isoformat(timespec="seconds")
-    from tradingagents.data.source_observations import publish_yahoo_statement
+    from tradingagents.data.source_observations import yahoo_statement_observations
 
-    publish_yahoo_statement(sub, ticker, kind, freq, source="yfinance statement supplement")
+    observations.extend(
+        yahoo_statement_observations(
+            sub, ticker, kind, freq, source="yfinance statement supplement"
+        )
+    )
     block = (
         "\n\n## Supplemental line items (yfinance)\n"
         f"Requested analysis date: {requested}\n"
@@ -305,8 +314,7 @@ def _yfinance_supplement(
         "Non-strict PIT: values are filtered only by fiscal period end and may "
         "contain later revisions; publication timestamps are unavailable.\n" + sub.to_csv()
     )
-    return attach_provenance(
-        block,
+    return DataResult(block, observations=tuple(observations)).with_provenance(
         ProvenanceRecord(
             evidence=evidence,
             source="yfinance statement supplement",
@@ -314,7 +322,7 @@ def _yfinance_supplement(
             effective="fiscal period ends only",
             timing="non-strict PIT; may include later revisions",
             retrieved_at=retrieved,
-        ),
+        )
     )
 
 
@@ -323,7 +331,8 @@ def _statement(
     kind: str,
     freq: str,
     curr_date: str | None,
-) -> str:
+) -> DataResult[str]:
+    observations = []
     validate_analysis_date(curr_date)
     try:
         canonical, raw = fetch_finance_records(ticker, kind)
@@ -360,7 +369,7 @@ def _statement(
         axis=1, how="all"
     )
     entity_type = classify_entity(profile, populated_fields.columns)
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
     from tradingagents.domain.data import scalar
 
     for _, row in visible.iterrows():
@@ -368,16 +377,22 @@ def _statement(
         for label, aliases in _FIELDS[kind][entity_type]:
             column = _find_column(visible.columns, aliases)
             values[label] = scalar(row[column]) if column else None
-        values.update(currency=scalar(row.get("Currency")),
-                      unit="source currency units",
-                      period_basis="instant" if kind == "balance" else "YTD",
-                      entity_type=entity_type)
+        values.update(
+            currency=scalar(row.get("Currency")),
+            unit="source currency units",
+            period_basis="instant" if kind == "balance" else "YTD",
+            entity_type=entity_type,
+        )
         has_visibility = pd.notna(row.get("PublishDate")) or pd.notna(row.get("UpdateDate"))
-        publish_observation(
-            "AkShare / Sina CompanyFinanceService", f"financial_{kind}",
-            f"{canonical}:{row['ReportDate'].date()}", values,
-            effective_date=row["ReportDate"],
-            available_on=row["VisibilityDate"] if has_visibility else None,
+        observations.append(
+            make_observation(
+                "AkShare / Sina CompanyFinanceService",
+                f"financial_{kind}",
+                f"{canonical}:{row['ReportDate'].date()}",
+                values,
+                effective_date=row["ReportDate"],
+                available_on=row["VisibilityDate"] if has_visibility else None,
+            )
         )
     table, missing = _render_sina_table(visible, kind, entity_type)
     requested = curr_date or "not provided (live retrieval)"
@@ -390,26 +405,49 @@ def _statement(
         f"# Latest visible disclosure/update: {effective}\n"
         f"# Missing mapped fields: {', '.join(missing) if missing else 'none'}\n\n" + table
     )
-    result = attach_provenance(
-        lines,
+    result = DataResult(lines, observations=tuple(observations)).with_provenance(
         ProvenanceRecord(
             evidence=_EVIDENCE[kind],
             source="AkShare / Sina CompanyFinanceService",
             requested=requested,
             effective=f"visibility dates <= {curr_date}" if curr_date else effective,
             timing="publication/update-date filtered; later conflicting date wins",
-        ),
+        )
     )
-    return result + _yfinance_supplement(ticker, kind, freq, curr_date, needed=bool(missing))
+    return DataResult.combine(
+        (result, _yfinance_supplement(ticker, kind, freq, curr_date, needed=bool(missing))),
+        separator="",
+    )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_income_statement", "cn_statements")
+def get_income_statement(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     return _statement(ticker, "income", freq, curr_date)
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_balance_sheet", "cn_statements")
+def get_balance_sheet(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     return _statement(ticker, "balance", freq, curr_date)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None, *, data_context: DataRequestContext) -> str:
+@source_metadata("get_cashflow", "cn_statements")
+def get_cashflow(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     return _statement(ticker, "cashflow", freq, curr_date)

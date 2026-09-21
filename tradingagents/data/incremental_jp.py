@@ -25,9 +25,7 @@ from tradingagents.data.incremental_common import (
     fundamentals_spans,
     is_empty,
     is_failure,
-    is_news_availability_record,
     merge_sources,
-    news_spans,
     origin_from_record,
     unavailable,
 )
@@ -55,21 +53,10 @@ from tradingagents.domain.evidence import EvidenceItem, EvidenceOrigin
 from tradingagents.domain.incremental import IncrementalCollectionResult
 from tradingagents.domain.performance import MarketSeriesPoint, MarketSeriesResult
 from tradingagents.domain.vendor_errors import VendorRateLimitError
-from tradingagents.provenance import (
-    extract_provenance,
-    strip_provenance_markers,
-)
 
 _TOKYO = ZoneInfo("Asia/Tokyo")
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
-_NEWS_ITEM = re.compile(r"^### (?P<title>.+?)\n(?P<body>.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
-_DISCLOSED_AT = re.compile(
-    r"^(?P<label>Submitted|Disclosed|Published):\s*(?P<value>\d{4}-\d{2}-\d{2}"
-    r"(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2}|\s+JST)?)?)",
-    re.MULTILINE,
-)
 _EFFECTIVE_DATE = re.compile(r"^Effective period:\s*(?P<value>\d{4}-\d{2}-\d{2})", re.MULTILINE)
-_DATE_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}$", re.MULTILINE)
 _DISCLOSURE_DATE = re.compile(r"\bdisclosed\s+(?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
 _FUNDAMENTAL_PERIOD_END = re.compile(
     r"\b(?:FY|Q[1-4]) end (?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE
@@ -114,7 +101,9 @@ def collect_japan_incremental(
             domains.append(result)
             evidence.extend((*candidates, *extra))
         elif domain == "social":
-            result, candidates = collect_professional_signals(request, partial(fetch_sentiment_signals, data_context=data_context))
+            result, candidates = collect_professional_signals(
+                request, partial(fetch_sentiment_signals, data_context=data_context)
+            )
             domains.append(result)
             evidence.extend(candidates)
         else:
@@ -143,7 +132,6 @@ def _collect_market(request, routed, now):
                 now=request.window_start,
             ).isoformat(),
             request.analysis_cutoff.isoformat(),
-            _provenance=True,
             _stop_on_rate_limit=True,
             _require_adjusted=True,
         )
@@ -204,199 +192,25 @@ def _collect_market(request, routed, now):
     except VendorRateLimitError:
         raise
     except Exception:
-        return unavailable(
-            "market",
-            "market_route_failure",
-            sources=(source,) if source else (),
-        ), None, None
+        return (
+            unavailable(
+                "market",
+                "market_route_failure",
+                sources=(source,) if source else (),
+            ),
+            None,
+            None,
+        )
 
 
 def _collect_news(request, routed, now):
-    sources = ()
     try:
-        response, structured = collect_news_observations(request, routed, now)
-        if structured is not None:
-            return structured
-        sources, body = _routed_sources(response, now)
-
-        if is_failure(body):
-            return unavailable("news", "news_retrieval_failed", sources=sources), ()
-        records = extract_provenance(response)
-        limited_sources = _news_availability_sources(records, now)
-        cap_limited_sources = _news_global_cap_sources(records, now)
-        if is_empty(body):
-            summary_sources = merge_sources(sources, limited_sources, cap_limited_sources)
-            if limited_sources:
-                return (
-                    CollectionDomainResult(
-                        domain="news",
-                        state=CollectionResultState.EMPTY,
-                        sources=summary_sources,
-                        diagnostic=CollectionDiagnostic(
-                            code="bounded_japanese_news_feed_with_upstream_unavailable"
-                        ),
-                    ),
-                    (),
-                )
-            if cap_limited_sources:
-                return (
-                    CollectionDomainResult(
-                        domain="news",
-                        state=CollectionResultState.EMPTY,
-                        sources=summary_sources,
-                        diagnostic=CollectionDiagnostic(
-                            code="bounded_japanese_news_feed_with_global_cap"
-                        ),
-                    ),
-                    (),
-                )
-            return bounded_empty("news", sources), ()
-        candidates: list[IncrementalEvidenceCandidate] = []
-        observed = []
-        used_sources: dict[str, CollectionSourceProvenance] = {}
-        temporal_limited_sources: dict[str, CollectionSourceProvenance] = {}
-        bases: list[CollectionTemporalBasis] = []
-        for span in news_spans(response, body):
-            if span.records and all(is_news_availability_record(record) for record in span.records):
-                continue
-            if span.content is None or len(span.records) != 1:
-                if span.content and span.records:
-                    raise CollectionUnavailable("unbound_news_item_provenance")
-                continue
-            source = _sources_from_records(span.records, now)[0]
-            if span.temporal_scope == "unknown":
-                temporal_limited_sources[source.source] = source.model_copy(
-                    update={"diagnostic": CollectionDiagnostic(code="unknown_news_temporal_scope")}
-                )
-                continue
-            if span.temporal_scope == "live_only":
-                record = span.records[0]
-                if _producer_retrieved_at(record.retrieved_at) is None:
-                    temporal_limited_sources[source.source] = source.model_copy(
-                        update={
-                            "diagnostic": CollectionDiagnostic(
-                                code="unreliable_live_news_retrieval_time"
-                            )
-                        }
-                    )
-                    continue
-                origin = origin_from_record(
-                    record,
-                    source,
-                    "disclosure_or_news",
-                    temporal_scope="live_only",
-                )
-                for match in _NEWS_ITEM.finditer(span.content):
-                    content = f"{match.group('title').strip()}\n{match.group('body').strip()}".strip()
-                    item = EvidenceItem.create(
-                        source=source.source,
-                        evidence_type="disclosure_or_news",
-                        requested_date=request.analysis_cutoff,
-                        content=content,
-                        fallback=source.fallback,
-                        origins=(origin,),
-                    )
-                    candidates.append(IncrementalEvidenceCandidate(evidence=item))
-                    used_sources[source.source] = source.model_copy(
-                        update={"diagnostic": CollectionDiagnostic(code="near_live_snapshot")}
-                    )
-                bases.append(CollectionTemporalBasis.NEAR_LIVE_ADVISORY)
-                continue
-            origin = origin_from_record(
-                span.records[0], source, "disclosure_or_news", temporal_scope="point_in_time"
-            )
-            for match in _NEWS_ITEM.finditer(span.content):
-                content = f"{match.group('title').strip()}\n{match.group('body').strip()}".strip()
-                available_at, available_on = _publication_time(content, source=source)
-                if available_at is not None:
-                    if not request.window_start < available_at <= request.window_end:
-                        continue
-                elif available_on is not None:
-                    conservative = _market_day_end(available_on)
-                    if not request.window_start < conservative <= request.window_end:
-                        continue
-                else:
-                    continue
-                item = EvidenceItem.create(
-                    source=source.source,
-                    evidence_type="disclosure_or_news",
-                    requested_date=request.analysis_cutoff,
-                    effective_date=_effective_date(content),
-                    available_at=available_at,
-                    content=content,
-                    fallback=source.fallback,
-                    origins=(origin,),
-                )
-                candidates.append(
-                    IncrementalEvidenceCandidate(
-                        evidence=item,
-                        available_on=available_on if available_at is None else None,
-                    )
-                )
-                observed.append(available_at or _market_day_end(available_on))
-                used_sources[source.source] = source
-                bases.append(CollectionTemporalBasis.PIT)
-        if not candidates:
-            summary_sources = merge_sources(
-                sources,
-                limited_sources,
-                cap_limited_sources,
-                tuple(temporal_limited_sources.values()),
-            )
-            temporal_code = _news_temporal_limitation_code(temporal_limited_sources.values())
-            diagnostic_code = (
-                "bounded_japanese_news_feed_with_upstream_unavailable"
-                if limited_sources
-                else (
-                    "bounded_japanese_news_feed_with_global_cap"
-                    if cap_limited_sources
-                    else (temporal_code or "no_reliably_dated_japanese_records")
-                )
-            )
-            return (
-                CollectionDomainResult(
-                    domain="news",
-                    state=CollectionResultState.EMPTY,
-                    sources=summary_sources,
-                    diagnostic=CollectionDiagnostic(code=diagnostic_code),
-                ),
-                (),
-            )
-        summary_sources = merge_sources(
-            tuple(used_sources.values()),
-            limited_sources,
-            cap_limited_sources,
-            tuple(temporal_limited_sources.values()),
-        )
-        return (
-            CollectionDomainResult(
-                domain="news",
-                state=CollectionResultState.PARTIAL,
-                sources=summary_sources,
-                observed_from=min(observed) if observed else None,
-                observed_through=max(observed) if observed else None,
-                temporal_bases=tuple(dict.fromkeys(bases)),
-                evidence_refs=tuple(candidate.evidence.ref for candidate in candidates),
-                diagnostic=CollectionDiagnostic(
-                    code=(
-                        "bounded_japanese_news_feed_with_upstream_unavailable"
-                        if limited_sources
-                        else (
-                            "bounded_japanese_news_feed_with_global_cap"
-                            if cap_limited_sources
-                            else "bounded_japanese_news_feed"
-                        )
-                    )
-                ),
-            ),
-            tuple(candidates),
-        )
-    except CollectionUnavailable as exc:
-        return unavailable("news", exc.code, sources=sources), ()
+        _response, collected = collect_news_observations(request, routed, now)
+        return collected
     except VendorRateLimitError:
         raise
     except Exception:
-        return unavailable("news", "news_route_failure", sources=sources), ()
+        return unavailable("news", "news_route_failure"), ()
 
 
 def _collect_fundamentals(request, routed, now):
@@ -406,7 +220,6 @@ def _collect_fundamentals(request, routed, now):
             "get_fundamentals",
             request.instrument,
             request.analysis_cutoff.isoformat(),
-            _provenance=True,
             _stop_on_rate_limit=True,
         )
         sources, body = _routed_sources(response, now)
@@ -496,7 +309,9 @@ def _collect_fundamentals(request, routed, now):
                     for record, actual_source in zip(span.records, span_sources, strict=True)
                 ),
             )
-            candidates.append(IncrementalEvidenceCandidate(evidence=item, available_on=available_on))
+            candidates.append(
+                IncrementalEvidenceCandidate(evidence=item, available_on=available_on)
+            )
             reported_sources.update({source.source: source for source in span_sources})
             bases.append(CollectionTemporalBasis.PIT)
         if not candidates:
@@ -540,8 +355,7 @@ def _collect_fundamentals(request, routed, now):
                             if temporal_limited_sources
                             else (
                                 "near_live_snapshot"
-                                if temporal_bases
-                                == (CollectionTemporalBasis.NEAR_LIVE_ADVISORY,)
+                                if temporal_bases == (CollectionTemporalBasis.NEAR_LIVE_ADVISORY,)
                                 else "mixed_pit_and_near_live_fundamentals"
                             )
                         )
@@ -566,15 +380,17 @@ def _routed_source(response: object, now):
 
 
 def _routed_sources(response: object, now):
-    if not isinstance(response, str):
+    if not isinstance(response.content, str):
         raise CollectionUnavailable("non_text_routed_response")
-    if response.startswith(("NO_DATA_AVAILABLE:", "DATA_UNAVAILABLE:", "LIVE_DATA_UNAVAILABLE:")):
+    if response.content.startswith(
+        ("NO_DATA_AVAILABLE:", "DATA_UNAVAILABLE:", "LIVE_DATA_UNAVAILABLE:")
+    ):
         raise CollectionUnavailable("routed_source_unavailable")
-    records = extract_provenance(response)
+    records = response.provenance
     if not records:
         raise CollectionUnavailable("missing_actual_source_provenance")
     sources = _sources_from_records(records, now)
-    return sources, strip_provenance_markers(response).strip()
+    return sources, response.content.strip()
 
 
 def _sources_from_records(records, now):
@@ -643,46 +459,6 @@ def _market_series(request, source, body):
     ), omitted
 
 
-def _publication_time(content, *, source):
-    timestamp = _DISCLOSED_AT.search(content)
-    if timestamp is not None:
-        value = timestamp.group("value")
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-            return None, date.fromisoformat(value)
-        available_at = _parse_datetime(
-            value,
-            allow_naive_tokyo=(
-                timestamp.group("label") == "Submitted" and source.source == "edinet"
-            ),
-        )
-        return available_at, available_at.astimezone(_TOKYO).date()
-    date_line = _DATE_LINE.search(content)
-    return (None, date.fromisoformat(date_line.group(0))) if date_line else (None, None)
-
-
-def _parse_datetime(value, *, allow_naive_tokyo=False):
-    rendered = value.replace("JST", "+09:00").strip()
-    try:
-        parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise CollectionUnavailable("invalid_disclosure_publication_time") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        if not allow_naive_tokyo:
-            raise CollectionUnavailable("invalid_disclosure_publication_time")
-        parsed = parsed.replace(tzinfo=_TOKYO)
-    return parsed.astimezone(UTC)
-
-
-def _effective_date(content):
-    match = _EFFECTIVE_DATE.search(content)
-    if match is None:
-        return None
-    try:
-        return date.fromisoformat(match.group("value"))
-    except ValueError as exc:
-        raise CollectionUnavailable("invalid_disclosure_effective_period") from exc
-
-
 def _fundamentals_disclosure_date(body):
     match = _DISCLOSURE_DATE.search(body)
     return date.fromisoformat(match.group("value")) if match else None
@@ -711,8 +487,7 @@ def _reliable_record_observation_dates(record):
     effective = record.effective.strip()
     if "market-date filtered" in timing:
         return tuple(
-            date.fromisoformat(value)
-            for value in re.findall(r"\d{4}-\d{2}-\d{2}", effective)
+            date.fromisoformat(value) for value in re.findall(r"\d{4}-\d{2}-\d{2}", effective)
         )
     if "publication" in timing or "disclosure-date" in timing:
         try:
@@ -722,37 +497,6 @@ def _reliable_record_observation_dates(record):
     return ()
 
 
-def _news_availability_sources(records, now):
-    unavailable = {}
-    for record, source in zip(records, _sources_from_records(records, now), strict=True):
-        if not is_news_availability_record(record):
-            continue
-        unavailable[source.source] = source.model_copy(
-            update={"diagnostic": CollectionDiagnostic(code="upstream_source_unavailable")}
-        )
-    return tuple(unavailable.values())
-
-
-def _news_global_cap_sources(records, now):
-    omitted = {}
-    for record, source in zip(records, _sources_from_records(records, now), strict=True):
-        if not _is_news_global_cap_record(record):
-            continue
-        omitted[source.source] = source.model_copy(
-            update={"diagnostic": CollectionDiagnostic(code="truncated_by_global_cap")}
-        )
-    return tuple(omitted.values())
-
-
-def _news_temporal_limitation_code(sources):
-    diagnostics = {source.diagnostic.code for source in sources if source.diagnostic}
-    if diagnostics == {"unknown_news_temporal_scope"}:
-        return "unknown_news_temporal_scope"
-    if diagnostics == {"unreliable_live_news_retrieval_time"}:
-        return "unreliable_live_news_retrieval_time"
-    return "news_temporal_scope_unavailable" if diagnostics else None
-
-
 def _fundamentals_temporal_limitation_code(sources):
     diagnostics = {source.diagnostic.code for source in sources if source.diagnostic}
     if diagnostics == {"unknown_fundamentals_temporal_scope"}:
@@ -760,11 +504,6 @@ def _fundamentals_temporal_limitation_code(sources):
     if diagnostics == {"unreliable_live_fundamentals_retrieval_time"}:
         return "unreliable_live_fundamentals_retrieval_time"
     return "fundamentals_temporal_scope_unavailable" if diagnostics else None
-
-
-def _is_news_global_cap_record(record):
-    timing = record.timing.casefold()
-    return "truncated_by_global_cap=" in timing and "kept_items=0" in timing
 
 
 def _source_id(value):
@@ -783,17 +522,6 @@ def _pit_origin(source, evidence_type, effective_date):
         retrieved_at=source.retrieved_at.isoformat().replace("+00:00", "Z"),
         fallback=source.fallback,
         temporal_scope="point_in_time",
-    )
-
-
-def _near_live_origin(source, evidence_type):
-    return EvidenceOrigin(
-        source=source.source,
-        evidence_type=evidence_type,
-        timing="live retrieval-time snapshot",
-        retrieved_at=source.retrieved_at.isoformat().replace("+00:00", "Z"),
-        fallback=source.fallback,
-        temporal_scope="live_only",
     )
 
 

@@ -11,7 +11,9 @@ from dateutil.relativedelta import relativedelta
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_stock import _fetch_ohlcv_frame
 from tradingagents.data.market_data_validator import render_verified_market_snapshot
+from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import render_indicator_window
+from tradingagents.domain.data_result import DataResult
 
 # Warm-up history fetched before the requested window so long indicators (e.g.
 # the 200 SMA) have enough lookback. 200 trading days ~ 290 calendar days; pad
@@ -19,25 +21,30 @@ from tradingagents.data.stockstats_utils import render_indicator_window
 _WARMUP_DAYS = 400
 
 
+@source_metadata("get_indicators", "jquants")
 def get_indicator(
-    symbol: str, indicator: str, curr_date: str, look_back_days: int
-, *, data_context: DataRequestContext) -> str:
+    symbol: str,
+    indicator: str,
+    curr_date: str,
+    look_back_days: int,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
     """Return a date->value window for ``indicator`` ending at ``curr_date``."""
     start = (
-        datetime.strptime(curr_date, "%Y-%m-%d")
-        - relativedelta(days=look_back_days + _WARMUP_DAYS)
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
-    return render_indicator_window(df, indicator, curr_date, look_back_days)
+    return DataResult(render_indicator_window(df, indicator, curr_date, look_back_days))
 
 
+@source_metadata("get_verified_market_snapshot", "jquants")
 def get_verified_market_snapshot(
-    symbol: str, curr_date: str, look_back_days: int = 30
-, *, data_context: DataRequestContext) -> str:
+    symbol: str, curr_date: str, look_back_days: int = 30, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Return a J-Quants-backed deterministic market snapshot."""
     start = (
-        datetime.strptime(curr_date, "%Y-%m-%d")
-        - relativedelta(days=look_back_days + _WARMUP_DAYS)
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
     return render_verified_market_snapshot(

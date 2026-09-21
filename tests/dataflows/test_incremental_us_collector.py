@@ -7,6 +7,7 @@ import pytest
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.data_policy import configure_data, request_context, reset_data
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
+from tests.source_results import news_source, replace_content, source_route
 from tradingagents.application.service import AnalysisService
 from tradingagents.data import incremental_us, interface, y_finance as yf_data
 from tradingagents.data.incremental_us import collect_us_incremental
@@ -17,7 +18,6 @@ from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.domain.vendor_errors import VendorRateLimitError
-from tradingagents.provenance import attach_provenance
 from tradingagents.research.incremental.collection import normalize_incremental_collection
 
 
@@ -25,7 +25,9 @@ from tradingagents.research.incremental.collection import normalize_incremental_
 def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult(""))
+    monkeypatch.setattr(
+        incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult("")
+    )
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
 
 
@@ -62,8 +64,7 @@ Date,Open,High,Low,Close,Volume
 2026-07-24,109,111,108,110,1000
 2026-07-25,111,112,110,111,1000
 """
-    return attach_provenance(
-        body,
+    return DataResult(body).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
@@ -71,7 +72,7 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-19 to 2026-07-25",
             timing="market-date filtered",
             retrieved_at="2026-07-25T01:00:00Z",
-        ),
+        )
     )
 
 
@@ -112,8 +113,12 @@ def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -
             data_context=request_context(),
         )
     report_collection_progress("unrelated", "started")
-    assert progress == [("market", "started"), ("market", "completed"),
-                        ("benchmarks", "started"), ("benchmarks", "completed")]
+    assert progress == [
+        ("market", "started"),
+        ("market", "completed"),
+        ("benchmarks", "started"),
+        ("benchmarks", "completed"),
+    ]
 
     assert result.stock_series is not None
     assert [point.session.isoformat() for point in result.stock_series.points] == [
@@ -140,8 +145,7 @@ Date,Open,High,Low,Close,Volume
 2026-07-06,102,104,101,103,1000
 2026-07-07,103,105,102,104,1000
 """
-    response = attach_provenance(
-        body,
+    response = DataResult(body).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
@@ -149,17 +153,17 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-02 to 2026-07-07",
             timing="market-date filtered",
             retrieved_at="2026-07-08T01:00:00Z",
-        ),
+        )
     )
     mismatched = collect_us_incremental(
         _request(baseline=date(2026, 7, 4), target=date(2026, 7, 7)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 8, 2, tzinfo=UTC),
         data_context=request_context(),
     )
     assert mismatched.collection_summary.domains[0].diagnostic.code == "market_instrument_mismatch"
 
-    eligible_body = response.replace("NVDAA", "NVDA")
+    eligible_body = replace_content(response, "NVDAA", "NVDA")
     collected = collect_us_incremental(
         _request(
             baseline=date(2026, 7, 4),
@@ -197,57 +201,60 @@ def test_us_collector_omits_same_day_bar_before_new_york_close() -> None:
     assert collected.collection_summary.domains[0].state.value == "empty"
 
 
-def test_us_collector_preserves_precise_yahoo_publication_time_and_omits_later_same_day_news() -> None:
+def test_us_collector_preserves_precise_yahoo_publication_time_and_omits_later_same_day_news() -> (
+    None
+):
     request = _request(
         enabled_domains=("news",),
         window_end=datetime(2026, 7, 24, 19, tzinfo=UTC),
     )
-    response = attach_provenance(
-        """### [direct] Before cutoff (source: Example)
-Published: 2026-07-24T18:00:00Z
-inside
-
-### [direct] After cutoff (source: Example)
-Published: 2026-07-24T20:00:00Z
-outside
-""",
+    response = news_source(
+        "### [direct] Before cutoff (source: Example)\nPublished: 2026-07-24T18:00:00Z\ninside\n\n### [direct] After cutoff (source: Example)\nPublished: 2026-07-24T20:00:00Z\noutside\n",
         ProvenanceRecord(
-            evidence="get_news", source="yfinance", requested="window",
-            effective="window", timing="publication-date filtered",
+            evidence="get_news",
+            source="yfinance",
+            requested="window",
+            effective="window",
+            timing="publication-date filtered",
             retrieved_at="2026-07-24T18:30:00Z",
         ),
     )
     collected = collect_us_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 24, 18, 30, tzinfo=UTC),
         data_context=request_context(),
     )
     _summary, evidence, _bindings = normalize_incremental_collection(
         request, collected, sealed_at=datetime(2026, 7, 24, 18, 31, tzinfo=UTC)
     )
-    assert [item.content.split("\n", 1)[0] for item in evidence] == ["Before cutoff"]
+    assert [item.provenance["observation"]["values"]["title"] for item in evidence] == [
+        "Before cutoff"
+    ]
     assert evidence[0].available_at == datetime(2026, 7, 24, 18, tzinfo=UTC)
 
 
 def test_us_collector_reports_yahoo_error_as_unavailable_with_actual_source() -> None:
-    response = attach_provenance(
+    response = news_source(
         "Error fetching news for NVDA: upstream unavailable",
         ProvenanceRecord(
-            evidence="get_news", source="yfinance", requested="window",
-            effective="—", timing="retrieval unavailable",
+            evidence="get_news",
+            source="yfinance",
+            requested="window",
+            effective="—",
+            timing="retrieval unavailable",
             retrieved_at="2026-07-25T01:00:00Z",
         ),
     )
     collected = collect_us_incremental(
         _request(enabled_domains=("news",)),
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
         data_context=request_context(),
     )
     domain = collected.collection_summary.domains[0]
     assert domain.state.value == "unavailable"
-    assert domain.diagnostic.code == "news_retrieval_failed.news_context_partial"
+    assert domain.diagnostic.code == "news_retrieval_failed"
     assert domain.sources[0].source == "yfinance"
 
 
@@ -336,8 +343,8 @@ def test_us_collector_starts_social_query_after_the_baseline_market_date() -> No
     result = collect_us_incremental(
         _request(enabled_domains=("social",)),
         route_to_vendor=lambda *_args, **_kwargs: "unused",
-        fetch_stocktwits_messages=lambda *args, **kwargs: calls.append((args, kwargs)) or (
-            "<no StockTwits messages found>"
+        fetch_stocktwits_messages=lambda *args, **kwargs: (
+            calls.append((args, kwargs)) or ("<no StockTwits messages found>")
         ),
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
         data_context=request_context(),
@@ -349,9 +356,7 @@ def test_us_collector_starts_social_query_after_the_baseline_market_date() -> No
 
 
 def test_xnys_schedule_handles_regular_holidays_early_close_and_adhoc_closure() -> None:
-    assert incremental_us._market_close_at(date(2026, 7, 2)) == datetime(
-        2026, 7, 2, 20, tzinfo=UTC
-    )
+    assert incremental_us._market_close_at(date(2026, 7, 2)) == datetime(2026, 7, 2, 20, tzinfo=UTC)
     assert not incremental_us._is_nyse_session(date(2026, 7, 3))
     assert not incremental_us._is_nyse_session(date(2026, 7, 4))
     assert incremental_us._market_close_at(date(2026, 11, 27)) == datetime(
@@ -362,11 +367,8 @@ def test_xnys_schedule_handles_regular_holidays_early_close_and_adhoc_closure() 
 
 def test_us_collector_admits_dated_yahoo_news_and_retains_selected_fallback() -> None:
     request = _request(enabled_domains=("news",))
-    response = attach_provenance(
-        """### [direct] NVIDIA announces a new product (source: Example)
-Published: 2026-07-22
-The announcement was observed in the bounded Yahoo feed.
-""",
+    response = news_source(
+        "### [direct] NVIDIA announces a new product (source: Example)\nPublished: 2026-07-22\nThe announcement was observed in the bounded Yahoo feed.\n",
         ProvenanceRecord(
             evidence="get_news",
             source="yfinance",
@@ -378,7 +380,7 @@ The announcement was observed in the bounded Yahoo feed.
     )
     collected = collect_us_incremental(
         request,
-        route_to_vendor=lambda *_args, **_kwargs: response,
+        route_to_vendor=source_route(response),
         fetch_stocktwits_messages=lambda *_args, **_kwargs: "unused",
         now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
         data_context=request_context(),
@@ -411,8 +413,9 @@ def test_us_collector_describes_an_empty_stocktwits_sample_without_historical_ab
 
 
 def test_us_collector_omits_six_day_old_live_snapshot_at_shared_boundary() -> None:
-    response = attach_provenance(
-        "# Company Fundamentals for NVDA (live yfinance snapshot)\nMarket Cap: 1",
+    response = DataResult(
+        "# Company Fundamentals for NVDA (live yfinance snapshot)\nMarket Cap: 1"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_fundamentals",
             source="yfinance",
@@ -420,7 +423,7 @@ def test_us_collector_omits_six_day_old_live_snapshot_at_shared_boundary() -> No
             effective="data available for cutoff 2026-07-24",
             timing="live non-point-in-time",
             retrieved_at="2026-07-30T15:00:00Z",
-        ),
+        )
     )
     request = _request(enabled_domains=("fundamentals",))
 
@@ -497,25 +500,42 @@ def test_default_us_collector_commits_a_full_to_incremental_service_journey(
     )
 
     assert result.status is RunStatus.SUCCEEDED
-    node = next(node for node in repository.get_timeline("NVDA").all_nodes if node.id == result.run_id)
+    node = next(
+        node for node in repository.get_timeline("NVDA").all_nodes if node.id == result.run_id
+    )
     assert node.performance.stock.status.value == "calculated"
     assert node.information_advancement.reasons == (
         "admissible_observation",
         "completed_stock_session",
     )
-    assert any(event.event_type == "incremental.collection_completed" for event in repository.list_events(result.run_id))
+    assert any(
+        event.event_type == "incremental.collection_completed"
+        for event in repository.list_events(result.run_id)
+    )
 
 
 @pytest.mark.parametrize("target_close", [110, 90])
 def test_market_interval_includes_baseline_endpoint_when_snapshot_fails(target_close):
     def route(method, *args, **kwargs):
         if method == "get_stock_data":
-            return _market_response().replace("109,111,108,110", f"{target_close},{target_close},{target_close},{target_close}")
+            return replace_content(
+                _market_response(),
+                "109,111,108,110",
+                f"{target_close},{target_close},{target_close},{target_close}",
+            )
         raise RuntimeError("snapshot unavailable")
-    result = collect_us_incremental(_request(), route_to_vendor=route,
-                                   now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC), data_context=request_context())
-    interval = next(c.evidence.provenance["observation"]["values"] for c in result.evidence
-                    if c.evidence.evidence_type == "market_interval")
+
+    result = collect_us_incremental(
+        _request(),
+        route_to_vendor=route,
+        now=lambda: datetime(2026, 7, 25, 2, tzinfo=UTC),
+        data_context=request_context(),
+    )
+    interval = next(
+        c.evidence.provenance["observation"]["values"]
+        for c in result.evidence
+        if c.evidence.evidence_type == "market_interval"
+    )
     assert interval["start_session"] == "2026-07-20"
     assert interval["end_session"] == "2026-07-24"
     assert interval["completed_rows"] == 2

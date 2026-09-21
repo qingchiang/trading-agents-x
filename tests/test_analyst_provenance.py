@@ -3,14 +3,15 @@ from datetime import date
 from unittest import mock
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
 from tests.data_policy import configure_data
 from tests.factories import analyst_runtime
+from tests.source_results import source_message
 from tradingagents.domain.data import ProvenanceRecord
-from tradingagents.provenance import attach_provenance
+from tradingagents.domain.data_result import DataResult
 from tradingagents.research.analysts.fundamentals_analyst import create_fundamentals_analyst
 from tradingagents.research.analysts.market_analyst import create_market_analyst
 from tradingagents.research.full.evidence import collect_evidence
@@ -24,9 +25,7 @@ def _reset_config():
 
 def _final_llm():
     llm = mock.MagicMock()
-    llm.bind_tools.return_value = RunnableLambda(
-        lambda _prompt: AIMessage(content="MODEL REPORT")
-    )
+    llm.bind_tools.return_value = RunnableLambda(lambda _prompt: AIMessage(content="MODEL REPORT"))
     return llm
 
 
@@ -36,21 +35,20 @@ def _state(tool_content: str):
         "trade_date": "2026-07-17",
         "asset_type": "stock",
         "fundamental_inputs": {"responses": {}, "observations": []},
-        "messages": [ToolMessage(content=tool_content, tool_call_id="call-1")],
+        "messages": [source_message(tool_content, tool_call_id="call-1")],
     }
 
 
 @pytest.mark.unit
 def test_market_final_report_keeps_audit_data_out_of_the_narrative():
-    content = attach_provenance(
-        "SNAPSHOT",
+    content = DataResult("SNAPSHOT").with_provenance(
         ProvenanceRecord(
             evidence="get_verified_market_snapshot",
             source="J-Quants",
             requested="2026-07-17",
             effective="2026-07-16",
             timing="market-date filtered",
-        ),
+        )
     )
     state = _state(content)
     result = create_market_analyst(_final_llm())(state, analyst_runtime())
@@ -65,9 +63,7 @@ def test_market_final_report_keeps_audit_data_out_of_the_narrative():
         prefetched_blocks=result["prefetched_evidence"],
     )
     snapshot = next(
-        item
-        for item in evidence
-        if item.evidence_type == "get_verified_market_snapshot"
+        item for item in evidence if item.evidence_type == "get_verified_market_snapshot"
     )
     assert snapshot.source == "J-Quants"
     assert snapshot.effective_date == date(2026, 7, 16)
@@ -75,8 +71,7 @@ def test_market_final_report_keeps_audit_data_out_of_the_narrative():
 
 @pytest.mark.unit
 def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
-    content = attach_provenance(
-        "STATEMENT",
+    content = DataResult("STATEMENT").with_provenance(
         ProvenanceRecord(
             evidence="get_income_statement",
             source="J-Quants official summary",
@@ -105,23 +100,13 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
         analyst="fundamentals",
         prefetched_blocks=result["prefetched_evidence"],
     )
-    statement = next(
-        item
-        for item in evidence
-        if item.evidence_type == "get_income_statement"
-    )
+    statement = next(item for item in evidence if item.evidence_type == "get_income_statement")
     assert {origin.source for origin in statement.origins} == {
         "J-Quants official summary",
         "yfinance curated detail",
     }
-    missing = {
-        item.evidence_type
-        for item in evidence
-        if item.quality.value == "unavailable"
-    }
-    assert {"fundamentals overview", "balance sheet", "cash flow statement"} <= (
-        missing
-    )
+    missing = {item.evidence_type for item in evidence if item.quality.value == "unavailable"}
+    assert {"fundamentals overview", "balance sheet", "cash flow statement"} <= (missing)
 
 
 @pytest.mark.unit
@@ -134,17 +119,16 @@ def test_fundamentals_full_prefetch_does_not_report_methods_as_not_requested():
     )
     responses = {
         method: (
-            "<get_cashflow unavailable: VendorRateLimitError>"
+            DataResult("<get_cashflow unavailable: VendorRateLimitError>")
             if method == "get_cashflow"
-            else attach_provenance(
-                f"DATA FOR {method}",
+            else DataResult(f"DATA FOR {method}").with_provenance(
                 ProvenanceRecord(
                     evidence=method,
                     source="fixture",
                     requested="2026-07-17",
                     effective="2026-07-16",
                     timing="disclosure-date filtered",
-                ),
+                )
             )
         )
         for method in methods
@@ -153,7 +137,10 @@ def test_fundamentals_full_prefetch_does_not_report_methods_as_not_requested():
         "company_of_interest": "6501.T",
         "trade_date": "2026-07-17",
         "asset_type": "stock",
-        "fundamental_inputs": {"responses": responses, "observations": []},
+        "fundamental_inputs": {
+            "responses": {key: value.dump() for key, value in responses.items()},
+            "observations": [],
+        },
         "messages": [],
     }
 
@@ -162,27 +149,26 @@ def test_fundamentals_full_prefetch_does_not_report_methods_as_not_requested():
     records = [
         record
         for block in result["prefetched_evidence"]
-        for record in block["records"]
+        for record in block.get("records", block.get("data_result", {}).get("provenance", []))
     ]
     assert not [record for record in records if record["timing"] == "not requested"]
     failed = [
         block
         for block in result["prefetched_evidence"]
-        if block["content"] is None and block["records"] == []
+        if "VendorRateLimitError" in block.get("data_result", {}).get("content", "")
     ]
     assert len(failed) == 1
 
 
 @pytest.mark.unit
 def test_market_report_omits_appendix_by_default():
-    content = attach_provenance(
-        "SNAPSHOT",
+    content = DataResult("SNAPSHOT").with_provenance(
         ProvenanceRecord(
             evidence="get_verified_market_snapshot",
             source="J-Quants",
             effective="2026-07-17",
             timing="market-date filtered",
-        ),
+        )
     )
     result = create_market_analyst(_final_llm())(_state(content), analyst_runtime())
 

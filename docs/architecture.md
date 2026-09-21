@@ -519,10 +519,12 @@ provider reuses the same physical client. Historical artifacts without these
 observations remain valid and are displayed as not recorded. No artifact stores
 hidden reasoning traces or raw provider conversations.
 
-Adapters may still encode transport provenance in versioned markers. Analyst
-nodes extract those markers from tool messages into typed evidence and remove
-the control syntax from human narrative. Prose is never the canonical
-provenance transport between graph stages.
+All routed adapters return `DataResult`: human content, producer observations,
+provenance, diagnostics and explicitly scoped spans travel together. Tools emit
+model-visible content and a separate checkpointed artifact; prefetching analysts
+carry the same serialized result. News caches store article identities, revisions
+and original retrieval times. Neither graph stages nor Incremental collectors
+recover provenance or news observations from Markdown or hidden text markers.
 
 ### Profiles
 

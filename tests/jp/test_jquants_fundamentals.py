@@ -10,19 +10,50 @@ import tradingagents.configuration.defaults as default_config
 from tests.data_policy import configure_data, request_context
 from tradingagents.data import interface
 from tradingagents.data.jp import jquants_fundamentals as jf
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError
 
 
-def _summary(disc_date, *, per_type="FY", per_end="2023-03-31", ta="1000", eq="400",
-             sales="500", op="80", odp="85", np_="60", eps="12.3", bps="250",
-             cfo="90", cfi="-30", cff="-20", casheq="200", disc_time="15:00:00",
-             doc_type=None):
+def _summary(
+    disc_date,
+    *,
+    per_type="FY",
+    per_end="2023-03-31",
+    ta="1000",
+    eq="400",
+    sales="500",
+    op="80",
+    odp="85",
+    np_="60",
+    eps="12.3",
+    bps="250",
+    cfo="90",
+    cfi="-30",
+    cff="-20",
+    casheq="200",
+    disc_time="15:00:00",
+    doc_type=None,
+):
     return {
-        "Code": "86970", "DiscDate": disc_date, "DiscTime": disc_time,
+        "Code": "86970",
+        "DiscDate": disc_date,
+        "DiscTime": disc_time,
         "DocType": doc_type or f"{per_type}FinancialStatements_Consolidated_IFRS",
-        "CurPerType": per_type, "CurPerEn": per_end, "CurFYEn": "2023-03-31",
-        "TA": ta, "Eq": eq, "Sales": sales, "OP": op, "OdP": odp, "NP": np_,
-        "EPS": eps, "BPS": bps, "CFO": cfo, "CFI": cfi, "CFF": cff, "CashEq": casheq,
+        "CurPerType": per_type,
+        "CurPerEn": per_end,
+        "CurFYEn": "2023-03-31",
+        "TA": ta,
+        "Eq": eq,
+        "Sales": sales,
+        "OP": op,
+        "OdP": odp,
+        "NP": np_,
+        "EPS": eps,
+        "BPS": bps,
+        "CFO": cfo,
+        "CFI": cfi,
+        "CFF": cff,
+        "CashEq": casheq,
     }
 
 
@@ -55,19 +86,21 @@ class FundamentalsTests(unittest.TestCase):
         undated = _summary("2023-05-10", sales="999")
         undated["DiscDate"] = None
         with _patch([_summary("2023-05-10", sales="500"), undated]):
-            out = jf.get_fundamentals("9984.T", curr_date="2023-12-31", data_context=request_context())
-        self.assertIn("Net sales: 500", out)
-        self.assertNotIn("999", out)
+            out = jf.get_fundamentals(
+                "9984.T", curr_date="2023-12-31", data_context=request_context()
+            )
+        self.assertIn("Net sales: 500", out.content)
+        self.assertNotIn("999", out.content)
 
     def test_overview_uses_latest_disclosed_period(self):
         # Input ascending by date (as J-Quants returns); latest must win.
         recs = [_summary("2022-05-10", sales="400"), _summary("2023-05-10", sales="500")]
         with _patch(recs):
             out = jf.get_fundamentals("9984.T", data_context=request_context())
-        self.assertIn("9984.T", out)
-        self.assertIn("Net sales: 500", out)
-        self.assertIn("EPS: 12.3", out)
-        self.assertIn("operating: 90", out)
+        self.assertIn("9984.T", out.content)
+        self.assertIn("Net sales: 500", out.content)
+        self.assertIn("EPS: 12.3", out.content)
+        self.assertIn("operating: 90", out.content)
 
     def test_duplicate_period_keeps_latest_visible_disclosure(self):
         recs = [
@@ -75,13 +108,17 @@ class FundamentalsTests(unittest.TestCase):
             _summary("2023-05-12", sales="500"),
         ]
         with _patch(recs):
-            before = jf.get_income_statement("9984.T", "annual", "2023-05-11", data_context=request_context())
-            after = jf.get_income_statement("9984.T", "annual", "2023-05-13", data_context=request_context())
-        self.assertIn("NetSales=400", before)
-        self.assertIn("disclosed 2023-05-10", before)
-        self.assertIn("NetSales=500", after)
-        self.assertNotIn("NetSales=400", after)
-        self.assertEqual(after.count("FY end 2023-03-31"), 1)
+            before = jf.get_income_statement(
+                "9984.T", "annual", "2023-05-11", data_context=request_context()
+            )
+            after = jf.get_income_statement(
+                "9984.T", "annual", "2023-05-13", data_context=request_context()
+            )
+        self.assertIn("NetSales=400", before.content)
+        self.assertIn("disclosed 2023-05-10", before.content)
+        self.assertIn("NetSales=500", after.content)
+        self.assertNotIn("NetSales=400", after.content)
+        self.assertEqual(after.content.count("FY end 2023-03-31"), 1)
 
     def test_duplicate_period_same_timestamp_keeps_later_api_record(self):
         recs = [
@@ -89,10 +126,12 @@ class FundamentalsTests(unittest.TestCase):
             _summary("2023-05-12", sales="500"),
         ]
         with _patch(recs):
-            out = jf.get_income_statement("9984.T", "annual", "2023-05-13", data_context=request_context())
-        self.assertIn("NetSales=500", out)
-        self.assertNotIn("NetSales=400", out)
-        self.assertEqual(out.count("FY end 2023-03-31"), 1)
+            out = jf.get_income_statement(
+                "9984.T", "annual", "2023-05-13", data_context=request_context()
+            )
+        self.assertIn("NetSales=500", out.content)
+        self.assertNotIn("NetSales=400", out.content)
+        self.assertEqual(out.content.count("FY end 2023-03-31"), 1)
 
     def test_dedupe_retains_distinct_doc_types_and_incomplete_keys(self):
         consolidated = _summary("2023-05-12", sales="500")
@@ -112,32 +151,32 @@ class FundamentalsTests(unittest.TestCase):
     def test_balance_sheet_derives_liabilities(self):
         with _patch([_summary("2023-05-10", ta="1000", eq="400")]):
             out = jf.get_balance_sheet("9984.T", data_context=request_context())
-        self.assertIn("TotalAssets=1000", out)
-        self.assertIn("TotalLiabilities=600.0", out)  # 1000 - 400
-        self.assertIn("NetAssets=400", out)
+        self.assertIn("TotalAssets=1000", out.content)
+        self.assertIn("TotalLiabilities=600.0", out.content)  # 1000 - 400
+        self.assertIn("NetAssets=400", out.content)
 
     def test_cashflow_fields(self):
         with _patch([_summary("2023-05-10", cfo="90", cfi="-30", cff="-20", casheq="200")]):
             out = jf.get_cashflow("9984.T", data_context=request_context())
-        self.assertIn("Operating=90", out)
-        self.assertIn("Investing=-30", out)
-        self.assertIn("Financing=-20", out)
-        self.assertIn("CashEnd=200", out)
+        self.assertIn("Operating=90", out.content)
+        self.assertIn("Investing=-30", out.content)
+        self.assertIn("Financing=-20", out.content)
+        self.assertIn("CashEnd=200", out.content)
 
     def test_income_statement_fields(self):
         with _patch([_summary("2023-05-10", sales="500", op="80", np_="60", eps="12.3")]):
             out = jf.get_income_statement("9984.T", data_context=request_context())
-        self.assertIn("NetSales=500", out)
-        self.assertIn("OperatingProfit=80", out)
-        self.assertIn("NetProfit=60", out)
-        self.assertIn("EPS=12.3", out)
+        self.assertIn("NetSales=500", out.content)
+        self.assertIn("OperatingProfit=80", out.content)
+        self.assertIn("NetProfit=60", out.content)
+        self.assertIn("EPS=12.3", out.content)
 
     def test_income_statement_explains_ifrs_missing_fields(self):
         with _patch([_summary("2023-05-10", op="", odp="")]):
             out = jf.get_income_statement("9984.T", data_context=request_context())
-        self.assertIn("Consolidated, IFRS", out)
-        self.assertIn("OperatingProfit=not provided in J-Quants summary", out)
-        self.assertIn("OrdinaryProfit=not applicable (IFRS)", out)
+        self.assertIn("Consolidated, IFRS", out.content)
+        self.assertIn("OperatingProfit=not provided in J-Quants summary", out.content)
+        self.assertIn("OrdinaryProfit=not applicable (IFRS)", out.content)
 
     def test_japanese_gaap_missing_ordinary_profit_is_not_called_ifrs_na(self):
         record = _summary(
@@ -148,16 +187,18 @@ class FundamentalsTests(unittest.TestCase):
         )
         with _patch([record]):
             out = jf.get_income_statement("9984.T", data_context=request_context())
-        self.assertIn("Non-consolidated, Japanese GAAP", out)
-        self.assertIn("OrdinaryProfit=not provided in J-Quants summary", out)
-        self.assertNotIn("not applicable (IFRS)", out)
+        self.assertIn("Non-consolidated, Japanese GAAP", out.content)
+        self.assertIn("OrdinaryProfit=not provided in J-Quants summary", out.content)
+        self.assertNotIn("not applicable (IFRS)", out.content)
 
     def test_lookahead_excludes_future_disclosures(self):
         recs = [_summary("2023-05-10", sales="500"), _summary("2024-05-10", sales="999")]
         with _patch(recs):
-            out = jf.get_fundamentals("9984.T", curr_date="2023-12-31", data_context=request_context())
-        self.assertIn("Net sales: 500", out)
-        self.assertNotIn("999", out)
+            out = jf.get_fundamentals(
+                "9984.T", curr_date="2023-12-31", data_context=request_context()
+            )
+        self.assertIn("Net sales: 500", out.content)
+        self.assertNotIn("999", out.content)
 
     def test_no_disclosure_on_or_before_curr_date_raises(self):
         with _patch([_summary("2024-05-10")]), self.assertRaises(NoMarketDataError):
@@ -174,14 +215,14 @@ class FundamentalsTests(unittest.TestCase):
         ]
         with _patch(recs):
             out = jf.get_income_statement("9984.T", freq="annual", data_context=request_context())
-        self.assertIn("NetSales=500", out)
-        self.assertNotIn("NetSales=120", out)  # 3Q excluded
+        self.assertIn("NetSales=500", out.content)
+        self.assertNotIn("NetSales=120", out.content)  # 3Q excluded
 
     def test_missing_values_render_na(self):
         with _patch([_summary("2023-05-10", ta=None, eq=None)]):
             out = jf.get_balance_sheet("9984.T", data_context=request_context())
-        self.assertIn("TotalAssets=N/A", out)
-        self.assertIn("TotalLiabilities=N/A", out)  # cannot derive without TA/Eq
+        self.assertIn("TotalAssets=N/A", out.content)
+        self.assertIn("TotalLiabilities=N/A", out.content)  # cannot derive without TA/Eq
 
 
 @pytest.mark.unit
@@ -193,20 +234,27 @@ class FundamentalsRoutingTests(unittest.TestCase):
         configure_data(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_jquants_registered_for_all_fundamental_methods(self):
-        for method in ("get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"):
+        for method in (
+            "get_fundamentals",
+            "get_balance_sheet",
+            "get_cashflow",
+            "get_income_statement",
+        ):
             self.assertIn("jquants", interface.VENDOR_METHODS[method])
 
     def test_tokyo_ticker_routes_fundamentals_to_jquants(self):
         configure_data({"data_vendors_by_market": {".T": {"fundamental_data": "jquants"}}})
-        jq = mock.Mock(return_value="JQ_FUND")
-        yf = mock.Mock(return_value="YF_FUND")
+        jq = mock.Mock(return_value=DataResult("JQ_FUND"))
+        yf = mock.Mock(return_value=DataResult("YF_FUND"))
         with mock.patch.dict(
             interface.VENDOR_METHODS,
             {"get_fundamentals": {"yfinance": yf, "jquants": jq}},
             clear=False,
         ):
-            result = interface.route_to_vendor("get_fundamentals", "9984.T", "2026-06-23", data_context=request_context())
-        self.assertEqual(result, "JQ_FUND")
+            result = interface.route_to_vendor(
+                "get_fundamentals", "9984.T", "2026-06-23", data_context=request_context()
+            )
+        self.assertEqual(result.content, "JQ_FUND")
         yf.assert_not_called()
 
 
