@@ -835,7 +835,10 @@ import application orchestration, persistence, market adapters or SDK clients.
 Research receives a scoped runtime context and explicit artifact/evidence sinks.
 The repository composes private execution, research-write, Timeline-query,
 artifact and lifecycle operations over a shared session factory. Operations that
-commit a research result retain their complete transaction boundary.
+commit a research result retain their complete transaction boundary. Full
+completion always commits a Decision and Research Node; Incremental uses its
+own atomic product commit. Runs without Nodes represent uncommitted execution
+history and cannot use the old successful-without-Node completion path.
 
 ### Research workspace presentation
 

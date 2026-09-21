@@ -27,7 +27,6 @@ from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
 from tradingagents.persistence.configuration import ConfigurationStore
-from tradingagents.persistence.models import RunRecord
 from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 from tradingagents.version import __version__
 from tradingagents.web import create_app
@@ -67,7 +66,6 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -161,7 +159,6 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 14, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -324,7 +321,6 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -481,7 +477,6 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -717,7 +712,6 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -792,7 +786,6 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -855,7 +848,6 @@ async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -916,7 +908,6 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -1022,7 +1013,6 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
             research_schema_version=research_schema_version,
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -1118,7 +1108,6 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -1206,7 +1195,6 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
         web_repository.set_instrument_local_name(run.id, "英伟达")
@@ -1272,7 +1260,6 @@ async def test_terminal_run_creation_template_is_lightweight_and_uses_today_inde
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     web_repository.fail(run.id, RuntimeError("fixture"))
@@ -1309,7 +1296,6 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
             research_schema_version="2",
             information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -1394,7 +1380,6 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -2156,15 +2141,6 @@ async def test_health_reports_database_and_queue_status(
     web_repository,
 ) -> None:
     web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    legacy = web_service.enqueue(AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, legacy.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
     response = await web_client.get("/api/v1/health")
 
     assert response.status_code == 200
@@ -2237,7 +2213,6 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
         web_repository.set_instrument_local_name(run.id, "英伟达")

@@ -142,10 +142,6 @@ class RunTrashState(_StableStrEnum):
     ALL = "all"
 
 
-class AssetType(_StableStrEnum):
-    STOCK = "stock"
-
-
 class ResearchRating(_StableStrEnum):
     BUY = "Buy"
     OVERWEIGHT = "Overweight"

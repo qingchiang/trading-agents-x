@@ -165,8 +165,7 @@ class RunRepository(ExecutionOperations, LifecycleOperations, ArtifactsOperation
         return backup_sqlite_database(self.settings, destination)
 
     @staticmethod
-    def market_bucket(ticker: str, asset_type: str | None = None) -> str | None:
-        del asset_type  # retained for callers reading legacy decision rows
+    def market_bucket(ticker: str) -> str | None:
         try:
             return str(market_timezone(ticker))
         except ValueError:

@@ -58,7 +58,6 @@ def get_language_instruction(response_scope: str = "your entire response") -> st
 
 def build_instrument_context(
     ticker: str,
-    asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
@@ -68,7 +67,6 @@ def build_instrument_context(
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
     """
-    del asset_type  # retained for compatibility with persisted graph callers
     context = (
         f"The instrument to analyze is `{ticker}`. "
         "Use this exact ticker in every tool call, report, and recommendation, "

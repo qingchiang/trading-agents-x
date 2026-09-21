@@ -113,7 +113,6 @@ def _merge_dicts(
 class ResearchState(TypedDict, total=False):
     ticker: str
     analysis_date: str
-    asset_type: str
     profile: str
     output_language: str
     analysts: list[str]
@@ -299,7 +298,6 @@ class ResearchGraph:
         return {
             "ticker": request.ticker,
             "analysis_date": request.analysis_date.isoformat(),
-            "asset_type": "stock",
             "profile": request.profile.value,
             "output_language": report_language_prompt_label(context.settings.output_language),
             "analysts": list(request.analysts),
@@ -486,7 +484,6 @@ class ResearchGraph:
             local_state: dict[str, Any] = {
                 "messages": [HumanMessage(content=context.request.ticker)],
                 "company_of_interest": context.request.ticker,
-                "asset_type": "stock",
                 "instrument_context": context.instrument_context,
                 "trade_date": context.request.analysis_date.isoformat(),
                 "market_report": "",

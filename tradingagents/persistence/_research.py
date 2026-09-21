@@ -78,7 +78,7 @@ class ResearchOperations:
         *,
         evidence: EvidenceBundle,
     ) -> RunMetrics:
-        """Persist a terminal result without creating legacy review state."""
+        """Commit Full research and its Node in one transaction."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             record = session.get(RunRecord, run_id)
@@ -91,56 +91,52 @@ class ResearchOperations:
                 raise EvidenceNotSealedError(run_id)
             if sealed.digest != evidence.digest:
                 raise EvidenceConflictError("completed result does not match the sealed evidence")
-            is_post_redesign_full = (
-                record.research_schema_version is not None and record.research_kind == "full"
-            )
-            if is_post_redesign_full and result.decision is None:
+            if record.research_kind != "full":
+                raise InvalidRunTransitionError("Full completion requires a Full Run")
+            if result.decision is None:
                 raise ValueError("Full Research Node requires a complete Research Decision")
-            if result.decision is not None:
-                request = RunRequestSnapshot.model_validate(record.request_json)
-                market = self.market_bucket(request.ticker)
-                decision = DecisionRecord(
-                    run_id=run_id,
-                    ticker=request.ticker,
-                    market=market,
-                    asset_type="stock",
-                    analysis_date=request.analysis_date,
-                    rating=result.decision.rating.value,
-                    confidence=result.decision.confidence.value,
-                    decision_json=result.decision.model_dump(mode="json"),
-                    numeric_audit_json=(
-                        result.numeric_audit.model_dump(mode="json")
-                        if result.numeric_audit is not None
-                        else None
-                    ),
-                    created_at=now,
-                )
-                session.add(decision)
-                session.flush()
-            if is_post_redesign_full:
-                node = ResearchNodeRecord(
-                    run_id=run_id,
-                    research_kind="full",
-                    full_baseline_run_id=None,
-                    created_at=now,
-                )
-                session.add(node)
-                request = RunRequestSnapshot.model_validate(record.request_json)
-                primary = session.get(PrimaryResearchCycleRecord, request.ticker)
-                if primary is None:
-                    session.add(
-                        PrimaryResearchCycleRecord(
-                            instrument=request.ticker,
-                            full_run_id=run_id,
-                            created_at=now,
-                            updated_at=now,
-                        )
+            request = RunRequestSnapshot.model_validate(record.request_json)
+            market = self.market_bucket(request.ticker)
+            decision = DecisionRecord(
+                run_id=run_id,
+                ticker=request.ticker,
+                market=market,
+                analysis_date=request.analysis_date,
+                rating=result.decision.rating.value,
+                confidence=result.decision.confidence.value,
+                decision_json=result.decision.model_dump(mode="json"),
+                numeric_audit_json=(
+                    result.numeric_audit.model_dump(mode="json")
+                    if result.numeric_audit is not None
+                    else None
+                ),
+                created_at=now,
+            )
+            session.add(decision)
+            session.flush()
+            node = ResearchNodeRecord(
+                run_id=run_id,
+                research_kind="full",
+                full_baseline_run_id=None,
+                created_at=now,
+            )
+            session.add(node)
+            request = RunRequestSnapshot.model_validate(record.request_json)
+            primary = session.get(PrimaryResearchCycleRecord, request.ticker)
+            if primary is None:
+                session.add(
+                    PrimaryResearchCycleRecord(
+                        instrument=request.ticker,
+                        full_run_id=run_id,
+                        created_at=now,
+                        updated_at=now,
                     )
-                elif request.make_primary is None:
-                    raise ValueError("later Full Research requires an explicit make_primary choice")
-                elif request.make_primary:
-                    primary.full_run_id = run_id
-                    primary.updated_at = now
+                )
+            elif request.make_primary is None:
+                raise ValueError("later Full Research requires an explicit make_primary choice")
+            elif request.make_primary:
+                primary.full_run_id = run_id
+                primary.updated_at = now
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -257,7 +253,6 @@ class ResearchOperations:
                     run_id=run_id,
                     ticker=request.ticker,
                     market=self.market_bucket(request.ticker),
-                    asset_type="stock",
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
                     confidence=result.decision.confidence.value,

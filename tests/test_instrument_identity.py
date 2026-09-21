@@ -158,7 +158,7 @@ class BuildInstrumentContextTests(unittest.TestCase):
 
     def test_injects_resolved_identity(self):
         context = build_instrument_context(
-            "TOTDY", "stock",
+            "TOTDY",
             {
                 "company_name": "TOTO LTD.",
                 "sector": "Industrials",

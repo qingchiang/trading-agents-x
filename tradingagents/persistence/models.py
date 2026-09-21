@@ -220,7 +220,6 @@ class DecisionRecord(Base):
     )
     ticker: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     market: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
-    asset_type: Mapped[str] = mapped_column(String(20), nullable=False)
     analysis_date: Mapped[date] = mapped_column(Date, nullable=False)
     rating: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence: Mapped[str] = mapped_column(String(10), nullable=False)

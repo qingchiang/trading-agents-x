@@ -19,7 +19,6 @@ CREATE TABLE "decisions" (
 	run_id VARCHAR(36) NOT NULL,
 	ticker VARCHAR(64) NOT NULL,
 	market VARCHAR(80),
-	asset_type VARCHAR(20) NOT NULL,
 	analysis_date DATE NOT NULL,
 	rating VARCHAR(20) NOT NULL,
 	confidence VARCHAR(10) NOT NULL,

@@ -52,8 +52,6 @@ def _commit_node(
             "schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
             "llm_provider": "fixture",
         },
-        research_kind=research_kind,
-        full_baseline_run_id=baseline_id,
         incremental_input_fingerprint=(
             f"fingerprint-{analysis_date.isoformat()}" if baseline_id else None
         ),
@@ -69,30 +67,20 @@ def _commit_node(
     evidence = EvidenceBundle(
         instrument="NVDA", analysis_date=analysis_date, items=(item,)
     )
-    repository.seal_evidence(run.id, evidence)
-    repository.complete(
-        run.id,
-        AnalysisResult(
-            run_id=run.id,
-            status=RunStatus.SUCCEEDED,
-            instrument="NVDA",
-            reports={},
-            decision=research_decision(evidence_refs=(item.ref,)),
-            evidence=evidence,
-        ),
-        evidence=evidence,
+    result = AnalysisResult(
+        run_id=run.id, status=RunStatus.SUCCEEDED, instrument="NVDA", reports={},
+        decision=research_decision(evidence_refs=(item.ref,)), evidence=evidence,
     )
     if baseline_id:
-        with repository.sessions.begin() as session:
-            session.add(
-                ResearchNodeRecord(
-                    run_id=run.id,
-                    research_kind="incremental",
-                    full_baseline_run_id=baseline_id,
-                    created_at=datetime.now(UTC).replace(tzinfo=None),
-                    incremental_products_json=None,
-                )
-            )
+        from tradingagents.domain.incremental import IncrementalNodeProducts
+        products = _warning_products()
+        products.update(full_research_required_reasons=[], decision_outcome="updated",
+                        decision_outcome_reason="Fixture observation changes the decision.")
+        repository.complete_incremental(run.id, result, evidence=evidence,
+                                        products=IncrementalNodeProducts.model_validate(products))
+    else:
+        repository.seal_evidence(run.id, evidence)
+        repository.complete(run.id, result, evidence=evidence)
     return repository.get_run(run.id)
 
 
@@ -511,8 +499,6 @@ def test_two_connections_linearize_restore_against_incremental_retry_slot(
         research_schema_version="1",
         information_cutoff_at=datetime(2026, 7, 25, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="incremental",
-        full_baseline_run_id=full.id,
         incremental_input_fingerprint="fingerprint-2026-07-25",
     )
     repository.claim_run(failed.id, "fixture", 30)

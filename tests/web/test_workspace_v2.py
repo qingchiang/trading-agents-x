@@ -23,7 +23,6 @@ def commit_full(
         research_schema_version="2",
         information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -64,8 +63,6 @@ async def test_group_search_keeps_baseline_context_for_pending_incremental(
     child, _ = web_repository.create_run(
         request,
         ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
-        research_kind="incremental",
-        full_baseline_run_id=baseline,
         incremental_input_fingerprint="fixture-pending",
     )
     response = await web_client.get("/api/v1/run-groups?status=queued&limit=1")
@@ -94,8 +91,6 @@ async def test_lifecycle_preview_excludes_uncommitted_tasks_and_checks_scope(
     child, _ = web_repository.create_run(
         request,
         ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
-        research_kind="incremental",
-        full_baseline_run_id=baseline,
         incremental_input_fingerprint="fixture-pending",
     )
     preview = await web_client.post(

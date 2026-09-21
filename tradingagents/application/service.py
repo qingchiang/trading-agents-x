@@ -207,7 +207,7 @@ class AnalysisService:
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
         request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False, exclude_unset=True))
-        from tradingagents.application.submissions import submission_identity
+        from tradingagents.domain.submissions import submission_identity
 
         identity = submission_identity(request, source_run_id)
         if idempotency_key:
@@ -253,8 +253,6 @@ class AnalysisService:
             research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
             information_cutoff_at=information_cutoff_at,
             method_snapshot=method_snapshot,
-            research_kind=request.research_kind,
-            full_baseline_run_id=request.full_baseline_run_id,
             incremental_input_fingerprint=(
                 self._incremental_input_fingerprint(
                     request,
@@ -471,16 +469,8 @@ class AnalysisService:
 
         with self._heartbeat(run.id, worker_id), ExitStack() as execution_scope:
             try:
-                if run.research_schema_version is None:
-                    raise ValueError(
-                        "legacy runs cannot cross the Research Timeline execution boundary"
-                    )
-                # Run views expose a tolerant retained snapshot.  Execution
-                # must cross the current creation contract explicitly so a
-                # future admission change also gates already-queued legacy
-                # requests.  Keep this inside the lifecycle boundary: a
-                # retained request that no longer converts must become a
-                # terminal failed Run rather than strand a claimed attempt.
+                # Validate the retained projection at the lifecycle boundary so
+                # invalid queued requests become terminal failures safely.
                 request = self._creation_request_from_history(run.request)
                 run_settings = RunSettings.model_validate(run.config_snapshot)
                 execution_scope.enter_context(use_credentials(self.configuration.execution_credentials(run_settings)))

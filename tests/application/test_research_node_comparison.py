@@ -378,7 +378,7 @@ def test_comparison_rejects_failed_and_cancelled_run_backed_nodes(
         )
 
 
-def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_implicit_trash(
+def test_comparison_rejects_invalid_identity_count_uncommitted_missing_purged_and_implicit_trash(
     app_settings,
     repository,
 ) -> None:
@@ -403,10 +403,10 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
     ).run(AnalysisRequest(ticker="AAPL", analysis_date=date(2026, 7, 20)))
-    legacy_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19))
-    legacy, _ = repository.create_run(
-        legacy_request,
-        ConfigurationStore(app_settings).resolve_request(legacy_request, require_initialized=False)[1].snapshot(),
+    uncommitted_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19), make_primary=False)
+    uncommitted, _ = repository.create_run(
+        uncommitted_request,
+        ConfigurationStore(app_settings).resolve_request(uncommitted_request, require_initialized=False)[1].snapshot(),
     )
     repository.trash_runs((trashed.id,))
     repository.trash_runs((other.id,))
@@ -422,7 +422,7 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
             ResearchNodeComparisonSelection(node_id=first.id),
             ResearchNodeComparisonSelection(node_id=first.id),
         )
-    for rejected_id in (legacy.id, "missing-node", other.id):
+    for rejected_id in (uncommitted.id, "missing-node", other.id):
         with pytest.raises(InvalidResearchNodeComparisonError, match="retained Research Node"):
             compare(
                 ResearchNodeComparisonSelection(node_id=first.id),

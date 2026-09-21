@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from tradingagents.domain.common import (
+    CURRENT_RESEARCH_SCHEMA_VERSION,
     RunStatus,
 )
 from tradingagents.domain.errors import (
@@ -61,24 +62,25 @@ class ExecutionOperations:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
-        research_schema_version: str | None = None,
+        research_schema_version: str = CURRENT_RESEARCH_SCHEMA_VERSION,
         information_cutoff_at: datetime | None = None,
         method_snapshot: dict[str, Any] | None = None,
-        research_kind: str | None = None,
-        full_baseline_run_id: str | None = None,
         incremental_input_fingerprint: str | None = None,
         submission_identity: dict[str, Any] | None = None,
     ) -> tuple[RunView, bool]:
         if not isinstance(request, AnalysisRequest):
             raise TypeError("new Runs require an AnalysisRequest creation contract")
         now = _utc_naive()
+        research_kind = request.research_kind
+        full_baseline_run_id = request.full_baseline_run_id
         request_json = request.model_dump(mode="json")
+        if submission_identity is None:
+            from tradingagents.domain.submissions import submission_identity as identify_submission
+            submission_identity = identify_submission(request, source_run_id)
         from tradingagents.persistence.submissions import matches_submission
 
         def matches(existing: RunRecord) -> bool:
-            if submission_identity is not None:
-                return matches_submission(existing, submission_identity)
-            return existing.request_json == request_json and existing.source_run_id == source_run_id
+            return matches_submission(existing, submission_identity)
 
         try:
             with self.sessions.begin() as session:

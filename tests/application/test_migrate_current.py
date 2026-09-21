@@ -136,3 +136,49 @@ def test_cli_conversion_does_not_start_the_application(source_0013, tmp_path, mo
     result = CliRunner().invoke(main.app, ['db', 'migrate-current', '--source', str(source_0013), '--destination', str(destination)])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)['retained_runs'] == 3
+
+
+def test_converted_full_remains_a_baseline_for_offline_incremental(source_0013, tmp_path):
+    from datetime import UTC, date, datetime
+
+    from tests.application.test_incremental_v1_service import _incremental_service, _pit_collection
+    from tests.factories import research_decision
+    from tradingagents.configuration.settings import AppSettings
+    from tradingagents.domain.collection import IncrementalEvidenceCandidate
+    from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.llm.models import preset_connection
+    from tradingagents.persistence.repository import RunRepository
+
+    baseline_item = EvidenceItem.create(source="fixture", evidence_type="filing",
+        requested_date=date(2026, 9, 10), effective_date=date(2026, 9, 10),
+        content="The retained baseline fact.")
+    bundle = EvidenceBundle(instrument="GOOG", analysis_date=date(2026, 9, 10), items=(baseline_item,))
+    decision = research_decision(evidence_refs=(baseline_item.ref,))
+    connection = preset_connection("openai", identity="retained-connection")
+    with sqlite3.connect(source_0013) as db:
+        db.execute("UPDATE runs SET information_cutoff_at='2026-09-11T03:59:59.999999' WHERE id='baseline'")
+        db.execute("INSERT INTO run_evidence VALUES ('baseline',1,?,?,1,0,'2026-09-11')", (bundle.model_dump_json(), bundle.digest))
+        db.execute("INSERT INTO decisions (run_id,ticker,market,asset_type,analysis_date,rating,confidence,decision_json,created_at) VALUES ('baseline','GOOG','united_states','stock','2026-09-10',?,?,?,'2026-09-11')", (decision.rating.value, decision.confidence.value, decision.model_dump_json()))
+        db.execute("INSERT INTO model_connections VALUES (?,?, 'openai')", (connection.id, connection.model_dump_json()))
+        db.execute("INSERT INTO configuration_credentials VALUES (?, 'offline-fixture-key')", (f"connection:{connection.id}:api_key",))
+        db.execute("INSERT INTO application_configuration VALUES (1,?,1,1,'2026-09-11')", (json.dumps({"llm_provider": "openai", "analysts": ["news"]}),))
+    destination = tmp_path / "current-baseline.db"
+    migrate_current(source_0013, destination)
+    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path), "TRADINGAGENTS_DATABASE_PATH": str(destination)}, load_env_files=False)
+    repository = RunRepository(settings)
+    candidate_item = EvidenceItem.create(source="fixture", evidence_type="filing",
+        requested_date=date(2026, 9, 11), effective_date=date(2026, 9, 11),
+        content="A newly published offline observation.")
+    candidate = IncrementalEvidenceCandidate(evidence=candidate_item,
+        available_on=date(2026, 9, 11))
+    service = _incremental_service(settings, repository,
+        collector=lambda request: _pit_collection(request, candidate),
+        now=lambda: datetime(2026, 9, 12, 20, tzinfo=UTC))
+    result = service.run(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-11",
+        research_kind="incremental", full_baseline_run_id="baseline"))
+    assert result.status.value == "succeeded"
+    assert result.decision == decision
+    assert repository.get_run(result.run_id).full_baseline_run_id == "baseline"
+    assert repository.get_evidence("baseline").digest == bundle.digest
+    assert repository.get_result("baseline").decision == decision

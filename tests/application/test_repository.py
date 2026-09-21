@@ -414,7 +414,6 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
     older, _ = _create(repository, app_settings, "NVDA")
     trashed, _ = _create(repository, app_settings, "AAPL")
     latest, _ = _create(repository, app_settings, "NVDA")
-    legacy_crypto, _ = _create(repository, app_settings, "MSFT")
     repository.set_instrument_name(older.id, "NVIDIA Corporation")
     repository.set_instrument_name(trashed.id, "Apple")
     repository.set_instrument_name(latest.id, "NVIDIA")
@@ -423,13 +422,6 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
         session.get(RunRecord, older.id).created_at = datetime(2026, 7, 1)
         session.get(RunRecord, trashed.id).created_at = datetime(2026, 7, 2)
         session.get(RunRecord, latest.id).created_at = datetime(2026, 7, 3)
-        legacy_record = session.get(RunRecord, legacy_crypto.id)
-        legacy_record.created_at = datetime(2026, 7, 4)
-        legacy_record.request_json = {
-            **legacy_record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
     repository.request_cancel(trashed.id)
     repository.trash_runs((trashed.id,))
 
@@ -1136,7 +1128,7 @@ def test_reports_use_canonical_order_across_result_and_repository(
         status=RunStatus.SUCCEEDED,
         instrument="NVDA",
         reports=reports,
-        decision=None,
+        decision=research_decision(),
     )
 
     assert list(result.reports) == [
@@ -1156,3 +1148,18 @@ def test_reports_use_canonical_order_across_result_and_repository(
         "news",
         "social",
     ]
+
+
+def test_full_completion_requires_decision_and_commits_a_research_node(repository, app_settings):
+    request = _request()
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+    evidence = EvidenceBundle(instrument=request.ticker, analysis_date=request.analysis_date, items=())
+    repository.seal_evidence(run.id, evidence)
+    result = AnalysisResult(run_id=run.id, status=RunStatus.SUCCEEDED,
+                            instrument=request.ticker, reports={}, evidence=evidence, decision=None)
+    with pytest.raises(ValueError, match="complete Research Decision"):
+        repository.complete(run.id, result, evidence=evidence)
+    assert repository.get_run(run.id).status is RunStatus.RUNNING
+    repository.complete(run.id, result.model_copy(update={"decision": research_decision()}), evidence=evidence)
+    assert repository.get_run(run.id).is_research_node is True

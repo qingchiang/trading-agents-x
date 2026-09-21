@@ -843,25 +843,6 @@ def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decis
     assert repository.get_result(failed.id).decision is None
 
 
-def test_queued_legacy_run_fails_execution_boundary_without_a_node(
-    app_settings,
-    repository,
-) -> None:
-    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    run, _ = repository.create_run(request, {"fixture": True})
-    claimed = repository.claim_run(run.id, "worker", 30)
-    service = AnalysisService(
-        app_settings,
-        repository=repository,
-        eligibility_resolver=_equity_resolver,
-    )
-
-    with pytest.raises(ValueError, match="legacy runs"):
-        service.execute_claimed(claimed, worker_id="worker")
-
-    assert repository.get_run(run.id).status is RunStatus.FAILED
-    assert repository.get_timeline("NVDA").all_nodes == ()
-
 
 class _MetricFailureGraph:
     def __init__(self, *, metrics, **_kwargs):

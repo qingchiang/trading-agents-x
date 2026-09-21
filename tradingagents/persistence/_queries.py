@@ -273,10 +273,6 @@ class QueriesOperations:
             RunRecord.request_json,
             "$.ticker",
         )
-        asset_type = func.coalesce(
-            func.json_extract(RunRecord.request_json, "$.asset_type"),
-            "stock",
-        )
         ranked = (
             select(
                 ticker.label("ticker"),
@@ -296,7 +292,6 @@ class QueriesOperations:
             .where(
                 RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
-                asset_type == "stock",
             )
             .subquery()
         )
@@ -324,15 +319,10 @@ class QueriesOperations:
 
     def active_run_counts(self) -> dict[str, int]:
         """Count current stock Runs by lifecycle status for health reporting."""
-        asset_type = func.coalesce(
-            func.json_extract(RunRecord.request_json, "$.asset_type"),
-            "stock",
-        )
         stmt = (
             select(RunRecord.status, func.count())
             .where(
                 RunRecord.trashed_at.is_(None),
-                asset_type == "stock",
             )
             .group_by(RunRecord.status)
         )
