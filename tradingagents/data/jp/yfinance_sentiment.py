@@ -8,8 +8,8 @@ overlay is gated to live / near-live runs (see :mod:`.lookahead`): a backtest
 simply omits it rather than leaking today's ratings onto a past date.
 
 Pre-fetched by the sentiment analyst (not routed through ``route_to_vendor``),
-so like the other prefetch sources it must always return a string and never
-raise.
+so like the other prefetch sources it returns a structured source result and
+degrades retrieval failures locally.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ import logging
 from datetime import UTC, datetime
 
 from tradingagents.data.context import DataRequestContext
-from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.jp.jquants_common import parse_number as _num
 from tradingagents.data.jp.market import is_tokyo_ticker
 from tradingagents.data.lookahead import is_near_live
-from tradingagents.data.y_finance import get_analyst_ratings
+from tradingagents.data.y_finance import get_analyst_ratings as _fetch_ratings
+from tradingagents.domain.data_result import DataResult, StructuredNumericFact
 from tradingagents.domain.measurement import instrument_currency
 
 logger = logging.getLogger(__name__)
@@ -32,12 +32,12 @@ logger = logging.getLogger(__name__)
 _MEAN_SCALE = "1=Strong Buy … 3=Hold … 5=Strong Sell"
 
 
-def get_analyst_ratings_payload(
+def get_analyst_ratings_result(
     ticker: str,
     curr_date: str,
     *,
     data_context: DataRequestContext,
-) -> tuple[str, tuple[StructuredNumericFact, ...]]:
+) -> DataResult:
     """Return readable consensus plus producer-owned numeric facts.
 
     Empty for non-Japanese tickers (yfinance-sourced but injected as a JP fill;
@@ -46,15 +46,16 @@ def get_analyst_ratings_payload(
     any fetch error or when no rating/target is available — never raises (the
     sentiment prefetch contract).
     """
+    observations = []
     if not is_tokyo_ticker(ticker):
-        return "", ()
+        return DataResult("", observations=tuple(observations), numeric_facts=())
     if not is_near_live(curr_date, ticker):
-        return "", ()
+        return DataResult("", observations=tuple(observations), numeric_facts=())
     try:
-        ratings = get_analyst_ratings(ticker, data_context=data_context)
+        ratings = _fetch_ratings(ticker, data_context=data_context)
     except Exception as exc:  # defensive: the getter already degrades to {}
         logger.warning("Analyst-ratings fetch failed for %s: %s", ticker, exc)
-        return "", ()
+        return DataResult("", observations=tuple(observations), numeric_facts=())
 
     key = ratings.get("recommendationKey")
     mean = _num(ratings.get("recommendationMean"))
@@ -100,16 +101,21 @@ def get_analyst_ratings_payload(
             numeric_rows.append(("retrieval_time_price", current, "currency", currency))
 
     if not lines:
-        return "", ()
+        return DataResult("", observations=tuple(observations), numeric_facts=())
     # Data + legend only; the prompt wrapper owns the section framing and the
     # sentiment rules own how to weight it (kept out of here so they don't drift).
     retrieved = datetime.now(UTC)
     retrieved_at = retrieved.isoformat(timespec="seconds")
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        "yfinance", "analyst_consensus", ticker, ratings,
-        retrieved_at=retrieved,
+    observations.append(
+        make_observation(
+            "yfinance",
+            "analyst_consensus",
+            ticker,
+            ratings,
+            retrieved_at=retrieved,
+        )
     )
     facts = tuple(
         StructuredNumericFact(
@@ -131,10 +137,4 @@ def get_analyst_ratings_payload(
         "Not point-in-time historical data; price comparisons use the retrieval-time price.\n\n"
         + "\n".join(lines)
     )
-    return body, facts
-
-
-def get_analyst_ratings_block(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
-    """Return the readable analyst-consensus block for direct callers."""
-
-    return get_analyst_ratings_payload(ticker, curr_date, data_context=data_context)[0]
+    return DataResult(body, observations=tuple(observations), numeric_facts=facts)

@@ -6,11 +6,22 @@ import pytest
 
 from tests.data_policy import request_context
 from tradingagents.data import market_signals
+from tradingagents.domain.data_result import DataResult
 from tradingagents.research.analysts import sentiment_analyst
 from tradingagents.research.analysts.sentiment_sources import (
     SentimentSourceInput,
     SentimentSourceStatus,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_external_signals(monkeypatch):
+    for name in (
+        "get_large_holdings", "get_margin_balance", "get_short_positions",
+        "get_analyst_ratings_result", "get_cn_margin_signal", "get_cn_holding_changes",
+        "get_cn_research_signal", "get_cn_important_announcements",
+    ):
+        monkeypatch.setattr(market_signals, name, mock.Mock(return_value=DataResult("")))
 
 
 @pytest.mark.unit
@@ -26,15 +37,15 @@ def test_tokyo_registry_fetches_registered_signals():
     with mock.patch.object(
         market_signals, "is_near_live", return_value=True
     ), mock.patch.object(
-        market_signals, "get_large_holdings", return_value="HOLDINGS"
+        market_signals, "get_large_holdings", return_value=DataResult("HOLDINGS")
     ) as holdings, mock.patch.object(
-        market_signals, "get_margin_balance", return_value="MARGIN"
+        market_signals, "get_margin_balance", return_value=DataResult("MARGIN")
     ) as margin, mock.patch.object(
-        market_signals, "get_short_positions", return_value="SHORTS"
+        market_signals, "get_short_positions", return_value=DataResult("SHORTS")
     ) as shorts, mock.patch.object(
         market_signals,
-        "get_analyst_ratings_payload",
-        return_value=("RATINGS", (fact,)),
+        "get_analyst_ratings_result",
+        return_value=DataResult("RATINGS", numeric_facts=(fact,)),
     ) as ratings:
         results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18", data_context=request_context())
 
@@ -51,7 +62,7 @@ def test_tokyo_registry_fetches_registered_signals():
     analyst = next(
         result for result in results if result.spec.tag == "analyst_ratings"
     )
-    assert analyst.structured_numeric_facts == (fact,)
+    assert analyst.result.numeric_facts == (fact,)
 
 
 @pytest.mark.unit
@@ -59,7 +70,7 @@ def test_historical_tokyo_registry_does_not_query_live_only_signal():
     with mock.patch.object(
         market_signals, "is_near_live", return_value=False
     ), mock.patch.object(
-        market_signals, "get_analyst_ratings_payload"
+        market_signals, "get_analyst_ratings_result"
     ) as ratings:
         results = market_signals.fetch_sentiment_signals(
             "9984.T",
@@ -71,22 +82,22 @@ def test_historical_tokyo_registry_does_not_query_live_only_signal():
     analyst = next(
         result for result in results if result.spec.tag == "analyst_ratings"
     )
-    assert "vendor not queried" in analyst.body
+    assert "vendor not queried" in analyst.result.content
     assert analyst.retrieved_at is None
 
 
 @pytest.mark.unit
 def test_mainland_registry_fetches_registered_signals():
     patches = (
-        mock.patch.object(market_signals, "get_cn_margin_signal", return_value="MARGIN"),
-        mock.patch.object(market_signals, "get_cn_holding_changes", return_value="HOLDINGS"),
+        mock.patch.object(market_signals, "get_cn_margin_signal", return_value=DataResult("MARGIN")),
+        mock.patch.object(market_signals, "get_cn_holding_changes", return_value=DataResult("HOLDINGS")),
         mock.patch.object(
             market_signals,
-            "get_cn_research_signal_payload",
-            return_value=("RESEARCH", ()),
+            "get_cn_research_signal",
+            return_value=DataResult("RESEARCH"),
         ),
         mock.patch.object(
-            market_signals, "get_cn_important_announcements", return_value="ANNOUNCEMENTS"
+            market_signals, "get_cn_important_announcements", return_value=DataResult("ANNOUNCEMENTS")
         ),
     )
     with (
@@ -119,7 +130,7 @@ def test_signal_prefetch_never_raises():
     holdings = next(
         result for result in results if result.spec.tag == "large_holdings"
     )
-    assert holdings.body == "<EDINET unavailable: RuntimeError>"
+    assert holdings.result.content == "<EDINET unavailable: RuntimeError>"
 
 
 @pytest.mark.unit
@@ -134,7 +145,7 @@ def test_registered_signal_metadata_drives_prompt_rendering():
         effective=lambda date: date,
         timing="market-date filtered",
     )
-    fetched = market_signals.FetchedSentimentSignal(spec, "CN_SIGNAL")
+    fetched = market_signals.FetchedSentimentSignal(spec, DataResult("CN_SIGNAL"))
 
     prompt = sentiment_analyst._build_system_message(
         ticker="600519.SS",

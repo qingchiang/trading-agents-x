@@ -7,6 +7,7 @@ from tradingagents.data.lookahead import lookback_start_date
 from tradingagents.data.macro_panel import get_global_macro_panel
 from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.provenance import extract_provenance
 from tradingagents.research.prompts.instrument import get_instrument_context_from_state
 from tradingagents.research.prompts.language import get_language_instruction
@@ -56,11 +57,13 @@ def create_news_analyst(llm):
         # for drilling into a specific series beyond the panel. Never raises.
         with capture_observations() as context_observations:
             macro_panel = get_global_macro_panel(current_date, data_context=runtime.context.data_context)
-            market_flow_context = (
-                get_market_investor_flows(ticker, current_date)
-                if is_tokyo_ticker(ticker)
-                else ""
-            )
+        market_flows = (
+            get_market_investor_flows(ticker, current_date)
+            if is_tokyo_ticker(ticker)
+            else DataResult("")
+        )
+        context_observations.extend(market_flows.observations)
+        market_flow_context = market_flows.content
         market_flow_section = ""
         if market_flow_context:
             market_flow_section = (

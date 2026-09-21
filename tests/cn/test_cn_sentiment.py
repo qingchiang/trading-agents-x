@@ -9,7 +9,6 @@ from tests.data_policy import request_context
 from tradingagents.data.cn import cn_sentiment
 from tradingagents.data.cn.common import AkShareRequestError, AkShareSchemaError
 from tradingagents.domain.data_quality import provenance_quality_issues
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 @pytest.fixture(autouse=True)
@@ -40,16 +39,16 @@ def test_research_signal_is_publication_date_bounded(monkeypatch):
 
     result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10", data_context=request_context())
 
-    assert "2026-01-10" in result
-    assert "upgrade" in result
-    _body, facts = cn_sentiment.get_research_signal_payload(
+    assert "2026-01-10" in result.content
+    assert "upgrade" in result.content
+    payload = cn_sentiment.get_research_signal(
         "000001.SZ", "2026-01-10"
     , data_context=request_context())
-    assert [(fact["key"], fact["value"], fact["unit"]) for fact in facts] == [
+    assert [(fact["key"], fact["value"], fact["unit"]) for fact in payload.numeric_facts] == [
         ("target_low_1", 10.0, "CNY"),
         ("target_high_1", 12.0, "CNY"),
     ]
-    assert {fact["effective_date"] for fact in facts} == {"2026-01-10"}
+    assert {fact["effective_date"] for fact in payload.numeric_facts} == {"2026-01-10"}
 
 
 @pytest.mark.unit
@@ -77,9 +76,9 @@ def test_research_signal_prefers_sina_without_querying_eastmoney(monkeypatch):
 
     result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10", data_context=request_context())
 
-    assert "Sina Finance; publication-date filtered" in result
-    assert "analysts=Analyst A" in result
-    assert [record.source for record in extract_provenance(result)] == [
+    assert "Sina Finance; publication-date filtered" in result.content
+    assert "analysts=Analyst A" in result.content
+    assert [record.source for record in result.provenance] == [
         "Sina Finance institutional ratings"
     ]
 
@@ -108,10 +107,10 @@ def test_research_signal_uses_eastmoney_after_sina_failure(monkeypatch):
     )
 
     result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10", data_context=request_context())
-    records = extract_provenance(result)
+    records = result.provenance
 
-    assert "Eastmoney Research; publication-date filtered" in result
-    assert "Sina rating feed unavailable" in result
+    assert "Eastmoney Research; publication-date filtered" in result.content
+    assert "Sina rating feed unavailable" in result.content
     assert [record.source for record in records] == [
         "Sina Finance institutional ratings",
         "Eastmoney Research",
@@ -125,9 +124,9 @@ def test_research_successful_empty_primary_and_fallback_do_not_warn(monkeypatch)
     monkeypatch.setattr(cn_sentiment, "research_rows", lambda *_args, data_context: [])
 
     result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10", data_context=request_context())
-    issues = provenance_quality_issues(extract_provenance(result))
+    issues = provenance_quality_issues(result.provenance)
 
-    assert "no usable coverage" in result
+    assert "no usable coverage" in result.content
     assert issues == []
 
 
@@ -142,7 +141,7 @@ def test_holding_changes_distinguishes_no_events(monkeypatch):
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert strip_provenance_markers(result).startswith(
+    assert result.content.startswith(
         "<Eastmoney holding changes: no matching events"
     )
 
@@ -177,9 +176,9 @@ def test_holding_changes_handles_same_date_and_converts_ten_thousand_shares(monk
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "shares=25,000" in result
-    assert "shares=10,000" in result
-    assert "timing=disclosure/update-date filtered" in result
+    assert "shares=25,000" in result.content
+    assert "shares=10,000" in result.content
+    assert "timing=disclosure/update-date filtered" in result.content
 
 
 @pytest.mark.unit
@@ -215,9 +214,9 @@ def test_holding_changes_labels_event_date_only_major_holder_data_as_non_strict_
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "[major shareholder] Holder A" in result
-    assert "timing=event-date only; non-strict PIT" in result
-    assert "non-strict PIT" in extract_provenance(result)[0].timing
+    assert "[major shareholder] Holder A" in result.content
+    assert "timing=event-date only; non-strict PIT" in result.content
+    assert "non-strict PIT" in result.provenance[0].timing
 
 
 @pytest.mark.unit
@@ -252,9 +251,9 @@ def test_holding_changes_include_executive_transactions(monkeypatch):
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "[executive] Executive A (Director); 减持; shares=1,200" in result
-    assert "2026-01-10" in result
-    assert "timing=disclosure/update-date filtered" in result
+    assert "[executive] Executive A (Director); 减持; shares=1,200" in result.content
+    assert "2026-01-10" in result.content
+    assert "timing=disclosure/update-date filtered" in result.content
 
 
 @pytest.mark.unit
@@ -290,7 +289,7 @@ def test_holding_changes_labels_event_date_only_executive_data_as_non_strict_pit
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "timing=event-date only; non-strict PIT" in result
+    assert "timing=event-date only; non-strict PIT" in result.content
 
 
 @pytest.mark.unit
@@ -331,9 +330,9 @@ def test_holding_errors_fall_back_to_exact_code_cninfo_announcements(monkeypatch
     )
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
-    records = extract_provenance(result)
+    records = result.provenance
 
-    assert "[official announcement fallback] 关于控股股东增持公司股份的公告" in result
+    assert "[official announcement fallback] 关于控股股东增持公司股份的公告" in result.content
     assert records[-1].source == "CNINFO"
     assert "fallback source used" in records[-1].timing
 
@@ -378,8 +377,8 @@ def test_holding_changes_uses_server_window_and_reports_single_page_truncation(
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "Historical Holder" in result
-    assert "latest 100 window records used; coverage is incomplete" in result
+    assert "Historical Holder" in result.content
+    assert "latest 100 window records used; coverage is incomplete" in result.content
     assert len(calls) == 2
     assert all(params["pageNumber"] == 1 for params in calls)
     assert "NOTICE_DATE>='2025-10-13'" in calls[0]["filter"]
@@ -419,7 +418,7 @@ def test_holding_no_data_code_is_normal_empty(monkeypatch):
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert strip_provenance_markers(result).startswith(
+    assert result.content.startswith(
         "<Eastmoney holding changes: no matching events"
     )
 
@@ -447,9 +446,9 @@ def test_sse_margin_preserves_legitimate_zero_values(monkeypatch):
 
     result = cn_sentiment.get_margin_signal("600519.SS", "2026-01-10", data_context=request_context())
 
-    assert "financing balance=0 CNY" in result
-    assert "financing buys=0 CNY" in result
-    assert "securities-lending balance=0 shares" in result
+    assert "financing balance=0 CNY" in result.content
+    assert "financing buys=0 CNY" in result.content
+    assert "securities-lending balance=0 shares" in result.content
 
 
 @pytest.mark.unit
@@ -508,7 +507,7 @@ def test_sz_margin_no_covered_row_is_not_neutral(monkeypatch):
         "000001.SZ", "2026-01-10", _remaining_sessions=1
     , data_context=request_context())
 
-    assert result.startswith("<SZSE margin detail: no covered row for 000001")
+    assert result.content.startswith("<SZSE margin detail: no covered row for 000001")
 
 
 @pytest.mark.unit
@@ -557,5 +556,5 @@ def test_sz_margin_walks_back_when_latest_workbook_not_published(monkeypatch):
 
     result = cn_sentiment.get_margin_signal("000001.SZ", "2026-01-10", data_context=request_context())
 
-    assert "on 2026-01-08" in result
-    assert "financing balance=5,000 CNY" in result
+    assert "on 2026-01-08" in result.content
+    assert "financing balance=5,000 CNY" in result.content

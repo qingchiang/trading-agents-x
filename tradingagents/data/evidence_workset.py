@@ -34,17 +34,6 @@ class EvidenceToolArtifact(TypedDict):
     structured_numeric_facts: NotRequired[list[dict[str, Any]]]
 
 
-class StructuredNumericFact(TypedDict):
-    """One producer-owned scalar carried outside model-visible prose."""
-
-    key: str
-    label: str
-    value: int | float
-    measurement_kind: str
-    unit: str | None
-    effective_date: str | None
-
-
 _OHLCV_REQUIRED = {"date", "close"}
 _OHLCV_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
 _RETURN_HORIZONS = (1, 5, 20, 60, 120, 252)

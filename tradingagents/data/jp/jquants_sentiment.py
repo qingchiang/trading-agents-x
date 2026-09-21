@@ -20,7 +20,7 @@ platforms that don't cover Japan. Three complementary signals live here:
     bearish positioning.
 
 The two per-name signals are prefetched by the sentiment analyst; the market
-flow is prefetched by the news analyst. All three return strings and never raise.
+flow is prefetched by the news analyst. All three return structured source results and degrade retrieval failures locally.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from tradingagents.data.jp.calendar import add_business_days
 from tradingagents.data.jp.company_info import get_company_market_section
 from tradingagents.data.jp.jquants_common import fetch_records, parse_number, to_jquants_code
 from tradingagents.data.jp.market import is_tokyo_ticker
+from tradingagents.domain.data_result import DataResult
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +60,18 @@ def _fmt_num(value, *, signed: bool = False) -> str:
     return f"{n:+,.0f}" if signed else f"{n:,.0f}"
 
 
-def _format_week(record: dict) -> str:
-    from tradingagents.data.source_observations import publish_observation
+def _format_week(record: dict, *, observations) -> str:
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        "J-Quants", "market_investor_flows", str(record.get("EnDate")),
-        {**record, "scope": "aggregate exchange-section context, not company order flow"},
-        effective_date=record.get("EnDate"), available_on=record.get("PubDate"),
+    observations.append(
+        make_observation(
+            "J-Quants",
+            "market_investor_flows",
+            str(record.get("EnDate")),
+            {**record, "scope": "aggregate exchange-section context, not company order flow"},
+            effective_date=record.get("EnDate"),
+            available_on=record.get("PubDate"),
+        )
     )
     flows = " · ".join(
         f"{label} {_fmt_num(record.get(key), signed=True)}" for label, key in _FLOW_FIELDS
@@ -79,24 +85,26 @@ def get_market_investor_flows(
     curr_date: str,
     look_back_weeks: int = 4,
     section: str | None = None,
-) -> str:
+) -> DataResult:
     """Return aggregate investor-type flows for the ticker's exchange section.
 
     The endpoint contains no per-security attribution. ``section`` is normally
     resolved from the company master as of ``curr_date``; it remains an optional
-    override for compatibility and diagnostics. A lookup failure never defaults
+    override for diagnostics. A lookup failure never defaults
     to Prime. Non-Tokyo tickers return ``""`` and every failure degrades to a
     visible placeholder.
     """
+    observations = []
     if not is_tokyo_ticker(ticker):
-        return ""
+        return DataResult("", observations=tuple(observations))
 
     try:
         section = section or get_company_market_section(ticker, curr_date)
         if section is None:
-            return (
+            return DataResult(
                 f"<market investor flows unavailable: no supported exchange section "
-                f"for {ticker} as of {curr_date}; not defaulting to TSEPrime>"
+                f"for {ticker} as of {curr_date}; not defaulting to TSEPrime>",
+                observations=tuple(observations),
             )
         # Reach back a few extra weeks beyond the requested window to absorb the
         # publication lag (the latest week is released several business days
@@ -112,36 +120,34 @@ def get_market_investor_flows(
         )
     except Exception as exc:
         logger.warning("Investor-flow fetch failed for %s: %s", section, exc)
-        return f"<investor flows unavailable: {type(exc).__name__}>"
+        return DataResult(
+            f"<investor flows unavailable: {type(exc).__name__}>", observations=tuple(observations)
+        )
 
     # Look-ahead guard: a week is only known once published.
     published = [r for r in records if r.get("PubDate") and r.get("PubDate") <= curr_date]
     if not published:
-        return f"<no investor-flow data published on or before {curr_date}>"
+        return DataResult(
+            f"<no investor-flow data published on or before {curr_date}>",
+            observations=tuple(observations),
+        )
 
     published.sort(key=lambda r: r.get("PubDate") or "", reverse=True)
-    weeks = "\n".join(_format_week(r) for r in published[:look_back_weeks])
+    weeks = "\n".join(
+        _format_week(r, observations=observations) for r in published[:look_back_weeks]
+    )
     # Data only — a neutral source label and unit definition. The prompt wrapper
     # repeats the interpretation, but keep the hard boundary adjacent to the raw
     # values so it survives copying or prompt restructuring.
-    return (
+    return DataResult(
         f"MARKET-LEVEL CONTEXT ONLY — NOT {ticker} ORDER FLOW.\n"
         f"{section} aggregate weekly net flows — J-Quants 投資部門別売買状況. "
         "This endpoint has no security-level attribution. Do not infer that "
         f"foreigners, individuals, or any category bought or sold {ticker}.\n"
         "Net = purchases − sales; positive = net buying for the whole exchange section:\n\n"
-        f"{weeks}"
+        f"{weeks}",
+        observations=tuple(observations),
     )
-
-
-def get_investor_flows(
-    ticker: str,
-    curr_date: str,
-    look_back_weeks: int = 4,
-    section: str | None = None,
-) -> str:
-    """Compatibility alias for :func:`get_market_investor_flows`."""
-    return get_market_investor_flows(ticker, curr_date, look_back_weeks, section)
 
 
 # --- Per-ticker margin-trading balances (信用取引週末残高) --------------------
@@ -169,17 +175,22 @@ def _margin_published_by(record_date: str, curr: date) -> bool:
     return add_business_days(rec, _MARGIN_PUBLICATION_BUSINESS_DAYS) <= curr
 
 
-def _margin_week(record: dict) -> str:
-    from tradingagents.data.source_observations import publish_observation
+def _margin_week(record: dict, *, observations) -> str:
+    from tradingagents.data.source_observations import make_observation
     from tradingagents.domain.data import as_date
 
     period = as_date(record.get("Date"))
     if period:
-        publish_observation(
-            "J-Quants", "margin_balances", str(period), record,
-            effective_date=period,
-            available_on=add_business_days(period, _MARGIN_PUBLICATION_BUSINESS_DAYS),
-            timing="inferred publication date: T+2 TSE business days; weekly positioning",
+        observations.append(
+            make_observation(
+                "J-Quants",
+                "margin_balances",
+                str(period),
+                record,
+                effective_date=period,
+                available_on=add_business_days(period, _MARGIN_PUBLICATION_BUSINESS_DAYS),
+                timing="inferred publication date: T+2 TSE business days; weekly positioning",
+            )
         )
     long_bal = parse_number(record.get("LongVol"))  # 信用買残 (margin longs)
     short_bal = parse_number(record.get("ShrtVol"))  # 信用売残 (margin shorts)
@@ -195,8 +206,12 @@ def _margin_week(record: dict) -> str:
 
 
 def get_margin_balance(
-    ticker: str, curr_date: str, look_back_weeks: int = _MARGIN_LOOK_BACK_WEEKS
-, *, data_context: DataRequestContext) -> str:
+    ticker: str,
+    curr_date: str,
+    look_back_weeks: int = _MARGIN_LOOK_BACK_WEEKS,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult:
     """Return recent weekly margin balances for a ``.T`` ticker, else "".
 
     Empty for any non-Tokyo ticker (a future market supplies its own source) and
@@ -207,14 +222,15 @@ def get_margin_balance(
     signals. Look-ahead safe: a week is surfaced only once its record date's T+2
     business-day release falls on/before ``curr_date``.
     """
+    observations = []
     if not is_tokyo_ticker(ticker):
-        return ""
+        return DataResult("", observations=tuple(observations))
 
     try:
         end = datetime.strptime(curr_date, "%Y-%m-%d").date()
         # Reach back a few extra weeks so the publication guard (which hides at most
         # the latest week or two) still leaves a full look_back_weeks window — same
-        # buffer get_investor_flows uses.
+        # buffer get_market_investor_flows uses.
         start = (end - timedelta(weeks=look_back_weeks + 3)).strftime("%Y-%m-%d")
         records = fetch_records(
             "/markets/margin-interest",
@@ -223,20 +239,23 @@ def get_margin_balance(
         )
     except Exception as exc:
         logger.warning("Margin-balance fetch failed for %s: %s", ticker, exc)
-        return f"<margin balances unavailable: {type(exc).__name__}>"
+        return DataResult(
+            f"<margin balances unavailable: {type(exc).__name__}>", observations=tuple(observations)
+        )
 
     visible = [r for r in records if _margin_published_by(r.get("Date"), end)]
     if not visible:
-        return ""
+        return DataResult("", observations=tuple(observations))
     visible.sort(key=lambda r: r.get("Date") or "", reverse=True)
-    weeks = "\n".join(_margin_week(r) for r in visible[:look_back_weeks])
+    weeks = "\n".join(_margin_week(r, observations=observations) for r in visible[:look_back_weeks])
     # Data + legend only; the prompt wrapper owns the framing and the sentiment
     # rules own how to weight it (kept out of here so they don't drift).
-    return (
+    return DataResult(
         "J-Quants 信用取引 weekly margin balances (信用買残 = shares bought on margin, "
         "信用売残 = shares sold short on margin; credit ratio = 買残/売残, higher = more "
         "long overhang):\n\n"
-        f"{weeks}"
+        f"{weeks}",
+        observations=tuple(observations),
     )
 
 
@@ -246,12 +265,18 @@ _SHORT_LOOK_BACK_DAYS = 365
 _SHORT_MAX_ROWS = 8
 
 
-def _short_event(record: dict) -> str:
-    from tradingagents.data.source_observations import publish_observation
+def _short_event(record: dict, *, observations) -> str:
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        "J-Quants", "short_positions", str(record.get("DiscDate")), record,
-        effective_date=record.get("CalcDate"), available_on=record.get("DiscDate"),
+    observations.append(
+        make_observation(
+            "J-Quants",
+            "short_positions",
+            str(record.get("DiscDate")),
+            record,
+            effective_date=record.get("CalcDate"),
+            available_on=record.get("DiscDate"),
+        )
     )
     seller = record.get("SSName") or "?"
     ratio = parse_number(record.get("ShrtPosToSO"))
@@ -271,7 +296,7 @@ def get_short_positions(
     max_rows: int = _SHORT_MAX_ROWS,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult:
     """Return recent disclosed large short positions for a ``.T`` ticker, else "".
 
     Empty for any non-Tokyo ticker and empty when this name has no disclosure in
@@ -281,8 +306,9 @@ def get_short_positions(
     ``DiscDate``, the public disclosure date, against a normalized ``curr_date``, so
     a position is shown only once it was public.
     """
+    observations = []
     if not is_tokyo_ticker(ticker):
-        return ""
+        return DataResult("", observations=tuple(observations))
 
     try:
         # Normalize the window bounds so a parseable-but-unpadded curr_date (e.g.
@@ -301,7 +327,9 @@ def get_short_positions(
         )
     except Exception as exc:
         logger.warning("Short-position fetch failed for %s: %s", ticker, exc)
-        return f"<short positions unavailable: {type(exc).__name__}>"
+        return DataResult(
+            f"<short positions unavailable: {type(exc).__name__}>", observations=tuple(observations)
+        )
 
     # A disclosure with no parseable position ratio carries no magnitude, so drop
     # it rather than render a bare "SELLER — N/A of shares out" bearish-looking row.
@@ -313,11 +341,12 @@ def get_short_positions(
         and parse_number(r.get("ShrtPosToSO")) is not None
     ]
     if not visible:
-        return ""
+        return DataResult("", observations=tuple(observations))
     visible.sort(key=lambda r: r.get("DiscDate") or "", reverse=True)
-    events = "\n".join(_short_event(r) for r in visible[:max_rows])
-    return (
+    events = "\n".join(_short_event(r, observations=observations) for r in visible[:max_rows])
+    return DataResult(
         "J-Quants 空売り残高報告 — disclosed large short positions (≥0.5% of shares "
         "outstanding), each naming the short seller:\n\n"
-        f"{events}"
+        f"{events}",
+        observations=tuple(observations),
     )

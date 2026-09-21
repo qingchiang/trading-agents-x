@@ -11,6 +11,7 @@ from tradingagents.data.incremental_jp import collect_japan_incremental
 from tradingagents.data.jp import edinet_news, jp_news
 from tradingagents.domain.collection import IncrementalCollectionRequest
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.performance import PerformanceComponentStatus
 from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.provenance import attach_evidence_span, attach_provenance
@@ -27,7 +28,7 @@ def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
-    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
 
 
 def _request(

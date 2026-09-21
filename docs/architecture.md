@@ -714,6 +714,12 @@ at assembly time.
 
 ### Shared observations and bounded news continuity
 
+`domain/data_result.py` defines source content, observations, provenance,
+diagnostics and bounded temporal spans independently of transport text.
+Professional signals return this result directly; Full and Incremental read
+its producer observations and numeric facts without an ambient observation sink.
+The market signal registry adds source policy and retains bounded failure handling.
+
 `source_observations` transports producer-owned records beside existing tool
 strings. Full fundamental prefetch and Incremental collectors consume the same
 financial summaries; professional signals and macro observations retain their

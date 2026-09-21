@@ -22,10 +22,9 @@ from tradingagents.data.cn.common import (
 from tradingagents.data.cn.news_sources import disclosure_rows, research_rows
 from tradingagents.data.cn.sina_ratings import rating_rows as sina_rating_rows
 from tradingagents.data.context import DataRequestContext
-from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult, StructuredNumericFact
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import attach_provenance
 from tradingagents.version import BROWSER_USER_AGENT
 
 _SSE_MARGIN = "https://query.sse.com.cn/marketdata/tradedata/queryMargin.do"
@@ -35,9 +34,9 @@ _UA = BROWSER_USER_AGENT
 _HOLDING_PAGE_SIZE = 100
 _HOLDING_CACHE_TTL_SECONDS = 15 * 60
 _HOLDING_CACHE_MAXSIZE = 128
-_HOLDING_CACHE: OrderedDict[
-    tuple[str, str, str, str], tuple[float, tuple[dict, ...], bool]
-] = OrderedDict()
+_HOLDING_CACHE: OrderedDict[tuple[str, str, str, str], tuple[float, tuple[dict, ...], bool]] = (
+    OrderedDict()
+)
 _HOLDING_CACHE_LOCK = Lock()
 
 
@@ -70,8 +69,11 @@ def _first_present(row, *keys: str):
     return None
 
 
-def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5, *, data_context: DataRequestContext) -> str:
+def get_margin_signal(
+    ticker: str, curr_date: str, _remaining_sessions: int = 5, *, data_context: DataRequestContext
+) -> DataResult:
     """Return latest on/before-date official exchange margin detail."""
+    observations = []
     _canonical, code, exchange = canonical_a_share(ticker)
     trade_date = previous_trade_date(curr_date)
     compact = trade_date.strftime("%Y%m%d")
@@ -105,31 +107,30 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5,
             (
                 item
                 for item in rows
-                if isinstance(item, dict)
-                and str(_first_present(item, *code_keys) or "") == code
+                if isinstance(item, dict) and str(_first_present(item, *code_keys) or "") == code
             ),
             None,
         )
-        if row is None and rows and not any(
-            isinstance(item, dict) and _first_present(item, *code_keys) is not None
-            for item in rows
+        if (
+            row is None
+            and rows
+            and not any(
+                isinstance(item, dict) and _first_present(item, *code_keys) is not None
+                for item in rows
+            )
         ):
             raise AkShareSchemaError(
                 "SSE margin detail rows do not expose a recognized security-code field."
             )
         if not isinstance(row, dict):
             return _earlier_margin_or_uncovered(
-                ticker, trade_date, "SSE", code, _remaining_sessions
-            , data_context=data_context)
+                ticker, trade_date, "SSE", code, _remaining_sessions, data_context=data_context
+            )
         financing = _first_present(row, "FIN_BALANCE", "RZYE", "rzye", "finBalance")
         buy = _first_present(row, "FIN_BUY_AMT", "RZMRE", "rzmre", "finBuyAmount")
-        short = _first_present(
-            row, "SEC_LENDING_BALANCE", "RQYL", "rqyl", "securityBalance"
-        )
+        short = _first_present(row, "SEC_LENDING_BALANCE", "RQYL", "rqyl", "securityBalance")
         if financing is None and buy is None and short is None:
-            raise AkShareSchemaError(
-                "SSE margin detail row has no recognized financing fields."
-            )
+            raise AkShareSchemaError("SSE margin detail row has no recognized financing fields.")
     else:
         headers["Referer"] = "https://www.szse.cn/disclosure/margin/margin/index.html"
         response = _request(
@@ -154,8 +155,8 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5,
         matches = frame[frame["证券代码"].astype(str).str.zfill(6) == code]
         if matches.empty:
             return _earlier_margin_or_uncovered(
-                ticker, trade_date, "SZSE", code, _remaining_sessions
-            , data_context=data_context)
+                ticker, trade_date, "SZSE", code, _remaining_sessions, data_context=data_context
+            )
         metric_columns = {
             "融资余额",
             "融资余额(元)",
@@ -165,26 +166,34 @@ def get_margin_signal(ticker: str, curr_date: str, _remaining_sessions: int = 5,
             "融券余量(股/份)",
         }
         if not metric_columns.intersection(frame.columns):
-            raise AkShareSchemaError(
-                "SZSE margin workbook has no recognized financing columns."
-            )
+            raise AkShareSchemaError("SZSE margin workbook has no recognized financing columns.")
         row = matches.iloc[0]
         financing = row.get("融资余额", row.get("融资余额(元)"))
         buy = row.get("融资买入额", row.get("融资买入额(元)"))
         short = row.get("融券余量", row.get("融券余量(股/份)"))
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        "SSE" if exchange == "sh" else "SZSE", "margin_balances", f"{code}:{trade_date}",
-        {"financing_balance": financing, "financing_buys": buy, "lending_shares": short,
-         "financing_currency": "CNY", "lending_unit": "shares"},
-        effective_date=trade_date,
-        timing="current exchange positioning snapshot; trade date is not publication time",
+    observations.append(
+        make_observation(
+            "SSE" if exchange == "sh" else "SZSE",
+            "margin_balances",
+            f"{code}:{trade_date}",
+            {
+                "financing_balance": financing,
+                "financing_buys": buy,
+                "lending_shares": short,
+                "financing_currency": "CNY",
+                "lending_unit": "shares",
+            },
+            effective_date=trade_date,
+            timing="current exchange positioning snapshot; trade date is not publication time",
+        )
     )
-    return (
+    return DataResult(
         f"Official margin detail for {code} on {trade_date}: financing balance="
         f"{_amount(financing)} CNY; financing buys={_amount(buy)} CNY; "
-        f"securities-lending balance={_amount(short)} shares. Missing fields are n/a."
+        f"securities-lending balance={_amount(short)} shares. Missing fields are n/a.",
+        observations=tuple(observations),
     )
 
 
@@ -196,19 +205,26 @@ def _earlier_margin_or_uncovered(
     remaining_sessions: int,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult:
     """Walk through publication lag, then distinguish sustained non-coverage."""
+    observations = []
     if remaining_sessions > 1:
         earlier = previous_trade_date(trade_date, inclusive=False)
-        return get_margin_signal(ticker, earlier.isoformat(), remaining_sessions - 1, data_context=data_context)
-    return (
+        return get_margin_signal(
+            ticker, earlier.isoformat(), remaining_sessions - 1, data_context=data_context
+        )
+    return DataResult(
         f"<{exchange_name} margin detail: no covered row for {code} in the checked "
-        f"exchange sessions ending {trade_date}>"
+        f"exchange sessions ending {trade_date}>",
+        observations=tuple(observations),
     )
 
 
-def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
+def get_holding_changes(
+    ticker: str, curr_date: str, *, data_context: DataRequestContext
+) -> DataResult:
     """Return major-shareholder/executive changes bounded by available dates."""
+    observations = []
     _canonical, code, _exchange = canonical_a_share(ticker)
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=89)
@@ -266,7 +282,7 @@ def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataReques
                 "window records used; coverage is incomplete>"
             )
             timing += "; partial coverage; result set truncated"
-        parsed = parse(records, start, end)
+        parsed = parse(records, start, end, observations=observations)
         if any("non-strict PIT" in text for _visible, text in parsed):
             timing += "; non-strict PIT"
         if not parsed:
@@ -283,16 +299,19 @@ def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataReques
         events.extend(parsed)
 
     notes = [
-        f"<{source} holding feed unavailable: {type(exc).__name__}>"
-        for source, exc in failures
+        f"<{source} holding feed unavailable: {type(exc).__name__}>" for source, exc in failures
     ]
     notes.extend(coverage_notes)
     cninfo_succeeded = False
     if failures:
         try:
-            announcements = disclosure_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
+            announcements = disclosure_rows(
+                ticker, start.isoformat(), end.isoformat(), data_context=data_context
+            )
         except Exception as exc:  # noqa: BLE001 - preserve structured feed results
-            notes.append(f"<CNINFO holding-announcement fallback unavailable: {type(exc).__name__}>")
+            notes.append(
+                f"<CNINFO holding-announcement fallback unavailable: {type(exc).__name__}>"
+            )
             provenance.append(
                 ProvenanceRecord(
                     evidence="holding-change announcement fallback",
@@ -311,10 +330,18 @@ def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataReques
             ]
             for row in matched:
                 visible = row["published"].date()
-                from tradingagents.data.source_observations import publish_observation
+                from tradingagents.data.source_observations import make_observation
 
-                publish_observation("CNINFO", "news_article", row.get("url", row["title"]),
-                                    row, available_on=visible, fallback=True)
+                observations.append(
+                    make_observation(
+                        "CNINFO",
+                        "news_article",
+                        row.get("url", row["title"]),
+                        row,
+                        available_on=visible,
+                        fallback=True,
+                    )
+                )
                 events.append(
                     (
                         visible,
@@ -345,18 +372,20 @@ def get_holding_changes(ticker: str, curr_date: str, *, data_context: DataReques
             f"<{source_label} holding changes: no matching events in available feeds "
             f"for {code} from {start} to {end}>"
         )
-        return attach_provenance("\n".join((empty, *notes)), *provenance)
-    lines = [
-        text for _visible, text in sorted(events, key=lambda item: item[0], reverse=True)[:8]
-    ]
+        return DataResult(
+            "\n".join((empty, *notes)),
+            observations=tuple(observations),
+            provenance=tuple(provenance),
+        )
+    lines = [text for _visible, text in sorted(events, key=lambda item: item[0], reverse=True)[:8]]
     if notes:
         lines.extend(notes)
-    return attach_provenance(
+    return DataResult(
         "Major-shareholder/executive holding changes "
         "(disclosure/update-date filtered where available; records without those dates "
-        "use event dates and are non-strict PIT):\n"
-        + "\n".join(lines),
-        *provenance,
+        "use event dates and are non-strict PIT):\n" + "\n".join(lines),
+        observations=tuple(observations),
+        provenance=tuple(provenance),
     )
 
 
@@ -497,7 +526,7 @@ def _visibility_timing(row: dict) -> str:
     )
 
 
-def _major_holder_events(records: list[dict], start, end) -> list[tuple]:
+def _major_holder_events(records: list[dict], start, end, *, observations) -> list[tuple]:
     events = []
     for row in records:
         visible = _visible_date(row, "END_DATE")
@@ -520,18 +549,22 @@ def _major_holder_events(records: list[dict], start, end) -> list[tuple]:
                 f"shares={_amount(shares)}; timing={_visibility_timing(row)}",
             )
         )
-        from tradingagents.data.source_observations import publish_observation
+        from tradingagents.data.source_observations import make_observation
 
-        publish_observation(
-            "Eastmoney", "holding_changes", f"{holder}:{visible}",
-            {"holder": holder, "direction": direction, "shares": shares, "unit": "shares"},
-            effective_date=visible,
-            available_on=visible if "non-strict" not in _visibility_timing(row) else None,
+        observations.append(
+            make_observation(
+                "Eastmoney",
+                "holding_changes",
+                f"{holder}:{visible}",
+                {"holder": holder, "direction": direction, "shares": shares, "unit": "shares"},
+                effective_date=visible,
+                available_on=visible if "non-strict" not in _visibility_timing(row) else None,
+            )
         )
     return events
 
 
-def _executive_events(records: list[dict], start, end) -> list[tuple]:
+def _executive_events(records: list[dict], start, end, *, observations) -> list[tuple]:
     events = []
     for row in records:
         visible = _visible_date(row, "CHANGE_DATE")
@@ -551,24 +584,35 @@ def _executive_events(records: list[dict], start, end) -> list[tuple]:
                 f"timing={_visibility_timing(row)}",
             )
         )
-        from tradingagents.data.source_observations import publish_observation
+        from tradingagents.data.source_observations import make_observation
 
-        publish_observation(
-            "Eastmoney", "holding_changes", f"{person}:{visible}",
-            {"person": person, "role": role, "direction": direction, "shares": shares, "unit": "shares"},
-            effective_date=visible,
-            available_on=visible if "non-strict" not in _visibility_timing(row) else None,
+        observations.append(
+            make_observation(
+                "Eastmoney",
+                "holding_changes",
+                f"{person}:{visible}",
+                {
+                    "person": person,
+                    "role": role,
+                    "direction": direction,
+                    "shares": shares,
+                    "unit": "shares",
+                },
+                effective_date=visible,
+                available_on=visible if "non-strict" not in _visibility_timing(row) else None,
+            )
         )
     return events
 
 
-def get_research_signal_payload(
+def get_research_signal(
     ticker: str,
     curr_date: str,
     *,
     data_context: DataRequestContext,
-) -> tuple[str, tuple[StructuredNumericFact, ...]]:
+) -> DataResult:
     """Return dated sell-side prose plus exact target-price facts."""
+    observations = []
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=89)
     requested = f"{start} to {end}"
@@ -608,7 +652,9 @@ def get_research_signal_payload(
     source = "Sina Finance"
     if not rows:
         try:
-            rows = research_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
+            rows = research_rows(
+                ticker, start.isoformat(), end.isoformat(), data_context=data_context
+            )
         except Exception as exc:  # noqa: BLE001 - keep Sina's successful-empty state visible
             notes.append(f"<Eastmoney research fallback unavailable: {type(exc).__name__}>")
             provenance.append(
@@ -642,18 +688,26 @@ def get_research_signal_payload(
         body = f"<Sina/Eastmoney research: no usable coverage in {start} to {end}>"
         if notes:
             body += "\n" + "\n".join(notes)
-        return attach_provenance(body, *provenance), ()
+        return DataResult(
+            body, observations=tuple(observations), provenance=tuple(provenance), numeric_facts=()
+        )
     lines = []
     facts: list[StructuredNumericFact] = []
     currency = instrument_currency(ticker)
     selected = sorted(rows, key=lambda item: item["published"], reverse=True)[:8]
     for index, row in enumerate(selected, start=1):
-        from tradingagents.data.source_observations import publish_observation
+        from tradingagents.data.source_observations import make_observation
 
-        publish_observation(
-            source, "analyst_rating", f"{row['institution']}:{row['published']}",
-            row, effective_date=row["published"], available_on=row["published"],
-            fallback=source == "Eastmoney Research",
+        observations.append(
+            make_observation(
+                source,
+                "analyst_rating",
+                f"{row['institution']}:{row['published']}",
+                row,
+                effective_date=row["published"],
+                available_on=row["published"],
+                fallback=source == "Eastmoney Research",
+            )
         )
         target = f"{_display(row['target_low'])}–{_display(row['target_high'])}"
         detail = (
@@ -681,17 +735,13 @@ def get_research_signal_payload(
             )
     if notes:
         lines.extend(notes)
-    return attach_provenance(
+    return DataResult(
         f"Sell-side rating and target changes ({source}; publication-date filtered):\n"
         + "\n".join(lines),
-        *provenance,
-    ), tuple(facts)
-
-
-def get_research_signal(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
-    """Return recent ratings and target ranges known by the analysis date."""
-
-    return get_research_signal_payload(ticker, curr_date, data_context=data_context)[0]
+        observations=tuple(observations),
+        provenance=tuple(provenance),
+        numeric_facts=tuple(facts),
+    )
 
 
 _IMPORTANT_TERMS = (
@@ -721,20 +771,38 @@ _HOLDING_ANNOUNCEMENT_TERMS = (
 )
 
 
-def get_important_announcements(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> str:
+def get_important_announcements(
+    ticker: str, curr_date: str, *, data_context: DataRequestContext
+) -> DataResult:
     """Return directly code-bound, potentially material CNINFO announcements."""
+    observations = []
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=29)
     rows = disclosure_rows(ticker, start.isoformat(), end.isoformat(), data_context=data_context)
     rows = [row for row in rows if any(term in row["title"] for term in _IMPORTANT_TERMS)]
     if not rows:
-        return f"<CNINFO important announcements: no matched events in {start} to {end}>"
+        return DataResult(
+            f"<CNINFO important announcements: no matched events in {start} to {end}>",
+            observations=tuple(observations),
+        )
     rows.sort(key=lambda row: row["published"], reverse=True)
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
     for row in rows[:10]:
-        publish_observation("CNINFO", "news_article", row.get("url", row["title"]),
-                            row, available_on=row["published"])
-    return "Important company announcements (exact-code, disclosure-date filtered):\n" + "\n".join(
-        f"- {row['published'].strftime('%Y-%m-%d %H:%M')} CST: {row['title']}" for row in rows[:10]
+        observations.append(
+            make_observation(
+                "CNINFO",
+                "news_article",
+                row.get("url", row["title"]),
+                row,
+                available_on=row["published"],
+            )
+        )
+    return DataResult(
+        "Important company announcements (exact-code, disclosure-date filtered):\n"
+        + "\n".join(
+            f"- {row['published'].strftime('%Y-%m-%d %H:%M')} CST: {row['title']}"
+            for row in rows[:10]
+        ),
+        observations=tuple(observations),
     )

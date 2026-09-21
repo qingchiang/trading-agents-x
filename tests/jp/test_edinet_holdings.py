@@ -55,7 +55,7 @@ class HoldingsTests(unittest.TestCase):
 
     def test_non_tokyo_returns_empty(self):
         with mock.patch.object(edinet_common, "fetch_documents") as fd:
-            self.assertEqual(edinet_holdings.get_large_holdings("AAPL", "2026-06-25", data_context=request_context()), "")
+            self.assertEqual(edinet_holdings.get_large_holdings("AAPL", "2026-06-25", data_context=request_context()).content, "")
         fd.assert_not_called()
 
     def test_default_window_is_exactly_90_calendar_dates(self):
@@ -72,7 +72,7 @@ class HoldingsTests(unittest.TestCase):
             _holding(subject="E99999", filer="OTHER"),  # about a different company
         ]}
         with self._patch(mapping):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context()).content
         self.assertIn("大量保有", out)
         self.assertIn("MINE", out)
         self.assertNotIn("OTHER", out)
@@ -83,7 +83,7 @@ class HoldingsTests(unittest.TestCase):
             _holding(doc_type="360", doc_id="CHG", when="2026-06-22 16:00"),
         ]}
         with self._patch(mapping):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context()).content
         self.assertIn("5%+ position", out)
         self.assertIn("change report", out)
 
@@ -97,7 +97,7 @@ class HoldingsTests(unittest.TestCase):
         with self._patch(mapping):
             out = edinet_holdings.get_large_holdings(
                 "9984.T", "2026-06-22", look_back_days=0
-            , data_context=request_context())
+            , data_context=request_context()).content
 
         self.assertIn("NEWER", out)
         self.assertNotIn("OLDER", out)
@@ -105,13 +105,13 @@ class HoldingsTests(unittest.TestCase):
     def test_unknown_code_skips_without_scanning(self):
         fd = mock.Mock(side_effect=_by_date({}))
         with mock.patch.object(edinet_common, "fetch_documents", fd):
-            out = edinet_holdings.get_large_holdings("0000.T", "2026-06-22", look_back_days=10, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("0000.T", "2026-06-22", look_back_days=10, data_context=request_context()).content
         self.assertIn("no EDINET code on file", out)
         fd.assert_not_called()  # don't scan dates for a subject we can't match
 
     def test_no_reports_returns_informative_line(self):
         with self._patch({"2026-06-22": [_holding(subject="E99999")]}):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context()).content
         self.assertIn("No EDINET large-shareholding or tender-offer filings", out)
 
     def test_surfaces_tender_offer_family_with_correct_labels(self):
@@ -133,7 +133,7 @@ class HoldingsTests(unittest.TestCase):
                      when="2026-06-22 18:00"),  # not an ownership/control docType
         ]}
         with self._patch(mapping):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context()).content
         self.assertIn("Takeover bid launched", out)
         self.assertIn("Target board opinion on TOB", out)
         self.assertIn("Takeover bid withdrawn", out)  # 260 is material, not noise
@@ -155,12 +155,12 @@ class HoldingsTests(unittest.TestCase):
 
     def test_fetch_error_degrades_without_raising(self):
         with mock.patch.object(edinet_common, "fetch_documents", side_effect=RuntimeError("boom")):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0, data_context=request_context()).content
         self.assertIn("<large-shareholding data unavailable: RuntimeError>", out)
 
     def test_malformed_curr_date_degrades_without_raising(self):
         with self._patch({}):
-            out = edinet_holdings.get_large_holdings("9984.T", "not-a-date", data_context=request_context())
+            out = edinet_holdings.get_large_holdings("9984.T", "not-a-date", data_context=request_context()).content
         self.assertIn("<large-shareholding data unavailable: ValueError>", out)
 
     def test_window_shares_cache_with_news(self):

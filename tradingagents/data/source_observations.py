@@ -76,6 +76,37 @@ def publish_observation(
     )
 
 
+def make_observation(
+    source: str,
+    kind: str,
+    key: str,
+    values: dict,
+    *,
+    effective_date=None,
+    available_on=None,
+    available_at=None,
+    retrieved_at: datetime | None = None,
+    timing: str | None = None,
+    fallback: bool = False,
+) -> SourceObservation:
+    return SourceObservation(
+        source=source,
+        kind=kind,
+        key=str(key),
+        values=scalar(values),
+        effective_date=as_date(effective_date),
+        available_on=as_date(available_on),
+        available_at=available_at,
+        retrieved_at=retrieved_at or datetime.now(UTC),
+        timing=timing
+        or (
+            "publication-date filtered"
+            if available_on or available_at
+            else "near-live snapshot; publication time unavailable"
+        ),
+        fallback=fallback,
+    )
+
 _FINANCIAL_FIELDS = {
     "income": ("Total Revenue", "Operating Income", "Net Income", "Basic EPS"),
     "balance": (

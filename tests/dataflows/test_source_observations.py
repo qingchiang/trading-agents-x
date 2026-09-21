@@ -4,6 +4,7 @@ import pandas as pd
 
 from tests.data_policy import request_context
 from tradingagents.data import y_finance
+from tradingagents.domain.data_result import DataResult
 
 
 def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeypatch):
@@ -53,7 +54,6 @@ def test_china_statement_observations_retain_visibility_and_cumulative_basis(mon
 
 def test_japan_margin_publishes_conservative_release_date(monkeypatch):
     from tradingagents.data.jp import jquants_sentiment
-    from tradingagents.data.source_observations import capture_observations
 
     monkeypatch.setattr(
         jquants_sentiment,
@@ -62,8 +62,8 @@ def test_japan_margin_publishes_conservative_release_date(monkeypatch):
             {"Date": "2026-08-28", "LongVol": 90, "ShrtVol": 10},
         ],
     )
-    with capture_observations() as observations:
-        jquants_sentiment.get_margin_balance("9984.T", "2026-09-05", data_context=request_context())
+    result = jquants_sentiment.get_margin_balance("9984.T", "2026-09-05", data_context=request_context())
+    observations = result.observations
     assert observations[0].effective_date == date(2026, 8, 28)
     assert observations[0].available_on == date(2026, 9, 1)
     assert "T+2" in observations[0].timing
@@ -132,7 +132,7 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
         timing="inferred T+2 publication",
     )
     fetched = FetchedSentimentSignal(
-        sentiment_signal_specs("7203.T")[1], "margin", observations=(observed,)
+        sentiment_signal_specs("7203.T")[1], DataResult("margin", observations=(observed,))
     )
     monkeypatch.setattr(incremental_jp, "fetch_sentiment_signals", lambda *a, data_context: (fetched,))
     request = _request(enabled_domains=("social",))

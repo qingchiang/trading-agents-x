@@ -100,40 +100,39 @@ def augment_domain(request, domain, observations):
     ), candidates
 
 
-def retain_input_limitations(result, responses, *, failure_code=None, now=None):
+def retain_input_limitations(result, records, *, failure_code=None, now=None):
     """Keep producer limitations without replacing admitted material's retrieval time."""
     domain, candidates = result
     sources = {source.source: source for source in domain.sources}
     limited = False
-    for response in responses:
-        for record in extract_provenance(response):
-            timing = record.timing.casefold()
-            code = next((code for token, code in (
-                ("cache refresh failed", "news_cache_refresh_failed"),
-                ("unavailable", "upstream_source_unavailable"),
-                ("partial", "upstream_source_partial"),
-                ("source_window_limited", "source_window_limited"),
-                ("truncated_by_global_cap", "truncated_by_global_cap"),
-            ) if token in timing), None)
-            if code is None or "fallback vendor selected" in timing:
-                continue
-            limited = True
-            name = re.sub(r"[^a-z0-9_.-]+", "_", record.source.casefold()).strip("_")
-            previous = sources.get(name)
-            if previous is not None:
-                sources[name] = previous.model_copy(update={
-                    "diagnostic": previous.diagnostic or CollectionDiagnostic(code=code),
-                })
-            else:
-                try:
-                    stamp = datetime.fromisoformat(record.retrieved_at or "")
-                    if stamp.tzinfo is None:
-                        raise ValueError("missing timezone")
-                except ValueError:
-                    stamp = now() if now else datetime.now(UTC)
-                sources[name] = CollectionSourceProvenance(
-                    source=name, retrieved_at=stamp, diagnostic=CollectionDiagnostic(code=code),
-                )
+    for record in records:
+        timing = record.timing.casefold()
+        code = next((code for token, code in (
+            ("cache refresh failed", "news_cache_refresh_failed"),
+            ("unavailable", "upstream_source_unavailable"),
+            ("partial", "upstream_source_partial"),
+            ("source_window_limited", "source_window_limited"),
+            ("truncated_by_global_cap", "truncated_by_global_cap"),
+        ) if token in timing), None)
+        if code is None or "fallback vendor selected" in timing:
+            continue
+        limited = True
+        name = re.sub(r"[^a-z0-9_.-]+", "_", record.source.casefold()).strip("_")
+        previous = sources.get(name)
+        if previous is not None:
+            sources[name] = previous.model_copy(update={
+                "diagnostic": previous.diagnostic or CollectionDiagnostic(code=code),
+            })
+        else:
+            try:
+                stamp = datetime.fromisoformat(record.retrieved_at or "")
+                if stamp.tzinfo is None:
+                    raise ValueError("missing timezone")
+            except ValueError:
+                stamp = now() if now else datetime.now(UTC)
+            sources[name] = CollectionSourceProvenance(
+                source=name, retrieved_at=stamp, diagnostic=CollectionDiagnostic(code=code),
+            )
     if limited or failure_code:
         diagnostic = domain.diagnostic
         if diagnostic is None or diagnostic.code == "bounded_source_observations" or not domain.sources:
@@ -181,7 +180,7 @@ def collect_news_observations(
         ),
         [replace(row, fallback=row.fallback or fallback) for row in observations],
     )
-    return response, retain_input_limitations(result, (response,), now=now)
+    return response, retain_input_limitations(result, extract_provenance(response), now=now)
 
 
 def _input_failed(response):
@@ -223,22 +222,23 @@ def append_financials(request, domain, routed, *, data_context: DataRequestConte
     responses = tuple(inputs["responses"].values())
     return retain_input_limitations(
         augment_domain(request, domain, [SourceObservation.load(o) for o in inputs["observations"]]),
-        responses,
+        [record for response in responses for record in extract_provenance(response)],
         failure_code="financial_inputs_partial" if any(map(_input_failed, responses)) else None,
     )
 
 
 def collect_professional_signals(request, fetch):
     results = fetch(request.instrument, request.analysis_cutoff.isoformat())
-    observations = [o for result in results for o in result.observations]
+    observations = [o for result in results for o in result.result.observations]
     empty = CollectionDomainResult(
         domain="social",
         state="unavailable",
         diagnostic=CollectionDiagnostic(code="no_usable_professional_signals"),
     )
-    responses = [result.body for result in results]
+    responses = [result.result.content for result in results]
     return retain_input_limitations(
-        augment_domain(request, empty, observations), responses,
+        augment_domain(request, empty, observations),
+        [record for signal in results for record in signal.result.provenance],
         failure_code="professional_signals_partial" if any(map(_input_failed, responses)) else None,
     )
 
@@ -254,8 +254,6 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
                        _provenance=True, _stop_on_rate_limit=True),
         lambda: get_global_macro_panel(request.analysis_cutoff.isoformat(), data_context=data_context),
     ]
-    if request.market == "japan":
-        calls.append(lambda: get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat()))
     for call in calls:
         with capture_observations() as captured:
             try:
@@ -269,8 +267,21 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
             responses.append(response)
             failed = failed or _input_failed(response)
             observations.extend(captured)
+    if request.market == "japan":
+        try:
+            flow = get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat())
+        except Exception as exc:
+            failed = True
+            code = _typed_vendor_failure_code(exc)
+            if code is not None:
+                typed_failures.append(code)
+        else:
+            observations.extend(flow.observations)
+            responses.append(flow.content)
+            failed = failed or _input_failed(flow.content)
     return retain_input_limitations(
-        augment_domain(request, domain, observations), responses,
+        augment_domain(request, domain, observations),
+        [record for response in responses for record in extract_provenance(response)],
         failure_code=(
             _context_failure_code(domain, "news_context_partial", typed_failures)
             if failed
@@ -322,7 +333,7 @@ def append_market_context(request, domain, series, routed):
             observations.extend(captured)
     snapshot_failed = failed or _input_failed(response)
     return retain_input_limitations(
-        augment_domain(request, domain, observations), (response,),
+        augment_domain(request, domain, observations), extract_provenance(response),
         failure_code=(
             _context_failure_code(
                 domain, "market_snapshot_unavailable", typed_failures

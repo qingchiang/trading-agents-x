@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Literal
 
-from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.market_signals import FetchedSentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import StructuredNumericFact
 from tradingagents.provenance import extract_provenance
 from tradingagents.research.state import PrefetchedEvidenceBlock, prefetched_evidence_block
 
@@ -268,8 +268,8 @@ def prepare_sentiment_sources(
 
     for result in market_signals:
         spec = result.spec
-        body = result.body
-        body_records = tuple(extract_provenance(body))
+        body = result.result.content
+        body_records = result.result.provenance
         if not body_records:
             lowered = body.casefold()
             if "unavailable" in lowered:
@@ -311,9 +311,9 @@ def prepare_sentiment_sources(
                 "live_only" if spec.live_only else "point_in_time"
             ),
             applicable=not (spec.live_only and not live_run),
-            structured_numeric_facts=result.structured_numeric_facts,
+            structured_numeric_facts=result.result.numeric_facts,
         )
-        for observation in result.observations:
+        for observation in result.result.observations:
             evidence_blocks.append({
                 "content": observation.content, "records": [],
                 "temporal_scope": "point_in_time" if observation.is_pit else "live_only",

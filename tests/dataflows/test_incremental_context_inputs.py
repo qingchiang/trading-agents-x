@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 
 from tests.data_policy import request_context
 from tradingagents.data.macro_common import SeriesCache
+from tradingagents.domain.data_result import DataResult
 
 
 def test_macro_cache_preserves_original_retrieval_across_instances(tmp_path, monkeypatch):
@@ -165,8 +166,8 @@ def test_optional_input_failures_remain_visible_without_erasing_success(monkeypa
     financial, candidates = incremental_inputs.append_financials(request, empty, route, data_context=request_context())
     assert candidates and financial.diagnostic.code == "financial_inputs_partial"
     social, candidates = incremental_inputs.collect_professional_signals(request, lambda *_: [
-        SimpleNamespace(body="ok", observations=(observation,)),
-        SimpleNamespace(body="<source unavailable: RuntimeError>", observations=()),
+        SimpleNamespace(result=DataResult("ok", observations=(observation,))),
+        SimpleNamespace(result=DataResult("<source unavailable: RuntimeError>")),
     ])
     assert candidates and social.diagnostic.code == "professional_signals_partial"
     market = empty.model_copy(update={"domain": "market"})
@@ -188,7 +189,7 @@ def test_structured_news_keeps_source_limits_through_three_market_admission(monk
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
-    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
     def route(method, *_a, **_k):
         if method != "get_news":

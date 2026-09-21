@@ -43,6 +43,7 @@ from tradingagents.data.jp.edinet_common import (
     render_filings,
 )
 from tradingagents.data.jp.market import is_tokyo_ticker
+from tradingagents.domain.data_result import DataResult
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ _DOC_TYPE_LABELS = {
 }
 
 
-def _format_filing(record: dict) -> str:
+def _format_filing(record: dict, *, observations) -> str:
     """Render one ownership/control filing as a markdown item.
 
     The filer is whoever filed: the shareholder (大量保有), the bidder (a TOB
@@ -82,19 +83,33 @@ def _format_filing(record: dict) -> str:
     """
     label = _DOC_TYPE_LABELS.get(str(record.get("docTypeCode")), "Ownership/control filing")
     filer = record.get("filerName") or "Unknown filer"
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
-    publish_observation(
-        "EDINET", "ownership_filing", str(record.get("docID")),
-        {key: record.get(key) for key in ("docID", "docDescription", "filerName", "docTypeCode")},
-        available_on=record.get("submitDateTime"), effective_date=record.get("periodEnd"),
+    observations.append(
+        make_observation(
+            "EDINET",
+            "ownership_filing",
+            str(record.get("docID")),
+            {
+                key: record.get(key)
+                for key in ("docID", "docDescription", "filerName", "docTypeCode")
+            },
+            available_on=record.get("submitDateTime"),
+            effective_date=record.get("periodEnd"),
+        )
     )
     line = f"### {label} — filed by {filer}"
     detail = filing_detail_line(record)
     return f"{line}\n{detail}" if detail else line
 
 
-def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_BACK_DAYS, *, data_context: DataRequestContext) -> str:
+def get_large_holdings(
+    ticker: str,
+    curr_date: str,
+    look_back_days: int = _LOOK_BACK_DAYS,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult:
     """Return recent EDINET large-shareholding & tender-offer (TOB) filings about ``ticker``.
 
     Tokyo-only (returns "" for non-``.T`` tickers, like the investor-flow proxy —
@@ -103,8 +118,9 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
     whose ``subjectEdinetCode`` is this ticker. Degrades to a placeholder string on
     any error or when the ticker's EDINET code is unknown; never raises.
     """
+    observations = []
     if not is_tokyo_ticker(ticker):
-        return ""
+        return DataResult("", observations=tuple(observations))
 
     try:
         # strptime inside the try so a malformed curr_date degrades rather than
@@ -117,7 +133,10 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
             # Unknown issuer (new listing not yet in seed or learned cache). Don't
             # scan dozens of dates for a subject we can't match; the self-heal on
             # other runs will fill it in once we have seen any of its filings.
-            return f"<no EDINET code on file for {ticker}; large-shareholding lookup skipped>"
+            return DataResult(
+                f"<no EDINET code on file for {ticker}; large-shareholding lookup skipped>",
+                observations=tuple(observations),
+            )
 
         # Materialize the (capped) date list so the reported window matches what
         # was actually scanned — iter_window_dates clamps to 90 inclusive dates.
@@ -138,22 +157,27 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
         learn_many(learned_pairs, data_context=data_context)
     except Exception as exc:
         logger.warning("Large-holding fetch failed for %s: %s", ticker, exc)
-        return f"<large-shareholding data unavailable: {type(exc).__name__}>"
+        return DataResult(
+            f"<large-shareholding data unavailable: {type(exc).__name__}>",
+            observations=tuple(observations),
+        )
 
     if not matches:
-        return (
+        return DataResult(
             f"No EDINET large-shareholding or tender-offer filings about {ticker} "
-            f"between {scanned_start} and {curr_date}"
+            f"between {scanned_start} and {curr_date}",
+            observations=tuple(observations),
         )
 
     items = render_filings(
         matches,
-        _format_filing,
+        lambda record: _format_filing(record, observations=observations),
         data_context.config["sentiment_filing_limit"],
     )
-    return (
+    return DataResult(
         f"EDINET ownership & control filings about {ticker}, {scanned_start} to {curr_date} "
         "(大量保有 5%+ stakes and 公開買付 takeover bids; type/filer/date below, "
         "stake % not parsed):"
-        f"\n\n{items}"
+        f"\n\n{items}",
+        observations=tuple(observations),
     )

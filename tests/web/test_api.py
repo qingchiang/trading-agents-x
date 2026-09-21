@@ -24,6 +24,7 @@ from tradingagents.domain.collection import (
 )
 from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
@@ -237,7 +238,7 @@ Date,Open,High,Low,Close,Volume
         "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a: ""
     )
     monkeypatch.setattr(
-        "tradingagents.data.incremental_inputs.get_market_investor_flows", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_market_investor_flows", lambda *_a: DataResult("")
     )
     service = AnalysisService(
         web_settings,

@@ -9,23 +9,21 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from tradingagents.data.cn.cn_sentiment import (
     get_holding_changes as get_cn_holding_changes,
     get_important_announcements as get_cn_important_announcements,
     get_margin_signal as get_cn_margin_signal,
-    get_research_signal_payload as get_cn_research_signal_payload,
+    get_research_signal as get_cn_research_signal,
 )
 from tradingagents.data.context import DataRequestContext
-from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.jp.edinet_holdings import get_large_holdings
 from tradingagents.data.jp.jquants_sentiment import get_margin_balance, get_short_positions
-from tradingagents.data.jp.yfinance_sentiment import get_analyst_ratings_payload
+from tradingagents.data.jp.yfinance_sentiment import get_analyst_ratings_result
 from tradingagents.data.lookahead import is_near_live
-from tradingagents.data.source_observations import capture_observations
-from tradingagents.domain.data import SourceObservation
+from tradingagents.domain.data_result import DataDiagnostic, DataResult
 from tradingagents.domain.instruments import match_exchange_suffix
 
 logger = logging.getLogger(__name__)
@@ -36,10 +34,7 @@ class SentimentSignal:
     """One market-specific signal and its provenance contract."""
 
     tag: str
-    fetch: Callable[
-        [str, str],
-        str | tuple[str, tuple[StructuredNumericFact, ...]],
-    ]
+    fetch: Callable[..., DataResult]
     evidence: str
     source: str
     title: str
@@ -54,10 +49,8 @@ class FetchedSentimentSignal:
     """Defensively fetched signal, including optional retrieval time."""
 
     spec: SentimentSignal
-    body: str
+    result: DataResult
     retrieved_at: str | None = None
-    structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
-    observations: tuple[SourceObservation, ...] = ()
 
 
 def _jp_signals() -> tuple[SentimentSignal, ...]:
@@ -119,7 +112,7 @@ def _jp_signals() -> tuple[SentimentSignal, ...]:
         ),
         SentimentSignal(
             tag="analyst_ratings",
-            fetch=get_analyst_ratings_payload,
+            fetch=get_analyst_ratings_result,
             evidence="analyst consensus",
             source="yfinance",
             title="Analyst consensus — sell-side rating & price target",
@@ -173,7 +166,7 @@ def _cn_signals() -> tuple[SentimentSignal, ...]:
         ),
         SentimentSignal(
             tag="cn_research",
-            fetch=get_cn_research_signal_payload,
+            fetch=get_cn_research_signal,
             evidence="sell-side ratings and target prices",
             source="Sina Finance / Eastmoney Research",
             title="Sell-side rating & target-price changes",
@@ -223,40 +216,31 @@ def fetch_sentiment_signals(
     """Fetch all registered signals without allowing an exception to escape."""
     fetched = []
     for spec in sentiment_signal_specs(ticker):
-        structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
-        observations = []
         if spec.live_only and not is_near_live(curr_date, ticker):
-            body = (
+            result = DataResult(
                 "<live-only source unavailable for historical or future "
-                f"trade_date {curr_date}; vendor not queried>"
+                f"trade_date {curr_date}; vendor not queried>",
+                diagnostics=(DataDiagnostic("outside_near_live_window", spec.source),),
             )
         else:
             try:
-                with capture_observations() as observations:
-                    result = spec.fetch(ticker, curr_date, data_context=data_context)
-                if isinstance(result, tuple):
-                    body, structured_numeric_facts = result
-                else:
-                    body = result or ""
+                result = spec.fetch(ticker, curr_date, data_context=data_context)
             except Exception as exc:
                 logger.warning(
                     "Sentiment signal %s failed for %s: %s", spec.tag, ticker, exc
                 )
-                body = f"<{spec.source} unavailable: {type(exc).__name__}>"
+                result = DataResult(
+                    f"<{spec.source} unavailable: {type(exc).__name__}>",
+                    diagnostics=(DataDiagnostic("source_unavailable", spec.source, type(exc).__name__),),
+                )
         retrieved_at = None
-        if spec.live_only and body and "unavailable" not in body.casefold():
+        if spec.live_only and result.content and "unavailable" not in result.content.casefold():
             retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
-        fetched.append(
-            FetchedSentimentSignal(
-                spec,
-                body,
-                retrieved_at,
-                tuple(structured_numeric_facts),
-                tuple(sorted(
-                    observations,
-                    key=lambda o: str(o.available_on or o.effective_date or ""),
-                    reverse=True,
-                )[:8] if spec.tag == "cn_holding_changes" else observations),
-            )
-        )
+        if spec.tag == "cn_holding_changes":
+            result = replace(result, observations=tuple(sorted(
+                result.observations,
+                key=lambda o: str(o.available_on or o.effective_date or ""),
+                reverse=True,
+            )[:8]))
+        fetched.append(FetchedSentimentSignal(spec, result, retrieved_at))
     return tuple(fetched)

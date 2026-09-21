@@ -12,6 +12,7 @@ from tests.data_policy import configure_data, data_config, request_context
 from tests.factories import analyst_runtime
 from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.sentiment_analyst import create_sentiment_analyst
 from tradingagents.research.analysts.sentiment_sources import (
@@ -198,7 +199,7 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(ticker, route):
         effective=lambda value: value,
         timing="publication-date filtered",
     )
-    signal = FetchedSentimentSignal(spec=spec, body="SIGNAL_DATA")
+    signal = FetchedSentimentSignal(spec=spec, result=DataResult("SIGNAL_DATA"))
 
     captured, stocktwits, reddit, signals, _, result = _run(
         ticker=ticker,
@@ -303,7 +304,7 @@ def test_japan_margin_figure_becomes_resolvable_evidence():
     result = _run(
         ticker="2802.T",
         routes={".T": {"news_data": "jp_news"}},
-        signals=(FetchedSentimentSignal(spec=spec, body=body),),
+        signals=(FetchedSentimentSignal(spec=spec, result=DataResult(body)),),
     )[-1]
 
     evidence = collect_evidence(

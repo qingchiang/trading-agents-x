@@ -14,6 +14,7 @@ from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.domain.collection import IncrementalCollectionRequest
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.domain.vendor_errors import VendorRateLimitError
 from tradingagents.provenance import attach_provenance
@@ -25,7 +26,7 @@ def _isolate_shared_background(monkeypatch):
     from tradingagents.data import incremental_inputs
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
-    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
+    monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
 
 
 def _request(

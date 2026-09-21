@@ -6,9 +6,9 @@ from typing import Annotated, NotRequired, TypedDict
 
 from langgraph.graph import MessagesState
 
-from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import temporal_scope_from_records
+from tradingagents.domain.data_result import StructuredNumericFact
 from tradingagents.provenance import strip_provenance_markers
 
 

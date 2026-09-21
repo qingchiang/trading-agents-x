@@ -16,6 +16,7 @@ from tests.factories import analyst_runtime
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import provenance_quality_issues
+from tradingagents.domain.data_result import DataResult
 from tradingagents.provenance import attach_provenance, extract_provenance
 from tradingagents.research.analysts import news_analyst
 from tradingagents.research.analysts.news_analyst import create_news_analyst
@@ -417,7 +418,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
             mock.patch.object(
                 news_analyst,
                 "get_market_investor_flows",
-                return_value=market_flows,
+                return_value=DataResult(market_flows),
             ) as flows,
         ):
             result = create_news_analyst(llm)(state, analyst_runtime(data_config()))

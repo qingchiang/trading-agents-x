@@ -235,7 +235,7 @@ def _build_system_message(
             result.spec.title,
             result.spec.intro,
             result.spec.tag,
-            result.body,
+            result.result.content,
         )
         for result in market_signals
     )
