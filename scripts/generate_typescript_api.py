@@ -10,7 +10,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA = ROOT / "frontend" / "openapi.json"
-DEFAULT_OUTPUT = ROOT / "frontend" / "src" / "api" / "types.generated.ts"
+DEFAULT_OUTPUT = ROOT / "frontend" / "src" / "shared" / "api" / "types.generated.ts"
 IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 

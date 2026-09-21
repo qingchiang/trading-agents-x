@@ -12,6 +12,8 @@ _CASES = json.loads(
         Path(__file__).parents[2]
         / "frontend"
         / "src"
+        / "features"
+        / "research"
         / "test-fixtures"
         / "numeric-display.json"
     ).read_text(encoding="utf-8")
