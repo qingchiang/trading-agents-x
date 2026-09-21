@@ -12,6 +12,18 @@ from zoneinfo import ZoneInfo
 
 from tradingagents.data.cn import calendar
 from tradingagents.data.collection_progress import report_collection_progress
+from tradingagents.data.incremental_common import (
+    CollectionUnavailable,
+    bounded_empty,
+    fundamentals_spans,
+    is_empty,
+    is_failure,
+    is_news_availability_record,
+    merge_sources,
+    news_spans,
+    origin_from_record,
+    unavailable,
+)
 from tradingagents.data.incremental_inputs import (
     append_financials,
     append_market_context,
@@ -37,11 +49,8 @@ from tradingagents.domain.incremental import IncrementalCollectionResult
 from tradingagents.domain.performance import MarketSeriesPoint, MarketSeriesResult
 from tradingagents.domain.vendor_errors import VendorRateLimitError
 from tradingagents.provenance import (
-    EvidenceSpan,
-    extract_evidence_spans,
     extract_provenance,
     strip_provenance_markers,
-    temporal_scope_from_records,
 )
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -63,12 +72,6 @@ _FUNDAMENTALS_VISIBLE = re.compile(
     r"^Latest visible disclosure/update:\s*(?P<value>\d{4}-\d{2}-\d{2})",
     re.MULTILINE,
 )
-
-
-class _Unavailable(ValueError):
-    def __init__(self, code: str) -> None:
-        self.code = code
-        super().__init__(code)
 
 
 def collect_mainland_china_incremental(
@@ -207,14 +210,14 @@ def _collect_market(request, routed, now):
             IncrementalEvidenceCandidate(evidence=item),
             series,
         )
-    except _Unavailable as exc:
-        return _unavailable(
+    except CollectionUnavailable as exc:
+        return unavailable(
             "market", exc.code, sources=(source,) if source else ()
         ), None, None
     except VendorRateLimitError:
         raise
     except Exception:
-        return _unavailable(
+        return unavailable(
             "market",
             "market_route_failure",
             sources=(source,) if source else (),
@@ -229,17 +232,17 @@ def _collect_news(request, routed, now):
             return structured
         sources, body = _routed_sources(response, now)
 
-        if _is_failure(body):
-            return _unavailable(
+        if is_failure(body):
+            return unavailable(
                 "news", "news_retrieval_failed", sources=sources
             ), ()
         records = extract_provenance(response)
         limited_sources = _news_availability_sources(records, now)
         cap_limited_sources = _news_global_cap_sources(records, now)
-        if _is_empty(body):
-            return _bounded_empty(
+        if is_empty(body):
+            return bounded_empty(
                 "news",
-                _merge_sources(sources, limited_sources, cap_limited_sources),
+                merge_sources(sources, limited_sources, cap_limited_sources),
             ), ()
 
         candidates: list[IncrementalEvidenceCandidate] = []
@@ -247,14 +250,14 @@ def _collect_news(request, routed, now):
         used_sources: dict[str, CollectionSourceProvenance] = {}
         temporal_limited_sources: dict[str, CollectionSourceProvenance] = {}
         bases: list[CollectionTemporalBasis] = []
-        for span in _news_spans(response, body):
+        for span in news_spans(response, body):
             if span.records and all(
-                _is_news_availability_record(record) for record in span.records
+                is_news_availability_record(record) for record in span.records
             ):
                 continue
             if span.content is None or len(span.records) != 1:
                 if span.content and span.records:
-                    raise _Unavailable("unbound_news_item_provenance")
+                    raise CollectionUnavailable("unbound_news_item_provenance")
                 continue
             source = _source_from_record(span.records[0], now)
             if span.temporal_scope == "unknown":
@@ -277,7 +280,7 @@ def _collect_news(request, routed, now):
                         }
                     )
                     continue
-                origin = _origin_from_record(
+                origin = origin_from_record(
                     record,
                     source,
                     "disclosure_or_news",
@@ -307,7 +310,7 @@ def _collect_news(request, routed, now):
                 bases.append(CollectionTemporalBasis.NEAR_LIVE_ADVISORY)
                 continue
 
-            origin = _origin_from_record(
+            origin = origin_from_record(
                 span.records[0],
                 source,
                 "disclosure_or_news",
@@ -351,7 +354,7 @@ def _collect_news(request, routed, now):
                 bases.append(CollectionTemporalBasis.PIT)
 
         if not candidates:
-            summary_sources = _merge_sources(
+            summary_sources = merge_sources(
                 sources,
                 limited_sources,
                 cap_limited_sources,
@@ -376,7 +379,7 @@ def _collect_news(request, routed, now):
                 ),
                 (),
             )
-        summary_sources = _merge_sources(
+        summary_sources = merge_sources(
             tuple(used_sources.values()),
             limited_sources,
             cap_limited_sources,
@@ -407,12 +410,12 @@ def _collect_news(request, routed, now):
             ),
             tuple(candidates),
         )
-    except _Unavailable as exc:
-        return _unavailable("news", exc.code, sources=sources), ()
+    except CollectionUnavailable as exc:
+        return unavailable("news", exc.code, sources=sources), ()
     except VendorRateLimitError:
         raise
     except Exception:
-        return _unavailable("news", "news_route_failure", sources=sources), ()
+        return unavailable("news", "news_route_failure", sources=sources), ()
 
 
 def _collect_fundamentals(request, routed, now):
@@ -426,20 +429,20 @@ def _collect_fundamentals(request, routed, now):
             _stop_on_rate_limit=True,
         )
         sources, body = _routed_sources(response, now)
-        if _is_failure(body):
-            return _unavailable(
+        if is_failure(body):
+            return unavailable(
                 "fundamentals",
                 "fundamentals_retrieval_failed",
                 sources=sources,
             ), ()
-        if _is_empty(body):
-            return _bounded_empty("fundamentals", sources), ()
+        if is_empty(body):
+            return bounded_empty("fundamentals", sources), ()
 
         candidates: list[IncrementalEvidenceCandidate] = []
         reported_sources: dict[str, CollectionSourceProvenance] = {}
         temporal_limited_sources: dict[str, CollectionSourceProvenance] = {}
         bases: list[CollectionTemporalBasis] = []
-        for span in _fundamentals_spans(response, body):
+        for span in fundamentals_spans(response, body):
             if span.content is None or not span.records:
                 continue
             span_sources = tuple(
@@ -485,7 +488,7 @@ def _collect_fundamentals(request, routed, now):
                     content=span.content,
                     fallback=source.fallback,
                     origins=tuple(
-                        _origin_from_record(
+                        origin_from_record(
                             record,
                             actual_source,
                             "fundamentals_snapshot",
@@ -548,7 +551,7 @@ def _collect_fundamentals(request, routed, now):
                 content=span.content,
                 fallback=source.fallback,
                 origins=tuple(
-                    _origin_from_record(
+                    origin_from_record(
                         record,
                         actual_source,
                         "fundamentals_disclosure",
@@ -571,7 +574,7 @@ def _collect_fundamentals(request, routed, now):
             bases.append(CollectionTemporalBasis.PIT)
 
         if not candidates:
-            summary_sources = _merge_sources(
+            summary_sources = merge_sources(
                 sources, tuple(temporal_limited_sources.values())
             )
             return (
@@ -601,7 +604,7 @@ def _collect_fundamentals(request, routed, now):
             CollectionDomainResult(
                 domain="fundamentals",
                 state=state,
-                sources=_merge_sources(
+                sources=merge_sources(
                     tuple(reported_sources.values()),
                     tuple(temporal_limited_sources.values()),
                 ),
@@ -628,12 +631,12 @@ def _collect_fundamentals(request, routed, now):
             ),
             tuple(candidates),
         )
-    except _Unavailable as exc:
-        return _unavailable("fundamentals", exc.code, sources=sources), ()
+    except CollectionUnavailable as exc:
+        return unavailable("fundamentals", exc.code, sources=sources), ()
     except VendorRateLimitError:
         raise
     except Exception:
-        return _unavailable(
+        return unavailable(
             "fundamentals", "fundamentals_route_failure", sources=sources
         ), ()
 
@@ -641,20 +644,20 @@ def _collect_fundamentals(request, routed, now):
 def _routed_source(response: object, now):
     sources, body = _routed_sources(response, now)
     if len(sources) != 1:
-        raise _Unavailable("ambiguous_market_source_provenance")
+        raise CollectionUnavailable("ambiguous_market_source_provenance")
     return sources[0], body
 
 
 def _routed_sources(response: object, now):
     if not isinstance(response, str):
-        raise _Unavailable("non_text_routed_response")
+        raise CollectionUnavailable("non_text_routed_response")
     if response.startswith(
         ("NO_DATA_AVAILABLE:", "DATA_UNAVAILABLE:", "LIVE_DATA_UNAVAILABLE:")
     ):
-        raise _Unavailable("routed_source_unavailable")
+        raise CollectionUnavailable("routed_source_unavailable")
     records = extract_provenance(response)
     if not records:
-        raise _Unavailable("missing_actual_source_provenance")
+        raise CollectionUnavailable("missing_actual_source_provenance")
     return (
         tuple(_source_from_record(record, now) for record in records),
         strip_provenance_markers(response).strip(),
@@ -684,9 +687,9 @@ def _publication_time(content):
     try:
         parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise _Unavailable("invalid_mainland_publication_time") from exc
+        raise CollectionUnavailable("invalid_mainland_publication_time") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise _Unavailable("invalid_mainland_publication_time")
+        raise CollectionUnavailable("invalid_mainland_publication_time")
     available_at = parsed.astimezone(UTC)
     return available_at, available_at.astimezone(_SHANGHAI).date()
 
@@ -698,48 +701,7 @@ def _effective_date(content):
     try:
         return date.fromisoformat(match.group("value"))
     except ValueError as exc:
-        raise _Unavailable("invalid_mainland_effective_period") from exc
-
-
-def _news_spans(response, body):
-    spans = extract_evidence_spans(response)
-    if spans:
-        return tuple(spans)
-    records = tuple(extract_provenance(response))
-    selected_fallback = tuple(
-        record
-        for record in records
-        if "fallback vendor selected" in record.timing.casefold()
-    )
-    if selected_fallback:
-        return (
-            EvidenceSpan(
-                content=body,
-                records=selected_fallback,
-                temporal_scope=temporal_scope_from_records(selected_fallback),
-            ),
-        )
-    return (
-        EvidenceSpan(
-            content=body,
-            records=records,
-            temporal_scope=temporal_scope_from_records(records),
-        ),
-    )
-
-
-def _fundamentals_spans(response, body):
-    spans = extract_evidence_spans(response)
-    if spans:
-        return tuple(spans)
-    records = tuple(extract_provenance(response))
-    return (
-        EvidenceSpan(
-            content=body,
-            records=records,
-            temporal_scope=temporal_scope_from_records(records),
-        ),
-    )
+        raise CollectionUnavailable("invalid_mainland_effective_period") from exc
 
 
 def _span_is_unavailable(span):
@@ -780,7 +742,7 @@ def _fundamentals_temporal_limitation_code(sources):
 def _news_availability_sources(records, now):
     unavailable = {}
     for record in records:
-        if not _is_news_availability_record(record):
+        if not is_news_availability_record(record):
             continue
         source = _source_from_record(record, now)
         unavailable[source.source] = source.model_copy(
@@ -810,63 +772,6 @@ def _news_global_cap_sources(records, now):
     return tuple(omitted.values())
 
 
-def _is_news_availability_record(record):
-    timing = record.timing.casefold()
-    return "fallback vendor selected" not in timing and "unavailable" in timing
-
-
-def _merge_sources(*source_groups):
-    merged = {}
-    for group in source_groups:
-        for source in group:
-            merged[source.source] = source
-    return tuple(merged.values())
-
-
-def _origin_from_record(record, source, evidence_type, *, temporal_scope):
-    return EvidenceOrigin(
-        source=source.source,
-        evidence_type=evidence_type,
-        requested=record.requested or "unknown",
-        effective=record.effective or "unknown",
-        effective_date=_origin_effective_date(record.effective),
-        timing=record.timing or "unknown",
-        retrieved_at=(
-            record.retrieved_at
-            or source.retrieved_at.isoformat().replace("+00:00", "Z")
-        ),
-        fallback=source.fallback,
-        temporal_scope=temporal_scope,
-    )
-
-
-def _origin_effective_date(value):
-    try:
-        return date.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _bounded_empty(domain, sources):
-    return CollectionDomainResult(
-        domain=domain,
-        state=CollectionResultState.EMPTY,
-        sources=sources,
-        diagnostic=CollectionDiagnostic(code="bounded_feed_no_observed_records"),
-    )
-
-
-def _is_empty(body):
-    lowered = body.strip().casefold()
-    return not lowered or lowered.startswith("no ")
-
-
-def _is_failure(body):
-    return body.strip().casefold().startswith(
-        ("error fetching", "error retrieving", "error getting")
-    )
-
-
 def _market_series(request, source, body):
     match = re.search(r"^# Stock data for (?P<instrument>.+?) from ", body, re.MULTILINE)
     if (
@@ -874,18 +779,18 @@ def _market_series(request, source, body):
         or match.group("instrument").strip().casefold()
         != request.instrument.casefold()
     ):
-        raise _Unavailable("market_instrument_mismatch")
+        raise CollectionUnavailable("market_instrument_mismatch")
     header = body.casefold()
     if source.source in {"akshare_tencent", "akshare_eastmoney"}:
         if "qfq (forward-adjusted)" not in header:
-            raise _Unavailable("mainland_qfq_basis_unverified")
+            raise CollectionUnavailable("mainland_qfq_basis_unverified")
         basis = "qfq_forward_adjusted"
     elif source.source == "yfinance":
         if "auto-adjusted" not in header:
-            raise _Unavailable("yfinance_adjustment_basis_unverified")
+            raise CollectionUnavailable("yfinance_adjustment_basis_unverified")
         basis = "yfinance_auto_adjusted_close"
     else:
-        raise _Unavailable("market_adjustment_basis_unverified")
+        raise CollectionUnavailable("market_adjustment_basis_unverified")
 
     lines = body.splitlines()
     try:
@@ -917,9 +822,9 @@ def _market_series(request, source, body):
                 )
             )
     except (KeyError, StopIteration, TypeError, ValueError) as exc:
-        raise _Unavailable("market_series_malformed") from exc
+        raise CollectionUnavailable("market_series_malformed") from exc
     if not points:
-        raise _Unavailable("no_admissible_market_rows")
+        raise CollectionUnavailable("no_admissible_market_rows")
     return (
         MarketSeriesResult(
             instrument=request.instrument,
@@ -948,20 +853,6 @@ def _pit_origin(source, evidence_type, effective_date):
         retrieved_at=source.retrieved_at.isoformat().replace("+00:00", "Z"),
         fallback=source.fallback,
         temporal_scope="point_in_time",
-    )
-
-
-def _unavailable(domain, code, *, sources=()):
-    return CollectionDomainResult(
-        domain=domain,
-        state=CollectionResultState.UNAVAILABLE,
-        sources=tuple(
-            source.model_copy(
-                update={"diagnostic": CollectionDiagnostic(code=code)}
-            )
-            for source in sources
-        ),
-        diagnostic=CollectionDiagnostic(code=code),
     )
 
 
