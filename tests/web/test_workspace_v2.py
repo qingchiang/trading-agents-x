@@ -3,13 +3,9 @@ from datetime import UTC, date, datetime
 import pytest
 
 from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    EvidenceBundle,
-    EvidenceItem,
-    RunStatus,
-)
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
 
 
 def commit_full(

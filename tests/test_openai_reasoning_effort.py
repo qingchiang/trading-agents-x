@@ -5,7 +5,7 @@ parameter: 'reasoning.effort'". The client must drop the kwarg for those rather
 than forward it and crash the run. The GPT-5 family and the o-series accept it.
 """
 
-from tradingagents.llm_clients.openai_client import OpenAIClient
+from tradingagents.llm.openai_client import OpenAIClient
 
 
 def _effort_on(model, monkeypatch):

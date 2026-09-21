@@ -1,8 +1,8 @@
 import pytest
 
 from tests.dataflows.test_incremental_us_collector import _request
-from tradingagents.application.contracts import CollectionDiagnostic, CollectionDomainResult
-from tradingagents.dataflows.errors import (
+from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
+from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
@@ -22,7 +22,7 @@ from tradingagents.dataflows.errors import (
 def test_news_context_keeps_typed_diagnostic_and_continues_macro(
     monkeypatch, failure, expected_code
 ):
-    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.data import incremental_inputs
 
     calls = []
 
@@ -66,7 +66,7 @@ def test_news_context_keeps_typed_diagnostic_and_continues_macro(
 def test_market_context_keeps_typed_snapshot_diagnostic_without_fake_source(
     failure, expected_code
 ):
-    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.data import incremental_inputs
 
     def route(*_args, **_kwargs):
         raise failure

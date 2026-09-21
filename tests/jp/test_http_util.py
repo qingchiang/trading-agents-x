@@ -6,9 +6,9 @@ from urllib.request import Request
 
 import pytest
 
-from tradingagents.dataflows.errors import VendorTransportError
-from tradingagents.dataflows.jp import http_util
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.data.jp import http_util
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import VendorTransportError
 
 
 class _Resp:

@@ -7,14 +7,10 @@ import pytest
 
 from tests.application.test_cycle_trash_lifecycle import _commit_node
 from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    EvidenceBundle,
-    EvidenceItem,
-    RunStatus,
-)
-from tradingagents.application.database import RunRecord
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.models import RunRecord
 
 
 def _selection(node_id: str, lifecycle_state: str = "active") -> dict[str, str]:

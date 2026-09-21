@@ -5,8 +5,8 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows.cn import cn_statements, sina_finance
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.data.cn import cn_statements, sina_finance
+from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.provenance import extract_provenance
 
 

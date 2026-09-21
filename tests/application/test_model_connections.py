@@ -1,9 +1,9 @@
 """Connection management through the shared configuration interface."""
 
-from tradingagents.application.configuration import ConfigurationStore
-from tradingagents.application.configuration_models import ConfigurationPatch
-from tradingagents.application.contracts import AnalysisRequest
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.models import ConfigurationPatch
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.migrations import upgrade_database
 
 
@@ -54,9 +54,9 @@ def test_independent_connections_bind_roles_without_exposing_credentials(tmp_pat
 def test_key_rotation_is_scoped_and_endpoint_changes_block_execution(tmp_path):
     import pytest
 
-    from tradingagents.application.configuration import ProviderConfigurationChanged
-    from tradingagents.application.model_connections import credential_name
+    from tradingagents.configuration.errors import ProviderConfigurationChanged
     from tradingagents.credentials import credential, use_credentials
+    from tradingagents.llm.models import credential_name
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
     upgrade_database(settings)
@@ -177,7 +177,7 @@ def test_disabled_connection_retains_attempts_but_is_not_admitted_for_new_runs(t
 def test_delete_blocks_active_runs_and_clears_keys_after_terminal_history(tmp_path):
     import pytest
 
-    from tradingagents.application.repository import RunRepository
+    from tradingagents.persistence.repository import RunRepository
 
     settings, store = configured_store(tmp_path)
     request, retained = store.resolve_request(
@@ -212,8 +212,8 @@ def test_delete_blocks_active_runs_and_clears_keys_after_terminal_history(tmp_pa
 
 
 def test_two_role_clients_receive_distinct_keys_and_native_interfaces(tmp_path, monkeypatch):
-    from tradingagents.application.llms import create_run_llms
     from tradingagents.credentials import use_credentials
+    from tradingagents.llm.runtime import create_run_llms
 
     _, store = configured_store(tmp_path)
     store.save(
@@ -243,7 +243,7 @@ def test_two_role_clients_receive_distinct_keys_and_native_interfaces(tmp_path, 
         captured.append({"provider": provider, "model": model, "url": base_url, **kwargs})
         return FakeClient()
 
-    monkeypatch.setattr("tradingagents.llm_clients.connections.create_llm_client", factory)
+    monkeypatch.setattr("tradingagents.llm.connections.create_llm_client", factory)
     with use_credentials(store.execution_credentials(run)):
         clients = create_run_llms(run)
     assert clients.quick["api_key"] == "primary-secret"
@@ -280,7 +280,7 @@ def test_incremental_does_not_require_unused_quick_credentials(tmp_path):
 
 
 def test_connection_model_discovery_is_isolated_and_only_relevant_changes_expire_cache(tmp_path):
-    from tradingagents.llm_clients.model_discovery import ModelDiscoveryService
+    from tradingagents.llm.model_discovery import ModelDiscoveryService
 
     settings, store = configured_store(tmp_path)
     calls = []
@@ -321,7 +321,7 @@ def test_migration_preserves_initialized_values_and_legacy_credentials(tmp_path)
     import json
     import sqlite3
 
-    from tradingagents.application.model_connections import legacy_connection_id
+    from tradingagents.llm.models import legacy_connection_id
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
     upgrade_database(settings, "0011_application_configuration")
@@ -357,8 +357,8 @@ def test_migration_preserves_initialized_values_and_legacy_credentials(tmp_path)
 
 
 def test_deleted_legacy_connection_cannot_be_rebound_by_import(tmp_path):
-    from tradingagents.application.configuration_models import ImportRequest
-    from tradingagents.application.model_connections import legacy_connection_id
+    from tradingagents.configuration.models import ImportRequest
+    from tradingagents.llm.models import legacy_connection_id
 
     _, store = configured_store(tmp_path)
     original = legacy_connection_id("openai")
@@ -426,14 +426,14 @@ def test_sdk_receives_scoped_credentials_and_never_environment_fallback(tmp_path
 
     import pytest
 
-    from tradingagents.application.llms import create_run_llms
     from tradingagents.credentials import use_credentials
+    from tradingagents.llm.runtime import create_run_llms
 
     _, store = configured_store(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "ambient-must-not-be-used")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "ambient-must-not-be-used")
     monkeypatch.setattr(
-        "tradingagents.llm_clients.openai_client.LocalCompatibleChatOpenAI",
+        "tradingagents.llm.openai_client.LocalCompatibleChatOpenAI",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     _, run = store.resolve_request(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10"))
@@ -467,14 +467,14 @@ def test_concurrent_execution_contexts_do_not_share_keys(tmp_path, monkeypatch):
     from threading import Barrier
     from types import SimpleNamespace
 
-    from tradingagents.application.llms import create_run_llms
-    from tradingagents.application.model_connections import credential_name
     from tradingagents.credentials import use_credentials
+    from tradingagents.llm.models import credential_name
+    from tradingagents.llm.runtime import create_run_llms
 
     _, store = configured_store(tmp_path)
     _, run = store.resolve_request(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10"))
     monkeypatch.setattr(
-        "tradingagents.llm_clients.openai_client.LocalCompatibleChatOpenAI",
+        "tradingagents.llm.openai_client.LocalCompatibleChatOpenAI",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     barrier = Barrier(2)

@@ -4,13 +4,13 @@ from datetime import date, timedelta
 
 import pytest
 
-from tradingagents.application.contracts import EvidenceItem, MeasurementKind
-from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.application.evidence_workset import (
+from tradingagents.data.evidence_workset import (
     build_market_data_artifact,
     market_analytical_views,
     parse_ohlcv_frame,
 )
+from tradingagents.domain.evidence import EvidenceItem, MeasurementKind
+from tradingagents.domain.evidence_tables import extract_evidence_tables
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 

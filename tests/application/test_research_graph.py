@@ -8,42 +8,43 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-import tradingagents.graph.research_graph as research_graph_module
+import tradingagents.research.full.workflow as research_graph_module
 from tests.factories import analyst_report, research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalystClaimType,
-    ClaimImportance,
-    DebateAgenda,
+from tradingagents.domain.artifacts import ResearchArtifactDraft
+from tradingagents.domain.common import (
     DebateImportance,
-    DebateIssue,
-    DecisionBrief,
-    EvidenceItem,
-    EvidenceQuality,
-    IssueDisposition,
-    KeyClaim,
-    ResearchArtifactDraft,
     ResearchRating,
-    ResearchWarning,
-    RiskReviewAdjustment,
     RiskReviewDisposition,
     RunProfile,
 )
-from tradingagents.application.metrics import MetricsCallback
-from tradingagents.application.runtime import RunContext
-from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
-from tradingagents.graph.deliberation import (
+from tradingagents.domain.decision import RiskReviewAdjustment
+from tradingagents.domain.evidence import EvidenceItem, EvidenceQuality
+from tradingagents.domain.reports import (
+    AnalystClaimType,
+    ClaimImportance,
+    DebateAgenda,
+    DebateIssue,
+    DecisionBrief,
+    IssueDisposition,
+    KeyClaim,
+    ResearchWarning,
+)
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.provenance import ProvenanceRecord
+from tradingagents.research.full.workflow import (
+    ResearchGraph,
+    _evidence_from_record,
+    _evidence_warnings,
+)
+from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.runtime import RunContext
+from tradingagents.research.synthesis.analyst_synthesis import AnalystAuditDraft
+from tradingagents.research.synthesis.deliberation import (
     DecisionNumericDraft,
     JudgeAudit,
     RebuttalAudit,
     ResearchDecisionCoreEnvelope,
 )
-from tradingagents.graph.research_graph import (
-    ResearchGraph,
-    _evidence_from_record,
-    _evidence_warnings,
-)
-from tradingagents.provenance import ProvenanceRecord
 
 
 class _StructuredInvoker:

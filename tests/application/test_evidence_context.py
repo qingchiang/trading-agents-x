@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
-from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.graph.evidence_context import (
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.evidence_tables import extract_evidence_tables
+from tradingagents.research.synthesis.evidence_context import (
     build_analyst_evidence_context,
     build_evidence_catalog,
     query_evidence_table_payload,

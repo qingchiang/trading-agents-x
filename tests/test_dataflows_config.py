@@ -7,8 +7,8 @@ from threading import Barrier
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import bind_config, get_config, use_config
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data.config import bind_config, get_config, use_config
 
 
 @pytest.mark.unit

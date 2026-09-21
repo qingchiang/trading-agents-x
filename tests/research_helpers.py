@@ -1,5 +1,6 @@
 """Deterministic research substitutes used only by offline tests."""
-from tradingagents.application.contracts import (
+from tradingagents.domain.decision_components import baseline_component_ids
+from tradingagents.domain.incremental import (
     IncrementalAnalysisBrief,
     IncrementalDecisionOutcome,
     IncrementalSynthesis,
@@ -8,9 +9,8 @@ from tradingagents.application.contracts import (
     ResearchReassessment,
     ResearchReassessmentEntry,
 )
-from tradingagents.application.decision_components import baseline_component_ids
-from tradingagents.application.llms import RunLLMs
-from tradingagents.application.markdown_evidence import parse_markdown_sections
+from tradingagents.llm.runtime import RunLLMs
+from tradingagents.research.presentation import parse_markdown_sections
 
 
 def stub_run_llms(*args, **kwargs):

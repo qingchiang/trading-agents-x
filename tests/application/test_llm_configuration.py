@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tradingagents.application.llms import create_run_llms
-from tradingagents.application.settings import RunSettings
-from tradingagents.default_config import build_default_config
-from tradingagents.llm_clients.reasoning_effort import RESOLVED_MARKER
+from tradingagents.configuration.defaults import build_default_config
+from tradingagents.configuration.settings import RunSettings
+from tradingagents.llm.reasoning_effort import RESOLVED_MARKER
+from tradingagents.llm.runtime import create_run_llms
 
 
 @pytest.mark.parametrize(
@@ -63,7 +63,7 @@ def test_run_builds_independent_role_kwargs(
         return client
 
     monkeypatch.setattr(
-        "tradingagents.application.llms.create_llm_client",
+        "tradingagents.llm.runtime.create_llm_client",
         factory,
     )
     settings = RunSettings(
@@ -97,7 +97,7 @@ def test_deepseek_role_efforts_are_not_cross_wired(monkeypatch):
         return client
 
     monkeypatch.setattr(
-        "tradingagents.application.llms.create_llm_client",
+        "tradingagents.llm.runtime.create_llm_client",
         factory,
     )
     settings = RunSettings(

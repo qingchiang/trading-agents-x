@@ -14,19 +14,13 @@ from unittest import mock
 import pytest
 import requests
 
-import tradingagents.default_config as default_config
+import tradingagents.configuration.defaults as default_config
 from tradingagents.credentials import use_credentials
-from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import bind_config, get_config
-from tradingagents.dataflows.errors import (
-    VendorNotConfiguredError,
-    VendorRateLimitError,
-)
-from tradingagents.dataflows.jp import edinet_common, edinet_news
-from tradingagents.dataflows.jp.edinet_common import (
-    EDINETNotConfiguredError,
-    EDINETRateLimitError,
-)
+from tradingagents.data import interface
+from tradingagents.data.config import bind_config, get_config
+from tradingagents.data.jp import edinet_common, edinet_news
+from tradingagents.data.jp.edinet_common import EDINETNotConfiguredError, EDINETRateLimitError
+from tradingagents.domain.vendor_errors import VendorNotConfiguredError, VendorRateLimitError
 
 
 class FakeResp:
@@ -333,7 +327,7 @@ class RoutingTests(unittest.TestCase):
     def test_global_news_stays_market_agnostic(self):
         # get_global_news is ticker-less, so a .T news route must not touch it.
         bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
-        from tradingagents.dataflows.market_context import infer_market
+        from tradingagents.data.market_routing import infer_market
         self.assertEqual(infer_market("get_global_news", ("2026-06-22",)), "")
 
 

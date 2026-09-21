@@ -1,21 +1,43 @@
 """Application-layer contracts and services for TradingAgentsX."""
 
-from .contracts import (
-    AnalysisCutoffContext,
-    AnalysisRequest,
-    AnalysisResult,
-    AnalystClaimType,
-    AnalystReport,
-    ArtifactGenerationObservation,
+from tradingagents.configuration.settings import AppSettings, RunSettings
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifact
+from tradingagents.domain.common import (
+    DebateImportance,
+    NumericAuditAppendixStatus,
+    NumericAuditComponentType,
+    NumericAuditPhase,
+    NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayScale,
+    NumericDisplayStatus,
+    ResearchScenarioKind,
+    RiskReviewDisposition,
+    RunProfile,
+    RunStatus,
+    ScenarioReferenceCategory,
+)
+from tradingagents.domain.decision import (
     AuditedRangeEndpoint,
     CalculationRecord,
-    ClaimImportance,
-    DebateAgenda,
-    DebateImportance,
-    DebateIssue,
-    DecisionBrief,
     DecisionCalculationUse,
-    DecisionNumericAuditAppendix,
+    EvidenceValueLocator,
+    MarketReferenceLevel,
+    NumericTemporalBasis,
+    ResearchDecision,
+    ResearchScenario,
+    RiskReviewAdjustment,
+    ScenarioReferenceRange,
+    ValuationAssessment,
+)
+from tradingagents.domain.errors import (
+    EligibilityUnavailableError,
+    FutureAnalysisCutoffError,
+    InstrumentEligibilityError,
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
+from tradingagents.domain.evidence import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceOrigin,
@@ -24,60 +46,48 @@ from .contracts import (
     EvidenceTableColumn,
     EvidenceTableRow,
     EvidenceTemporalScope,
-    EvidenceValueLocator,
+    MeasurementKind,
+    TableDataType,
+)
+from tradingagents.domain.history import RunAttemptView, RunExport
+from tradingagents.domain.incremental import (
     IncrementalAnalysisBrief,
     IncrementalBaselineContext,
     IncrementalExportContext,
     IncrementalRunContext,
+)
+from tradingagents.domain.numeric_audit import (
+    DecisionNumericAuditAppendix,
+    MarketReferenceBasis,
+    NumericAuditOmission,
+    NumericAuditSnapshot,
+    NumericRequirementCheck,
+)
+from tradingagents.domain.reports import (
+    AnalystClaimType,
+    AnalystReport,
+    ClaimImportance,
+    DebateAgenda,
+    DebateIssue,
+    DecisionBrief,
     JudgeDraft,
     KeyClaim,
-    MarketReferenceBasis,
-    MarketReferenceLevel,
-    MeasurementKind,
-    NodeMetrics,
-    NumericAuditAppendixStatus,
-    NumericAuditComponentType,
-    NumericAuditOmission,
-    NumericAuditPhase,
-    NumericAuditSnapshot,
-    NumericAuditStatus,
-    NumericCalculationStatus,
-    NumericDisplayScale,
-    NumericDisplayStatus,
-    NumericRequirementCheck,
-    NumericTemporalBasis,
     RebuttalReview,
     ReportAuditStatus,
     ReportSection,
-    ResearchArtifact,
     ResearchCase,
-    ResearchDecision,
-    ResearchScenario,
-    ResearchScenarioKind,
     RiskReview,
-    RiskReviewAdjustment,
-    RiskReviewDisposition,
-    RunAttemptView,
+)
+from tradingagents.domain.runs import (
+    AnalysisCutoffContext,
+    AnalysisRequest,
+    AnalysisResult,
+    NodeMetrics,
     RunEvent,
-    RunExport,
     RunMetrics,
-    RunProfile,
     RunRequestSnapshot,
-    RunStatus,
-    ScenarioReferenceCategory,
-    ScenarioReferenceRange,
     StructuredRecoveryNotice,
-    TableDataType,
-    ValuationAssessment,
 )
-from .errors import (
-    EligibilityUnavailableError,
-    FutureAnalysisCutoffError,
-    InstrumentEligibilityError,
-    InstrumentEligibilityUnavailableError,
-    UnsupportedInstrumentError,
-)
-from .settings import AppSettings, RunSettings
 
 __all__ = [
     "AnalysisCutoffContext",

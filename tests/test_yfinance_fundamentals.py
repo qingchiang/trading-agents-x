@@ -5,9 +5,9 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import y_finance as yf_data
-from tradingagents.dataflows.errors import VendorRateLimitError
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.data import y_finance as yf_data
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 
 @pytest.mark.unit

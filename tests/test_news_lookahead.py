@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-import tradingagents.dataflows.yfinance_news as ynews
+import tradingagents.data.yfinance_news as ynews
 
 
 def _epoch(date_str):
@@ -172,7 +172,7 @@ def test_global_news_continues_past_expired_candidates_and_preserves_publication
 
 
 def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypatch):
-    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.data.config import get_config, use_config
 
     def article(title, index):
         return {
@@ -222,7 +222,7 @@ def test_global_news_continues_until_canonical_candidates_reach_budget(monkeypat
 
 @pytest.mark.parametrize("limit,expected_queries", [(1, 1), (20, 2)])
 def test_global_output_target_is_independent_of_per_query_candidates(monkeypatch, limit, expected_queries):
-    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.data.config import get_config, use_config
 
     calls = []
     class Search:
@@ -242,7 +242,7 @@ def test_global_output_target_is_independent_of_per_query_candidates(monkeypatch
 
 
 def test_global_larger_output_target_cannot_reuse_smaller_refresh(tmp_path, monkeypatch):
-    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.data.config import get_config, use_config
 
     calls = []
     class Search:

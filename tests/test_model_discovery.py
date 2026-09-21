@@ -7,12 +7,9 @@ from typing import Any
 import pytest
 import requests
 
-from tradingagents.application.settings import AppSettings
-from tradingagents.llm_clients.model_discovery import ModelDiscoveryService
-from tradingagents.llm_clients.provider_registry import (
-    PROVIDER_REGISTRY,
-    provider_availability,
-)
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.llm.model_discovery import ModelDiscoveryService
+from tradingagents.llm.provider_registry import PROVIDER_REGISTRY, provider_availability
 
 
 class FakeResponse:
@@ -400,8 +397,8 @@ def test_bedrock_adapter_filters_non_text_models(tmp_path: Path) -> None:
 
 
 def test_database_discovery_uses_latest_connection_and_credentials_without_ambient_fallback(tmp_path, monkeypatch):
-    from tradingagents.application.configuration import ConfigurationStore
-    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.configuration.models import ConfigurationPatch
+    from tradingagents.persistence.configuration import ConfigurationStore
     from tradingagents.persistence.migrations import upgrade_database
 
     settings = _settings(tmp_path)
@@ -429,9 +426,9 @@ def test_database_discovery_uses_latest_connection_and_credentials_without_ambie
     ("google", "https://generativelanguage.googleapis.com", "/v1beta/models"),
 ])
 def test_execution_and_discovery_use_one_api_version_segment(tmp_path, provider, root, path):
-    from tradingagents.application.configuration import ConfigurationStore
-    from tradingagents.application.configuration_models import ConfigurationPatch
-    from tradingagents.application.contracts import AnalysisRequest
+    from tradingagents.configuration.models import ConfigurationPatch
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.persistence.configuration import ConfigurationStore
     from tradingagents.persistence.migrations import upgrade_database
 
     settings = _settings(tmp_path)

@@ -1,0 +1,115 @@
+from collections.abc import Mapping
+from typing import Any
+
+from tradingagents.data.instrument_identity import resolve_instrument_identity
+
+# Import tools from separate utility files
+from tradingagents.research.tools.core_stock_tools import get_stock_data
+from tradingagents.research.tools.fundamental_data_tools import (
+    get_balance_sheet,
+    get_cashflow,
+    get_fundamentals,
+    get_income_statement,
+)
+from tradingagents.research.tools.macro_data_tools import get_macro_indicators
+from tradingagents.research.tools.market_data_validation_tools import get_verified_market_snapshot
+from tradingagents.research.tools.news_data_tools import (
+    get_global_news,
+    get_insider_transactions,
+    get_news,
+)
+from tradingagents.research.tools.prediction_markets_tools import get_prediction_markets
+from tradingagents.research.tools.technical_indicators_tools import get_indicators
+
+# Public surface: the data tools are imported here so agents and the graph
+# import them from one place, plus the instrument/language helpers defined below.
+__all__ = [
+    "get_stock_data",
+    "get_indicators",
+    "get_fundamentals",
+    "get_balance_sheet",
+    "get_cashflow",
+    "get_income_statement",
+    "get_news",
+    "get_global_news",
+    "get_insider_transactions",
+    "get_macro_indicators",
+    "get_prediction_markets",
+    "get_verified_market_snapshot",
+    "build_instrument_context",
+    "resolve_instrument_identity",
+    "get_instrument_context_from_state",
+    "get_language_instruction",
+]
+
+def get_language_instruction(response_scope: str = "your entire response") -> str:
+    """Return a prompt instruction for the configured output language.
+
+    Returns empty string when English (default), so no extra tokens are used.
+    Applied to analyst reports so a non-English run produces localized
+    user-facing research.
+    """
+    from tradingagents.data.config import get_config
+    lang = get_config().get("output_language", "English")
+    if lang.strip().lower() == "english":
+        return ""
+    return f" Write {response_scope} in {lang}."
+
+
+def build_instrument_context(
+    ticker: str,
+    asset_type: str = "stock",
+    identity: Mapping[str, str] | None = None,
+) -> str:
+    """Describe the exact instrument so agents preserve identity and ticker.
+
+    When ``identity`` is provided (resolved deterministically via
+    :func:`resolve_instrument_identity`), the company name and business
+    classification are injected so agents anchor to the real company rather
+    than pattern-matching the price chart to a wrong one (#814).
+    """
+    del asset_type  # retained for compatibility with persisted graph callers
+    context = (
+        f"The instrument to analyze is `{ticker}`. "
+        "Use this exact ticker in every tool call, report, and recommendation, "
+        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`)."
+    )
+
+    details = []
+    if identity:
+        name = identity.get("company_name") or identity.get("name")
+        if name:
+            details.append(f"Company: {name}")
+        sector, industry = identity.get("sector"), identity.get("industry")
+        if sector and industry:
+            details.append(f"Business classification: {sector} / {industry}")
+        elif sector:
+            details.append(f"Sector: {sector}")
+        elif industry:
+            details.append(f"Industry: {industry}")
+        if identity.get("exchange"):
+            details.append(f"Exchange: {identity['exchange']}")
+
+    if details:
+        context += (
+            f" Resolved identity: {'; '.join(details)}. "
+            "Do not substitute a different company or ticker unless a tool "
+            "result explicitly disproves this resolved identity."
+        )
+
+    return context
+
+
+def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
+    """Return the instrument context for the current run.
+
+    Prefers the identity-resolved context computed once at run start and
+    stored on the state by :class:`AnalysisService`.
+    Falls back to a ticker-only context — with no network lookup — when the
+    state was constructed without it (bare programmatic states, tests), so a
+    consumer is never forced to make a yfinance call mid-graph.
+    """
+    context = state.get("instrument_context")
+    if isinstance(context, str) and context.strip():
+        return context
+    return build_instrument_context(str(state["company_of_interest"]))

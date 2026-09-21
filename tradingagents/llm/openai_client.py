@@ -1,0 +1,326 @@
+from typing import Any
+
+from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
+
+from tradingagents.credentials import credential
+from tradingagents.llm.api_key_env import get_api_key_env
+from tradingagents.llm.base_client import BaseLLMClient, normalize_content
+from tradingagents.llm.capabilities import ModelCapabilities, ThinkingMode, get_capabilities
+from tradingagents.llm.provider_presets import (
+    OPENAI_COMPATIBLE_PROVIDERS,
+    _is_native_openai_base_url,
+)
+from tradingagents.llm.reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
+from tradingagents.llm.validators import validate_model
+
+
+class NormalizedChatOpenAI(ChatOpenAI):
+    """ChatOpenAI with normalized content output and capability-aware binding.
+
+    The Responses API returns content as a list of typed blocks
+    (reasoning, text, etc.). ``invoke`` normalizes to string for
+    consistent downstream handling.
+
+    ``with_structured_output`` consults the per-model capability table
+    (``capabilities.get_capabilities``) to pick the method and to decide
+    whether ``tool_choice`` may be sent. Models that reject ``tool_choice``
+    (for example the legacy DeepSeek reasoner endpoint) still bind the schema
+    as a tool, but no ``tool_choice`` parameter is sent.
+
+    Provider-specific quirks beyond structured-output (e.g. DeepSeek's
+    reasoning_content roundtrip) live in subclasses so this base class
+    stays small.
+    """
+
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(self.model_name)
+
+    def invoke(self, input, config=None, **kwargs):
+        return normalize_content(super().invoke(input, config, **kwargs))
+
+    @property
+    def preferred_structured_output_method(self) -> str:
+        """Expose the selected transport for application-level auditing."""
+        return self._model_capabilities().preferred_structured_method
+
+    @property
+    def structured_output_max_tokens(self) -> int | None:
+        """Return an explicit typed-output ceiling when the provider needs one."""
+        capability_limit = (
+            self._model_capabilities().structured_output_max_tokens
+        )
+        if capability_limit is None:
+            return None
+        configured = getattr(self, "max_tokens", None)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return capability_limit
+
+    def with_structured_output(self, schema, *, method=None, **kwargs):
+        caps = self._model_capabilities()
+        if caps.preferred_structured_method == "none":
+            raise NotImplementedError(
+                f"{self.model_name} has no structured-output method available; "
+                f"agent factories will fall back to free-text generation."
+            )
+        method = method or caps.preferred_structured_method
+        if method == "json_mode" and not caps.supports_json_mode:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON mode"
+            )
+        if method == "json_schema" and not caps.supports_json_schema:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON Schema"
+            )
+        # When the model rejects tool_choice, suppress langchain's hardcoded
+        # value. The schema is still bound as a tool — exactly what
+        # DeepSeek's official tool-calling examples do.
+        if method == "function_calling" and not caps.supports_tool_choice:
+            kwargs.setdefault("tool_choice", None)
+        return super().with_structured_output(schema, method=method, **kwargs)
+
+
+class LocalCompatibleChatOpenAI(NormalizedChatOpenAI):
+    """OpenAI-compatible client for arbitrary local servers (LM Studio, vLLM,
+    llama.cpp via the generic ``openai_compatible`` provider).
+
+    Their tool-calling support varies, and many reject the object-form
+    ``tool_choice`` langchain sends for function-calling structured output. Bind
+    the schema as a tool but don't force tool_choice, so structured output works
+    across local servers regardless of the model ID's capabilities (#1057).
+    """
+
+    def with_structured_output(self, schema, *, method=None, **kwargs):
+        resolved = method or get_capabilities(self.model_name).preferred_structured_method
+        if resolved == "function_calling":
+            kwargs.setdefault("tool_choice", None)
+        return super().with_structured_output(schema, method=method, **kwargs)
+
+
+def _input_to_messages(input_: Any) -> list:
+    """Normalise a langchain LLM input to a list of message objects.
+
+    Accepts a list of messages, a ``ChatPromptValue`` (from a
+    ChatPromptTemplate), or anything else (treated as no messages).
+    Used by providers that need to walk the outgoing message history;
+    in particular DeepSeek thinking-mode propagation must work for
+    both bare-list invocations and ChatPromptTemplate-driven ones, so
+    treating only ``list`` here would silently skip half the call sites.
+    """
+    if isinstance(input_, list):
+        return input_
+    if hasattr(input_, "to_messages"):
+        return input_.to_messages()
+    return []
+
+
+def _configured_thinking_mode(client: Any) -> ThinkingMode | None:
+    """Read DeepSeek's explicit mode without treating omission as disabled."""
+    extra_body = getattr(client, "extra_body", None)
+    if not isinstance(extra_body, dict):
+        return None
+    thinking = extra_body.get("thinking")
+    if not isinstance(thinking, dict):
+        return None
+    mode = thinking.get("type")
+    if mode == "enabled":
+        return "enabled"
+    if mode == "disabled":
+        return "disabled"
+    return None
+
+
+class DeepSeekChatOpenAI(NormalizedChatOpenAI):
+    """DeepSeek-specific overrides on top of the OpenAI-compatible client.
+
+    Thinking-mode round-trip is the only DeepSeek-specific behavior that
+    stays here. When DeepSeek's thinking models return a response with
+    ``reasoning_content``, that field must be echoed back as part of the
+    assistant message on the next turn or the API fails with HTTP 400.
+    ``_create_chat_result`` captures it on receive and
+    ``_get_request_payload`` re-attaches it on send.
+
+    Structured-output handling is delegated to the capability dispatch in
+    ``NormalizedChatOpenAI.with_structured_output``. V4 thinking models prefer
+    JSON mode; V4 with thinking explicitly disabled can force a schema tool;
+    the legacy reasoner endpoint continues to bind an unforced tool.
+    """
+
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(
+            self.model_name,
+            thinking_mode=_configured_thinking_mode(self),
+        )
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        # langchain-openai normalizes ``max_tokens`` to OpenAI's newer
+        # ``max_completion_tokens`` field. DeepSeek's Chat Completions API
+        # still documents and consumes ``max_tokens``; leaving the normalized
+        # name in place can silently fall back to the provider's lower default.
+        normalized_max_tokens = payload.pop("max_completion_tokens", None)
+        if normalized_max_tokens is not None:
+            payload.setdefault("max_tokens", normalized_max_tokens)
+        outgoing = payload.get("messages", [])
+        for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
+            if not isinstance(message, AIMessage):
+                continue
+            reasoning = message.additional_kwargs.get("reasoning_content")
+            if reasoning is not None:
+                message_dict["reasoning_content"] = reasoning
+        return payload
+
+    def _create_chat_result(self, response, generation_info=None):
+        chat_result = super()._create_chat_result(response, generation_info)
+        response_dict = (
+            response
+            if isinstance(response, dict)
+            else response.model_dump(
+                exclude={"choices": {"__all__": {"message": {"parsed"}}}}
+            )
+        )
+        for generation, choice in zip(
+            chat_result.generations, response_dict.get("choices", []), strict=False
+        ):
+            reasoning = choice.get("message", {}).get("reasoning_content")
+            if reasoning is not None:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning
+        return chat_result
+
+
+class MinimaxChatOpenAI(NormalizedChatOpenAI):
+    """MiniMax-specific overrides on top of the OpenAI-compatible client.
+
+    M2.x reasoning models embed ``<think>...</think>`` blocks directly in
+    ``message.content`` by default, which would pollute saved reports.
+    Per platform.minimax.io/docs/api-reference/text-openai-api,
+    ``reasoning_split=True`` redirects the thinking block into
+    ``reasoning_details`` so ``content`` stays clean. It is sent via
+    ``extra_body`` (not a top-level kwarg) because the openai SDK validates
+    top-level params and rejects unknown ones like reasoning_split (#826).
+
+    The flag is gated by ``ModelCapabilities.requires_reasoning_split`` so
+    only M2.x reasoning models receive it; non-reasoning MiniMax endpoints
+    (Coding Plan, MiniMax-Text-01) never see it.
+
+    Tool-choice handling for M2.x — those models accept only the string
+    enum ``{"none", "auto"}`` and reject langchain's function-spec dict —
+    is handled by the capability dispatch in
+    ``NormalizedChatOpenAI.with_structured_output``, not here.
+    """
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        if get_capabilities(self.model_name).requires_reasoning_split:
+            # Pass via extra_body, not as a top-level kwarg: the openai SDK
+            # (>=1.56) validates top-level params against Completions.create
+            # and rejects unknown ones like reasoning_split (#826). extra_body
+            # is forwarded into the request body untouched.
+            extra_body = payload.setdefault("extra_body", {})
+            extra_body.setdefault("reasoning_split", True)
+        return payload
+
+
+# Kwargs forwarded from user config to ChatOpenAI
+_PASSTHROUGH_KWARGS = (
+    "timeout", "max_retries", "max_tokens", "reasoning_effort", "temperature",
+    "extra_body",
+    "api_key", "callbacks", "http_client", "http_async_client",
+)
+
+
+
+def is_openai_compatible(provider: str) -> bool:
+    """Whether ``provider`` is served by the OpenAI-compatible registry."""
+    return provider.lower() in OPENAI_COMPATIBLE_PROVIDERS
+
+
+
+
+class OpenAIClient(BaseLLMClient):
+    """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
+
+    For native OpenAI models, uses the Responses API (/v1/responses) which
+    supports reasoning_effort with function tools across all model families
+    (GPT-4.1, GPT-5). Third-party compatible providers (xAI, OpenRouter,
+    Ollama) use standard Chat Completions.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        base_url: str | None = None,
+        provider: str = "openai",
+        **kwargs,
+    ):
+        super().__init__(model, base_url, **kwargs)
+        self.provider = provider.lower()
+
+    def get_llm(self) -> Any:
+        """Return a configured ChatOpenAI instance, driven by the provider registry."""
+        self.warn_if_unknown_model()
+        llm_kwargs = {"model": self.model}
+        spec = OPENAI_COMPATIBLE_PROVIDERS.get(self.provider)
+        chat_cls = NormalizedChatOpenAI
+
+        if spec is not None:
+            chat_cls = spec.chat_class
+
+            # An explicit resolved connection takes precedence over the built-in
+            # provider endpoint. Ambient environment cannot change a Run.
+            base_url = self.base_url or spec.base_url
+            if spec.require_base_url and not base_url:
+                raise ValueError(
+                    f"Provider '{self.provider}' requires a base_url. Set it via "
+                    "the service address in Settings to your endpoint, "
+                    "e.g. http://localhost:8000/v1 (vLLM) or http://localhost:1234/v1 "
+                    "(LM Studio)."
+                )
+            if base_url:
+                llm_kwargs["base_url"] = base_url
+
+            # API key: required unless key_optional; keyless local servers get a
+            # placeholder. The env-var name is the single source in api_key_env.
+            api_key_env = get_api_key_env(self.provider)
+            api_key = self.kwargs.get("api_key") or (credential(api_key_env) if api_key_env else None)
+            if api_key:
+                llm_kwargs["api_key"] = api_key
+            elif spec.key_optional:
+                llm_kwargs["api_key"] = spec.placeholder_key
+            elif api_key_env:
+                raise ValueError(
+                    f"API key for provider '{self.provider}' is not set. "
+                    "Configure the credential in Settings."
+                )
+
+            # The Responses API only exists on native OpenAI; if the user points
+            # the openai provider at a custom base_url (proxy/gateway/local), it
+            # only speaks Chat Completions, so keep Responses off there (#1024).
+            if spec.use_responses_api and _is_native_openai_base_url(base_url):
+                llm_kwargs["use_responses_api"] = True
+        elif self.base_url:
+            llm_kwargs["base_url"] = self.base_url
+
+        # Forward user-provided kwargs
+        for key in _PASSTHROUGH_KWARGS:
+            if key not in self.kwargs:
+                continue
+            value = self.kwargs[key]
+            if key == "reasoning_effort" and not self.kwargs.get(RESOLVED_MARKER):
+                value = resolve_native_reasoning_value(
+                    self.provider, self.model, value
+                )
+                if value is None:
+                    continue
+            llm_kwargs[key] = value
+
+        if "use_responses_api" in self.kwargs:
+            llm_kwargs["use_responses_api"] = self.kwargs["use_responses_api"]
+
+        # The subclass (provider quirks) comes from the registry spec.
+        return chat_cls(**llm_kwargs)
+
+    def validate_model(self) -> bool:
+        """Validate model for the provider."""
+        return validate_model(self.provider, self.model)

@@ -5,8 +5,8 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows.cn import cn_sentiment
-from tradingagents.dataflows.cn.common import AkShareRequestError, AkShareSchemaError
+from tradingagents.data.cn import cn_sentiment
+from tradingagents.data.cn.common import AkShareRequestError, AkShareSchemaError
 from tradingagents.provenance import (
     extract_provenance,
     provenance_quality_issues,

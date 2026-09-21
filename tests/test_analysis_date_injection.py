@@ -9,28 +9,22 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from tradingagents.agents.utils.core_stock_tools import (
-    get_stock_data_for_analysis,
-)
-from tradingagents.agents.utils.macro_data_tools import (
-    get_macro_indicators_for_analysis,
-)
-from tradingagents.agents.utils.market_data_validation_tools import (
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
+from tradingagents.research.runtime import RunContext
+from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
+from tradingagents.research.tools.macro_data_tools import get_macro_indicators_for_analysis
+from tradingagents.research.tools.market_data_validation_tools import (
     get_verified_market_snapshot_for_analysis,
 )
-from tradingagents.agents.utils.news_data_tools import (
+from tradingagents.research.tools.news_data_tools import (
     get_global_news_for_analysis,
     get_news_for_analysis,
 )
-from tradingagents.agents.utils.prediction_markets_tools import (
+from tradingagents.research.tools.prediction_markets_tools import (
     get_prediction_markets_for_analysis,
 )
-from tradingagents.agents.utils.technical_indicators_tools import (
-    get_indicators_for_analysis,
-)
-from tradingagents.application.contracts import AnalysisRequest
-from tradingagents.application.runtime import RunContext
-from tradingagents.provenance import extract_provenance, strip_provenance_markers
+from tradingagents.research.tools.technical_indicators_tools import get_indicators_for_analysis
 
 
 class _ToolState(TypedDict):
@@ -93,7 +87,7 @@ def test_market_and_news_tool_schemas_hide_workflow_dates():
 @pytest.mark.unit
 def test_market_tool_node_injects_trade_date_as_end_date():
     with mock.patch(
-        "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+        "tradingagents.research.tools.core_stock_tools.route_to_vendor",
         return_value="SAFE",
     ) as router:
         result = _invoke_tool(
@@ -134,7 +128,7 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
 
     with (
         mock.patch(
-            "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+            "tradingagents.research.tools.core_stock_tools.route_to_vendor",
             return_value="SAFE",
         ) as router,
         warnings.catch_warnings(record=True) as caught,
@@ -168,11 +162,11 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
 def test_news_tool_node_derives_window_from_injected_trade_date():
     with (
         mock.patch(
-            "tradingagents.agents.utils.news_data_tools.get_config",
+            "tradingagents.research.tools.news_data_tools.get_config",
             return_value={"ticker_news_lookback_days": 14},
         ),
         mock.patch(
-            "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+            "tradingagents.research.tools.news_data_tools.route_to_vendor",
             return_value="SAFE",
         ) as router,
     ):
@@ -190,7 +184,7 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
 @pytest.mark.unit
 def test_news_tool_node_supports_bounded_extended_window():
     with mock.patch(
-        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+        "tradingagents.research.tools.news_data_tools.route_to_vendor",
         return_value="SAFE",
     ) as router:
         _invoke_tool(
@@ -211,11 +205,11 @@ def test_news_tool_node_supports_bounded_extended_window():
 def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
     with (
         mock.patch(
-            "tradingagents.agents.utils.news_data_tools.get_config",
+            "tradingagents.research.tools.news_data_tools.get_config",
             return_value={"ticker_news_lookback_days": 120},
         ),
         mock.patch(
-            "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+            "tradingagents.research.tools.news_data_tools.route_to_vendor",
             return_value="SAFE",
         ) as router,
     ):
@@ -248,11 +242,11 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
 
     router = mock.Mock(side_effect=live_result)
     monkeypatch.setattr(
-        "tradingagents.agents.utils.prediction_markets_tools.route_to_vendor",
+        "tradingagents.research.tools.prediction_markets_tools.route_to_vendor",
         router,
     )
     monkeypatch.setattr(
-        "tradingagents.agents.utils.prediction_markets_tools.datetime",
+        "tradingagents.research.tools.prediction_markets_tools.datetime",
         clock,
     )
 
@@ -265,7 +259,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
     assert "LIVE_DATA_UNAVAILABLE" in historical["messages"][0].content
 
     monkeypatch.setattr(
-        "tradingagents.agents.utils.prediction_markets_tools.is_near_live",
+        "tradingagents.research.tools.prediction_markets_tools.is_near_live",
         lambda curr_date, ticker: True,
     )
     live = _invoke_tool(

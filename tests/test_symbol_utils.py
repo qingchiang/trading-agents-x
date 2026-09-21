@@ -4,7 +4,7 @@ import unittest
 
 import pytest
 
-from tradingagents.dataflows.symbol_utils import (
+from tradingagents.domain.instruments import (
     NoMarketDataError,
     infer_mainland_equity_suffix,
     is_supported_equity_symbol,

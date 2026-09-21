@@ -5,24 +5,22 @@ from datetime import UTC, date, datetime
 import pytest
 import requests
 
-from tradingagents.application.contracts import (
-    IncrementalCollectionRequest,
-    PerformanceComponentStatus,
-)
-from tradingagents.application.incremental_collection import (
+from tradingagents.data.cn import calendar
+from tradingagents.data.cn.common import AkShareRateLimitError
+from tradingagents.data.incremental_cn import collect_mainland_china_incremental
+from tradingagents.domain.collection import IncrementalCollectionRequest
+from tradingagents.domain.performance import PerformanceComponentStatus
+from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,
     normalize_incremental_collection,
 )
-from tradingagents.dataflows.cn import calendar
-from tradingagents.dataflows.cn.common import AkShareRateLimitError
-from tradingagents.dataflows.incremental_cn import collect_mainland_china_incremental
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 
 
 @pytest.fixture(autouse=True)
 def _isolate_shared_background(monkeypatch):
-    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.data import incremental_inputs
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
@@ -154,7 +152,7 @@ def test_mainland_collector_retains_internal_eastmoney_fallback_provenance(
 def test_default_collector_dispatches_mainland_path(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_cn.collect_mainland_china_incremental",
+        "tradingagents.data.incremental_cn.collect_mainland_china_incremental",
         lambda request: sentinel,
     )
 

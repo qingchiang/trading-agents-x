@@ -8,24 +8,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tradingagents.agents.analysts.sentiment_analyst import (
-    create_sentiment_analyst,
-)
-from tradingagents.agents.sentiment_sources import (
+from tradingagents.data.config import bind_config
+from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research.analysts.sentiment_analyst import create_sentiment_analyst
+from tradingagents.research.analysts.sentiment_sources import (
     SentimentConfidence,
     SentimentSourceInput,
     SentimentSourceStatus,
     sentiment_confidence,
 )
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.market_signals import (
-    FetchedSentimentSignal,
-    SentimentSignal,
-)
-from tradingagents.graph.research_graph import _collect_evidence
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research.full.workflow import _collect_evidence
 
-_MODULE = "tradingagents.agents.analysts.sentiment_analyst"
+_MODULE = "tradingagents.research.analysts.sentiment_analyst"
 
 
 def _state(ticker: str = "NVDA", trade_date: str = "2026-01-15"):

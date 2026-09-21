@@ -6,8 +6,9 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from tradingagents.application.contracts import NodeMetrics, RunMetrics
-from tradingagents.application.metrics import MetricsCallback, merge_run_metrics
+from tradingagents.domain.metrics import merge_run_metrics
+from tradingagents.domain.runs import NodeMetrics, RunMetrics
+from tradingagents.research.metrics import MetricsCallback
 
 
 def _result(input_tokens: int, output_tokens: int) -> LLMResult:
@@ -178,7 +179,7 @@ def test_phase_records_parallel_safe_wall_time_and_timeline_events(
 ) -> None:
     moments = iter((0.0, 10.0, 12.5, 13.0))
     monkeypatch.setattr(
-        "tradingagents.application.metrics.monotonic",
+        "tradingagents.research.metrics.monotonic",
         lambda: next(moments),
     )
     metrics = MetricsCallback()

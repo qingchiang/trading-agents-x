@@ -10,17 +10,17 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.default_config as default_config
-from tradingagents.agents.analysts import news_analyst
-from tradingagents.agents.analysts.news_analyst import create_news_analyst
-from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.dataflows.config import bind_config
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
+from tradingagents.data.config import bind_config
 from tradingagents.provenance import (
     ProvenanceRecord,
     attach_provenance,
     extract_provenance,
     provenance_quality_issues,
 )
+from tradingagents.research.analysts import news_analyst
+from tradingagents.research.analysts.news_analyst import create_news_analyst
 
 
 def _series(points, series_id="X", timing=None):

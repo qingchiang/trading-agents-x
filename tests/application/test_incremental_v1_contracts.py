@@ -5,30 +5,30 @@ from datetime import UTC, date, datetime
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.application.contracts import (
-    BenchmarkSeriesResult,
+from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionResultState,
     CollectionSourceProvenance,
     CollectionSummary,
     CollectionTemporalBasis,
-    EvidenceItem,
-    EvidenceOrigin,
-    EvidenceTemporalScope,
     IncrementalCollectionRequest,
-    IncrementalCollectionResult,
     IncrementalEvidenceCandidate,
     InformationAdvancement,
-    MarketSeriesPoint,
-    MarketSeriesResult,
-    PerformanceCalculationRecord,
-    PerformanceComponentStatus,
     ResearchAvailability,
     ResearchAvailabilityDomain,
     ResearchAvailabilityStatus,
 )
-from tradingagents.application.incremental_collection import (
+from tradingagents.domain.evidence import EvidenceItem, EvidenceOrigin, EvidenceTemporalScope
+from tradingagents.domain.incremental import IncrementalCollectionResult
+from tradingagents.domain.performance import (
+    BenchmarkSeriesResult,
+    MarketSeriesPoint,
+    MarketSeriesResult,
+    PerformanceCalculationRecord,
+    PerformanceComponentStatus,
+)
+from tradingagents.research.incremental.collection import (
     admit_incremental_observations,
     assess_information_advancement,
     calculate_benchmark_performance,

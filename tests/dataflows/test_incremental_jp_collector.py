@@ -5,30 +5,24 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.application.contracts import (
-    IncrementalCollectionRequest,
-    PerformanceComponentStatus,
-)
-from tradingagents.application.incremental_collection import (
+from tradingagents.data import interface
+from tradingagents.data.incremental_jp import collect_japan_incremental
+from tradingagents.data.jp import edinet_news, jp_news
+from tradingagents.domain.collection import IncrementalCollectionRequest
+from tradingagents.domain.performance import PerformanceComponentStatus
+from tradingagents.domain.vendor_errors import NoMarketDataError
+from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,
     derive_research_availability,
     normalize_incremental_collection,
 )
-from tradingagents.dataflows import interface
-from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.dataflows.incremental_jp import collect_japan_incremental
-from tradingagents.dataflows.jp import edinet_news, jp_news
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_evidence_span,
-    attach_provenance,
-)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_shared_background(monkeypatch):
-    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.data import incremental_inputs
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
@@ -1170,7 +1164,7 @@ Official correction published after the Full Baseline.
 def test_default_collector_dispatches_japan_path(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_jp.collect_japan_incremental",
+        "tradingagents.data.incremental_jp.collect_japan_incremental",
         lambda request: sentinel,
     )
     assert default_incremental_collector(_request()) is sentinel

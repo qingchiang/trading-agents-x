@@ -9,26 +9,18 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
 from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    CURRENT_RESEARCH_SCHEMA_VERSION,
-    AnalysisRequest,
-    AnalysisResult,
-    EvidenceBundle,
-    EvidenceItem,
-    RunStatus,
-)
-from tradingagents.application.database import (
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.domain.common import CURRENT_RESEARCH_SCHEMA_VERSION, RunStatus
+from tradingagents.domain.errors import IncrementalRequestConflictError
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence._repository_common import InvalidRunTransitionError, RunNotFoundError
+from tradingagents.persistence.models import (
     DecisionRecord,
     ResearchNodeRecord,
     RunAttemptRecord,
     RunEvidenceRecord,
     RunRecord,
-)
-from tradingagents.application.errors import IncrementalRequestConflictError
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import (
-    InvalidRunTransitionError,
-    RunNotFoundError,
 )
 
 

@@ -6,7 +6,7 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
-from tradingagents.application.contracts import (
+from tradingagents.domain.evidence import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceTable,
@@ -16,8 +16,8 @@ from tradingagents.application.contracts import (
     MeasurementKind,
     TableDataType,
 )
-from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.graph.numeric_evidence import (
+from tradingagents.domain.evidence_tables import extract_evidence_tables
+from tradingagents.research.synthesis.numeric_evidence import (
     build_numeric_value_catalog,
     compact_numeric_value_catalog,
 )

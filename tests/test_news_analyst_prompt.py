@@ -7,11 +7,8 @@ import inspect
 
 import pytest
 
-import tradingagents.agents.analysts.news_analyst as na
-from tradingagents.agents.utils.news_data_tools import (
-    get_news,
-    get_news_for_analysis,
-)
+import tradingagents.research.analysts.news_analyst as na
+from tradingagents.research.tools.news_data_tools import get_news, get_news_for_analysis
 
 
 @pytest.mark.unit

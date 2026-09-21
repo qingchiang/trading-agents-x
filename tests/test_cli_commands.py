@@ -12,22 +12,18 @@ from alembic import command as alembic_command
 from alembic.config import Config
 from typer.testing import CliRunner
 
-import cli.main as cli
+import tradingagents.cli.main as cli
 from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    AnalysisResult,
-    RunEvent,
-    RunProfile,
-    RunStatus,
-)
-from tradingagents.application.errors import (
+from tradingagents.application.service import AnalysisService
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.common import RunProfile, RunStatus
+from tradingagents.domain.errors import (
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
 )
-from tradingagents.application.repository import RunRepository
-from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
+from tradingagents.domain.runs import AnalysisResult, RunEvent
 from tradingagents.persistence import upgrade_database
+from tradingagents.persistence.repository import RunRepository
 
 runner = CliRunner()
 
@@ -732,7 +728,7 @@ def test_database_backup_is_consistent_and_refuses_overwrite(
 
 @pytest.mark.parametrize("flags,expected", [([], "deep"), (["--profile", "standard"], "standard")])
 def test_cli_omissions_inherit_db_defaults_and_explicit_standard_wins(cli_service, monkeypatch, flags, expected):
-    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.configuration.models import ConfigurationPatch
     config = cli_service.configuration
     config.save(ConfigurationPatch(revision=config.read().revision, values={"profile": "deep", "analysts": ["news"]}))
     captured = []

@@ -7,10 +7,10 @@ hit the right instrument instead of failing/mismatching.
 """
 import pytest
 
-import tradingagents.agents.utils.agent_utils as au
-import tradingagents.dataflows.instrument_identity as identity_dataflow
-import tradingagents.dataflows.yfinance_news as ynews
-from tradingagents.dataflows.symbol_utils import market_timezone
+import tradingagents.data.instrument_identity as identity_dataflow
+import tradingagents.data.yfinance_news as ynews
+import tradingagents.research.tools.catalog as au
+from tradingagents.domain.instruments import market_timezone
 
 
 @pytest.mark.parametrize(

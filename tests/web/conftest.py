@@ -6,10 +6,10 @@ from pathlib import Path
 import httpx2 as httpx
 import pytest
 
-from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 from tradingagents.persistence import upgrade_database
+from tradingagents.persistence.repository import RunRepository
 from tradingagents.web import create_app
 
 

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.application.llms import create_run_llms
-from tradingagents.application.settings import RunSettings
-from tradingagents.default_config import build_default_config
+from tradingagents.configuration.defaults import build_default_config
+from tradingagents.configuration.settings import RunSettings
+from tradingagents.llm.runtime import create_run_llms
 
 
 def _settings(*, retries=None, provider="openai") -> RunSettings:
@@ -45,7 +45,7 @@ def test_retry_budget_is_forwarded_to_both_run_roles(monkeypatch, provider):
         return client
 
     monkeypatch.setattr(
-        "tradingagents.application.llms.create_llm_client",
+        "tradingagents.llm.runtime.create_llm_client",
         factory,
     )
 
@@ -66,7 +66,7 @@ def test_unset_retry_budget_preserves_provider_default(monkeypatch):
         return client
 
     monkeypatch.setattr(
-        "tradingagents.application.llms.create_llm_client",
+        "tradingagents.llm.runtime.create_llm_client",
         factory,
     )
 

@@ -9,9 +9,9 @@ from urllib.error import HTTPError
 
 import pytest
 
-from tradingagents.dataflows import stocktwits
-from tradingagents.dataflows.errors import VendorRateLimitError
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.data import stocktwits
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 
 def _raise(exc):

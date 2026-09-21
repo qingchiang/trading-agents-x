@@ -14,13 +14,13 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
-import tradingagents.dataflows.stockstats_utils as stockstats_utils
-import tradingagents.dataflows.y_finance as y_finance
-import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.stockstats_utils import _assert_ohlcv_not_stale
-from tradingagents.dataflows.symbol_utils import NoMarketDataError
+import tradingagents.configuration.defaults as default_config
+import tradingagents.data.stockstats_utils as stockstats_utils
+import tradingagents.data.y_finance as y_finance
+from tradingagents.data import interface
+from tradingagents.data.config import bind_config
+from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale
+from tradingagents.domain.instruments import NoMarketDataError
 
 
 def _frame(date):

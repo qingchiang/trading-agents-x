@@ -7,11 +7,11 @@ model name is accepted, and the env backend URL precedence (#978).
 
 import pytest
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 from tradingagents.credentials import use_credentials
-from tradingagents.llm_clients.api_key_env import get_api_key_env
-from tradingagents.llm_clients.factory import create_llm_client
-from tradingagents.llm_clients.validators import validate_model
+from tradingagents.llm.api_key_env import get_api_key_env
+from tradingagents.llm.factory import create_llm_client
+from tradingagents.llm.validators import validate_model
 
 # Note: assert by class NAME, not isinstance — other tests reload the
 # openai_client module, which would otherwise create a second class identity.
@@ -65,7 +65,7 @@ def test_any_model_accepted_no_forced_key():
     # The key env exists (read for keyed relays) but the provider is marked
     # key-optional, so the CLI never forces a prompt and keyless servers work.
     assert get_api_key_env("openai_compatible") == "OPENAI_COMPATIBLE_API_KEY"
-    from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS
+    from tradingagents.llm.openai_client import OPENAI_COMPATIBLE_PROVIDERS
     assert OPENAI_COMPATIBLE_PROVIDERS["openai_compatible"].key_optional is True
 
 

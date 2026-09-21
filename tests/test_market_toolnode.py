@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock
 
-from tradingagents.application.contracts import RunProfile
-from tradingagents.graph.research_graph import ResearchGraph
+from tradingagents.domain.common import RunProfile
+from tradingagents.research.full.workflow import ResearchGraph
 
 
 def test_market_toolnode_can_execute_verified_snapshot():

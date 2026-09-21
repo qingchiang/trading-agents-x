@@ -8,18 +8,17 @@ from pydantic import ValidationError
 from tests.factories import analyst_report, research_decision
 from tradingagents import RunProfile as PublicRunProfile
 from tradingagents.application import RunProfile as ApplicationRunProfile
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    EvidenceBundle,
-    EvidenceItem,
+from tradingagents.configuration.settings import AppSettings, RunSettings
+from tradingagents.domain.common import (
     ReportLanguage,
     ResearchConfidenceLevel,
-    ResearchDecision,
-    ResearchWarning,
     RunProfile,
     RunStatus,
 )
-from tradingagents.application.settings import AppSettings, RunSettings
+from tradingagents.domain.decision import ResearchDecision
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.reports import ResearchWarning
+from tradingagents.domain.runs import AnalysisRequest
 
 
 def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
@@ -257,7 +256,7 @@ def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
     )
 
     from tests.configuration_helpers import import_configuration
-    from tradingagents.application.configuration_models import ConfigurationPatch
+    from tradingagents.configuration.models import ConfigurationPatch
     assert import_configuration(defaults).read().values.trash_retention_days == 30
     assert import_configuration(disabled).read().values.trash_retention_days == 0
     with pytest.raises(ValueError):
@@ -265,9 +264,9 @@ def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
 
 
 def test_legacy_archive_retention_is_reported_during_import(tmp_path):
-    from tradingagents.application.configuration import ConfigurationStore
-    from tradingagents.application.configuration_models import ImportRequest
+    from tradingagents.configuration.models import ImportRequest
     from tradingagents.persistence import upgrade_database
+    from tradingagents.persistence.configuration import ConfigurationStore
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path), "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "30"})
     upgrade_database(settings)
     preview = ConfigurationStore(settings).preview_import(ImportRequest())

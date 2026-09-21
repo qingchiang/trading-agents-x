@@ -2,7 +2,7 @@
 
 import pytest
 
-from tradingagents.agents.utils.rating import RATINGS_5_TIER, parse_rating
+from tradingagents.research.tools.rating import RATINGS_5_TIER, parse_rating
 
 # ---------------------------------------------------------------------------
 # Heuristic parser

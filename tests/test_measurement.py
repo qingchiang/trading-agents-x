@@ -1,6 +1,6 @@
 """Deterministic measurement metadata supplied by data adapters."""
 
-from tradingagents.dataflows.measurement import classify_vendor_unit, instrument_currency
+from tradingagents.domain.measurement import classify_vendor_unit, instrument_currency
 
 
 def test_instrument_currency_covers_supported_market_shapes() -> None:

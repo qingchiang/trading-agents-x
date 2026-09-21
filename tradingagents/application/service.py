@@ -14,81 +14,65 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
-from tradingagents.agents.utils.agent_utils import (
-    build_instrument_context,
-    resolve_instrument_identity,
+from tradingagents.application.credentials import configuration_credentials
+from tradingagents.application.eligibility import validate_instrument_eligibility
+from tradingagents.application.exporting import (
+    render_run_export_markdown,
+    render_run_export_package,
 )
+from tradingagents.application.instrument_names import resolve_local_instrument_name
+from tradingagents.configuration.settings import AppSettings, RunSettings
 from tradingagents.credentials import use_credentials
-from tradingagents.dataflows.config import use_config
-from tradingagents.dataflows.interface import (
-    resolve_instrument_eligibility,
-    validate_market_routing,
-)
-from tradingagents.dataflows.symbol_utils import (
-    is_supported_equity_symbol,
-    market_timezone,
-    market_today,
-    normalize_symbol,
-)
-from tradingagents.graph.deliberation import (
-    ResearchDecisionCoreDraft,
-    ResearchScenarioCoreDraft,
-    write_research_markdown,
-)
-from tradingagents.graph.output_validation import OutputValidationError
-from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
-from tradingagents.graph.structured_output import (
-    StructuredOutputResult,
-    StructuredOutputRunner,
-)
-from tradingagents.persistence import upgrade_database
-from tradingagents.version import __version__
-
-from .checkpoints import CredentialSafeSqliteSaver as SqliteSaver
-from .configuration import ConfigurationStore, configuration_credentials
-from .contracts import (
+from tradingagents.data.config import use_config
+from tradingagents.data.interface import resolve_instrument_eligibility, validate_market_routing
+from tradingagents.domain.artifacts import ResearchArtifactDraft
+from tradingagents.domain.collection import IncrementalCollectionPreflight
+from tradingagents.domain.common import (
     CURRENT_RESEARCH_SCHEMA_VERSION,
-    AnalysisCutoffContext,
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    EvidenceBundle,
-    FullResearchRequiredReason,
-    IncrementalAnalysisBrief,
-    IncrementalCollectionPreflight,
-    IncrementalDecisionOutcome,
-    IncrementalNodeProducts,
-    IncrementalSynthesis,
-    IncrementalSynthesisInput,
-    PerformanceComponentStatus,
-    PerformanceObservation,
-    ReassessmentDisposition,
-    ReportLanguage,
-    ResearchArtifactDraft,
-    ResearchDecision,
-    ResearchNodeComparison,
-    ResearchNodeComparisonSelection,
-    ResearchReassessment,
-    RunEvent,
-    RunExport,
     RunStatus,
-    report_language_prompt_label,
 )
-from .decision_components import baseline_component_ids
-from .eligibility import validate_instrument_eligibility
-from .errors import (
+from tradingagents.domain.decision_components import baseline_component_ids
+from tradingagents.domain.errors import (
     FutureAnalysisCutoffError,
     InstrumentEligibilityUnavailableError,
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
 )
-from .exporting import (
-    render_run_export_markdown,
-    render_run_export_package,
+from tradingagents.domain.evidence import EvidenceBundle
+from tradingagents.domain.history import RunExport
+from tradingagents.domain.incremental import (
+    FullResearchRequiredReason,
+    IncrementalDecisionOutcome,
+    IncrementalNodeProducts,
+    IncrementalSynthesis,
+    IncrementalSynthesisInput,
+    ReassessmentDisposition,
 )
-from .incremental_collection import (
+from tradingagents.domain.instruments import (
+    is_supported_equity_symbol,
+    market_timezone,
+    market_today,
+    normalize_symbol,
+)
+from tradingagents.domain.performance import PerformanceComponentStatus, PerformanceObservation
+from tradingagents.domain.runs import (
+    AnalysisCutoffContext,
+    AnalysisRequest,
+    AnalysisResult,
+    RunEvent,
+    RunView,
+)
+from tradingagents.domain.timeline import ResearchNodeComparison, ResearchNodeComparisonSelection
+from tradingagents.llm.runtime import RunLLMs, create_run_llms
+from tradingagents.persistence import upgrade_database
+from tradingagents.persistence._repository_common import EvidenceConflictError
+from tradingagents.persistence.checkpoints import CredentialSafeSqliteSaver as SqliteSaver
+from tradingagents.persistence.configuration import ConfigurationStore
+from tradingagents.persistence.repository import RunRepository
+from tradingagents.research.full.workflow import GraphExecution, ResearchGraph
+from tradingagents.research.incremental.collection import (
     IncrementalCollector,
     assess_information_advancement,
     build_incremental_collection_request,
@@ -99,112 +83,20 @@ from .incremental_collection import (
     incremental_market_identity,
     normalize_incremental_collection,
 )
-from .instrument_names import resolve_local_instrument_name
-from .llms import RunLLMs, create_run_llms
-from .markdown_evidence import parse_markdown_sections
-from .metrics import MetricsCallback
-from .repository import EvidenceConflictError, RunRepository, RunView
-from .runtime import RunCancelled, RunContext, WorkerShutdown
-from .settings import AppSettings, RunSettings
+from tradingagents.research.incremental.synthesis import synthesize_incremental
+from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.runtime import RunCancelled, RunContext, WorkerShutdown
+from tradingagents.research.tools.catalog import (
+    build_instrument_context,
+    resolve_instrument_identity,
+)
+from tradingagents.version import __version__
 
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
 EligibilityResolver = Callable[[str], Any]
 IncrementalSynthesizer = Callable[[IncrementalSynthesisInput], IncrementalSynthesis]
-
-
-def _incremental_brief_fallback_title(language: ReportLanguage | str) -> str:
-    """Return the deterministic heading used when a brief has no Markdown heading."""
-    titles = {
-        ReportLanguage.ENGLISH: "Incremental analysis",
-        ReportLanguage.SIMPLIFIED_CHINESE: "增量分析",
-        ReportLanguage.JAPANESE: "増分分析",
-    }
-    return titles[ReportLanguage(language)]
-
-
-class _IncrementalAssessmentPayload(BaseModel):
-    """Small Incremental assessment that decides whether a Decision is regenerated."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    reassessment: ResearchReassessment
-    decision_outcome: IncrementalDecisionOutcome
-    decision_outcome_reason: str = Field(min_length=1)
-    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
-
-
-_FINAL_CONFIDENCE_PROSE_INSTRUCTION = (
-    "Treat the structured Full Baseline Decision confidence level as authoritative. "
-    "When discussing final Decision confidence, use only the localized equivalent of low, "
-    "medium, or high. Never express final Decision confidence as a number, decimal, "
-    "percentage, or probability, even when legacy baseline prose contains one."
-)
-
-
-class _IncrementalDecisionSection(BaseModel):
-    """Bounded recovery section for the current qualitative Decision core."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    decision: ResearchDecisionCoreDraft
-
-
-class _IncrementalDecisionPayload(BaseModel):
-    """Complete Decision payload generated only for an updated outcome."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    decision: ResearchDecision
-
-
-def _incremental_decision_core(decision: ResearchDecision) -> ResearchDecisionCoreDraft:
-    return ResearchDecisionCoreDraft(
-        rating=decision.rating,
-        confidence=decision.confidence,
-        executive_summary=decision.executive_summary,
-        thesis=decision.thesis,
-        evidence_refs=decision.evidence_refs,
-        catalysts=decision.catalysts,
-        risks=decision.risks,
-        invalidation_conditions=decision.invalidation_conditions,
-        unresolved_questions=decision.unresolved_questions,
-        time_horizon=decision.time_horizon,
-        scenarios=tuple(
-            ResearchScenarioCoreDraft(
-                kind=scenario.kind,
-                core_assumptions=scenario.core_assumptions,
-                outcome=scenario.outcome,
-                evidence_refs=scenario.evidence_refs,
-            )
-            for scenario in decision.scenarios
-        ),
-        risk_review_adjustments=decision.risk_review_adjustments,
-    )
-
-
-def _incremental_decision_from_core(
-    core: ResearchDecisionCoreDraft,
-    baseline: ResearchDecision,
-) -> ResearchDecision:
-    baseline_scenarios = {scenario.kind: scenario for scenario in baseline.scenarios}
-    payload = core.model_dump(mode="python")
-    payload["scenarios"] = tuple(
-        {
-            **scenario.model_dump(mode="python"),
-            "reference_ranges": baseline_scenarios[scenario.kind].reference_ranges,
-        }
-        for scenario in core.scenarios
-    )
-    for field in (
-        "valuation_assessment",
-        "market_reference_levels",
-        "calculation_records",
-        "numeric_audit_status",
-    ):
-        payload[field] = getattr(baseline, field)
-    return ResearchDecision.model_validate(payload)
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -315,7 +207,7 @@ class AnalysisService:
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
         request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False, exclude_unset=True))
-        from .submissions import submission_identity
+        from tradingagents.application.submissions import submission_identity
 
         identity = submission_identity(request, source_run_id)
         if idempotency_key:
@@ -668,7 +560,7 @@ class AnalysisService:
                                             instrument_local_name,
                                         )
                     baseline_evidence = self.repository.get_evidence(baseline.id)
-                    from tradingagents.dataflows.collection_progress import collection_progress
+                    from tradingagents.data.collection_progress import collection_progress
 
                     def progress(domain, phase):
                         logger.info("run %s incremental collection %s %s", run.id, domain, phase)
@@ -761,12 +653,14 @@ class AnalysisService:
                     if self.incremental_synthesizer is not None:
                         synthesis = self.incremental_synthesizer(synthesis_input)
                     else:
-                        synthesis = self._run_incremental_synthesis(
+                        synthesis = synthesize_incremental(
                             synthesis_input,
                             run_settings=run_settings,
                             metrics=metrics,
-                            run_id=run.id,
-                            on_event=on_event,
+                            llm_factory=self.llm_factory,
+                            event_writer=lambda raw: self._persist_graph_event(
+                                run.id, raw, on_event
+                            ),
                         )
                     expected_components = set(baseline_component_ids(baseline_result.decision))
                     if {
@@ -1324,271 +1218,6 @@ class AnalysisService:
             warnings=warnings,
         )
 
-    def _run_incremental_synthesis(
-        self,
-        synthesis_input: IncrementalSynthesisInput,
-        *,
-        run_settings: RunSettings,
-        metrics: MetricsCallback,
-        run_id: str,
-        on_event: EventHandler | None,
-    ) -> IncrementalSynthesis:
-        """Use the run-scoped reasoning and serializer clients for required synthesis."""
-        llms = self.llm_factory(
-            run_settings,
-            callbacks=[metrics],
-            purpose="incremental",
-        )
-        semantic_llm = llms.deep
-        serializer_llm = llms.deep_serializer
-
-        def event_writer(raw: dict[str, Any]) -> None:
-            self._persist_graph_event(run_id, raw, on_event)
-
-        output_language = report_language_prompt_label(run_settings.output_language)
-        semantic_prompt = (
-            "Write a concise, user-facing Incremental Research analysis report. Assess every Full "
-            "Baseline Decision Component using only the typed input. Do not use sibling "
-            "Incremental Nodes or invent Evidence. Limited or missing optional Research "
-            "Availability alone must not create a Full Research Required reason; do not "
-            "reintroduce required-coverage certification. Cover the key new information, "
-            "its effect on the current Decision, stock and benchmark Performance context, "
-            "and unresolved questions. Keep audit metadata out of the narrative. "
-            f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
-            f"Write all human-readable prose in {output_language}.\n\n"
-            + synthesis_input.model_dump_json(indent=2)
-        )
-        with metrics.phase("incremental.synthesis.semantic", event_writer=event_writer):
-            semantic_output = write_research_markdown(
-                semantic_llm,
-                prompt=semantic_prompt,
-                node="incremental.synthesis.semantic",
-                allowed_evidence_refs=tuple(
-                    dict.fromkeys(
-                        (
-                            *synthesis_input.permitted_baseline_evidence_refs,
-                            *(item.ref for item in synthesis_input.incremental_evidence.items),
-                        )
-                    )
-                ),
-                output_language=output_language,
-                allow_continuation=False,
-                invoke_config={"metadata": {"research_node": "incremental.synthesis.semantic"}},
-            )
-        semantic_brief = semantic_output.markdown
-        analysis_brief = IncrementalAnalysisBrief(
-            markdown=semantic_brief,
-            report_sections=parse_markdown_sections(
-                semantic_brief,
-                namespace="incremental",
-                fallback_title=_incremental_brief_fallback_title(run_settings.output_language),
-            ),
-            evidence_refs=semantic_output.evidence_refs,
-            warnings=semantic_output.warnings,
-        )
-        allowed_evidence_refs = tuple(
-            dict.fromkeys(
-                (
-                    *synthesis_input.permitted_baseline_evidence_refs,
-                    *(item.ref for item in synthesis_input.incremental_evidence.items),
-                )
-            )
-        )
-        expected_components = set(baseline_component_ids(synthesis_input.full_baseline_decision))
-
-        def validate_assessment(
-            value: _IncrementalAssessmentPayload,
-        ) -> _IncrementalAssessmentPayload:
-            if {entry.component_id for entry in value.reassessment.entries} != expected_components:
-                raise OutputValidationError("incremental.reassessment.component_closure")
-            if value.decision_outcome is IncrementalDecisionOutcome.UNCHANGED and any(
-                entry.disposition is ReassessmentDisposition.OVERTURNED
-                for entry in value.reassessment.entries
-            ):
-                raise OutputValidationError("incremental.outcome.overturned_unchanged")
-            allowed = set(allowed_evidence_refs)
-            if any(
-                not set(entry.evidence_refs).issubset(allowed)
-                for entry in value.reassessment.entries
-            ) or any(
-                not set(reason.evidence_refs).issubset(allowed)
-                for reason in value.full_research_required_reasons
-            ):
-                raise OutputValidationError("incremental.assessment.refs_invalid")
-            return value
-
-        assessment_prompt = (
-            "Serialize only the small Incremental assessment from the semantic brief and "
-            "typed bounded input. Reassess every Full Baseline Decision Component. Set "
-            "decision_outcome to unchanged when the complete baseline Decision remains valid "
-            "without changing any field, even if evidence strengthened or weakened a component. "
-            "Set it to updated only when at least one complete Decision field must actually be "
-            "rewritten. An overturned component always requires updated. Do not serialize a "
-            "Research Decision. Full Research Required is independent of decision_outcome, so "
-            "either outcome may include a reason. Every reassessment entry and the outcome need "
-            "a concise reason. Include Evidence references only when the permitted bundles "
-            "support them. Limited or missing optional Research Availability alone must not "
-            "create a Full Research Required reason, and required_coverage codes are forbidden. "
-            "Use only the typed reason codes for material thesis reversal, identity uncertainty, "
-            "unreliable attribution, or material Evidence conflict. Write all human-readable "
-            f"prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
-            f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-            f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
-        )
-        assessment_example = {
-            "reassessment": {
-                "entries": [
-                    {
-                        "component_id": "thesis",
-                        "disposition": "reaffirmed",
-                        "reason": "Explain the bounded reassessment.",
-                    }
-                ]
-            },
-            "decision_outcome": "unchanged",
-            "decision_outcome_reason": "No complete Decision field needs to change.",
-            "full_research_required_reasons": [],
-        }
-        with metrics.phase("incremental.synthesis.assessment", event_writer=event_writer):
-            assessment_output = StructuredOutputRunner(
-                llm=serializer_llm,
-                schema=_IncrementalAssessmentPayload,
-                validator=validate_assessment,
-                node="incremental.synthesis.assessment",
-                event_writer=event_writer,
-                invoke_config={"metadata": {"research_node": "incremental.synthesis.assessment"}},
-                repair_instructions=(
-                    "Write all human-readable prose in "
-                    f"{output_language}. Preserve every baseline component ID, enums, "
-                    "permitted Evidence refs, and typed Full Research Required codes exactly. "
-                    f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION}"
-                ),
-            ).invoke(
-                assessment_prompt,
-                example=assessment_example,
-                allowed_evidence_refs=allowed_evidence_refs,
-            )
-
-        assessment = assessment_output.value
-        baseline_decision = synthesis_input.full_baseline_decision
-        if assessment.decision_outcome is IncrementalDecisionOutcome.UNCHANGED:
-            decision = baseline_decision
-        else:
-            repair_available = not assessment_output.failed_attempts
-            decision_prompt = (
-                "Serialize one complete updated Research Decision from the semantic brief, "
-                "small assessment, and typed bounded input. The Decision must differ from the "
-                "Full Baseline in at least one real field. Do not emit a field patch or changed-"
-                "fields list. Primary generation may update valuation, scenarios, market "
-                "references, and calculations when supported by permitted Evidence. Classify "
-                "confidence by rubric, not as a probability: low means the core judgment remains "
-                "tentative because important gaps, conflicts, or unresolved assumptions remain; "
-                "medium means the main direction is supported but important uncertainty could "
-                "materially change it; high means reliable evidence sufficiently supports the "
-                "core judgment with no unresolved major conflict. Include exactly base, bull, "
-                "and bear scenarios and use only permitted Evidence references. Write all human-"
-                f"readable prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
-                f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-                f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
-                f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
-            )
-            decision_example = {"decision": baseline_decision.model_dump(mode="json")}
-
-            def validate_decision(
-                value: _IncrementalDecisionPayload,
-            ) -> _IncrementalDecisionPayload:
-                if value.decision.model_dump(mode="json") == baseline_decision.model_dump(
-                    mode="json"
-                ):
-                    raise OutputValidationError("incremental.decision.updated_identical")
-                if not set(value.decision.evidence_refs).issubset(set(allowed_evidence_refs)):
-                    raise OutputValidationError("incremental.decision.refs_invalid")
-                return value
-
-            def decision_core_recovery() -> StructuredOutputResult[_IncrementalDecisionPayload]:
-                decision_core = (
-                    StructuredOutputRunner(
-                        llm=serializer_llm,
-                        schema=_IncrementalDecisionSection,
-                        validator=lambda value: value,
-                        node="incremental.synthesis.decision",
-                        event_writer=event_writer,
-                        repair_enabled=False,
-                        invoke_config={
-                            "metadata": {
-                                "research_node": "incremental.synthesis.decision",
-                            }
-                        },
-                        repair_instructions=(
-                            "Return one complete current qualitative Decision core using only "
-                            "permitted Evidence references."
-                        ),
-                    )
-                    .invoke(
-                        (
-                            "Recover only the complete updated qualitative Research Decision "
-                            "core from the semantic brief and bounded input. Include exactly "
-                            "base, bull, and bear scenarios. Do not serialize the Research "
-                            "Reassessment, Full Research Required reasons, or any optional "
-                            "numeric appendix; the application preserves the audited numeric "
-                            "appendix from the direct Full Baseline. "
-                            f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
-                            f"Write all human-readable prose in {output_language}.\n\n"
-                            f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-                            f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
-                            f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
-                        ),
-                        example={
-                            "decision": _incremental_decision_core(baseline_decision).model_dump(
-                                mode="json"
-                            )
-                        },
-                        allowed_evidence_refs=allowed_evidence_refs,
-                    )
-                    .value
-                )
-                return StructuredOutputResult(
-                    value=_IncrementalDecisionPayload(
-                        decision=_incremental_decision_from_core(
-                            decision_core.decision,
-                            baseline_decision,
-                        )
-                    ),
-                    generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
-                )
-
-            with metrics.phase("incremental.synthesis.decision", event_writer=event_writer):
-                decision_output = StructuredOutputRunner(
-                    llm=serializer_llm,
-                    schema=_IncrementalDecisionPayload,
-                    validator=validate_decision,
-                    node="incremental.synthesis.decision",
-                    event_writer=event_writer,
-                    repair_enabled=repair_available,
-                    invoke_config={"metadata": {"research_node": "incremental.synthesis.decision"}},
-                    repair_instructions=(
-                        "Return a complete Decision that really differs from the baseline, "
-                        "uses only permitted Evidence refs, and follows the confidence rubric."
-                        f" {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}"
-                    ),
-                    truncation_recovery=(decision_core_recovery if repair_available else None),
-                    sectioned_recovery_reasons=("output_truncated", "schema_validation"),
-                    sectioned_recovery_after_repair=False,
-                ).invoke(
-                    decision_prompt,
-                    example=decision_example,
-                    allowed_evidence_refs=allowed_evidence_refs,
-                )
-            decision = decision_output.value.decision
-
-        return IncrementalSynthesis(
-            analysis_brief=analysis_brief,
-            reassessment=assessment.reassessment,
-            decision_outcome=assessment.decision_outcome,
-            decision_outcome_reason=assessment.decision_outcome_reason,
-            decision=decision,
-            full_research_required_reasons=assessment.full_research_required_reasons,
-        )
 
     @staticmethod
     def _validate_incremental_bundle_ownership(

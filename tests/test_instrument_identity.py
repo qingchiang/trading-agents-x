@@ -5,13 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.data import instrument_identity as identity_dataflow
+from tradingagents.data.instrument_identity import resolve_instrument_eligibility
+from tradingagents.research.tools.catalog import (
     build_instrument_context,
     get_instrument_context_from_state,
     resolve_instrument_identity,
 )
-from tradingagents.dataflows import instrument_identity as identity_dataflow
-from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
 
 @pytest.mark.unit

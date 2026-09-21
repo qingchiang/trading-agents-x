@@ -6,24 +6,22 @@ import pytest
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    IncrementalCollectionRequest,
-    RunStatus,
-)
-from tradingagents.application.incremental_collection import normalize_incremental_collection
 from tradingagents.application.service import AnalysisService
-from tradingagents.dataflows import incremental_us, interface, y_finance as yf_data
-from tradingagents.dataflows.config import bind_config, reset_config
-from tradingagents.dataflows.errors import VendorRateLimitError
-from tradingagents.dataflows.incremental_us import collect_us_incremental
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_requested
+from tradingagents.data import incremental_us, interface, y_finance as yf_data
+from tradingagents.data.config import bind_config, reset_config
+from tradingagents.data.incremental_us import collect_us_incremental
+from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.domain.collection import IncrementalCollectionRequest
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.domain.vendor_errors import VendorRateLimitError
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research.incremental.collection import normalize_incremental_collection
 
 
 @pytest.fixture(autouse=True)
 def _isolate_shared_background(monkeypatch):
-    from tradingagents.dataflows import incremental_inputs
+    from tradingagents.data import incremental_inputs
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")
@@ -90,7 +88,7 @@ def test_social_observed_range_describes_messages_not_requested_window():
 
 
 def test_us_collector_reuses_routed_broader_adjusted_series_and_truncates_it() -> None:
-    from tradingagents.dataflows.collection_progress import (
+    from tradingagents.data.collection_progress import (
         collection_progress,
         report_collection_progress,
     )

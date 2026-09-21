@@ -10,9 +10,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.jp import edinet_code_map as cm
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data.config import bind_config
+from tradingagents.data.jp import edinet_code_map as cm
 
 
 @pytest.mark.unit

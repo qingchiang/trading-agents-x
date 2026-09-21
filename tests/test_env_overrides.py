@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tradingagents.default_config import build_default_config
+from tradingagents.configuration.defaults import build_default_config
 
 
 def _config(**overrides):

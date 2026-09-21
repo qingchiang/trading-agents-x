@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tradingagents.application.numeric_display import format_decision_number
+from tradingagents.domain.numeric_display import format_decision_number
 
 _CASES = json.loads(
     (

@@ -10,19 +10,21 @@ from typing import Any
 import pytest
 
 from tests.factories import research_decision
-from tradingagents.application.contracts import (
+from tradingagents.domain.common import (
+    NumericAuditStatus,
+    NumericDisplayScale,
+    NumericDisplayStatus,
+)
+from tradingagents.domain.decision import NumericTemporalBasis
+from tradingagents.domain.evidence import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceOrigin,
     EvidenceQuality,
     EvidenceTemporalScope,
-    NumericAuditStatus,
-    NumericDisplayScale,
-    NumericDisplayStatus,
-    NumericTemporalBasis,
 )
-from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.graph.deliberation import (
+from tradingagents.domain.evidence_tables import extract_evidence_tables
+from tradingagents.research.synthesis.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
@@ -31,7 +33,7 @@ from tradingagents.graph.deliberation import (
     _assemble_numeric_draft,
     _preflight_numeric_requirements,
 )
-from tradingagents.graph.numeric_evidence import build_numeric_value_catalog
+from tradingagents.research.synthesis.numeric_evidence import build_numeric_value_catalog
 
 _FIXTURE_PATH = (
     Path(__file__).parent / "fixtures" / "live_numeric_regressions_2026_08_03.json"

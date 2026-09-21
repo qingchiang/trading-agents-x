@@ -21,8 +21,8 @@ from io import StringIO
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows import cn_macro, jp_macro
-from tradingagents.dataflows.cn import (
+from tradingagents.data import cn_macro, jp_macro
+from tradingagents.data.cn import (
     akshare_stock,
     calendar as cn_calendar,
     cn_sentiment,
@@ -31,8 +31,8 @@ from tradingagents.dataflows.cn import (
     news_sources,
     sina_finance,
 )
-from tradingagents.dataflows.symbol_utils import normalize_symbol
-from tradingagents.dataflows.y_finance import get_YFin_data_online
+from tradingagents.data.y_finance import get_YFin_data_online
+from tradingagents.domain.instruments import normalize_symbol
 from tradingagents.provenance import extract_provenance
 
 pytestmark = [

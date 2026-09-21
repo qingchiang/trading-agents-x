@@ -9,8 +9,8 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
-import tradingagents.agents.analysts.fundamentals_analyst as fa
-from tradingagents.agents.utils.fundamental_data_tools import (
+import tradingagents.research.analysts.fundamentals_analyst as fa
+from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet_for_analysis,
     get_cashflow_for_analysis,
     get_fundamentals_for_analysis,
@@ -91,7 +91,7 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
     }
 
     with mock.patch(
-        "tradingagents.agents.utils.fundamental_data_tools.route_to_vendor",
+        "tradingagents.research.tools.fundamental_data_tools.route_to_vendor",
         return_value="SAFE",
     ) as router:
         result = graph.invoke(state)

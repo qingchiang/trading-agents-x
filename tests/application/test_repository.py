@@ -9,63 +9,55 @@ from threading import Barrier
 import pytest
 from sqlalchemy import select
 
-from tests.factories import (
-    analyst_report,
-    research_case,
-    research_decision,
-)
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    AnalystClaimType,
-    AnalystReport,
+from tests.factories import analyst_report, research_case, research_decision
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifactDraft
+from tradingagents.domain.common import (
     ArtifactGenerationMethod,
-    ArtifactGenerationObservation,
-    ClaimImportance,
-    DebateAgenda,
     DebateImportance,
-    DebateIssue,
-    DecisionBrief,
-    DecisionNumericAuditAppendix,
-    EvidenceBundle,
-    EvidenceItem,
-    IssueDisposition,
-    JudgeDraft,
-    KeyClaim,
     NumericAuditAppendixStatus,
     NumericAuditComponentType,
-    NumericAuditOmission,
     NumericAuditPhase,
-    NumericAuditSnapshot,
     NumericAuditStatus,
     NumericCalculationStatus,
     NumericDisplayStatus,
-    NumericRequirementCheck,
-    RebuttalReview,
-    ReportAuditStatus,
-    ReportSection,
-    ResearchArtifactDraft,
     ResearchRating,
-    RiskReview,
-    RunMetrics,
     RunStatus,
     RunTrashState,
 )
-from tradingagents.application.database import (
-    DecisionRecord,
-    RunAttemptRecord,
-    RunRecord,
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.numeric_audit import (
+    DecisionNumericAuditAppendix,
+    NumericAuditOmission,
+    NumericAuditSnapshot,
+    NumericRequirementCheck,
 )
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import (
+from tradingagents.domain.reports import (
+    AnalystClaimType,
+    AnalystReport,
+    ClaimImportance,
+    DebateAgenda,
+    DebateIssue,
+    DecisionBrief,
+    IssueDisposition,
+    JudgeDraft,
+    KeyClaim,
+    RebuttalReview,
+    ReportAuditStatus,
+    ReportSection,
+    RiskReview,
+)
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult, RunMetrics
+from tradingagents.persistence._repository_common import (
     ArtifactConflictError,
     EvidenceConflictError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
     RunNotFoundError,
-    RunRepository,
 )
-from tradingagents.application.settings import AppSettings
+from tradingagents.persistence.models import DecisionRecord, RunAttemptRecord, RunRecord
+from tradingagents.persistence.repository import RunRepository
 
 
 def _request(ticker: str = "NVDA") -> AnalysisRequest:

@@ -7,7 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 from tradingagents.web import create_app
 
 

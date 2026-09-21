@@ -2,8 +2,8 @@
 
 import pytest
 
-from tradingagents.dataflows.cn import sina_ratings
-from tradingagents.dataflows.cn.common import AkShareSchemaError
+from tradingagents.data.cn import sina_ratings
+from tradingagents.data.cn.common import AkShareSchemaError
 
 
 @pytest.fixture(autouse=True)

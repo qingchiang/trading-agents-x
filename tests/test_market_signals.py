@@ -4,12 +4,12 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.agents.analysts import sentiment_analyst
-from tradingagents.agents.sentiment_sources import (
+from tradingagents.data import market_signals
+from tradingagents.research.analysts import sentiment_analyst
+from tradingagents.research.analysts.sentiment_sources import (
     SentimentSourceInput,
     SentimentSourceStatus,
 )
-from tradingagents.dataflows import market_signals
 
 
 @pytest.mark.unit

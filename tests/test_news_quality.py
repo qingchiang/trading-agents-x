@@ -2,7 +2,7 @@
 
 import pytest
 
-from tradingagents.dataflows.news_quality import (
+from tradingagents.data.news_quality import (
     build_company_aliases,
     canonical_headline,
     classify_google_article,

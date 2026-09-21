@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 from langchain_core.messages import ToolMessage
 
-from tradingagents.dataflows import interface
+from tradingagents.data import interface
 from tradingagents.provenance import (
     ProvenanceRecord,
     attach_provenance,

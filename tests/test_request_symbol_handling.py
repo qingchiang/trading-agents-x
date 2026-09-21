@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.application.contracts import AnalysisRequest, AssetType
-from tradingagents.dataflows.symbol_utils import normalize_symbol
+from tradingagents.domain.common import AssetType
+from tradingagents.domain.instruments import normalize_symbol
+from tradingagents.domain.runs import AnalysisRequest
 
 
 @pytest.mark.parametrize(

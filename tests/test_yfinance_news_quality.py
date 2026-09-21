@@ -7,9 +7,9 @@ from urllib.error import HTTPError
 import pytest
 from yfinance.exceptions import YFRateLimitError
 
-from tradingagents.dataflows import yfinance_news as ynews
-from tradingagents.dataflows.errors import VendorRateLimitError
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.data import yfinance_news as ynews
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 
 def _epoch(date_str: str) -> int:

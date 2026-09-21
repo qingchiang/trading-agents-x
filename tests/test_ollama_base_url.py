@@ -6,7 +6,7 @@ import importlib
 
 
 def _reload_client():
-    import tradingagents.llm_clients.openai_client as mod
+    import tradingagents.llm.openai_client as mod
     return importlib.reload(mod)
 
 

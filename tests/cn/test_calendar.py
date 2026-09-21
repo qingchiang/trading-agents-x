@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tradingagents.dataflows.cn import calendar
-from tradingagents.dataflows.cn.common import AkShareSchemaError
+from tradingagents.data.cn import calendar
+from tradingagents.data.cn.common import AkShareSchemaError
 
 
 @pytest.mark.unit

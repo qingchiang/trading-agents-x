@@ -4,9 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from tradingagents.llm_clients.capabilities import (
-    get_capabilities,
-)
+from tradingagents.llm.capabilities import get_capabilities
 
 
 @pytest.mark.unit

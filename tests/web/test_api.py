@@ -7,40 +7,27 @@ from datetime import UTC, date, datetime
 import httpx2 as httpx
 import pytest
 
-from tests.factories import (
-    analyst_report,
-    research_case,
-    research_decision,
-)
+from tests.factories import analyst_report, research_case, research_decision
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    ArtifactGenerationObservation,
+from tradingagents.application.service import AnalysisService
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.data import incremental_cn, incremental_jp, incremental_us
+from tradingagents.data.cn import calendar as cn_calendar
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifactDraft
+from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionSourceProvenance,
     CollectionSummary,
-    EvidenceBundle,
-    EvidenceItem,
     IncrementalCollectionRequest,
-    IncrementalCollectionResult,
-    IncrementalDecisionOutcome,
     IncrementalEvidenceCandidate,
-    ResearchArtifactDraft,
-    RunStatus,
 )
-from tradingagents.application.database import RunRecord
-from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
-from tradingagents.dataflows import incremental_cn, incremental_jp, incremental_us
-from tradingagents.dataflows.cn import calendar as cn_calendar
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_evidence_span,
-    attach_provenance,
-)
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.models import RunRecord
+from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
@@ -248,10 +235,10 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a: ""
     )
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_market_investor_flows", lambda *_a: ""
     )
     service = AnalysisService(
         web_settings,
@@ -418,7 +405,7 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a: ""
     )
     synthesis_inputs = []
 

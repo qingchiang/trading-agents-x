@@ -7,14 +7,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from tradingagents.application.configuration import ConfigurationStore
-from tradingagents.application.configuration_models import ConfigurationPatch
-from tradingagents.application.contracts import AnalysisRequest
-from tradingagents.application.model_connections import legacy_connection_id
-from tradingagents.application.repository import IdempotencyConflictError
 from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.models import ConfigurationPatch
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.llm.models import legacy_connection_id
 from tradingagents.persistence import upgrade_database
+from tradingagents.persistence._repository_common import IdempotencyConflictError
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
 def configured(tmp_path):
@@ -136,7 +136,7 @@ def test_upgrade_captures_current_legacy_connection_as_reset_baseline(tmp_path):
 @pytest.mark.parametrize("action", ["update", "delete"])
 def test_incremental_ignores_retired_unused_quick_connection(tmp_path, action):
     from tests.application.test_model_connections import configured_store
-    from tradingagents.application.configuration import ConfigurationError
+    from tradingagents.configuration.errors import ConfigurationError
 
     _, store = configured_store(tmp_path)
     store.save(
@@ -231,7 +231,7 @@ def test_submission_null_inheritance_and_source_identity(tmp_path):
 
 
 def test_schema_groups_and_localized_choices_are_discoverable():
-    from tradingagents.application.configuration_catalog import configuration_schema
+    from tradingagents.configuration.catalog import configuration_schema
 
     schema = configuration_schema()
     for field in schema.fields:

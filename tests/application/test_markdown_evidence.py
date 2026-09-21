@@ -1,4 +1,4 @@
-from tradingagents.application.markdown_evidence import normalize_evidence_markdown
+from tradingagents.research.presentation import normalize_evidence_markdown
 
 
 def test_normalizes_inline_refs_and_removes_model_authored_definitions() -> None:

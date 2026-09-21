@@ -6,9 +6,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.jp import edinet_code_map as cm, edinet_common, edinet_holdings
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data.config import bind_config
+from tradingagents.data.jp import edinet_code_map as cm, edinet_common, edinet_holdings
 
 
 def _holding(subject="E02778", *, doc_type="350", filer="ブラックロック・ジャパン株式会社",

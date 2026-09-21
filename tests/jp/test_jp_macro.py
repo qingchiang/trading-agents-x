@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tradingagents.dataflows import fred, jp_macro
-from tradingagents.dataflows.jp import mof_yield
+from tradingagents.data import fred, jp_macro
+from tradingagents.data.jp import mof_yield
 
 _TOKYO = ZoneInfo("Asia/Tokyo")
 

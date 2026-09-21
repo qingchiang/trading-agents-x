@@ -9,9 +9,9 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows import macro_common
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.macro_common import SeriesCache, exact_year_over_year
+from tradingagents.data import macro_common
+from tradingagents.data.config import bind_config
+from tradingagents.data.macro_common import SeriesCache, exact_year_over_year
 
 
 @pytest.mark.unit

@@ -10,8 +10,8 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.alpha_vantage_common as av
-import tradingagents.dataflows.alpha_vantage_fundamentals as avf
+import tradingagents.data.alpha_vantage_common as av
+import tradingagents.data.alpha_vantage_fundamentals as avf
 
 
 class _FakeResponse:

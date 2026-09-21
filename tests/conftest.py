@@ -82,8 +82,8 @@ def _isolate_config():
     import copy
     import tempfile
 
-    import tradingagents.default_config as default_config
-    from tradingagents.dataflows.config import bind_config, reset_config
+    import tradingagents.configuration.defaults as default_config
+    from tradingagents.data.config import bind_config, reset_config
 
     def _fresh(cache_dir):
         cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -103,7 +103,7 @@ def mock_llm_client():
     client = MagicMock()
     client.get_llm.return_value = MagicMock()
     with patch(
-        "tradingagents.llm_clients.factory.create_llm_client",
+        "tradingagents.llm.factory.create_llm_client",
         return_value=client,
     ):
         yield client
@@ -111,7 +111,7 @@ def mock_llm_client():
 
 @pytest.fixture
 def app_settings(tmp_path: Path):
-    from tradingagents.application.settings import AppSettings
+    from tradingagents.configuration.settings import AppSettings
 
     settings = AppSettings.from_env(
         environ={
@@ -129,8 +129,8 @@ def app_settings(tmp_path: Path):
 
 @pytest.fixture
 def repository(app_settings):
-    from tradingagents.application.repository import RunRepository
     from tradingagents.persistence import upgrade_database
+    from tradingagents.persistence.repository import RunRepository
 
     upgrade_database(app_settings)
     from tests.configuration_helpers import initialize_configuration

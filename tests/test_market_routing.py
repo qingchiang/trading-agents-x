@@ -11,10 +11,10 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface, market_context
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data import interface, market_routing as market_context
+from tradingagents.data.config import bind_config
+from tradingagents.domain.vendor_errors import NoMarketDataError, VendorNotConfiguredError
 
 
 def _reset_config():

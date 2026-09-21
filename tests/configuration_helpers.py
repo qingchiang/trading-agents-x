@@ -1,8 +1,9 @@
 """Explicit configuration setup for tests that exercise configured applications."""
 
-from tradingagents.application.configuration import ConfigurationStore, credential_owners
-from tradingagents.application.configuration_models import ConfigurationPatch
+from tradingagents.configuration.models import ConfigurationPatch
+from tradingagents.configuration.resolution import credential_owners
 from tradingagents.persistence import upgrade_database
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
 def initialize_configuration(settings):
@@ -19,7 +20,7 @@ def initialize_configuration(settings):
 
 
 def import_configuration(settings):
-    from tradingagents.application.configuration_models import ImportRequest
+    from tradingagents.configuration.models import ImportRequest
 
     upgrade_database(settings)
     store = ConfigurationStore(settings)

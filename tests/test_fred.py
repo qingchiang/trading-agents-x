@@ -9,10 +9,10 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
+import tradingagents.configuration.defaults as default_config
 from tradingagents.credentials import use_credentials
-from tradingagents.dataflows import fred, interface, macro_common
-from tradingagents.dataflows.config import bind_config
+from tradingagents.data import fred, interface, macro_common
+from tradingagents.data.config import bind_config
 
 # A small, stable set of observations to format against.
 _META = {

@@ -10,15 +10,16 @@ from pathlib import Path
 from zipfile import ZipFile
 
 _REQUIRED_FILES = {
-    "cli/main.py",
-    "tradingagents/application/configuration.py",
+    "tradingagents/cli/main.py",
+    "tradingagents/persistence/configuration.py",
     "tradingagents/application/submissions.py",
-    "tradingagents/application/model_connections.py",
+    "tradingagents/llm/models.py",
     "tradingagents/persistence/alembic/versions/0012_model_connections.py",
     "tradingagents/persistence/alembic/versions/0013_submission_identity.py",
     "tradingagents/persistence/alembic/versions/0011_application_configuration.py",
     "tradingagents/client.py",
-    "tradingagents/graph/research_graph.py",
+    "tradingagents/research/full/workflow.py",
+    "tradingagents/data/data/edinet_code_map.json",
     "tradingagents/persistence/alembic/versions/0001_markdown_research.py",
     "tradingagents/web/static/index.html",
 }
@@ -155,7 +156,7 @@ def verify(wheel: Path) -> None:
             name for name in names if name.endswith(".dist-info/entry_points.txt")
         )
         entry_points = archive.read(entry_points_name).decode("utf-8")
-        if "tradingagents = cli.main:app" not in entry_points:
+        if "tradingagents = tradingagents.cli.main:app" not in entry_points:
             raise ValueError("wheel is missing the tradingagents CLI entry point")
 
 

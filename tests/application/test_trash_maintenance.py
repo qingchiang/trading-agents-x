@@ -7,20 +7,14 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import (
-    analyst_report,
-    research_decision,
-)
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    EvidenceBundle,
-    EvidenceItem,
-    ResearchArtifactDraft,
-    RunStatus,
-)
-from tradingagents.application.database import (
+from tests.factories import analyst_report, research_decision
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.domain.artifacts import ResearchArtifactDraft
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence._repository_common import RunNotFoundError
+from tradingagents.persistence.models import (
     DecisionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
@@ -28,8 +22,6 @@ from tradingagents.application.database import (
     RunEvidenceRecord,
     RunRecord,
 )
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import RunNotFoundError
 
 
 def _cancel_and_trash(repository, app_settings, ticker: str):

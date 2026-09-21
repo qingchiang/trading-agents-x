@@ -2,12 +2,12 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 
-from tradingagents.dataflows import y_finance
+from tradingagents.data import y_finance
 
 
 def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeypatch):
-    from tradingagents.dataflows import symbol_utils
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data.source_observations import capture_observations
+    from tradingagents.domain import instruments as symbol_utils
 
     class MarketClock(datetime):
         @classmethod
@@ -37,8 +37,8 @@ def test_us_statement_exposes_period_values_without_claiming_filing_date(monkeyp
 
 def test_china_statement_observations_retain_visibility_and_cumulative_basis(monkeypatch):
     from tests.cn.test_cn_statements import _frame
-    from tradingagents.dataflows.cn import cn_statements
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data.cn import cn_statements
+    from tradingagents.data.source_observations import capture_observations
 
     monkeypatch.setattr(cn_statements, "fetch_finance_records", lambda *_: ("600309.SS", _frame()))
     monkeypatch.setattr(cn_statements, "get_company_profile", lambda _: pd.DataFrame())
@@ -51,8 +51,8 @@ def test_china_statement_observations_retain_visibility_and_cumulative_basis(mon
 
 
 def test_japan_margin_publishes_conservative_release_date(monkeypatch):
-    from tradingagents.dataflows.jp import jquants_sentiment
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data.jp import jquants_sentiment
+    from tradingagents.data.source_observations import capture_observations
 
     monkeypatch.setattr(
         jquants_sentiment,
@@ -70,9 +70,9 @@ def test_japan_margin_publishes_conservative_release_date(monkeypatch):
 
 def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.application.incremental_collection import normalize_incremental_collection
-    from tradingagents.dataflows.incremental_us import collect_us_incremental
+    from tradingagents.data.incremental_us import collect_us_incremental
     from tradingagents.provenance import ProvenanceRecord, attach_provenance
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     class Stock:
         quarterly_cashflow = pd.DataFrame(
@@ -113,14 +113,11 @@ def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch)
 
 def test_professional_signal_enters_incremental_and_full_with_same_identity(monkeypatch):
     from tests.dataflows.test_incremental_jp_collector import _request
-    from tradingagents.application.incremental_collection import normalize_incremental_collection
-    from tradingagents.dataflows import incremental_jp
-    from tradingagents.dataflows.market_signals import (
-        FetchedSentimentSignal,
-        sentiment_signal_specs,
-    )
-    from tradingagents.dataflows.source_observations import SourceObservation
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data import incremental_jp
+    from tradingagents.data.market_signals import FetchedSentimentSignal, sentiment_signal_specs
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     observed = SourceObservation(
         "J-Quants",
@@ -158,8 +155,8 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
 
 
 def test_financial_release_keeps_older_comparative_periods_as_context():
-    from tradingagents.dataflows.financial_inputs import collect_financial_inputs
-    from tradingagents.dataflows.source_observations import publish_observation
+    from tradingagents.data.financial_inputs import collect_financial_inputs
+    from tradingagents.data.source_observations import publish_observation
 
     def route(method, *_args, **_kwargs):
         if method == "get_income_statement":
@@ -177,9 +174,9 @@ def test_financial_release_keeps_older_comparative_periods_as_context():
 
 
 def test_financial_rate_limit_preserves_an_earlier_success():
-    from tradingagents.dataflows.errors import VendorRateLimitError
-    from tradingagents.dataflows.financial_inputs import collect_financial_inputs
-    from tradingagents.dataflows.source_observations import publish_observation
+    from tradingagents.data.financial_inputs import collect_financial_inputs
+    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.domain.vendor_errors import VendorRateLimitError
 
     calls = []
     def route(method, *_args, **_kwargs):
@@ -197,9 +194,9 @@ def test_financial_rate_limit_preserves_an_earlier_success():
 
 def test_cn_news_signal_deduplication_preserves_valid_domain_contracts():
     from tests.dataflows.test_incremental_cn_collector import _request
-    from tradingagents.application.contracts import CollectionDiagnostic, CollectionDomainResult
-    from tradingagents.dataflows.incremental_inputs import augment_domain, dedupe_news_domains
-    from tradingagents.dataflows.source_observations import SourceObservation
+    from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
 
     request = _request(enabled_domains=("news", "social"))
     observed = SourceObservation("CNINFO", "news_article", "record-1",
@@ -223,9 +220,9 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
 
     import pytest
 
-    from tradingagents.application.contracts import EvidenceBundle
-    from tradingagents.dataflows.source_observations import SourceObservation
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.evidence import EvidenceBundle
+    from tradingagents.research.full.workflow import _collect_evidence
 
     observation = SourceObservation("J-Quants", "financial_income", "9984.T:2026-06-30",
                                     {"Revenue": 100}, datetime(2026, 9, 5, tzinfo=UTC),
@@ -241,19 +238,12 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
 def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
     from langchain_core.messages import ToolMessage
 
-    from tradingagents.dataflows import interface
-    from tradingagents.dataflows.config import get_config, use_config
-    from tradingagents.dataflows.errors import NoMarketDataError
-    from tradingagents.dataflows.news_selection import (
-        NewsCandidate,
-        finalize_news,
-        render_candidate,
-    )
-    from tradingagents.dataflows.source_observations import (
-        capture_observations,
-        publish_observation,
-    )
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data import interface
+    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.news_selection import NewsCandidate, finalize_news, render_candidate
+    from tradingagents.data.source_observations import capture_observations, publish_observation
+    from tradingagents.domain.vendor_errors import NoMarketDataError
+    from tradingagents.research.full.workflow import _collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     def failed(*_a, **_k):
@@ -277,13 +267,10 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
 
 
 def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
-    from tradingagents.dataflows import interface
-    from tradingagents.dataflows.config import get_config, use_config
-    from tradingagents.dataflows.errors import NoMarketDataError
-    from tradingagents.dataflows.source_observations import (
-        capture_observations,
-        publish_observation,
-    )
+    from tradingagents.data import interface
+    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.source_observations import capture_observations, publish_observation
+    from tradingagents.domain.vendor_errors import NoMarketDataError
 
     def failed(*_a, **_k):
         raise NoMarketDataError("GOOG")
@@ -298,16 +285,16 @@ def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
 
 def test_cn_news_deduplication_preserves_failures_for_partial_and_empty_social():
     from tests.dataflows.test_incremental_cn_collector import _request
-    from tradingagents.application.contracts import (
+    from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.collection import (
         CollectionDiagnostic,
         CollectionDomainResult,
         CollectionSourceProvenance,
         CollectionSummary,
-        IncrementalCollectionResult,
     )
-    from tradingagents.application.incremental_collection import normalize_incremental_collection
-    from tradingagents.dataflows.incremental_inputs import augment_domain, dedupe_news_domains
-    from tradingagents.dataflows.source_observations import SourceObservation
+    from tradingagents.domain.incremental import IncrementalCollectionResult
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     request = _request(enabled_domains=("news", "social"))
     retrieved = datetime(2026, 7, 24, tzinfo=UTC)
@@ -355,11 +342,12 @@ def test_full_structured_near_live_guard_covers_each_ingress():
 
     from langchain_core.messages import ToolMessage
 
-    from tradingagents.application.contracts import AnalysisRequest, EvidenceItem
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_selection import NewsCandidate, render_candidate
-    from tradingagents.dataflows.source_observations import SourceObservation, publish_observation
-    from tradingagents.graph.research_graph import ResearchGraph, _collect_evidence
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_selection import NewsCandidate, render_candidate
+    from tradingagents.data.source_observations import SourceObservation, publish_observation
+    from tradingagents.domain.evidence import EvidenceItem
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.research.full.workflow import ResearchGraph, _collect_evidence
 
     retrieved = datetime(2026, 9, 5, 10, tzinfo=UTC)
     cutoff = date(2020, 1, 2)
@@ -395,9 +383,9 @@ def test_full_structured_near_live_guard_covers_each_ingress():
 def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit():
     from datetime import timedelta
 
-    from tradingagents.dataflows.source_observations import SourceObservation
-    from tradingagents.dataflows.symbol_utils import market_timezone
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.instruments import market_timezone
+    from tradingagents.research.full.workflow import _collect_evidence
 
     # The same instant falls on different US and Asian calendar dates.
     retrieved = datetime(2026, 9, 5, 1, tzinfo=UTC)

@@ -6,14 +6,12 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.default_config as default_config
-from tradingagents.agents.analysts.fundamentals_analyst import (
-    create_fundamentals_analyst,
-)
-from tradingagents.agents.analysts.market_analyst import create_market_analyst
-from tradingagents.dataflows.config import bind_config
-from tradingagents.graph.research_graph import _collect_evidence
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data.config import bind_config
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research.analysts.fundamentals_analyst import create_fundamentals_analyst
+from tradingagents.research.analysts.market_analyst import create_market_analyst
+from tradingagents.research.full.workflow import _collect_evidence
 
 
 @pytest.fixture(autouse=True)

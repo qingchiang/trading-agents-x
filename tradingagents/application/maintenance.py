@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from .repository import RunRepository
-from .settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.persistence.repository import RunRepository
 
 TRASH_MAINTENANCE_INTERVAL_SECONDS = 24 * 60 * 60
 TRASH_MAINTENANCE_RETRY_SECONDS = 60 * 60
@@ -33,7 +33,7 @@ class TrashMaintenance:
 
     def run_once(self) -> int:
         """Purge all trashed runs expired at this maintenance cycle's cutoff."""
-        from .configuration import ConfigurationStore
+        from tradingagents.persistence.configuration import ConfigurationStore
         configuration = ConfigurationStore(self.settings).read()
         if not configuration.initialized:
             return 0

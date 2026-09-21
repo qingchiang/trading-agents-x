@@ -9,8 +9,8 @@ from unittest import mock
 import pytest
 
 from tradingagents.credentials import use_credentials
-from tradingagents.dataflows import estat
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.data import estat
+from tradingagents.domain.vendor_errors import NoMarketDataError
 
 
 def _root(values):

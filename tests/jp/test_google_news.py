@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.jp import google_news as gn
+from tradingagents.data.jp import google_news as gn
 
 
 def _rss(*items: str) -> bytes:

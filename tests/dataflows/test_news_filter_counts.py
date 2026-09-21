@@ -7,7 +7,7 @@ import pytest
 
 @pytest.mark.parametrize("source", ["disclosure", "research"])
 def test_cn_source_counts_survive_shared_memory_cache(source, monkeypatch):
-    from tradingagents.dataflows.cn import news_sources
+    from tradingagents.data.cn import news_sources
 
     news_sources._clear_feed_cache()
     monkeypatch.setattr(news_sources, "_cninfo_org_ids", lambda: {"600309": "org"})
@@ -39,8 +39,8 @@ def test_cn_source_counts_survive_shared_memory_cache(source, monkeypatch):
 
 
 def test_edinet_counts_cover_security_filter_and_source_cap(monkeypatch):
-    from tradingagents.dataflows.config import get_config, use_config
-    from tradingagents.dataflows.jp import edinet_news
+    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.jp import edinet_news
 
     rows = [
         {"secCode": "99840", "docDescription": "one", "submitDateTime": "2026-09-03 10:00", "docID": "1"},
@@ -58,8 +58,8 @@ def test_edinet_counts_cover_security_filter_and_source_cap(monkeypatch):
 
 def test_tdnet_counts_cover_parse_date_security_and_cap(monkeypatch):
     from tests.jp.test_tdnet_news import _page, _row
-    from tradingagents.dataflows.config import get_config, use_config
-    from tradingagents.dataflows.jp import tdnet_news
+    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.jp import tdnet_news
 
     page = _page(_row(when="2026/09/03 10:00", title="one"),
                  _row(when="2026/09/03 11:00", title="two"),

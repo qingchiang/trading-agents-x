@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from tradingagents.dataflows.lookahead import is_near_live
+from tradingagents.data.lookahead import is_near_live
 
 
 @pytest.mark.unit

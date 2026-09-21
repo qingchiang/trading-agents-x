@@ -9,8 +9,8 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows import boj
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.data import boj
+from tradingagents.domain.vendor_errors import NoMarketDataError
 
 
 def _body(survey_dates, values, unit="percent per annum", freq="DAILY"):

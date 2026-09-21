@@ -4,9 +4,9 @@ from datetime import date, timedelta
 from typing import Any
 
 from tests.factories import analyst_report
-from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
-from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.graph.role_context import RoleContextBuilder
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.evidence_tables import extract_evidence_tables
+from tradingagents.research.synthesis.role_context import RoleContextBuilder
 
 
 def _state(rows: int = 200) -> dict[str, Any]:

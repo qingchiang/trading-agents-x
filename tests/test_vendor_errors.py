@@ -8,20 +8,20 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface
-from tradingagents.dataflows.alpha_vantage_common import (
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data import interface
+from tradingagents.data.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
     AlphaVantageRateLimitError,
 )
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.errors import (
+from tradingagents.data.config import bind_config
+from tradingagents.data.fred import FredNotConfiguredError
+from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.dataflows.fred import FredNotConfiguredError
 
 
 @pytest.mark.unit
@@ -42,9 +42,7 @@ class HierarchyTests(unittest.TestCase):
         self.assertTrue(issubclass(FredNotConfiguredError, ValueError))
 
     def test_symbol_utils_reexports_no_market_data_error(self):
-        from tradingagents.dataflows.symbol_utils import (
-            NoMarketDataError as ReExported,
-        )
+        from tradingagents.domain.instruments import NoMarketDataError as ReExported
         self.assertIs(ReExported, NoMarketDataError)
 
 

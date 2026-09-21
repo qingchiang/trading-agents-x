@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from tradingagents.application.contracts import AnalysisRequest, RunStatus
 from tradingagents.application.worker import AnalysisWorker
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.runs import AnalysisRequest
 
 
 class _Service:
     def __init__(self, repository):
         self.repository = repository
-        from tradingagents.application.configuration import ConfigurationStore
+        from tradingagents.persistence.configuration import ConfigurationStore
         self.configuration = ConfigurationStore(repository.settings)
         self.executed = []
 

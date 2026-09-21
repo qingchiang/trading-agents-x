@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from tradingagents.application.contracts import (
-    ArtifactGenerationMethod,
-    RunEvent,
-)
-from tradingagents.application.recoveries import rebuild_structured_recoveries
+from tradingagents.domain.common import ArtifactGenerationMethod
+from tradingagents.domain.recoveries import rebuild_structured_recoveries
+from tradingagents.domain.runs import RunEvent
 
 
 def _event(

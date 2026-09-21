@@ -806,19 +806,31 @@ public Python API. Specialized contracts remain owned by their subsystem
 modules.
 
 - Public API: `tradingagents/client.py`,
-  `tradingagents/application/contracts.py`
+  `tradingagents/domain/runs.py` and `tradingagents/domain/decision.py`
 - Lifecycle: `tradingagents/application/service.py`
 - Worker: `tradingagents/application/worker.py`
-- Repository/schema: `tradingagents/application/repository.py`,
-  `tradingagents/application/database.py`
+- Repository/schema: `tradingagents/persistence/repository.py`,
+  `tradingagents/persistence/models.py`
+- Configuration documents and resolution: `tradingagents/configuration/`
+- Configuration persistence: `tradingagents/persistence/configuration.py`
+- Model protocols and construction: `tradingagents/llm/`
 - Migrations: `tradingagents/persistence/`
-- Graph: `tradingagents/graph/research_graph.py`
-- Agent tools: `tradingagents/agents/utils/`
+- Graph: `tradingagents/research/full/workflow.py`
+- Analysts, tools, prompts and state: `tradingagents/research/`
+- Incremental synthesis and recovery: `tradingagents/research/incremental/synthesis.py`
+- CLI: `tradingagents/cli/`
 - HTTP/security: `tradingagents/web/`
 - React application: `frontend/`
-- Routing: `tradingagents/dataflows/interface.py`
-- Japan/China: `tradingagents/dataflows/jp/`,
-  `tradingagents/dataflows/cn/`
+- Routing: `tradingagents/data/interface.py`
+- Japan/China: `tradingagents/data/jp/`,
+  `tradingagents/data/cn/`
+
+The domain package owns typed research contracts and pure rules; it does not
+import application orchestration, persistence, market adapters or SDK clients.
+Research receives a scoped runtime context and explicit artifact/evidence sinks.
+The repository composes private execution, research-write, Timeline-query,
+artifact and lifecycle operations over a shared session factory. Operations that
+commit a research result retain their complete transaction boundary.
 
 ### Research workspace presentation
 

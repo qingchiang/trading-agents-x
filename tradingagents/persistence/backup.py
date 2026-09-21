@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 
 
 def backup_sqlite_database(settings: AppSettings, destination: Path) -> Path:

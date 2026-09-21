@@ -4,7 +4,7 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.jp import company_info as ci, jquants_common
+from tradingagents.data.jp import company_info as ci, jquants_common
 
 
 def _patch(records=None, side_effect=None):

@@ -1,11 +1,11 @@
 import json
 from datetime import UTC, date, datetime
 
-from tradingagents.dataflows.macro_common import SeriesCache
+from tradingagents.data.macro_common import SeriesCache
 
 
 def test_macro_cache_preserves_original_retrieval_across_instances(tmp_path, monkeypatch):
-    from tradingagents.dataflows.config import get_config, use_config
+    from tradingagents.data.config import get_config, use_config
 
     with use_config({**get_config(), "data_cache_dir": str(tmp_path)}):
         data = {"points": [("2026-08-01", "2.5")]}
@@ -20,9 +20,9 @@ def test_macro_cache_preserves_original_retrieval_across_instances(tmp_path, mon
 def test_same_structured_observation_does_not_advance_after_refresh():
     from dataclasses import replace
 
-    from tradingagents.application.contracts import PerformanceComponent, PerformanceObservation
-    from tradingagents.application.incremental_collection import assess_information_advancement
-    from tradingagents.dataflows.source_observations import SourceObservation
+    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
+    from tradingagents.research.incremental.collection import assess_information_advancement
 
     original = SourceObservation("FRED", "macro_indicator", "rate", {"value": 4.5},
                                  datetime(2026, 9, 4, tzinfo=UTC))
@@ -37,10 +37,10 @@ def test_same_structured_observation_does_not_advance_after_refresh():
 
 
 def test_macro_window_display_change_reaches_evidence_without_advancing(monkeypatch):
-    from tradingagents.application.contracts import PerformanceComponent, PerformanceObservation
-    from tradingagents.application.incremental_collection import assess_information_advancement
-    from tradingagents.dataflows import fred, macro_panel
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data import fred, macro_panel
+    from tradingagents.data.source_observations import capture_observations
+    from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
+    from tradingagents.research.incremental.collection import assess_information_advancement
 
     retrieved_at = datetime(2026, 9, 5, tzinfo=UTC)
 
@@ -76,10 +76,10 @@ def test_macro_window_display_change_reaches_evidence_without_advancing(monkeypa
 
 
 def test_exact_yoy_comparator_reaches_evidence_and_revision_advances(monkeypatch):
-    from tradingagents.application.contracts import PerformanceComponent, PerformanceObservation
-    from tradingagents.application.incremental_collection import assess_information_advancement
-    from tradingagents.dataflows import fred, macro_panel
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data import fred, macro_panel
+    from tradingagents.data.source_observations import capture_observations
+    from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
+    from tradingagents.research.incremental.collection import assess_information_advancement
 
     def produce(base_value):
         monkeypatch.setattr(
@@ -121,9 +121,9 @@ def test_exact_yoy_comparator_reaches_evidence_and_revision_advances(monkeypatch
 
 def test_partial_background_preserves_cached_time_and_failed_source(monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.application.contracts import CollectionDiagnostic, CollectionDomainResult
-    from tradingagents.dataflows import incremental_inputs
-    from tradingagents.dataflows.source_observations import publish_observation
+    from tradingagents.data import incremental_inputs
+    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
     from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
     request = _request(enabled_domains=("news",))
@@ -146,9 +146,9 @@ def test_optional_input_failures_remain_visible_without_erasing_success(monkeypa
     from types import SimpleNamespace
 
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.application.contracts import CollectionDiagnostic, CollectionDomainResult
-    from tradingagents.dataflows import incremental_inputs
-    from tradingagents.dataflows.source_observations import SourceObservation, publish_observation
+    from tradingagents.data import incremental_inputs
+    from tradingagents.data.source_observations import SourceObservation, publish_observation
+    from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
 
     request = _request()
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
@@ -178,10 +178,10 @@ def test_structured_news_keeps_source_limits_through_three_market_admission(monk
         test_incremental_jp_collector as jp,
         test_incremental_us_collector as us,
     )
-    from tradingagents.application.incremental_collection import normalize_incremental_collection
-    from tradingagents.dataflows import incremental_inputs
-    from tradingagents.dataflows.source_observations import publish_observation
+    from tradingagents.data import incremental_inputs
+    from tradingagents.data.source_observations import publish_observation
     from tradingagents.provenance import ProvenanceRecord, attach_provenance
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: "")

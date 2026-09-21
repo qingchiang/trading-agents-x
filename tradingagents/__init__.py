@@ -1,12 +1,9 @@
-from .application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationObservation,
-    ResearchDecision,
-    RunProfile,
-)
-from .client import TradingAgents
-from .version import __version__
+from tradingagents.client import TradingAgents
+from tradingagents.domain.artifacts import ArtifactGenerationObservation
+from tradingagents.domain.common import RunProfile
+from tradingagents.domain.decision import ResearchDecision
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.version import __version__
 
 __all__ = [
     "AnalysisRequest",

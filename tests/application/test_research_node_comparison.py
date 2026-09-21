@@ -8,18 +8,12 @@ from sqlalchemy import select
 from tests.application.test_cycle_trash_lifecycle import _commit_node, _warning_products
 from tests.application.test_service import _equity_resolver, _Graph
 from tests.research_helpers import stub_run_llms
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    ResearchNodeComparisonSelection,
-    RunStatus,
-)
-from tradingagents.application.database import (
-    DecisionRecord,
-    ResearchNodeRecord,
-    RunRecord,
-)
-from tradingagents.application.errors import InvalidResearchNodeComparisonError
 from tradingagents.application.service import AnalysisService
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.errors import InvalidResearchNodeComparisonError
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.domain.timeline import ResearchNodeComparisonSelection
+from tradingagents.persistence.models import DecisionRecord, ResearchNodeRecord, RunRecord
 
 
 def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(

@@ -13,10 +13,10 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.interface import route_to_vendor
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
+from tradingagents.data.config import bind_config
+from tradingagents.data.interface import route_to_vendor
 from tradingagents.provenance import extract_provenance
 
 

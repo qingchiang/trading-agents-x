@@ -9,12 +9,12 @@ import pandas as pd
 import pytest
 import requests
 
-import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface, stockstats_utils, y_finance
-from tradingagents.dataflows.cn import akshare_indicator, akshare_stock, calendar, common
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+import tradingagents.configuration.defaults as default_config
+from tradingagents.data import interface, stockstats_utils, y_finance
+from tradingagents.data.cn import akshare_indicator, akshare_stock, calendar, common
+from tradingagents.data.config import bind_config
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.provenance import extract_provenance, provenance_quality_issues
 
 
@@ -404,7 +404,7 @@ def test_reversed_date_range_fails_loud():
 
 @pytest.mark.unit
 def test_yfinance_fallback_uses_exact_mainland_freshness(monkeypatch):
-    from tradingagents.dataflows.cn import calendar
+    from tradingagents.data.cn import calendar
 
     monkeypatch.setattr(
         calendar, "effective_trade_date", lambda _value: date(2026, 7, 17)
@@ -467,7 +467,7 @@ def test_mainland_freshness_rejects_a_row_after_completed_session(monkeypatch):
 
 @pytest.mark.unit
 def test_yfinance_fallback_fails_closed_when_calendar_is_unavailable(monkeypatch):
-    from tradingagents.dataflows.cn import calendar
+    from tradingagents.data.cn import calendar
 
     monkeypatch.setattr(
         calendar,

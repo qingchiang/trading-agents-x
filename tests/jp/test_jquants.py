@@ -12,23 +12,23 @@ import pandas as pd
 import pytest
 import requests
 
-import tradingagents.default_config as default_config
+import tradingagents.configuration.defaults as default_config
 from tradingagents.credentials import use_credentials
-from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import bind_config
-from tradingagents.dataflows.errors import (
-    NoMarketDataError,
-    VendorNotConfiguredError,
-    VendorRateLimitError,
-)
-from tradingagents.dataflows.jp import jquants_common, jquants_stock
-from tradingagents.dataflows.jp.jquants_common import (
+from tradingagents.data import interface
+from tradingagents.data.config import bind_config
+from tradingagents.data.jp import jquants_common, jquants_stock
+from tradingagents.data.jp.jquants_common import (
     JQuantsNotConfiguredError,
     JQuantsRateLimitError,
     from_jquants_code,
     to_jquants_code,
 )
-from tradingagents.dataflows.jp.jquants_stock import get_stock
+from tradingagents.data.jp.jquants_stock import get_stock
+from tradingagents.domain.vendor_errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
 
 
 class FakeResp:
@@ -94,7 +94,7 @@ class StockFetchTests(unittest.TestCase):
 
     def _patch_records(self, records):
         return mock.patch(
-            "tradingagents.dataflows.jp.jquants_common.fetch_records",
+            "tradingagents.data.jp.jquants_common.fetch_records",
             return_value=records,
         )
 
@@ -132,7 +132,7 @@ class StockFetchTests(unittest.TestCase):
         # The get_indicators tool calls the vendor once per indicator over the
         # same window; only the first should hit the API.
         mock_fetch = mock.Mock(return_value=[_quote("2026-06-23", 100.0)])
-        with mock.patch("tradingagents.dataflows.jp.jquants_common.fetch_records", mock_fetch):
+        with mock.patch("tradingagents.data.jp.jquants_common.fetch_records", mock_fetch):
             jquants_stock._fetch_ohlcv_frame("9984.T", "2026-06-20", "2026-06-23")
             jquants_stock._fetch_ohlcv_frame("9984.T", "2026-06-20", "2026-06-23")
         mock_fetch.assert_called_once()
@@ -149,7 +149,7 @@ class StockFetchTests(unittest.TestCase):
         self.assertEqual(df["High"].tolist(), [101.0, 101.0])  # filled from prior day
 
     def test_get_indicator_renders_window(self):
-        from tradingagents.dataflows.jp.jquants_indicator import get_indicator
+        from tradingagents.data.jp.jquants_indicator import get_indicator
 
         dates = pd.bdate_range(end="2026-06-23", periods=60)
         records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
@@ -254,7 +254,7 @@ class RoutingTests(unittest.TestCase):
         yf = mock.Mock(return_value="YFINANCE_ADJUSTED")
         with (
             mock.patch(
-                "tradingagents.dataflows.jp.jquants_common.fetch_records",
+                "tradingagents.data.jp.jquants_common.fetch_records",
                 return_value=records,
             ),
             mock.patch.dict(

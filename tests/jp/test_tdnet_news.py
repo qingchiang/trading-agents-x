@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from tradingagents.dataflows.jp import http_util, tdnet_news as td
+from tradingagents.data.jp import http_util, tdnet_news as td
 
 
 def _row(code="72030", title="2026年3月期決算短信", pdf="/inbs/140120260710590974.pdf",
@@ -214,7 +214,7 @@ class GetNewsTests(unittest.TestCase):
 @pytest.mark.unit
 class RegistrationTests(unittest.TestCase):
     def test_tdnet_news_registered_for_get_news(self):
-        from tradingagents.dataflows import interface
+        from tradingagents.data import interface
         self.assertIn("tdnet_news", interface.VENDOR_METHODS["get_news"])
         self.assertIn("tdnet_news", interface.VENDOR_LIST)
 

@@ -4,7 +4,7 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows import cn_macro, macro
+from tradingagents.data import cn_macro, macro
 
 
 @pytest.fixture(autouse=True)

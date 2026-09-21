@@ -9,40 +9,46 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from tests.factories import analyst_report, research_decision
-from tradingagents.application.contracts import (
+from tradingagents.domain.common import (
     ArtifactGenerationMethod,
-    AuditedRangeEndpoint,
-    CalculationRecord,
-    DebateAgenda,
     DebateImportance,
-    DebateIssue,
-    EvidenceBundle,
-    EvidenceItem,
-    EvidenceOrigin,
-    EvidenceQuality,
-    EvidenceTemporalScope,
-    EvidenceValueLocator,
-    JudgeDraft,
-    MarketReferenceBasis,
-    MarketReferenceLevel,
-    MeasurementKind,
     NumericAuditAppendixStatus,
     NumericAuditStatus,
     NumericCalculationStatus,
     NumericDisplayScale,
     NumericDisplayStatus,
-    NumericTemporalBasis,
-    RebuttalReview,
     ReportLanguage,
     ResearchScenarioKind,
-    RiskReview,
-    RiskReviewAdjustment,
     ScenarioReferenceCategory,
+)
+from tradingagents.domain.decision import (
+    AuditedRangeEndpoint,
+    CalculationRecord,
+    EvidenceValueLocator,
+    MarketReferenceLevel,
+    NumericTemporalBasis,
+    RiskReviewAdjustment,
     ScenarioReferenceRange,
     ValuationAssessment,
 )
-from tradingagents.application.metrics import MetricsCallback
-from tradingagents.graph.deliberation import (
+from tradingagents.domain.evidence import (
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceOrigin,
+    EvidenceQuality,
+    EvidenceTemporalScope,
+    MeasurementKind,
+)
+from tradingagents.domain.numeric_audit import MarketReferenceBasis
+from tradingagents.domain.reports import (
+    DebateAgenda,
+    DebateIssue,
+    JudgeDraft,
+    RebuttalReview,
+    RiskReview,
+)
+from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.synthesis.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
@@ -75,9 +81,9 @@ from tradingagents.graph.deliberation import (
     invoke_risk_review,
     write_research_markdown,
 )
-from tradingagents.graph.numeric_evidence import build_numeric_value_catalog
-from tradingagents.graph.output_validation import OutputValidationError
-from tradingagents.graph.structured_output import (
+from tradingagents.research.synthesis.numeric_evidence import build_numeric_value_catalog
+from tradingagents.research.synthesis.output_validation import OutputValidationError
+from tradingagents.research.synthesis.structured_output import (
     StructuredOutputError,
     StructuredOutputFailure,
 )
@@ -4212,7 +4218,7 @@ def test_numeric_audit_snapshot_redacts_secrets_and_omits_oversize_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "tradingagents.graph.deliberation._NUMERIC_CANDIDATE_MAX_BYTES",
+        "tradingagents.research.synthesis.deliberation._NUMERIC_CANDIDATE_MAX_BYTES",
         32,
     )
     snapshot = _numeric_audit_snapshot(

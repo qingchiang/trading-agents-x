@@ -8,19 +8,20 @@ from sqlalchemy import text
 from yfinance.exceptions import YFRateLimitError
 
 from tests.research_helpers import stub_run_llms
-from tradingagents.application.contracts import AnalysisRequest, RunStatus
-from tradingagents.application.database import RunRecord
-from tradingagents.application.errors import (
+from tradingagents.application.service import AnalysisService
+from tradingagents.client import TradingAgents
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.data import instrument_identity as identity_dataflow
+from tradingagents.data.config import get_config
+from tradingagents.data.instrument_identity import resolve_instrument_eligibility
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.errors import (
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
 )
-from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
-from tradingagents.client import TradingAgents
-from tradingagents.dataflows import instrument_identity as identity_dataflow
-from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.errors import VendorError, VendorRateLimitError
-from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.domain.vendor_errors import VendorError, VendorRateLimitError
+from tradingagents.persistence.models import RunRecord
 
 
 def _request(ticker: str = "NVDA") -> AnalysisRequest:
@@ -34,9 +35,10 @@ def _with_eligibility_vendor(
     from sqlalchemy.orm import Session
 
     from tests.configuration_helpers import initialize_configuration
-    from tradingagents.application.configuration import ConfigurationError, ConfigurationStore
-    from tradingagents.application.configuration_models import ConfigurationPatch
-    from tradingagents.application.database import ConfigurationRecord
+    from tradingagents.configuration.errors import ConfigurationError
+    from tradingagents.configuration.models import ConfigurationPatch
+    from tradingagents.persistence.configuration import ConfigurationStore
+    from tradingagents.persistence.models import ConfigurationRecord
     initialize_configuration(app_settings)
     store = ConfigurationStore(app_settings)
     routes = {**store.read().values.data_vendors, "instrument_eligibility": vendor}

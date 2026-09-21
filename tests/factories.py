@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from tradingagents.application.contracts import (
+from tradingagents.domain.common import (
+    ResearchConfidenceLevel,
+    ResearchRating,
+    ResearchScenarioKind,
+)
+from tradingagents.domain.decision import ResearchDecision, ResearchScenario, RiskReviewAdjustment
+from tradingagents.domain.reports import (
     AnalystClaimType,
     AnalystReport,
     ClaimImportance,
@@ -12,13 +18,7 @@ from tradingagents.application.contracts import (
     ReportAuditStatus,
     ReportSection,
     ResearchCase,
-    ResearchConfidenceLevel,
-    ResearchDecision,
-    ResearchRating,
-    ResearchScenario,
-    ResearchScenarioKind,
     ResearchWarning,
-    RiskReviewAdjustment,
 )
 
 _DEFAULT_REF = "ev_0123456789ab"

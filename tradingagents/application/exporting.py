@@ -12,27 +12,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from tradingagents.application.markdown_evidence import normalize_evidence_markdown
-from tradingagents.application.numeric_display import format_decision_number
-
-from .contracts import (
+from tradingagents.domain.artifacts import ResearchArtifactContent
+from tradingagents.domain.common import ReportLanguage
+from tradingagents.domain.decision import ResearchDecision
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceTable
+from tradingagents.domain.evidence_tables import group_evidence_by_content
+from tradingagents.domain.history import RunExport
+from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
+from tradingagents.domain.numeric_display import format_decision_number
+from tradingagents.domain.reports import (
     AnalystReport,
     DebateAgenda,
     DecisionBrief,
-    DecisionNumericAuditAppendix,
-    EvidenceBundle,
-    EvidenceTable,
     JudgeDraft,
     RebuttalReview,
-    ReportLanguage,
-    ResearchArtifactContent,
     ResearchCase,
-    ResearchDecision,
     ResearchWarning,
     RiskReview,
-    RunExport,
 )
-from .evidence import group_evidence_by_content
+from tradingagents.research.presentation import normalize_evidence_markdown
 
 
 @dataclass(frozen=True)

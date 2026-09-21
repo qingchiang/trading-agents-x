@@ -11,36 +11,17 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import (
-    FastAPI,
-    Header,
-    HTTPException,
-    Path as PathParam,
-    Query,
-    Request,
-    Response,
-)
+from fastapi import FastAPI, Header, HTTPException, Path as PathParam, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from tradingagents.application.contracts import (
-    AnalysisCutoffContext,
-    EvidenceBundle,
-    RecentInstrument,
-    ResearchArtifact,
-    ResearchNodeComparison,
-    ResearchTimelinePage,
-    RunEvent,
-    RunGroupPage,
-    RunLifecyclePreview,
-    RunPage,
-    RunStatus,
-    RunTrashState,
-    RunView,
-    report_language_value,
-)
-from tradingagents.application.errors import (
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.application.service import AnalysisService
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.artifacts import ResearchArtifact
+from tradingagents.domain.common import RunStatus, RunTrashState, report_language_value
+from tradingagents.domain.errors import (
     FutureAnalysisCutoffError,
     IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
@@ -48,8 +29,16 @@ from tradingagents.application.errors import (
     InvalidResearchNodeComparisonError,
     UnsupportedInstrumentError,
 )
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import (
+from tradingagents.domain.evidence import EvidenceBundle
+from tradingagents.domain.history import RecentInstrument, RunGroupPage, RunPage
+from tradingagents.domain.runs import AnalysisCutoffContext, RunEvent, RunView
+from tradingagents.domain.timeline import (
+    ResearchNodeComparison,
+    ResearchTimelinePage,
+    RunLifecyclePreview,
+)
+from tradingagents.llm.model_discovery import ModelDiscoveryService, UnknownProviderError
+from tradingagents.persistence._repository_common import (
     ArtifactConflictError,
     EvidenceConflictError,
     EvidenceNotSealedError,
@@ -58,16 +47,9 @@ from tradingagents.application.repository import (
     InvalidRunTransitionError,
     RunNotFoundError,
 )
-from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
-from tradingagents.llm_clients.model_discovery import (
-    ModelDiscoveryService,
-    UnknownProviderError,
-)
 from tradingagents.version import __version__
-
-from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
-from .models import (
+from tradingagents.web.auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
+from tradingagents.web.models import (
     AnalysisCutoffErrorResponse,
     CapabilitiesResponse,
     FullBaselineCandidates,
@@ -127,7 +109,7 @@ def create_app(
         description="Local evidence-first investment research run center.",
         lifespan=lifespan,
     )
-    from .settings_api import register_settings_routes
+    from tradingagents.web.settings_api import register_settings_routes
     register_settings_routes(app, service.configuration)
     app.state.settings = settings
     app.state.service = service
@@ -750,7 +732,7 @@ def create_app(
                 "unavailable_reason": availability.reason,
                 "model_discovery_supported": definition.adapter != "custom",
             }
-        from tradingagents.application.model_connections import legacy_connection_id
+        from tradingagents.llm.models import legacy_connection_id
 
         configuration = service.configuration.read()
         defaults = service.configuration.default_run_settings()

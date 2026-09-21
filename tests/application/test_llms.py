@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tradingagents.application.llms import create_run_llms
+from tradingagents.llm.runtime import create_run_llms
 
 
 class _Client:
@@ -22,7 +22,7 @@ def test_incremental_llm_construction_does_not_initialize_the_quick_model(
         return _Client(model)
 
     monkeypatch.setattr(
-        "tradingagents.application.llms.create_llm_client",
+        "tradingagents.llm.runtime.create_llm_client",
         create_client,
     )
     settings = app_settings.default_run_settings.model_copy(

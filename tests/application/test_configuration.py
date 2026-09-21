@@ -2,10 +2,10 @@
 
 import pytest
 
-from tradingagents.application.configuration import ConfigurationStore
-from tradingagents.application.configuration_models import ConfigurationPatch, ImportRequest
-from tradingagents.application.contracts import AnalysisRequest
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.models import ConfigurationPatch, ImportRequest
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.migrations import upgrade_database
 
 
@@ -86,7 +86,7 @@ def test_explicit_profile_overrides_database_default_and_bad_patch_is_atomic(tmp
 
 
 def test_execution_credentials_rotate_without_rewriting_run_parameters(tmp_path):
-    from tradingagents.application.configuration import ProviderConfigurationChanged
+    from tradingagents.configuration.errors import ProviderConfigurationChanged
     from tradingagents.credentials import credential, use_credentials
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
@@ -127,8 +127,8 @@ def test_worker_does_not_claim_tasks_before_configuration_is_initialized(tmp_pat
 @pytest.mark.parametrize("provider", ["openai", "anthropic", "google", "azure"])
 def test_clients_never_fall_back_to_environment_credentials(monkeypatch, provider):
     from tradingagents.credentials import use_credentials
-    from tradingagents.llm_clients import create_llm_client
-    from tradingagents.llm_clients.api_key_env import get_api_key_env
+    from tradingagents.llm import create_llm_client
+    from tradingagents.llm.api_key_env import get_api_key_env
 
     monkeypatch.setenv(get_api_key_env(provider), "ambient-key-must-not-be-used")
     with use_credentials({}), pytest.raises(ValueError, match="Settings"):
@@ -136,8 +136,8 @@ def test_clients_never_fall_back_to_environment_credentials(monkeypatch, provide
 
 
 def test_configuration_catalog_classifies_every_default_and_translates_fields():
-    from tradingagents.application.configuration_catalog import configuration_schema
-    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.configuration.catalog import configuration_schema
+    from tradingagents.configuration.defaults import DEFAULT_CONFIG
 
     schema = configuration_schema()
     fields = {field.key: field for field in schema.fields}
@@ -157,7 +157,7 @@ def test_configuration_catalog_classifies_every_default_and_translates_fields():
 def test_import_precedence_invalid_fields_and_stale_source(tmp_path):
     from pydantic import SecretStr
 
-    from tradingagents.application.configuration import ConfigurationConflict
+    from tradingagents.configuration.errors import ConfigurationConflict
 
     settings = AppSettings.from_env(
         environ={"TRADINGAGENTS_HOME": str(tmp_path), "OPENAI_API_KEY": "process-value"}
@@ -192,7 +192,7 @@ def test_import_precedence_invalid_fields_and_stale_source(tmp_path):
 def test_cli_import_preview_does_not_create_database(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    import cli.main as cli
+    import tradingagents.cli.main as cli
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path / "new-home")})
     monkeypatch.setattr(cli, "_settings", lambda: settings)
@@ -235,9 +235,9 @@ def test_provider_patch_preserves_omitted_fields_and_reset_preserves_credentials
 def test_checkpoint_and_failure_records_redact_execution_credentials(tmp_path):
     from langgraph.graph import END, START, StateGraph
 
-    from tradingagents.application.checkpoints import CredentialSafeSqliteSaver
-    from tradingagents.application.repository import _sanitize_text
     from tradingagents.credentials import use_credentials
+    from tradingagents.persistence._repository_common import _sanitize_text
+    from tradingagents.persistence.checkpoints import CredentialSafeSqliteSaver
 
     secret = "fake-credential-without-a-secret-prefix"
     with use_credentials({"OPENAI_API_KEY": secret}):

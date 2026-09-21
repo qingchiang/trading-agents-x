@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 import requests
 
-from tradingagents.dataflows.jp import jp_fundamentals
+from tradingagents.data.jp import jp_fundamentals
 from tradingagents.provenance import extract_provenance
 
 

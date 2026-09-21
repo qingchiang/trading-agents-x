@@ -42,7 +42,7 @@ LISTED = "上場"
 DEFAULT_OUTPUT = (
     Path(__file__).resolve().parent.parent
     / "tradingagents"
-    / "dataflows"
+    / "data"
     / "data"
     / "edinet_code_map.json"
 )

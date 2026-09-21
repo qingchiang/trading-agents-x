@@ -5,9 +5,9 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows.cn import cn_fundamentals, common, company
-from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
+from tradingagents.data.cn import cn_fundamentals, common, company
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import NoMarketDataError
 from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 _PROFILE_RETRIEVED_AT = "2026-07-19T02:03:04+00:00"

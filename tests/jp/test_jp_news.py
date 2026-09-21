@@ -7,13 +7,13 @@ from urllib.error import HTTPError
 
 import pytest
 
-from tradingagents.dataflows.errors import (
+from tradingagents.data.jp import http_util, jp_news, tdnet_news
+from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.dataflows.jp import http_util, jp_news, tdnet_news
-from tradingagents.dataflows.rate_limit import stop_on_rate_limit_scope
 from tradingagents.provenance import extract_provenance
 
 _EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"

@@ -12,72 +12,68 @@ import pytest
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
-from tests.factories import (
-    analyst_report,
-    research_case,
-    research_decision,
-)
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    ArtifactGenerationObservation,
-    AuditedRangeEndpoint,
-    CalculationRecord,
-    DecisionBrief,
-    DecisionCalculationUse,
-    DecisionNumericAuditAppendix,
-    EvidenceBundle,
-    EvidenceItem,
-    EvidenceQuality,
-    EvidenceTemporalScope,
-    EvidenceValueLocator,
-    IncrementalAnalysisBrief,
-    IncrementalBaselineContext,
-    IncrementalExportContext,
-    MarketReferenceBasis,
-    MarketReferenceLevel,
-    MeasurementKind,
-    NodeMetrics,
-    NumericAuditAppendixStatus,
-    NumericAuditComponentType,
-    NumericAuditOmission,
-    NumericAuditPhase,
-    NumericAuditSnapshot,
-    NumericAuditStatus,
-    NumericCalculationStatus,
-    NumericDisplayStatus,
-    NumericRequirementCheck,
-    ReportSection,
-    ResearchArtifact,
-    ResearchScenarioKind,
-    ResearchWarning,
-    RiskReviewAdjustment,
-    RiskReviewDisposition,
-    RunExport,
-    RunMetrics,
-    RunStatus,
-    RunView,
-    ScenarioReferenceCategory,
-    ScenarioReferenceRange,
-    TableDataType,
-    ValuationAssessment,
-)
-from tradingagents.application.evidence import extract_evidence_tables
+from tests.factories import analyst_report, research_case, research_decision
 from tradingagents.application.exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
-from tradingagents.graph.evidence_context import build_evidence_catalog
-from tradingagents.graph.research_graph import (
-    _collect_evidence,
-    _evidence_from_records,
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifact
+from tradingagents.domain.common import (
+    ArtifactGenerationMethod,
+    NumericAuditAppendixStatus,
+    NumericAuditComponentType,
+    NumericAuditPhase,
+    NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayStatus,
+    ResearchScenarioKind,
+    RiskReviewDisposition,
+    RunStatus,
+    ScenarioReferenceCategory,
 )
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_evidence_span,
-    attach_provenance,
+from tradingagents.domain.decision import (
+    AuditedRangeEndpoint,
+    CalculationRecord,
+    DecisionCalculationUse,
+    EvidenceValueLocator,
+    MarketReferenceLevel,
+    RiskReviewAdjustment,
+    ScenarioReferenceRange,
+    ValuationAssessment,
 )
+from tradingagents.domain.evidence import (
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceQuality,
+    EvidenceTemporalScope,
+    MeasurementKind,
+    TableDataType,
+)
+from tradingagents.domain.evidence_tables import extract_evidence_tables
+from tradingagents.domain.history import RunExport
+from tradingagents.domain.incremental import (
+    IncrementalAnalysisBrief,
+    IncrementalBaselineContext,
+    IncrementalExportContext,
+)
+from tradingagents.domain.numeric_audit import (
+    DecisionNumericAuditAppendix,
+    MarketReferenceBasis,
+    NumericAuditOmission,
+    NumericAuditSnapshot,
+    NumericRequirementCheck,
+)
+from tradingagents.domain.reports import DecisionBrief, ReportSection, ResearchWarning
+from tradingagents.domain.runs import (
+    AnalysisRequest,
+    AnalysisResult,
+    NodeMetrics,
+    RunMetrics,
+    RunView,
+)
+from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.research.full.workflow import _collect_evidence, _evidence_from_records
+from tradingagents.research.synthesis.evidence_context import build_evidence_catalog
 
 
 def _record(

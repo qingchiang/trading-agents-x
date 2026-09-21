@@ -7,8 +7,8 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-from tradingagents.dataflows.jp import jp_statements
-from tradingagents.dataflows.symbol_utils import NoMarketDataError
+from tradingagents.data.jp import jp_statements
+from tradingagents.domain.instruments import NoMarketDataError
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 

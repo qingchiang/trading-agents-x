@@ -10,19 +10,13 @@ import pytest
 from sqlalchemy import select
 
 from tests.factories import analyst_report, research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    EvidenceBundle,
-    EvidenceItem,
-    ResearchArtifactDraft,
-    RunRequestSnapshot,
-    RunStatus,
-)
-from tradingagents.application.database import RunRecord
 from tradingagents.application.exporting import render_run_export_markdown
 from tradingagents.application.service import AnalysisService
+from tradingagents.domain.artifacts import ResearchArtifactDraft
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult, RunRequestSnapshot
+from tradingagents.persistence.models import RunRecord
 
 
 def _equity_resolver(ticker: str) -> dict[str, str]:

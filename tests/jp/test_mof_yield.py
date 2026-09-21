@@ -10,11 +10,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tradingagents.dataflows.jp import mof_yield
-from tradingagents.dataflows.jp.calendar import (
-    add_government_business_days,
-    is_government_business_day,
-)
+from tradingagents.data.jp import mof_yield
+from tradingagents.data.jp.calendar import add_government_business_days, is_government_business_day
 
 _TOKYO = ZoneInfo("Asia/Tokyo")
 

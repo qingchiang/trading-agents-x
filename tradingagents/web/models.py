@@ -8,23 +8,25 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from tradingagents.application.contracts import (
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.history import RunAttemptView
+from tradingagents.domain.incremental import IncrementalRunContext
+from tradingagents.domain.runs import (
     AnalysisCutoffContext,
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
+    RunRequestSnapshot,
+    RunView,
+)
+from tradingagents.domain.timeline import (
     FullBaselineCandidate,
-    IncrementalRunContext,
     ResearchNodeComparisonSelection,
     ResearchNodeView,
     ResearchTimeline,
-    RunAttemptView,
     RunLifecycleImpact,
-    RunRequestSnapshot,
-    RunStatus,
-    RunView,
 )
-from tradingagents.application.model_connections import ConnectionView
+from tradingagents.llm.models import ConnectionView
 
 
 class ApiModel(BaseModel):

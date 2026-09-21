@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import tradingagents.agents.analysts.sentiment_analyst as sentiment
-from tradingagents.agents.utils.structured import NO_EXTERNAL_TOOLS
+import tradingagents.research.analysts.sentiment_analyst as sentiment
+from tradingagents.research.prompts.constraints import NO_EXTERNAL_TOOLS
 
 
 @pytest.mark.unit
@@ -57,8 +57,8 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
 
 @pytest.mark.unit
 def test_tool_using_analysts_keep_immutable_date_guidance():
-    import tradingagents.agents.analysts.market_analyst as market
-    import tradingagents.agents.analysts.news_analyst as news
+    import tradingagents.research.analysts.market_analyst as market
+    import tradingagents.research.analysts.news_analyst as news
 
     for module in (market, news):
         assert "tool-call date ranges" in inspect.getsource(module)

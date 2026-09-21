@@ -4,11 +4,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from tradingagents.dataflows.jp.calendar import (
-    add_business_days,
-    is_tse_open,
-    tokyo_today,
-)
+from tradingagents.data.jp.calendar import add_business_days, is_tse_open, tokyo_today
 
 
 @pytest.mark.unit

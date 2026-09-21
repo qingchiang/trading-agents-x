@@ -4,8 +4,8 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.jp import jquants_sentiment as js
-from tradingagents.dataflows.jp.jquants_sentiment import (
+from tradingagents.data.jp import jquants_sentiment as js
+from tradingagents.data.jp.jquants_sentiment import (
     get_investor_flows,
     get_margin_balance,
     get_market_investor_flows,

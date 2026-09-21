@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import StringIO
 from pathlib import Path
 
-from cli.supervisor import ColorMode, LocalProcessSupervisor, _ProcessLog
+from tradingagents.cli.supervisor import ColorMode, LocalProcessSupervisor, _ProcessLog
 
 
 class _FakeProcess:

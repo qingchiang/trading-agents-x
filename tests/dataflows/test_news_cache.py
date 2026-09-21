@@ -2,8 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 
 def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
-    from tradingagents.dataflows.config import get_config, use_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.news_cache import fetch_news_feed
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     calls = []
@@ -23,10 +23,10 @@ def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
 
 
 def test_cache_refresh_scope_revision_and_failure(tmp_path):
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import emit_news, split_candidates
-    from tradingagents.dataflows.source_observations import capture_observations
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import emit_news, split_candidates
+    from tradingagents.data.source_observations import capture_observations
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
@@ -67,9 +67,9 @@ def test_cache_refresh_scope_revision_and_failure(tmp_path):
 def test_cache_eviction_corruption_and_disabled_mode(tmp_path):
     import sqlite3
 
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import split_candidates
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import split_candidates
 
     config = {**get_config(), "data_cache_dir": str(tmp_path), "news_cache_scope_limit": 2,
               "news_cache_total_limit": 3}
@@ -99,8 +99,8 @@ def test_cache_eviction_corruption_and_disabled_mode(tmp_path):
 def test_cache_concurrent_writes_remain_readable(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
 
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
     def request(index):
@@ -118,11 +118,11 @@ def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path
     from langchain_core.messages import ToolMessage
 
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.incremental_us import _collect_news
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import finalize_news
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data.config import get_config
+    from tradingagents.data.incremental_us import _collect_news
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import finalize_news
+    from tradingagents.research.full.workflow import _collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
@@ -143,9 +143,9 @@ def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path
 
 
 def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_path):
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import split_candidates
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import split_candidates
 
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
     body = fetch_news_feed("JP", "9984.T", "2026-09-04", "2026-09-04",
@@ -155,9 +155,9 @@ def test_cache_preserves_market_local_publication_across_utc_date_boundary(tmp_p
 
 
 def test_global_cache_uses_utc_publication_day(tmp_path):
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import split_candidates
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import split_candidates
 
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
@@ -195,12 +195,12 @@ def test_global_cache_uses_utc_publication_day(tmp_path):
 
 def test_refresh_failure_survives_incremental_admission_without_changing_article_identity(tmp_path, monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
-    from tradingagents.application.incremental_collection import normalize_incremental_collection
-    from tradingagents.dataflows import incremental_inputs
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.incremental_us import collect_us_incremental
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import finalize_news
+    from tradingagents.data import incremental_inputs
+    from tradingagents.data.config import get_config
+    from tradingagents.data.incremental_us import collect_us_incremental
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import finalize_news
+    from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
@@ -230,9 +230,9 @@ def test_refresh_failure_survives_incremental_admission_without_changing_article
 
 
 def test_cache_tracks_content_reversion_as_a_new_observed_version(tmp_path):
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import split_candidates
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import split_candidates
 
     config = {**get_config(), "data_cache_dir": str(tmp_path), "news_cache_refresh_seconds": 0}
     current = datetime(2026, 9, 3, 10, tzinfo=UTC)
@@ -256,9 +256,9 @@ def test_cache_tracks_content_reversion_as_a_new_observed_version(tmp_path):
 def test_full_news_separates_availability_diagnostics_from_articles():
     from langchain_core.messages import ToolMessage
 
-    from tradingagents.dataflows.news_selection import NewsCandidate, render_candidate
-    from tradingagents.graph.research_graph import _collect_evidence
+    from tradingagents.data.news_selection import NewsCandidate, render_candidate
     from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+    from tradingagents.research.full.workflow import _collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     article = NewsCandidate("cninfo", "real event", "### real event", "2026-09-04T10:00:00+08:00",
@@ -279,10 +279,10 @@ def test_full_news_separates_availability_diagnostics_from_articles():
 def test_cn_query_recovery_does_not_revise_unchanged_cached_article(tmp_path, monkeypatch):
     import sqlite3
 
-    from tradingagents.dataflows.cn import google_news
-    from tradingagents.dataflows.config import get_config
-    from tradingagents.dataflows.news_cache import fetch_news_feed
-    from tradingagents.dataflows.news_selection import split_candidates
+    from tradingagents.data.cn import google_news
+    from tradingagents.data.config import get_config
+    from tradingagents.data.news_cache import fetch_news_feed
+    from tradingagents.data.news_selection import split_candidates
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     config = {**get_config(), "data_cache_dir": str(tmp_path)}

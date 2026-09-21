@@ -7,7 +7,7 @@ import pytest
 async def test_settings_initialize_save_reveal_and_reject_cross_origin(tmp_path):
     import httpx2 as httpx
 
-    from tradingagents.application.settings import AppSettings
+    from tradingagents.configuration.settings import AppSettings
     from tradingagents.web import create_app
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
@@ -52,8 +52,8 @@ async def test_web_and_python_inherit_database_defaults_and_queued_snapshot_is_i
     import httpx2 as httpx
 
     from tradingagents import AnalysisRequest, TradingAgents
-    from tradingagents.application.configuration_models import ConfigurationPatch
-    from tradingagents.application.settings import AppSettings
+    from tradingagents.configuration.models import ConfigurationPatch
+    from tradingagents.configuration.settings import AppSettings
     from tradingagents.web import create_app
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
@@ -102,7 +102,7 @@ async def test_web_and_python_inherit_database_defaults_and_queued_snapshot_is_i
 async def test_connection_api_reveals_only_requested_key_and_preserves_conflicting_edits(tmp_path):
     import httpx2 as httpx
 
-    from tradingagents.application.settings import AppSettings
+    from tradingagents.configuration.settings import AppSettings
     from tradingagents.web import create_app
 
     settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})

@@ -6,14 +6,9 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.application.contracts import (
-    AnalystClaimType,
-    ClaimImportance,
-    EvidenceBundle,
-    EvidenceItem,
-    ReportAuditStatus,
-)
-from tradingagents.graph.analyst_synthesis import (
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.reports import AnalystClaimType, ClaimImportance, ReportAuditStatus
+from tradingagents.research.synthesis.analyst_synthesis import (
     AnalystAuditDraft,
     AuditKeyClaimDraft,
     invoke_analyst_report,

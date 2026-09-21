@@ -10,51 +10,51 @@ from pydantic import ValidationError
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.factories import analyst_report, research_decision
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    BenchmarkSeriesResult,
+from tradingagents.application.service import AnalysisService
+from tradingagents.data.config import get_config
+from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionSourceProvenance,
     CollectionSummary,
-    EvidenceBundle,
-    EvidenceItem,
-    EvidenceOrigin,
-    FullResearchRequiredReason,
     IncrementalCollectionRequest,
+    IncrementalEvidenceCandidate,
+)
+from tradingagents.domain.common import NumericAuditStatus, ReportLanguage, RunStatus
+from tradingagents.domain.decision_components import baseline_component_ids
+from tradingagents.domain.errors import (
+    InvalidIncrementalBaselineError,
+    NoInformationAdvancementError,
+    UnsupportedInstrumentError,
+)
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem, EvidenceOrigin
+from tradingagents.domain.incremental import (
+    FullResearchRequiredReason,
     IncrementalCollectionResult,
     IncrementalDecisionOutcome,
-    IncrementalEvidenceCandidate,
+    ReassessmentDisposition,
+)
+from tradingagents.domain.performance import (
+    BenchmarkSeriesResult,
     MarketSeriesPoint,
     MarketSeriesResult,
-    NumericAuditStatus,
-    ReassessmentDisposition,
-    ReportLanguage,
-    RunStatus,
 )
-from tradingagents.application.database import (
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.llm.runtime import RunLLMs
+from tradingagents.persistence._repository_common import EvidenceConflictError
+from tradingagents.persistence.models import (
     DecisionRecord,
     ResearchNodeRecord,
     RunEvidenceRecord,
     RunRecord,
 )
-from tradingagents.application.decision_components import baseline_component_ids
-from tradingagents.application.errors import (
-    InvalidIncrementalBaselineError,
-    NoInformationAdvancementError,
-    UnsupportedInstrumentError,
-)
-from tradingagents.application.llms import RunLLMs
-from tradingagents.application.repository import EvidenceConflictError
-from tradingagents.application.service import (
-    AnalysisService,
+from tradingagents.research.full.workflow import GraphExecution
+from tradingagents.research.incremental.synthesis import (
     _incremental_brief_fallback_title,
     _incremental_decision_core,
     _incremental_decision_from_core,
 )
-from tradingagents.dataflows.config import get_config
-from tradingagents.graph.research_graph import GraphExecution
-from tradingagents.graph.structured_output import StructuredOutputError
+from tradingagents.research.synthesis.structured_output import StructuredOutputError
 
 
 def _unavailable_domains(request: IncrementalCollectionRequest):

@@ -14,23 +14,14 @@ from alembic.config import Config
 from sqlalchemy import inspect, text
 
 from tests.factories import analyst_report, research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    ArtifactGenerationObservation,
-    EvidenceBundle,
-    EvidenceItem,
-    ResearchArtifactDraft,
-    RunStatus,
-)
-from tradingagents.application.database import RunRecord, create_sqlite_engine
-from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
-from tradingagents.persistence import (
-    IncompatibleDatabaseError,
-    upgrade_database,
-)
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifactDraft
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence import IncompatibleDatabaseError, upgrade_database
+from tradingagents.persistence.models import RunRecord, create_sqlite_engine
+from tradingagents.persistence.repository import RunRepository
 
 
 def _canonical_content_hash(payload: dict[str, object]) -> str:

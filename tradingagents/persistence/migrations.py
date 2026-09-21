@@ -8,7 +8,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.util.exc import CommandError
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 
 
 class IncompatibleDatabaseError(RuntimeError):

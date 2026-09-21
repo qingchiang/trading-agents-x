@@ -8,13 +8,10 @@ import pytest
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 
-from tradingagents.application.contracts import (
-    ArtifactGenerationMethod,
-    EvidenceBundle,
-    EvidenceItem,
-)
-from tradingagents.graph.deliberation import invoke_research_decision
-from tradingagents.graph.structured_output import (
+from tradingagents.domain.common import ArtifactGenerationMethod
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.research.synthesis.deliberation import invoke_research_decision
+from tradingagents.research.synthesis.structured_output import (
     StructuredOutputError,
     StructuredOutputResult,
     StructuredOutputRunner,

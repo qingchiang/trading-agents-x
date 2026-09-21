@@ -6,10 +6,10 @@ chat client; when unset the provider keeps its own default.
 
 import pytest
 
-from tradingagents.application.llms import create_run_llms
-from tradingagents.application.settings import RunSettings
-from tradingagents.default_config import build_default_config
-from tradingagents.llm_clients.factory import create_llm_client
+from tradingagents.configuration.defaults import build_default_config
+from tradingagents.configuration.settings import RunSettings
+from tradingagents.llm.factory import create_llm_client
+from tradingagents.llm.runtime import create_run_llms
 
 
 @pytest.mark.unit
@@ -44,14 +44,14 @@ class TestTemperatureForwarding:
 @pytest.mark.unit
 class TestTemperatureEnvOverlay:
     def test_explicit_environment_sets_temperature(self):
-        import tradingagents.default_config as dc
+        import tradingagents.configuration.defaults as dc
 
         config = dc.build_default_config({"TRADINGAGENTS_TEMPERATURE": "0.2"})
 
         assert float(config["temperature"]) == 0.2
 
     def test_module_default_ignores_process_environment(self, monkeypatch):
-        import tradingagents.default_config as dc
+        import tradingagents.configuration.defaults as dc
 
         monkeypatch.setenv("TRADINGAGENTS_TEMPERATURE", "0.2")
 
@@ -75,7 +75,7 @@ class TestProviderKwargsTemperature:
             return Client()
 
         monkeypatch.setattr(
-            "tradingagents.application.llms.create_llm_client",
+            "tradingagents.llm.runtime.create_llm_client",
             factory,
         )
         settings = RunSettings(

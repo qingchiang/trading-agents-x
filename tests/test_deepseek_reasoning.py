@@ -17,14 +17,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompt_values import ChatPromptValue
 from pydantic import BaseModel
 
-from tradingagents.application.contracts import ArtifactGenerationMethod
-from tradingagents.graph.structured_output import StructuredOutputRunner
-from tradingagents.llm_clients.factory import create_llm_client
-from tradingagents.llm_clients.openai_client import (
+from tradingagents.domain.common import ArtifactGenerationMethod
+from tradingagents.llm.factory import create_llm_client
+from tradingagents.llm.openai_client import (
     DeepSeekChatOpenAI,
     NormalizedChatOpenAI,
     _input_to_messages,
 )
+from tradingagents.research.synthesis.structured_output import StructuredOutputRunner
 
 # ---------------------------------------------------------------------------
 # _input_to_messages — the helper that handles list / ChatPromptValue / other

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tradingagents.llm_clients.reasoning_effort import (
+from tradingagents.llm.reasoning_effort import (
     PROVIDER_DEFAULT,
     model_effort_levels,
     resolve_reasoning_effort,

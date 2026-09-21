@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.application.contracts import AnalysisRequest, AssetType
+from tradingagents.domain.common import AssetType
+from tradingagents.domain.runs import AnalysisRequest
 
 
 @pytest.mark.parametrize("ticker", ["BTC-USD", "eth-usd", "DOGE-SHIB", "BTCUSDT"])

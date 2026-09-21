@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 
 from tests.factories import analyst_report
-from tradingagents.agents.utils.agent_utils import get_language_instruction
-from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
-from tradingagents.graph.role_context import RoleContextBuilder
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.research.synthesis.role_context import RoleContextBuilder
+from tradingagents.research.tools.catalog import get_language_instruction
 
-_AGENTS_DIR = Path(__file__).resolve().parents[1] / "tradingagents" / "agents"
+_AGENTS_DIR = Path(__file__).resolve().parents[1] / "tradingagents" / "research"
 
 # Every node whose text reaches the saved report. If you add a report-producing
 # agent, add it here — and make it call get_language_instruction().
@@ -31,19 +31,19 @@ REPORT_AGENTS = [
 @pytest.mark.unit
 class TestLanguageInstruction:
     def test_english_adds_no_tokens(self, monkeypatch):
-        from tradingagents.dataflows.config import bind_config
+        from tradingagents.data.config import bind_config
         bind_config({"output_language": "English"})
         assert get_language_instruction() == ""
 
     def test_non_english_emits_directive(self):
-        from tradingagents.dataflows.config import bind_config
+        from tradingagents.data.config import bind_config
         bind_config({"output_language": "中文"})
         out = get_language_instruction()
         assert "中文" in out
         assert "entire response" in out
 
     def test_custom_scope_limits_directive(self):
-        from tradingagents.dataflows.config import bind_config
+        from tradingagents.data.config import bind_config
         bind_config({"output_language": "Chinese"})
         out = get_language_instruction("all explanatory prose")
         assert out == " Write all explanatory prose in Chinese."

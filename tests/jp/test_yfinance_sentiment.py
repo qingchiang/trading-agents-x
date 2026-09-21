@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows.jp import yfinance_sentiment as ys
+from tradingagents.data.jp import yfinance_sentiment as ys
 
 _LIVE = "2026-06-26"  # gating is patched, so the literal value is irrelevant
 _FULL = {
