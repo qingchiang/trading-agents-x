@@ -26,6 +26,7 @@ from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import RunRecord
 from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
 from tradingagents.version import __version__
@@ -62,7 +63,7 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -156,7 +157,7 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 14, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -319,7 +320,7 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -476,7 +477,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     baseline_request = AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -637,7 +638,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         exported.json()["research_node"]["information_advancement"]
         == node["information_advancement"]
     )
-    assert exported.json()["schema_version"] == "11"
+    assert exported.json()["schema_version"] == "12"
     assert (
         exported.json()["incremental_context"]["analysis_brief"]["generation_method"]
         == "markdown_audited"
@@ -712,7 +713,7 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -787,7 +788,7 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
     baseline_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -850,7 +851,7 @@ async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
     baseline_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(baseline_request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -911,7 +912,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
@@ -1017,7 +1018,7 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             research_schema_version=research_schema_version,
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
@@ -1113,7 +1114,7 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
@@ -1201,7 +1202,7 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
@@ -1267,7 +1268,7 @@ async def test_terminal_run_creation_template_is_lightweight_and_uses_today_inde
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
@@ -1304,7 +1305,7 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             research_schema_version="2",
             information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
             method_snapshot={"schema_version": "1"},
@@ -1389,7 +1390,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
@@ -1490,57 +1491,8 @@ async def test_run_creation_distinguishes_typed_admission_failures(
     assert web_repository.list_runs().total == 0
 
 
-@pytest.mark.anyio
-async def test_legacy_crypto_retry_returns_stable_unsupported_response(
-    web_client: httpx.AsyncClient,
-    web_repository,
-    web_service,
-) -> None:
-    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    web_repository.claim_run(queued.id, "legacy-fixture", 30)
-    web_repository.fail(queued.id, RuntimeError("fixture failure"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, queued.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
-    response = await web_client.post(f"/api/v1/runs/{queued.id}/retry")
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "unsupported_instrument"
-    unchanged = web_repository.get_run(queued.id)
-    assert unchanged.status is RunStatus.FAILED
-    assert unchanged.attempt == 1
 
 
-@pytest.mark.anyio
-async def test_legacy_crypto_source_returns_stable_unsupported_response(
-    web_client: httpx.AsyncClient,
-    web_repository,
-    web_service,
-) -> None:
-    source = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    web_repository.claim_run(source.id, "legacy-fixture", 30)
-    web_repository.fail(source.id, RuntimeError("fixture failure"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, source.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
-    response = await web_client.post(
-        "/api/v1/runs",
-        json={**_payload("AAPL"), "source_run_id": source.id},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "unsupported_instrument"
-    assert web_repository.list_runs().total == 1
 
 
 @pytest.mark.anyio
@@ -2121,8 +2073,6 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
         payload["defaults"]
         | {
             "output_language": "en",
-            "quick_reasoning_effort": None,
-            "deep_reasoning_effort": None,
         }
         == payload["defaults"]
     )
@@ -2184,7 +2134,7 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
     web_settings,
 ) -> None:
     from tests.configuration_helpers import save_configuration
-    save_configuration(web_settings, credentials={"OPENAI_API_KEY": None})
+    save_configuration(web_settings, connection_changes=[{"action": "update", "id": "default", "credentials": {"api_key": None}}])
 
     response = await web_client.get("/api/v1/providers/openai/models")
     unknown = await web_client.get("/api/v1/providers/not-real/models")
@@ -2283,7 +2233,7 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             research_schema_version="2",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},

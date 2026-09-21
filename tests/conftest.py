@@ -72,7 +72,7 @@ def _dummy_api_keys(monkeypatch, request):
                 monkeypatch.setenv(env_var, value)
 
     from tradingagents.credentials import use_credentials
-    with use_credentials({name: os.environ[name] for name in _CREDENTIAL_ENV_VARS}):
+    with use_credentials({**{name: os.environ[name] for name in _CREDENTIAL_ENV_VARS}, "connection:test:api_key": "placeholder", "connection:default:api_key": "placeholder"}):
         yield
 
 

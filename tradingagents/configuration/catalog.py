@@ -5,38 +5,13 @@ from tradingagents.configuration.models import (
     ConfigurationSchema,
     ConfigurationValues,
 )
-from tradingagents.configuration.resolution import credential_owners, effective_connection
+from tradingagents.configuration.resolution import credential_owners
 
 # English, simplified Chinese, Japanese. Technical names remain searchable.
 LABELS = {
-    "quick_connection_id": ("Quick connection", "快速模型连接", "高速モデル接続"),
-    "deep_connection_id": ("Deep connection", "深入模型连接", "詳細モデル接続"),
+    "models": ("Role models", "角色模型", "役割別モデル"),
     "profile": ("Research depth", "研究档位", "リサーチの深さ"),
     "analysts": ("Analysts", "分析师", "アナリスト"),
-    "llm_provider": ("Default provider", "默认模型服务", "既定のプロバイダー"),
-    "quick_think_llm": ("Quick model", "快速模型", "高速モデル"),
-    "deep_think_llm": ("Deep model", "深入模型", "詳細モデル"),
-    "quick_reasoning_effort": (
-        "Quick reasoning effort",
-        "快速模型推理强度",
-        "高速モデルの推論強度",
-    ),
-    "deep_reasoning_effort": ("Deep reasoning effort", "深入模型推理强度", "詳細モデルの推論強度"),
-    "google_thinking_level": (
-        "Google shared thinking level",
-        "Google 共享思考强度",
-        "Google 共通思考強度",
-    ),
-    "openai_reasoning_effort": (
-        "OpenAI shared reasoning effort",
-        "OpenAI 共享推理强度",
-        "OpenAI 共通推論強度",
-    ),
-    "anthropic_effort": (
-        "Anthropic shared effort",
-        "Anthropic 共享推理强度",
-        "Anthropic 共通推論強度",
-    ),
     "temperature": ("Sampling temperature", "采样温度", "サンプリング温度"),
     "llm_max_retries": ("LLM retry budget", "模型请求重试次数", "モデルの再試行回数"),
     "output_language": ("Report language", "报告语言", "レポート言語"),
@@ -112,7 +87,6 @@ LABELS = {
     "data_vendors": ("Default source chains", "默认数据源顺序", "既定のデータソース順序"),
     "tool_vendors": ("Tool source overrides", "工具数据源覆盖", "ツール別ソース設定"),
     "data_vendors_by_market": ("Market source overrides", "市场数据源覆盖", "市場別ソース設定"),
-    "providers": ("Model service connections", "模型服务连接", "モデルサービス接続"),
 }
 
 GROUP_DESCRIPTIONS = {
@@ -136,20 +110,11 @@ GROUP_DESCRIPTIONS = {
         "按工具覆盖、市场覆盖、默认类别解析；仅使用选中的来源，按顺序回退。",
         "ツール、市場、既定カテゴリの優先順で解決し、選択したソースのみを順に使用します。",
     ),
-    "compatibility": (
-        "Used when role-specific reasoning is unset. provider_default explicitly omits the native parameter.",
-        "仅在角色推理强度未设置时使用；provider_default 明确省略服务原生参数。",
-        "役割別推論が未設定の場合に使用。provider_default はネイティブパラメータを明示的に省略します。",
-    ),
-    "providers": (
-        "Each connection has independent credentials, read at execution start.",
-        "每个连接独立管理凭据，在执行开始时读取。",
-        "接続ごとに認証情報を管理し、実行開始時に読み込みます。",
-    ),
 }
 
 
 OPTION_LABELS = {
+    "models": ("Role models", "角色模型", "役割別モデル"),
     "fast": ("Fast", "快速", "高速"),
     "standard": ("Standard", "标准", "標準"),
     "deep": ("Deep", "深入", "詳細"),
@@ -186,10 +151,9 @@ def translated(values):
 
 
 def configuration_schema() -> ConfigurationSchema:
-    from tradingagents.configuration.defaults import _ENV_OVERRIDES
+    from tradingagents.configuration.importing import ENV_FIELDS
     from tradingagents.data.interface import TOOLS_CATEGORIES, VENDOR_METHODS
     from tradingagents.llm.provider_registry import PROVIDER_REGISTRY
-    from tradingagents.llm.reasoning_effort import provider_effort_levels
 
     defaults = ConfigurationValues().model_dump()
     properties = ConfigurationValues.model_json_schema()["properties"]
@@ -202,10 +166,6 @@ def configuration_schema() -> ConfigurationSchema:
             group = "sources"
         elif "news" in key or key in {"sentiment_filing_limit", "social_lookback_days"}:
             group = "news"
-        elif key in {"google_thinking_level", "openai_reasoning_effort", "anthropic_effort"}:
-            group = "compatibility"
-        elif key == "providers":
-            group = "providers"
         prop = properties[key]
         nullable = any(item.get("type") == "null" for item in prop.get("anyOf", []))
         scalar = next((item for item in prop.get("anyOf", []) if item.get("type") != "null"), prop)
@@ -213,34 +173,14 @@ def configuration_schema() -> ConfigurationSchema:
             scalar.get("type"), "text"
         )
         options = prop.get("enum", [])
-        if key == "llm_provider":
-            options = list(PROVIDER_REGISTRY)
-        elif key == "analysts":
+        if key == "analysts":
             options = ["market", "social", "news", "fundamentals"]
-        elif key in {
-            "quick_reasoning_effort",
-            "deep_reasoning_effort",
-            "openai_reasoning_effort",
-            "google_thinking_level",
-            "anthropic_effort",
-        }:
-            providers = {
-                "openai_reasoning_effort": "openai",
-                "google_thinking_level": "google",
-                "anthropic_effort": "anthropic",
-            }
-            levels = (
-                provider_effort_levels(providers[key])
-                if key in providers
-                else ("none", "minimal", "low", "medium", "high", "xhigh", "max")
-            )
-            options = ["provider_default", *levels]
         if options and kind != "list":
             kind = "choice"
         if group == "sources":
             kind = "routes"
-        if key == "providers":
-            kind = "providers"
+        if key == "models":
+            kind = "models"
         description = ("", "", "")
         if key.endswith("lookback_days"):
             description = (
@@ -260,22 +200,7 @@ def configuration_schema() -> ConfigurationSchema:
                 "留空使用服务默认值；部分推理模型会忽略温度。",
                 "未設定ではプロバイダーの既定値。一部の推論モデルは温度を無視します。",
             )
-        env_names = [env for env, target in _ENV_OVERRIDES.items() if target == key]
-        if key == "trash_retention_days":
-            env_names.append("TRADINGAGENTS_TRASH_RETENTION_DAYS")
-        if key == "providers":
-            env_names.extend(
-                [
-                    "TRADINGAGENTS_LLM_BACKEND_URL",
-                    "AZURE_OPENAI_ENDPOINT",
-                    "AZURE_OPENAI_DEPLOYMENT_NAME",
-                    "OPENAI_API_VERSION",
-                    "OLLAMA_BASE_URL",
-                    "AWS_REGION",
-                    "AWS_DEFAULT_REGION",
-                    "AWS_PROFILE",
-                ]
-            )
+        env_names = [env for env, target in ENV_FIELDS.items() if target == key]
         fields.append(
             ConfigurationField(
                 key=key,
@@ -304,12 +229,9 @@ def configuration_schema() -> ConfigurationSchema:
             key: {"label": name, "description": translated(description)}
             for key, (name, description) in SOURCE_METADATA.items()
         },
-        presets={name: preset_connection(name) for name in PROVIDER_REGISTRY},
+        presets={name: preset_connection(name, identity=f"preset-{name}") for name in PROVIDER_REGISTRY},
         fields=fields,
         providers={key: value.label for key, value in PROVIDER_REGISTRY.items()},
-        provider_defaults={
-            key: effective_connection(ConfigurationValues(), key) for key in PROVIDER_REGISTRY
-        },
         credential_owners=credential_owners(),
         route_options={
             key: sorted(

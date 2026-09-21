@@ -51,3 +51,23 @@ def default_incremental_synthesizer(
         ),
         decision=synthesis_input.full_baseline_decision,
     )
+
+
+def model_settings(provider='openai', *, quick='gpt-5.4-mini', deep='gpt-5.5', quick_effort=None, deep_effort=None, **options):
+    """Build current bound settings for client-construction tests."""
+    from tradingagents.configuration.defaults import build_default_config
+    from tradingagents.configuration.settings import RunSettings
+    from tradingagents.llm.models import ModelBinding, preset_connection
+
+    connection = preset_connection(provider, identity='test')
+    if connection.transport.kind != 'bedrock':
+        fields = connection.transport.model_dump()
+        fields['base_url'] = fields['base_url'] or 'https://test.invalid/v1'
+        if fields['kind'] == 'azure':
+            fields['api_version'] = '2024-10-21'
+        connection = type(connection).model_validate({**connection.model_dump(), 'transport': fields})
+    return RunSettings(
+        quick_binding=ModelBinding(connection=connection, model=quick, reasoning_effort=quick_effort),
+        deep_binding=ModelBinding(connection=connection, model=deep, reasoning_effort=deep_effort),
+        data_config=options.pop('data_config', build_default_config()), **options,
+    )

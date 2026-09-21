@@ -77,3 +77,13 @@ def aws_client(connection, auth, service):
     return boto3.Session(**kwargs).client(
         service, region_name=connection.get("region", "us-west-2")
     )
+
+
+def validate_binding(binding):
+    """Check provider capabilities without constructing an SDK client."""
+    resolve_reasoning_effort({
+        **binding.connection.reasoning_defaults,
+        'llm_provider': binding.connection.compatibility,
+        'quick_think_llm': binding.model,
+        'quick_reasoning_effort': binding.reasoning_effort,
+    }, 'quick')

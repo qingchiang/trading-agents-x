@@ -13,6 +13,7 @@ from tradingagents.domain.common import RunStatus
 from tradingagents.domain.errors import InvalidResearchNodeComparisonError
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.domain.timeline import ResearchNodeComparisonSelection
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import DecisionRecord, ResearchNodeRecord, RunRecord
 
 
@@ -405,7 +406,7 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
     legacy_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19))
     legacy, _ = repository.create_run(
         legacy_request,
-        app_settings.resolve_run(legacy_request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(legacy_request, require_initialized=False)[1].snapshot(),
     )
     repository.trash_runs((trashed.id,))
     repository.trash_runs((other.id,))

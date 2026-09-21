@@ -66,10 +66,10 @@ tradingagents config import-env --file .env --apply
 tradingagents config import-env --file .env --exclude OLD_VARIABLE --apply
 ```
 
-Back up the existing database before upgrading. Stop old Web/worker processes,
-upgrade, complete the settings import, and then allow workers to continue.
-The new migration adds configuration tables without rewriting retained Runs or
-research products. An entire database backup now includes credentials.
+Existing installations must use the explicit [offline cutover](database-cutover.md)
+from revision `0013_submission_identity`. The source is read-only and the target
+must not exist. Backups contain credentials; keep them under local file access
+controls. Older databases must first be upgraded using the predecessor program.
 
 ## Resolution and execution
 
@@ -85,9 +85,9 @@ At each execution start, the application reads the current credentials once,
 and binds them to an isolated in-memory execution context. Key rotation affects
 the next execution, not clients already running. Endpoint/connection changes
 reject execution of incompatible older Runs with a prompt to create a new Run;
-new credentials are never silently sent to an old address. Legacy Runs without
-complete connection information use only retained fields and built-in provider
-defaults when that is unambiguous.
+new credentials are never silently sent to an old address. Historical Runs without complete recorded executable bindings remain readable
+for audit; create a new Run to execute them. No connection identity is inferred
+from current defaults.
 
 Web capabilities, model discovery, CLI, Python and workers resolve through the
 same module. Model discovery caches are isolated by connection ID and its execution/discovery
@@ -157,25 +157,32 @@ Google, Azure or Bedrock), discovery strategy and model compatibility policy.
 Ollama can use Chat Completions with native model discovery. DeepSeek/MiniMax
 compatibility rules remain available when changing the endpoint. Generic
 compatible endpoints do not automatically acquire vendor-specific behavior.
-Responses is explicit for new connections; legacy OpenAI endpoint inference is
-used only for compatibility and migration.
+Responses is explicit in the connection transport.
 
-Python/HTTP requests accept `connection_id` for both roles, with
-`quick_connection_id` and `deep_connection_id` overriding it individually.
-Omitted selections inherit each role's DB default. Model, reasoning, profile and
-other omitted parameters independently inherit their saved defaults. CLI uses
-`--connection`, `--quick-connection`, and `--deep-connection` with the same rules.
-Legacy `llm_provider` / `--provider` resolves the original migrated connection;
-it cannot be combined with the new connection selectors. It never selects an
-arbitrary connection by name or preset. A deleted original cannot be rebound by
-creating another connection with the same display name.
+Python/HTTP requests and daily configuration use the same role structure:
 
-Run snapshots and method records contain two versioned model bindings. The
-legacy single-provider field is empty for cross-connection research; consumers
-must use the role bindings to display or inspect it. Incremental research keeps
-its existing deep-only execution path and does not require an unused quick
-credential. Role reasoning overrides the connection's compatibility defaults;
-provider-default selection deliberately leaves the choice to the provider.
+```json
+{
+  "models": {
+    "quick": {"connection_id": "local", "model": "quick-model", "reasoning_effort": null},
+    "deep": {"connection_id": "remote", "model": "deep-model", "reasoning_effort": "provider_default"}
+  }
+}
+```
+
+Omitted or null request fields inherit the corresponding daily default.
+`provider_default` explicitly omits the native reasoning parameter. Full research
+resolves both roles; Incremental resolves only deep and rejects an explicit quick
+selection. CLI `--quick-connection`, `--deep-connection`, model and reasoning
+flags populate these fields. `--connection` sets both Full role connection IDs.
+The old `llm_provider`, flat role request fields, `asset_type`, and `--provider`
+are no longer accepted. Environment aliases are understood only during explicit
+import and are never consulted during execution.
+
+A new Run records one executable configuration containing its resolved bindings;
+Incremental contains no quick binding. Connection transport, compatibility,
+capability checks and per-connection reasoning defaults remain independent of
+role selection. New exports use schema 12.
 
 Disable a connection to hide it from new research while retaining queued tasks,
 resumes and failed-task retries. Replace default references before disabling.
@@ -184,13 +191,11 @@ references the connection. Finished reports remain readable after deletion,
 but a failed Run must be recreated with an available connection instead of
 retrying the removed one. A non-secret tombstone prevents identity reuse.
 
-The connection migration preserves initialization and maps existing provider
-settings, credentials and historical references to stable connection IDs.
-Unused vendor presets are not expanded into connection records. Historical
-research JSON is not rewritten. Already initialized installations do not need
-to reimport environment files. Back up and stop old processes before deploying
-this schema; databases with custom connections cannot safely downgrade to the
-single-provider schema.
+The offline converter preserves connection IDs, reset templates, credentials and
+initialization. Original request/config/method/submission snapshots remain in
+`audit_snapshot`, separately from normalized reading projections. Missing
+historical connection identity, analysis brief or decision outcome stays missing.
+No model calls or current defaults fill historical facts.
 
 ## Settings API changes
 

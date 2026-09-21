@@ -17,20 +17,21 @@ def test_incremental_llm_construction_does_not_initialize_the_quick_model(
 ) -> None:
     created: list[str] = []
 
-    def create_client(*, model: str, **_kwargs):
+    def create_client(_provider, model: str, _base_url=None, **_kwargs):
         created.append(model)
         return _Client(model)
 
     monkeypatch.setattr(
-        "tradingagents.llm.runtime.create_llm_client",
+        "tradingagents.llm.connections.create_llm_client",
         create_client,
     )
     settings = app_settings.default_run_settings.model_copy(
-        update={"quick_model": "invalid-quick", "deep_model": "valid-deep"}
+        update={"quick_binding": None, "deep_binding": app_settings.default_run_settings.deep_binding.model_copy(update={"model": "valid-deep"}), "research_kind": "incremental"}
     )
 
     llms = create_run_llms(settings, purpose="incremental")
 
     assert created == ["valid-deep"]
     assert llms.deep.model == "valid-deep"
-    assert llms.quick is llms.deep
+    assert llms.quick is None
+    assert llms.quick_serializer is None

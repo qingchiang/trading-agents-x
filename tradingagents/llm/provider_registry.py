@@ -128,9 +128,6 @@ def resolve_provider_base_url(
     env = {} if environ is None else environ
     if connections is not None:
         return connections[definition.name].get("base_url")
-    defaults = settings.default_run_settings
-    if definition.name == defaults.llm_provider and defaults.backend_url:
-        return defaults.backend_url
     if definition.base_url_env and env.get(definition.base_url_env):
         return env[definition.base_url_env]
     return definition.default_base_url

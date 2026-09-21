@@ -156,8 +156,8 @@ class ModelDiscoveryService:
     def _connection_defaults(catalog, conn, defaults):
         by_id = {model.id: model for model in catalog.models}
         for role in ("quick", "deep"):
-            if getattr(defaults, f"{role}_connection_id") == conn.id:
-                model_id = getattr(defaults, f"{role}_think_llm")
+            if getattr(defaults.models, role).connection_id == conn.id:
+                model_id = getattr(defaults.models, role).model
                 existing = by_id.get(model_id)
                 by_id[model_id] = DiscoveredModel(
                     model_id,
@@ -171,12 +171,10 @@ class ModelDiscoveryService:
     def providers(self) -> dict[str, tuple[ProviderDefinition, ProviderAvailability]]:
         """Return every provider for Settings, including unavailable entries."""
         if self.configuration is not None:
-            from tradingagents.llm.models import legacy_connection_id
-
             view = self.configuration.read()
             result = {}
             for name, definition in PROVIDER_REGISTRY.items():
-                entry = view.connections.get(legacy_connection_id(name))
+                entry = next((entry for entry in view.connections.values() if entry.connection.preset == name), None)
                 result[name] = (
                     definition,
                     ProviderAvailability(
@@ -200,15 +198,20 @@ class ModelDiscoveryService:
             for name, definition in PROVIDER_REGISTRY.items()
         }
 
+    def _provider_connection_id(self, provider):
+        matches = [entry.connection.id for entry in self.configuration.read().connections.values()
+                   if entry.connection.preset == provider]
+        if len(matches) != 1:
+            raise UnknownProviderError("Select a connection ID for model discovery")
+        return matches[0]
+
     def discover(self, provider: str, *, refresh: bool = False) -> ModelCatalog:
         """Return a live, cached, or configured-default model catalog."""
         if self.configuration is not None:
-            from tradingagents.llm.models import legacy_connection_id
-
             if provider not in PROVIDER_REGISTRY:
                 raise UnknownProviderError(provider)
             return replace(
-                self.discover_connection(legacy_connection_id(provider), refresh=refresh),
+                self.discover_connection(self._provider_connection_id(provider), refresh=refresh),
                 provider=provider,
             )
         definition = get_provider_definition(provider)
@@ -593,12 +596,11 @@ class ModelDiscoveryService:
         self,
         provider: str,
     ) -> dict[str, tuple[Literal["quick", "deep"], ...]]:
-        defaults = self.settings.default_run_settings
-        if provider != defaults.llm_provider:
-            return {}
         roles: dict[str, list[Literal["quick", "deep"]]] = {}
-        roles.setdefault(defaults.quick_model, []).append("quick")
-        roles.setdefault(defaults.deep_model, []).append("deep")
+        for role in ("quick", "deep"):
+            binding = getattr(self.settings.default_run_settings, f"{role}_binding")
+            if binding is not None and binding.connection.compatibility == provider:
+                roles.setdefault(binding.model, []).append(role)
         return {model: tuple(values) for model, values in roles.items()}
 
     def _api_key(self, legacy_name):

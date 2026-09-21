@@ -50,7 +50,6 @@ class ModelConnectionRecord(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     definition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    legacy_provider: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True)
 
 
 class RunRecord(Base):
@@ -64,6 +63,7 @@ class RunRecord(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     instrument_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     instrument_local_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    audit_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     submission_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)

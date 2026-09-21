@@ -2,8 +2,6 @@ import { useState } from "react";
 import {
   api,
   type ConfigurationField,
-  type ConfigurationSchema,
-  type ProviderConnection,
 } from "../api/client";
 import type { SettingsText } from "../settingsCopy";
 
@@ -388,77 +386,6 @@ export function CredentialEditor({
           {text.remove}
         </button>
       </div>
-    </div>
-  );
-}
-
-export function ProviderEditor({
-  name,
-  label,
-  connection,
-  onChange,
-  schema,
-  text,
-}: {
-  name: string;
-  label: string;
-  connection: ProviderConnection;
-  onChange: (v: ProviderConnection) => void;
-  schema: ConfigurationSchema;
-  text: SettingsText;
-}) {
-  const field = (
-    key: keyof ProviderConnection,
-    title: string,
-    hint?: string,
-  ) => (
-    <label>
-      {title}
-      <input
-        value={String(connection[key] ?? "")}
-        placeholder={hint}
-        onChange={(e) =>
-          onChange({ ...connection, [key]: e.target.value || null })
-        }
-      />
-    </label>
-  );
-  return (
-    <div className="configuration-provider-fields" aria-label={label}>
-      {name !== "bedrock" &&
-        field(
-          "base_url",
-          text.address,
-          schema.provider_defaults[name]?.base_url ?? text.providerDefault,
-        )}
-      {name === "azure" && (
-        <>
-          {field("deployment", text.deploymentName)}
-          {field("api_version", text.apiVersion)}
-        </>
-      )}
-      {name === "bedrock" && (
-        <>
-          {field("region", text.region)}
-          {field("aws_profile", text.awsProfile)}
-          <label>
-            {text.authMode}
-            <select
-              value={connection.auth_mode ?? "system"}
-              onChange={(e) =>
-                onChange({
-                  ...connection,
-                  auth_mode: e.target.value as ProviderConnection["auth_mode"],
-                })
-              }
-            >
-              <option value="system">{text.system}</option>
-              <option value="bearer">{text.bearer}</option>
-              <option value="static">{text.static}</option>
-            </select>
-          </label>
-        </>
-      )}
     </div>
   );
 }

@@ -30,6 +30,7 @@ from tradingagents.domain.reports import (
     ResearchWarning,
 )
 from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.provenance import ProvenanceRecord
 from tradingagents.research.full.workflow import (
     ResearchGraph,
@@ -230,7 +231,7 @@ def _context(
         profile=profile,
         analysts=analysts,
     )
-    settings = app_settings.resolve_run(request)
+    settings = ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1]
     return RunContext(
         run_id=f"fixture-{profile.value}",
         request=request,

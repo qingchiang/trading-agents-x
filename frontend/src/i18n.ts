@@ -395,8 +395,8 @@ const en = {
     templateLoadFailed: "Could not load source run {{id}}.",
     templateSourceNotTerminal:
       "Only completed, failed, or cancelled runs can be used as templates.",
-    templateProviderUnavailable:
-      "The source provider {{provider}} is unavailable. Current defaults were selected; review the model settings.",
+    templateConnectionUnavailable:
+      "A selected model connection is unavailable. Choose a replacement before submitting.",
     sourceOutputLanguage: "From source run: {{value}}",
     exportPackage: "Export research package",
     exportMarkdown: "Export Markdown",
@@ -1378,8 +1378,8 @@ const zhCN = {
     templateFromRun: "正在使用以下来源运行的配置：",
     templateLoadFailed: "无法加载来源运行 {{id}}。",
     templateSourceNotTerminal: "只有已完成、失败或已取消的运行可作为模板。",
-    templateProviderUnavailable:
-      "来源模型服务商 {{provider}} 当前不可用，已改用当前默认配置；请复核模型设置。",
+    templateConnectionUnavailable:
+      "所选模型连接不可用，请在提交前选择替代连接。",
     sourceOutputLanguage: "来自来源运行：{{value}}",
     exportPackage: "导出研究包",
     exportMarkdown: "导出 Markdown",
@@ -2339,8 +2339,8 @@ const ja = {
     templateLoadFailed: "元の実行 {{id}} を読み込めませんでした。",
     templateSourceNotTerminal:
       "完了、失敗、またはキャンセル済みの実行だけをテンプレートにできます。",
-    templateProviderUnavailable:
-      "元のプロバイダー {{provider}} は利用できません。現在の既定値を選択したため、モデル設定を確認してください。",
+    templateConnectionUnavailable:
+      "選択したモデル接続は利用できません。送信前に別の接続を選んでください。",
     sourceOutputLanguage: "元の実行から：{{value}}",
     exportPackage: "研究パッケージを出力",
     exportMarkdown: "Markdown 出力",

@@ -6,8 +6,8 @@ chat client; when unset the provider keeps its own default.
 
 import pytest
 
+from tests.research_helpers import model_settings
 from tradingagents.configuration.defaults import build_default_config
-from tradingagents.configuration.settings import RunSettings
 from tradingagents.llm.factory import create_llm_client
 from tradingagents.llm.runtime import create_run_llms
 
@@ -43,12 +43,11 @@ class TestTemperatureForwarding:
 
 @pytest.mark.unit
 class TestTemperatureEnvOverlay:
-    def test_explicit_environment_sets_temperature(self):
-        import tradingagents.configuration.defaults as dc
-
-        config = dc.build_default_config({"TRADINGAGENTS_TEMPERATURE": "0.2"})
-
-        assert float(config["temperature"]) == 0.2
+    def test_explicit_environment_sets_temperature(self, tmp_path):
+        from tests.configuration_helpers import import_configuration
+        from tradingagents.configuration.settings import AppSettings
+        settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path), "TRADINGAGENTS_TEMPERATURE": "0.2"})
+        assert import_configuration(settings).read().values.temperature == 0.2
 
     def test_module_default_ignores_process_environment(self, monkeypatch):
         import tradingagents.configuration.defaults as dc
@@ -65,7 +64,8 @@ class TestProviderKwargsTemperature:
     def _kwargs_for(self, monkeypatch, temperature):
         calls = []
 
-        def factory(**kwargs):
+        def factory(provider, model, base_url=None, **kwargs):
+            kwargs.update(provider=provider, model=model, base_url=base_url)
             calls.append(kwargs)
 
             class Client:
@@ -75,12 +75,12 @@ class TestProviderKwargsTemperature:
             return Client()
 
         monkeypatch.setattr(
-            "tradingagents.llm.runtime.create_llm_client",
+            "tradingagents.llm.connections.create_llm_client",
             factory,
         )
-        settings = RunSettings(
+        settings = model_settings(
             temperature=temperature,
-            data_config=build_default_config({}),
+            data_config=build_default_config(),
         )
         create_run_llms(settings)
         return calls

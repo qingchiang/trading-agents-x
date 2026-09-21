@@ -9,9 +9,7 @@ import {
   type AnalysisCutoffContext,
   type AnalysisRequest,
   type Capabilities,
-  type DiscoveredModel,
   type FullBaselineCandidate,
-  type ProviderModelCatalog,
   type RunCreateRequest,
 } from "../api/client";
 import {
@@ -23,7 +21,6 @@ import {
 import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
-const customModelValue = "__custom_model_id__";
 
 type AnalysisDateMode = "auto" | "manual";
 
@@ -68,10 +65,6 @@ export default function NewRun() {
         ? "full"
         : null;
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [modelCatalog, setModelCatalog] =
-    useState<ProviderModelCatalog | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelWarning, setModelWarning] = useState("");
   const [ticker, setTicker] = useState("");
   const [analysisDate, setAnalysisDate] = useState("");
   const [analysisContext, setAnalysisContext] =
@@ -84,11 +77,8 @@ export default function NewRun() {
     "standard",
   );
   const [analysts, setAnalysts] = useState<string[]>([...analystKeys]);
-  const [provider, setProvider] = useState("openai");
   const [quickModel, setQuickModel] = useState("");
   const [deepModel, setDeepModel] = useState("");
-  const [quickCustomModel, setQuickCustomModel] = useState("");
-  const [deepCustomModel, setDeepCustomModel] = useState("");
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [quickConnection, setQuickConnection] = useState("");
   const [deepConnection, setDeepConnection] = useState("");
@@ -261,22 +251,8 @@ export default function NewRun() {
         ]);
         if (!active) return;
         setCapabilities(data);
-        const selectableProviders = Object.entries(data.providers).filter(
-          ([, config]) => config.selectable,
-        );
-        const defaultProvider = data.providers[data.defaults.llm_provider]?.selectable
-          ? data.defaults.llm_provider
-          : (selectableProviders[0]?.[0] ?? "");
         const sourceRequest = source?.request;
         const sourceIsTerminal = source !== null;
-        const sourceProvider =
-          sourceIsTerminal ? (sourceRequest?.llm_provider ?? "") : "";
-        const sourceProviderAvailable =
-          Boolean(sourceProvider) &&
-          Boolean(data.providers[sourceProvider]?.selectable);
-        const nextProvider = sourceProviderAvailable
-          ? sourceProvider
-          : defaultProvider;
         setProfile(
           (sourceIsTerminal
             ? sourceRequest?.profile
@@ -291,31 +267,6 @@ export default function NewRun() {
             ? [...(sourceRequest?.analysts ?? analystKeys)]
             : [...(data.defaults.analysts ?? analystKeys)] as typeof analystKeys[number][],
         );
-        setProvider(nextProvider);
-        if (sourceIsTerminal && sourceProviderAvailable) {
-          setQuickModel(sourceRequest?.quick_model ?? "");
-          setDeepModel(sourceRequest?.deep_model ?? "");
-          setQuickReasoning(
-            sourceRequest?.quick_reasoning_effort ?? "",
-          );
-          setDeepReasoning(
-            sourceRequest?.deep_reasoning_effort ?? "",
-          );
-        } else if (nextProvider === data.defaults.llm_provider) {
-          setQuickModel(data.defaults.quick_model);
-          setDeepModel(data.defaults.deep_model);
-          setQuickReasoning(
-            data.defaults.quick_reasoning_effort ?? "",
-          );
-          setDeepReasoning(
-            data.defaults.deep_reasoning_effort ?? "",
-          );
-        } else {
-          setQuickModel("");
-          setDeepModel("");
-          setQuickReasoning("provider_default");
-          setDeepReasoning("provider_default");
-        }
         setOutputLanguage(
           sourceIsTerminal
             ? (sourceRequest?.output_language ?? data.defaults.output_language)
@@ -323,30 +274,15 @@ export default function NewRun() {
         );
         setSourceRunId(sourceIsTerminal ? (source?.run_id ?? "") : "");
         if (lockedKind) setResearchKind(lockedKind);
-        if (
-          sourceIsTerminal &&
-          sourceProvider &&
-          !sourceProviderAvailable
-        ) {
-          setTemplateWarning(
-            t("templateProviderUnavailable", {
-              provider: sourceProvider,
-            }),
-          );
-        } else if (sourceIsTerminal) {
-          setTemplateWarning("");
+        const q = sourceRequest?.models?.quick ?? data.defaults.models.quick;
+        const d = sourceRequest?.models?.deep ?? data.defaults.models.deep;
+        setQuickConnection(q?.connection_id ?? ""); setDeepConnection(d?.connection_id ?? "");
+        setQuickModel(q?.model ?? ""); setDeepModel(d?.model ?? "");
+        setQuickReasoning(q?.reasoning_effort ?? ""); setDeepReasoning(d?.reasoning_effort ?? "");
+        if (!data.connections?.[d?.connection_id ?? ""]?.selectable || (lockedKind !== "incremental" && !data.connections?.[q?.connection_id ?? ""]?.selectable)) {
+          setTemplateWarning(t("templateConnectionUnavailable"));
         }
-        if (Object.keys(data.connections ?? {}).length) {
-          const q = sourceRequest?.quick_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.quick_connection_id ?? "";
-          const d = sourceRequest?.deep_connection_id ?? (sourceRequest?.llm_provider ? data.legacy_connections?.[sourceRequest.llm_provider] : undefined) ?? data.defaults.deep_connection_id ?? "";
-          setQuickConnection(q); setDeepConnection(d); setProvider(d);
-          setQuickModel(sourceRequest?.quick_model ?? data.defaults.quick_model);
-          setDeepModel(sourceRequest?.deep_model ?? data.defaults.deep_model);
-          setQuickReasoning(sourceRequest?.quick_reasoning_effort ?? data.defaults.quick_reasoning_effort ?? "");
-          setDeepReasoning(sourceRequest?.deep_reasoning_effort ?? data.defaults.deep_reasoning_effort ?? "");
-          if (!data.connections?.[d]?.selectable || !data.connections?.[q]?.selectable) setTemplateWarning(t("templateProviderUnavailable", { provider: "connection" }));
-        }
-        if (!nextProvider && !Object.keys(data.connections ?? {}).length) setError(t("noConfiguredProviders"));
+        if (!Object.values(data.connections ?? {}).some(connection => connection.selectable)) setError(t("noConfiguredProviders"));
       } catch (cause) {
         if (!active) return;
         setError(cause instanceof Error ? cause.message : t("error"));
@@ -358,92 +294,6 @@ export default function NewRun() {
     };
   }, [fromRun, lockedKind, t]);
 
-  useEffect(() => {
-    if (!capabilities || !provider || Object.keys(capabilities.connections ?? {}).length) return;
-    let active = true;
-    setModelsLoading(true);
-    setModelCatalog(null);
-    setModelWarning("");
-    void api
-      .providerModels(provider)
-      .then((catalog) => {
-        if (!active) return;
-        setModelCatalog(catalog);
-        setModelWarning(catalog.warning?.message ?? "");
-        const isDefaultProvider =
-          provider === capabilities.defaults.llm_provider;
-        const selectedQuick = chooseModel(
-          catalog,
-          quickModel,
-          isDefaultProvider ? capabilities.defaults.quick_model : "",
-          "quick",
-        );
-        const selectedDeep = chooseModel(
-          catalog,
-          deepModel,
-          isDefaultProvider ? capabilities.defaults.deep_model : "",
-          "deep",
-        );
-        setQuickModel(selectedQuick);
-        setDeepModel(selectedDeep);
-        setQuickReasoning((current) =>
-          reasoningOptions(catalog, selectedQuick, current).includes(current)
-            ? current
-            : "provider_default",
-        );
-        setDeepReasoning((current) =>
-          reasoningOptions(catalog, selectedDeep, current).includes(current)
-            ? current
-            : "provider_default",
-        );
-      })
-      .catch((cause) => {
-        if (!active) return;
-        setModelWarning(
-          cause instanceof Error ? cause.message : "Model discovery failed",
-        );
-        const isDefaultProvider =
-          provider === capabilities.defaults.llm_provider;
-        setQuickModel((current) =>
-          current ||
-          (isDefaultProvider
-            ? capabilities.defaults.quick_model
-            : customModelValue),
-        );
-        setDeepModel((current) =>
-          current ||
-          (isDefaultProvider
-            ? capabilities.defaults.deep_model
-            : customModelValue),
-        );
-        if (!sourceRunId) {
-          setQuickReasoning("provider_default");
-          setDeepReasoning("provider_default");
-        }
-      })
-      .finally(() => {
-        if (active) setModelsLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [capabilities, provider]);
-
-  const selectableProviders = useMemo(
-    () =>
-      Object.entries(capabilities?.providers ?? {}).filter(
-        ([, config]) => config.selectable,
-      ),
-    [capabilities],
-  );
-  const quickOptions = useMemo(
-    () => modelOptions(modelCatalog, quickModel),
-    [modelCatalog, quickModel],
-  );
-  const deepOptions = useMemo(
-    () => modelOptions(modelCatalog, deepModel),
-    [modelCatalog, deepModel],
-  );
   const reportLanguageOptions = capabilities?.output_languages ?? [
     "en",
     "zh-CN",
@@ -454,18 +304,6 @@ export default function NewRun() {
     outputLanguage && !reportLanguageOptions.includes(outputLanguage)
       ? outputLanguage
       : "";
-
-  const changeProvider = (next: string) => {
-    setProvider(next);
-    setModelCatalog(null);
-    setModelWarning("");
-    setQuickModel("");
-    setDeepModel("");
-    setQuickCustomModel("");
-    setDeepCustomModel("");
-    setQuickReasoning("provider_default");
-    setDeepReasoning("provider_default");
-  };
 
   const toggleAnalyst = (key: string) => {
     setAnalysts((current) =>
@@ -481,22 +319,8 @@ export default function NewRun() {
       setError(t("selectAnalystError"));
       return;
     }
-    if (
-      (researchKind === "full" &&
-        quickModel === customModelValue &&
-        !quickCustomModel.trim()) ||
-      (deepModel === customModelValue && !deepCustomModel.trim())
-    ) {
-      setError(t("customModel"));
-      return;
-    }
     setSubmitting(true);
     setError("");
-    const resolvedQuickModel = quickModel === customModelValue
-      ? quickCustomModel.trim()
-      : quickModel;
-    const resolvedDeepModel =
-      deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
     let latestContext: AnalysisCutoffContext;
     try {
       latestContext = await api.analysisCutoffContext(ticker.trim());
@@ -520,13 +344,12 @@ export default function NewRun() {
       const payload: RunCreateRequest = {
         ticker: latestContext.instrument,
         analysis_date: reconciliation.analysisDate,
-        asset_type: "stock",
         profile,
         analysts: analysts as AnalysisRequest["analysts"],
-        ...(Object.keys(capabilities?.connections ?? {}).length ? { ...(researchKind === "full" ? { quick_connection_id: quickConnection } : {}), deep_connection_id: deepConnection } : { llm_provider: provider }),
-        ...(researchKind === "full" ? { quick_model: resolvedQuickModel, quick_reasoning_effort: quickReasoning || null } : {}),
-        deep_model: resolvedDeepModel,
-        deep_reasoning_effort: deepReasoning || null,
+        models: {
+          ...(researchKind === "full" ? { quick: { connection_id: quickConnection, model: quickModel.trim(), reasoning_effort: quickReasoning || null } } : {}),
+          deep: { connection_id: deepConnection, model: deepModel.trim(), reasoning_effort: deepReasoning || null },
+        },
         output_language: outputLanguage,
         research_kind: researchKind,
         full_baseline_run_id:
@@ -576,9 +399,9 @@ export default function NewRun() {
     : analysisContextLoading ? t("marketDateLoading")
     : !analysisContext ? analysisContextError || t("marketDateLoading")
     : !analysisDate ? t("selectAnalysisDate")
-    : !capabilities || modelsLoading ? t("loading")
+    : !capabilities ? t("loading")
     : unavailableConnection ? t("chooseResearchModels")
-    : !provider || researchKind === "full" && !quickModel || !deepModel ? t("chooseResearchModels")
+    : !deepConnection || !deepModel || researchKind === "full" && (!quickConnection || !quickModel) ? t("chooseResearchModels")
     : researchKind === "incremental" && !fullBaselineRunId ? t("selectResearchBaseline")
     : "";
 
@@ -845,119 +668,9 @@ export default function NewRun() {
               ))}
             </div>
             <h2>{t("modelsOutput")}</h2>
-            {Object.keys(capabilities?.connections ?? {}).length > 0 ? <RoleConnections language={i18n.language} connections={capabilities?.connections ?? {}} includeQuick={researchKind === "full"}
+            <RoleConnections language={i18n.language} connections={capabilities?.connections ?? {}} includeQuick={researchKind === "full"}
               value={{ quick: { connection: quickConnection, model: quickModel, reasoning: quickReasoning }, deep: { connection: deepConnection, model: deepModel, reasoning: deepReasoning } }}
-              onChange={roles => { setQuickConnection(roles.quick.connection); setDeepConnection(roles.deep.connection); setProvider(roles.deep.connection); setQuickModel(roles.quick.model); setDeepModel(roles.deep.model); setQuickReasoning(roles.quick.reasoning); setDeepReasoning(roles.deep.reasoning); }} /> : <>
-            <div className="model-provider">
-              <label>
-                {t("provider")}
-                <select
-                  value={provider}
-                  onChange={(event) => changeProvider(event.target.value)}
-                >
-                  {selectableProviders.map(([key, config]) => (
-                    <option key={key} value={key}>
-                      {config.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="model-groups">
-              {researchKind === "full" && <fieldset className="model-group"><legend>{t("quickModel")}</legend>
-              {researchKind === "full" && (
-                <label>
-                  {t("quickModel")}
-                  <select
-                    value={quickModel}
-                    onChange={(event) => {
-                      setQuickModel(event.target.value);
-                      setQuickReasoning("provider_default");
-                    }}
-                  >
-                    {quickOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.id === customModelValue
-                          ? t("customModel")
-                          : option.label}
-                      </option>
-                    ))}
-                  </select>
-                  {quickModel === customModelValue && (
-                    <input
-                      required
-                      value={quickCustomModel}
-                      onChange={(event) => setQuickCustomModel(event.target.value)}
-                      placeholder={t("customModel")}
-                    />
-                  )}
-                </label>
-              )}
-              {researchKind === "full" && (
-                <ReasoningSelect
-                  label={t("quickReasoning")}
-                  value={quickReasoning}
-                  options={reasoningOptions(
-                    modelCatalog,
-                    quickModel,
-                    quickReasoning,
-                  )}
-                  onChange={setQuickReasoning}
-                  providerDefault={t("providerDefault")}
-                />
-              )}
-
-              </fieldset>}
-              <fieldset className="model-group"><legend>{t("deepModel")}</legend>
-              <label>
-                {t("deepModel")}
-                <select
-                  value={deepModel}
-                  onChange={(event) => {
-                    setDeepModel(event.target.value);
-                    setDeepReasoning("provider_default");
-                  }}
-                >
-                  {deepOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.id === customModelValue
-                        ? t("customModel")
-                        : option.label}
-                    </option>
-                  ))}
-                </select>
-                {deepModel === customModelValue && (
-                  <input
-                    required
-                    value={deepCustomModel}
-                    onChange={(event) => setDeepCustomModel(event.target.value)}
-                    placeholder={t("customModel")}
-                  />
-                )}
-              </label>
-              <ReasoningSelect
-                label={t("deepReasoning")}
-                value={deepReasoning}
-                options={reasoningOptions(
-                  modelCatalog,
-                  deepModel,
-                  deepReasoning,
-                )}
-                onChange={setDeepReasoning}
-                providerDefault={t("providerDefault")}
-              />
-              </fieldset>
-            </div>
-            </>}
-            {(modelsLoading || modelWarning) && (
-              <p
-                className={`model-catalog-note ${
-                  modelWarning ? "warning" : ""
-                }`}
-              >
-                {modelsLoading ? t("discoveringModels") : modelWarning}
-              </p>
-            )}
+              onChange={roles => { setQuickConnection(roles.quick.connection); setDeepConnection(roles.deep.connection); setQuickModel(roles.quick.model); setDeepModel(roles.deep.model); setQuickReasoning(roles.quick.reasoning); setDeepReasoning(roles.deep.reasoning); }} />
           </div>
         </details>
         </article>
@@ -1021,97 +734,6 @@ function reportLanguageLabel(value: string) {
   if (value === "zh-CN") return "简体中文";
   if (value === "ja") return "日本語";
   return value;
-}
-
-type ModelRole = "quick" | "deep";
-
-function chooseModel(
-  catalog: ProviderModelCatalog,
-  current: string,
-  configuredDefault: string,
-  role: ModelRole,
-) {
-  const ids = new Set(catalog.models.map((model) => model.id));
-  if (current && current !== customModelValue) return current;
-  if (configuredDefault && ids.has(configuredDefault)) return configuredDefault;
-  return (
-    catalog.models.find((model) => model.default_roles.includes(role))?.id ??
-    catalog.models[0]?.id ??
-    customModelValue
-  );
-}
-
-function modelOptions(
-  catalog: ProviderModelCatalog | null,
-  current: string,
-): DiscoveredModel[] {
-  const options = [...(catalog?.models ?? [])];
-  if (
-    current &&
-    current !== customModelValue &&
-    !options.some((model) => model.id === current)
-  ) {
-    options.unshift({
-      id: current,
-      label: current,
-      compatibility: "unknown",
-      reasoning_efforts: ["provider_default"],
-      default_roles: [],
-    });
-  }
-  options.push({
-    id: customModelValue,
-    label: "Custom model ID",
-    compatibility: "unknown",
-    reasoning_efforts: ["provider_default"],
-    default_roles: [],
-  });
-  return options;
-}
-
-function reasoningOptions(
-  catalog: ProviderModelCatalog | null,
-  model: string,
-  current = "",
-) {
-  const options =
-    !model || model === customModelValue
-      ? ["provider_default"]
-      : (catalog?.models.find((option) => option.id === model)
-          ?.reasoning_efforts ?? ["provider_default"]);
-  const inherited = ["", ...options];
-  return current && !inherited.includes(current) ? [...inherited, current] : inherited;
-}
-
-function ReasoningSelect({
-  label,
-  value,
-  options,
-  onChange,
-  providerDefault,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-  providerDefault: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <label>
-      {label}
-      <select
-        value={options.includes(value) ? value : "provider_default"}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option === "" ? t("defaults") : option === "provider_default" ? providerDefault : option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 function createIdempotencyKey() {

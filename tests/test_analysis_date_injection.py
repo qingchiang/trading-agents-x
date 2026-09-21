@@ -1,3 +1,4 @@
+
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
@@ -10,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
@@ -116,7 +118,7 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         ticker="NVDA",
         analysis_date="2020-01-15",
     )
-    settings = app_settings.resolve_run(request)
+    settings = ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1]
     context = RunContext(
         run_id="typed-tool-runtime",
         request=request,

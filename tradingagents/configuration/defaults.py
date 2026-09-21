@@ -1,95 +1,11 @@
 import os
-from collections.abc import Mapping
 from copy import deepcopy
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
-# Legacy environment aliases used by the explicit configuration importer.
-# Runtime daily settings come from the database configuration module.
-_ENV_OVERRIDES = {
-    "TRADINGAGENTS_LLM_PROVIDER":         "llm_provider",
-    "TRADINGAGENTS_DEEP_THINK_LLM":       "deep_think_llm",
-    "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
-    "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
-    "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
-    "TRADINGAGENTS_TEMPERATURE":          "temperature",
-    "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
-    "TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS": "ticker_news_lookback_days",
-    "TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS":     "social_lookback_days",
-    "TRADINGAGENTS_QUICK_REASONING_EFFORT": "quick_reasoning_effort",
-    "TRADINGAGENTS_DEEP_REASONING_EFFORT":  "deep_reasoning_effort",
-    # Provider-specific reasoning/thinking knobs (None = each provider's own
-    # default). These names are accepted by explicit legacy imports; the
-    # settings page exposes their priority relative to role-specific values.
-    "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
-    "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
-    "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
-}
-
-
-_BOOL_TRUE = ("true", "1", "yes", "on")
-_BOOL_FALSE = ("false", "0", "no", "off")
-def _coerce(value: str, reference):
-    """Coerce env-var string to the type of the existing default value.
-
-    Invalid values raise ``ValueError`` rather than silently falling back to a
-    default — a misspelled boolean (e.g. ``treu``) or non-numeric int should fail
-    loudly at startup, not quietly misconfigure an unattended run.
-    """
-    if isinstance(reference, bool):
-        normalized = value.strip().lower()
-        if normalized in _BOOL_TRUE:
-            return True
-        if normalized in _BOOL_FALSE:
-            return False
-        raise ValueError(
-            f"expected a boolean ({'/'.join(_BOOL_TRUE + _BOOL_FALSE)}), got {value!r}"
-        )
-    if isinstance(reference, int) and not isinstance(reference, bool):
-        return int(value)
-    if isinstance(reference, float):
-        return float(value)
-    return value
-
-
-def _apply_env_overrides(
-    config: dict,
-    environ: Mapping[str, str] | None = None,
-) -> dict:
-    """Apply TRADINGAGENTS_* values at an explicit application boundary."""
-    env = os.environ if environ is None else environ
-    for env_var, key in _ENV_OVERRIDES.items():
-        raw = env.get(env_var)
-        if raw is None or raw == "":
-            continue
-        try:
-            config[key] = _coerce(raw, config.get(key))
-        except ValueError as exc:
-            raise ValueError(f"Invalid value for {env_var}: {exc}") from exc
-    return config
-
-
 _BASE_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "data_cache_dir": os.path.join(_TRADINGAGENTS_HOME, "cache"),
-    # LLM settings
-    "llm_provider": "openai",
-    "deep_think_llm": "gpt-5.5",
-    "quick_think_llm": "gpt-5.4-mini",
-    # When None, each provider's client falls back to its own default endpoint
-    # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
-    # The CLI overrides this per provider when the user picks one. Keeping a
-    # provider-specific URL here would leak (e.g. OpenAI's /v1 was previously
-    # being forwarded to Gemini, producing malformed request URLs).
-    "backend_url": None,
-    # Provider-specific thinking configuration
-    # Role-specific values take precedence over the provider's legacy shared
-    # key. "provider_default" explicitly omits the native SDK parameter.
-    "quick_reasoning_effort": None,
-    "deep_reasoning_effort": None,
-    "google_thinking_level": None,      # "high", "minimal", etc.
-    "openai_reasoning_effort": None,    # "medium", "high", "low"
-    "anthropic_effort": None,           # "high", "medium", "low"
     # Sampling temperature, forwarded to every provider when set. None leaves
     # each provider at its own default. Lower values reduce run-to-run
     # variation on models that honor it; reasoning models largely ignore it
@@ -204,14 +120,9 @@ _BASE_CONFIG = {
 }
 
 
-def build_default_config(
-    environ: Mapping[str, str] | None = None,
-) -> dict:
-    """Return a fresh config, optionally applying an explicit environment."""
-    config = deepcopy(_BASE_CONFIG)
-    if environ is not None:
-        _apply_env_overrides(config, environ)
-    return config
+def build_default_config() -> dict:
+    """Return isolated data defaults without reading or applying environment values."""
+    return deepcopy(_BASE_CONFIG)
 
 
 # Imports are deterministic. These program defaults also back the typed

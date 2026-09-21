@@ -120,60 +120,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AssetType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -187,17 +133,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -208,6 +143,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -226,39 +164,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -534,13 +439,6 @@
         ],
         "title": "ArtifactGenerationObservation",
         "type": "object"
-      },
-      "AssetType": {
-        "enum": [
-          "stock"
-        ],
-        "title": "AssetType",
-        "type": "string"
       },
       "AuditedRangeEndpoint": {
         "additionalProperties": false,
@@ -852,13 +750,6 @@
           "defaults": {
             "$ref": "#/components/schemas/CapabilityDefaults"
           },
-          "legacy_connections": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Legacy Connections",
-            "type": "object"
-          },
           "output_languages": {
             "items": {
               "type": "string"
@@ -901,39 +792,12 @@
             "title": "Analysts",
             "type": "array"
           },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "title": "Deep Model",
-            "type": "string"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "lan_enabled": {
             "title": "Lan Enabled",
             "type": "boolean"
           },
-          "llm_provider": {
-            "title": "Llm Provider",
-            "type": "string"
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "title": "Output Language",
@@ -943,32 +807,6 @@
             "title": "Profile",
             "type": "string"
           },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "title": "Quick Model",
-            "type": "string"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
-          },
           "trash_retention_days": {
             "minimum": 0.0,
             "title": "Trash Retention Days",
@@ -976,12 +814,8 @@
           }
         },
         "required": [
+          "models",
           "profile",
-          "llm_provider",
-          "quick_model",
-          "deep_model",
-          "quick_reasoning_effort",
-          "deep_reasoning_effort",
           "output_language",
           "lan_enabled",
           "trash_retention_days"
@@ -1240,7 +1074,7 @@
               "list",
               "choice",
               "routes",
-              "providers"
+              "models"
             ],
             "title": "Kind",
             "type": "string"
@@ -1396,13 +1230,6 @@
             "title": "Presets",
             "type": "object"
           },
-          "provider_defaults": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderConnection"
-            },
-            "title": "Provider Defaults",
-            "type": "object"
-          },
           "providers": {
             "additionalProperties": {
               "type": "string"
@@ -1434,7 +1261,6 @@
         "required": [
           "fields",
           "providers",
-          "provider_defaults",
           "credential_owners",
           "route_options",
           "tool_options"
@@ -1459,17 +1285,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "anthropic_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Anthropic Effort"
-          },
           "cn_news_candidate_limit": {
             "default": 100,
             "maximum": 100.0,
@@ -1493,34 +1308,6 @@
             },
             "title": "Data Vendors By Market",
             "type": "object"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
-          "deep_think_llm": {
-            "default": "gpt-5.5",
-            "minLength": 1,
-            "title": "Deep Think Llm",
-            "type": "string"
           },
           "global_news_article_limit": {
             "default": 10,
@@ -1554,17 +1341,6 @@
             "title": "Global News Query Limit",
             "type": "integer"
           },
-          "google_thinking_level": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Thinking Level"
-          },
           "llm_max_retries": {
             "anyOf": [
               {
@@ -1577,10 +1353,8 @@
             ],
             "title": "Llm Max Retries"
           },
-          "llm_provider": {
-            "default": "openai",
-            "title": "Llm Provider",
-            "type": "string"
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "news_article_limit": {
             "default": 30,
@@ -1617,17 +1391,6 @@
             "title": "News Cache Total Limit",
             "type": "integer"
           },
-          "openai_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Openai Reasoning Effort"
-          },
           "output_language": {
             "default": "en",
             "minLength": 1,
@@ -1642,41 +1405,6 @@
               "deep"
             ],
             "title": "Profile",
-            "type": "string"
-          },
-          "providers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderConnection"
-            },
-            "title": "Providers",
-            "type": "object"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
-          },
-          "quick_think_llm": {
-            "default": "gpt-5.4-mini",
-            "minLength": 1,
-            "title": "Quick Think Llm",
             "type": "string"
           },
           "sentiment_filing_limit": {
@@ -3864,6 +3592,49 @@
         "title": "ModelDiscoveryWarningView",
         "type": "object"
       },
+      "ModelSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          }
+        },
+        "title": "ModelSelection",
+        "type": "object"
+      },
       "NodeMetrics": {
         "additionalProperties": false,
         "description": "Resource usage attributed to one research graph node.",
@@ -4591,72 +4362,6 @@
           "model_discovery_supported"
         ],
         "title": "ProviderCapabilities",
-        "type": "object"
-      },
-      "ProviderConnection": {
-        "additionalProperties": false,
-        "properties": {
-          "api_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Version"
-          },
-          "auth_mode": {
-            "default": "system",
-            "enum": [
-              "bearer",
-              "system",
-              "static"
-            ],
-            "title": "Auth Mode",
-            "type": "string"
-          },
-          "aws_profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aws Profile"
-          },
-          "base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Url"
-          },
-          "deployment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployment"
-          },
-          "region": {
-            "default": "us-west-2",
-            "title": "Region",
-            "type": "string"
-          }
-        },
-        "title": "ProviderConnection",
         "type": "object"
       },
       "ProviderModelCatalog": {
@@ -6405,6 +6110,33 @@
         "title": "RiskReviewDisposition",
         "type": "string"
       },
+      "RoleSelections": {
+        "additionalProperties": false,
+        "properties": {
+          "deep": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quick": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RoleSelections",
+        "type": "object"
+      },
       "RunAttemptView": {
         "additionalProperties": false,
         "description": "Observed execution usage and lifecycle for one retry attempt.",
@@ -6567,60 +6299,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AssetType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -6634,17 +6312,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -6655,6 +6322,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -6673,39 +6343,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -7335,61 +6972,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asset Type"
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -7401,17 +6983,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -7422,6 +6993,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -7440,39 +7014,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -7514,6 +7055,18 @@
           "attempt": {
             "title": "Attempt",
             "type": "integer"
+          },
+          "audit_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Snapshot"
           },
           "cancel_requested": {
             "title": "Cancel Requested",
@@ -7761,6 +7314,18 @@
           "attempt": {
             "title": "Attempt",
             "type": "integer"
+          },
+          "audit_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Snapshot"
           },
           "cancel_requested": {
             "title": "Cancel Requested",

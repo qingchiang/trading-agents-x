@@ -125,8 +125,6 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
             "deep",
             "--analysts",
             "news,market",
-            "--provider",
-            "openai",
             "--quick-model",
             "quick",
             "--deep-model",
@@ -150,8 +148,8 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
     assert request.profile is RunProfile.DEEP
     assert request.analysts == ("market", "news")
     assert request.output_language == "ja"
-    assert request.quick_reasoning_effort == "low"
-    assert request.deep_reasoning_effort == "high"
+    assert request.models.quick.reasoning_effort == "low"
+    assert request.models.deep.reasoning_effort == "high"
     assert captured["on_event"] is None
 
 
@@ -653,7 +651,8 @@ def test_run_accepts_independent_role_connections_without_filling_omitted_defaul
         "--quick-connection", "quick", "--deep-connection", "deep", "--quiet", "--json"])
     assert result.exit_code == 0, result.output
     request = captured["request"]
-    assert request.quick_connection_id == "quick" and request.deep_connection_id == "deep"
-    assert request.llm_provider is None
+    assert request.models.quick.connection_id == "quick" and request.models.deep.connection_id == "deep"
+    assert request.models.quick.model is None
+    assert request.models.deep.model is None
     assert "profile" not in request.model_fields_set
     assert "analysts" not in request.model_fields_set

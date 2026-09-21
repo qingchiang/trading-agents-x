@@ -6,8 +6,6 @@ from tradingagents.llm.models import (
     ModelConnection,
     connection_view,
     credential_name,
-    legacy_connection_id,
-    legacy_credential_fields,
     preset_connection,
 )
 from tradingagents.persistence.models import CredentialRecord, ModelConnectionRecord, RunRecord
@@ -36,81 +34,12 @@ def views(session):
     }
 
 
-def ensure_legacy(session, provider, raw):
-    identity = legacy_connection_id(provider)
-    row = session.get(ModelConnectionRecord, identity)
-    if row is None:
-        conn = preset_connection(
-            provider,
-            legacy=raw.get("providers", {}).get(provider),
-            defaults={
-                k: raw[k]
-                for k in ("openai_reasoning_effort", "google_thinking_level", "anthropic_effort")
-                if k in raw
-            },
-        )
-        row = ModelConnectionRecord(
-            id=identity, legacy_provider=provider, definition=conn.model_dump(mode="json")
-        )
-        session.add(row)
-        session.flush()
-    if row.definition.get("deleted"):
-        raise ValueError("Legacy connection was deleted; select a new connection explicitly")
-    return row
-
-
-def sync_legacy(session, raw, updates, credential_updates):
-    """Translate compatibility inputs once, never infer identity from a label."""
-    provider = raw.get("llm_provider", "openai")
-    if (
-        not raw.get("quick_connection_id")
-        or not raw.get("deep_connection_id")
-        or "llm_provider" in updates
-    ):
-        row = ensure_legacy(session, provider, raw)
-        raw["quick_connection_id"] = row.id
-        raw["deep_connection_id"] = row.id
-    for owner in updates.get("providers", {}):
-        row = ensure_legacy(session, owner, raw)
-        conn = ModelConnection.model_validate(row.definition)
-        translated = preset_connection(owner, legacy=raw["providers"][owner])
-        row.definition = conn.model_copy(
-            update={"transport": translated.transport, "revision": conn.revision + 1}
-        ).model_dump(mode="json")
-    for row in session.scalars(select(ModelConnectionRecord)):
-        native = {
-            key: value
-            for key, value in updates.items()
-            if key in {"openai_reasoning_effort", "google_thinking_level", "anthropic_effort"}
-        }
-        if native and row.legacy_provider and not row.definition.get("deleted"):
-            conn = ModelConnection.model_validate(row.definition)
-            row.definition = conn.model_copy(
-                update={"reasoning_defaults": {**conn.reasoning_defaults, **native}}
-            ).model_dump(mode="json")
-    translated_credentials = {}
-    aliases = legacy_credential_fields()
-    for name, value in credential_updates.items():
-        if name in aliases:
-            owner, field = aliases[name]
-            row = ensure_legacy(session, owner, raw)
-            translated_credentials[credential_name(row.id, field)] = value
-            definition = dict(row.definition)
-            definition["revision"] += 1
-            row.definition = definition
-        else:
-            translated_credentials[name] = value
-    return translated_credentials
-
-
 def referenced_ids(snapshot):
     ids = {
         binding["connection"]["id"]
         for role in (("deep",) if snapshot.get("research_kind") == "incremental" else ("quick", "deep"))
         if (binding := snapshot.get(f"{role}_binding"))
     }
-    if not ids and snapshot.get("llm_provider"):
-        ids.add(legacy_connection_id(snapshot["llm_provider"]))
     return ids
 
 
@@ -134,7 +63,7 @@ def apply_changes(session, changes, raw):
             )
         conn = ModelConnection.model_validate(row.definition)
         if change.action == "delete":
-            if change.id in {raw.get("quick_connection_id"), raw.get("deep_connection_id")}:
+            if change.id in {(raw.get("models", {}).get(role) or {}).get("connection_id") for role in ("quick", "deep")}:
                 raise ConfigurationError(
                     "Replace the default connection before deleting it", fields=["connections"]
                 )
@@ -219,11 +148,11 @@ def apply_changes(session, changes, raw):
         ).model_dump(mode="json")
         session.flush()
     for role in ("quick", "deep"):
-        row = session.get(ModelConnectionRecord, raw.get(f"{role}_connection_id"))
+        row = session.get(ModelConnectionRecord, (raw.get("models", {}).get(role) or {}).get("connection_id"))
         if row is None or row.definition.get("deleted") or not row.definition.get("enabled", True):
             raise ConfigurationError(
                 "Research defaults must select an enabled connection",
-                fields=[f"{role}_connection_id"],
+                fields=[f"models.{role}.connection_id"],
             )
         from tradingagents.configuration.models import ConfigurationValues
         from tradingagents.llm.reasoning_effort import resolve_reasoning_effort
@@ -235,15 +164,15 @@ def apply_changes(session, changes, raw):
                 {
                     **conn.reasoning_defaults,
                     "llm_provider": conn.compatibility,
-                    "quick_think_llm": getattr(values, f"{role}_think_llm"),
-                    "quick_reasoning_effort": getattr(values, f"{role}_reasoning_effort"),
+                    "quick_think_llm": getattr(values.models, role).model,
+                    "quick_reasoning_effort": getattr(values.models, role).reasoning_effort,
                 },
                 "quick",
             )
         except ValueError as exc:
             raise ConfigurationError(
                 "Unsupported reasoning setting for this connection",
-                fields=[f"{role}_reasoning_effort"],
+                fields=[f"models.{role}.reasoning_effort"],
             ) from exc
 
 
@@ -254,8 +183,6 @@ def validate_run_connections(session, snapshot, *, retry=False):
     for identity in referenced_ids(snapshot):
         row = session.get(ModelConnectionRecord, identity)
         if row is None:
-            if not snapshot.get("quick_binding"):
-                continue
             raise ProviderConfigurationChanged("Connection does not exist; create a new Run")
         current = ModelConnection.model_validate(row.definition)
         if current.deleted or (not retry and not current.enabled):

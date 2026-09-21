@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import dotenv_values, find_dotenv
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
@@ -20,8 +20,7 @@ from tradingagents.domain.common import (
     normalize_report_language,
     report_language_prompt_label,
 )
-from tradingagents.domain.runs import AnalysisRequest
-from tradingagents.llm.models import ModelBinding
+from tradingagents.llm.models import ModelBinding, preset_connection
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
 
@@ -53,21 +52,14 @@ class RunSettings(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    binding_version: int = 2
+    snapshot_version: Literal[1] = 1
     quick_binding: ModelBinding | None = None
-    deep_binding: ModelBinding | None = None
+    deep_binding: ModelBinding
     research_kind: str = "full"
     profile: RunProfile = RunProfile.STANDARD
-    llm_provider: str = "openai"
-    quick_model: str = "gpt-5.4-mini"
-    deep_model: str = "gpt-5.5"
-    backend_url: str | None = None
-    quick_reasoning_effort: str | None = None
-    deep_reasoning_effort: str | None = None
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
-    connection: dict[str, Any] | None = None
     data_config: Mapping[str, Any]
 
     @field_validator("output_language", mode="before")
@@ -96,12 +88,6 @@ class RunSettings(BaseModel):
         config.update(
             {
                 "data_cache_dir": str(app.data_cache_dir),
-                "llm_provider": self.llm_provider,
-                "quick_think_llm": self.quick_model,
-                "deep_think_llm": self.deep_model,
-                "backend_url": self.backend_url,
-                "quick_reasoning_effort": self.quick_reasoning_effort,
-                "deep_reasoning_effort": self.deep_reasoning_effort,
                 "temperature": self.temperature,
                 "llm_max_retries": self.llm_max_retries,
                 "output_language": report_language_prompt_label(
@@ -172,9 +158,11 @@ class AppSettings(BaseModel):
             env = {**enterprise_values, **primary_values, **env}
         home = Path(env.get("TRADINGAGENTS_HOME", "~/.tradingagents")).expanduser()
         defaults = build_default_config()
+        connection = preset_connection("openai", identity="default")
         run_settings = RunSettings(
-            llm_provider=defaults["llm_provider"], quick_model=defaults["quick_think_llm"],
-            deep_model=defaults["deep_think_llm"], data_config=defaults,
+            quick_binding=ModelBinding(connection=connection, model="gpt-5.4-mini"),
+            deep_binding=ModelBinding(connection=connection, model="gpt-5.5"),
+            data_config=defaults,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
         token = env.get("TRADINGAGENTS_LAN_TOKEN")
@@ -212,47 +200,6 @@ class AppSettings(BaseModel):
             import_primary={k: SecretStr(v) for k, v in primary_values.items()},
             import_enterprise={k: SecretStr(v) for k, v in enterprise_values.items()},
             default_run_settings=run_settings,
-        )
-
-    def resolve_run(self, request: AnalysisRequest) -> RunSettings:
-        base = self.default_run_settings
-        return base.model_copy(
-            update={
-                "profile": request.profile,
-                "llm_provider": request.llm_provider or base.llm_provider,
-                "quick_model": request.quick_model or base.quick_model,
-                "deep_model": request.deep_model or base.deep_model,
-                "quick_reasoning_effort": (
-                    request.quick_reasoning_effort
-                    if request.quick_reasoning_effort is not None
-                    else base.quick_reasoning_effort
-                ),
-                "deep_reasoning_effort": (
-                    request.deep_reasoning_effort
-                    if request.deep_reasoning_effort is not None
-                    else base.deep_reasoning_effort
-                ),
-                "output_language": request.output_language or base.output_language,
-            }
-        )
-
-    def materialize_request(
-        self,
-        request: AnalysisRequest,
-        *,
-        run_settings: RunSettings | None = None,
-    ) -> AnalysisRequest:
-        """Persist the effective request instead of ambiguous omitted overrides."""
-        resolved = run_settings or self.resolve_run(request)
-        return request.model_copy(
-            update={
-                "llm_provider": resolved.llm_provider,
-                "quick_model": resolved.quick_model,
-                "deep_model": resolved.deep_model,
-                "quick_reasoning_effort": resolved.quick_reasoning_effort,
-                "deep_reasoning_effort": resolved.deep_reasoning_effort,
-                "output_language": resolved.output_language,
-            }
         )
 
     def prepare_filesystem(self) -> None:

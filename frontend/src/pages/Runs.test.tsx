@@ -23,14 +23,10 @@ function run(
     request: {
       ticker,
       analysis_date: "2026-07-24",
-      asset_type: "stock",
+
       profile: "standard",
       analysts: ["market"],
-      llm_provider: "openai",
-      quick_model: "quick",
-      deep_model: "deep",
-      quick_reasoning_effort: "provider_default",
-      deep_reasoning_effort: "provider_default",
+      models: { quick: { connection_id: "openai", model: "quick", reasoning_effort: "provider_default" }, deep: { connection_id: "openai", model: "deep", reasoning_effort: "provider_default" } },
       output_language: "en",
     },
     config_snapshot: {},

@@ -14,7 +14,7 @@ has an earlier revision.
    tradingagents db migrate-current --source /path/old.db --destination /path/new.db
    ```
 
-4. Verify the count-only report, retained Timeline nodes and baseline usability
+4. Verify the count and missing-field report, retained Timeline nodes and baseline usability
    against a disposable copy before switching the installation's
    `TRADINGAGENTS_DATABASE_PATH` to the new database.
 5. Restart Web and worker together with the new program and database path.
@@ -30,3 +30,10 @@ Retain the original database and backup. Before new research is written, rollbac
 consists of stopping the new processes and restoring the old program and original
 database path. Research written after switching belongs to the new database and
 must not be silently discarded during a later rollback.
+
+The report counts retained/removed Runs, Research Nodes, verified tables and
+missing historical fields. Original request, configuration, method and submission
+snapshots are retained separately from normalized projections. These audit
+snapshots never enter execution validation. The converter preserves recorded
+submission identity; an old idempotency key whose identity cannot be recovered
+returns an explicit conflict and requires a new key.

@@ -12,7 +12,8 @@ def initialize_configuration(settings):
     if not store.read().initialized:
         store.save(
             ConfigurationPatch(
-                revision=0, credentials=dict.fromkeys(credential_owners(), "placeholder")
+                revision=0, credentials=dict.fromkeys(credential_owners(), "placeholder"),
+                connection_changes=[{"action": "create", "id": "default", "preset": "openai", "credentials": {"api_key": "placeholder"}}]
             ),
             initialize=True,
         )
@@ -29,12 +30,13 @@ def import_configuration(settings):
     return store
 
 
-def save_configuration(settings, values=None, credentials=None):
+def save_configuration(settings, values=None, credentials=None, connection_changes=None):
     initialize_configuration(settings)
     store = ConfigurationStore(settings)
     store.save(
         ConfigurationPatch(
-            revision=store.read().revision, values=values or {}, credentials=credentials or {}
+            revision=store.read().revision, values=values or {}, credentials=credentials or {},
+            connection_changes=connection_changes or []
         )
     )
     return store

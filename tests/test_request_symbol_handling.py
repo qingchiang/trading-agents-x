@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tradingagents.domain.common import AssetType
 from tradingagents.domain.instruments import normalize_symbol
 from tradingagents.domain.runs import AnalysisRequest
 
@@ -29,7 +28,6 @@ def test_request_accepts_supported_symbols(raw: str, expected: str) -> None:
     request = AnalysisRequest(ticker=raw, analysis_date="2026-07-24")
 
     assert request.ticker == expected
-    assert request.asset_type is AssetType.STOCK
 
 
 @pytest.mark.parametrize(

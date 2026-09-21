@@ -237,10 +237,6 @@ class AnalysisService:
                 self.repository.get_run(source_run_id).request
             )
             self._validate_instrument_eligibility(source_request)
-        request = self.settings.materialize_request(
-            request,
-            run_settings=run_settings,
-        )
         method_snapshot = self._method_snapshot(run_settings, request)
         if request.research_kind == "incremental":
             assert request.full_baseline_run_id is not None
@@ -345,14 +341,7 @@ class AnalysisService:
             "research_kind": request.research_kind,
             "quick_binding": snapshot.get("quick_binding") if request.research_kind == "full" else None,
             "deep_binding": snapshot.get("deep_binding"),
-            "binding_version": snapshot.get("binding_version", 1),
-            "llm_provider": snapshot["llm_provider"],
-            "quick_model": snapshot["quick_model"] if request.research_kind == "full" else None,
-            "deep_model": snapshot["deep_model"],
-            "backend_url": snapshot["backend_url"],
-            "connection": snapshot["connection"],
-            "quick_reasoning_effort": snapshot["quick_reasoning_effort"] if request.research_kind == "full" else None,
-            "deep_reasoning_effort": snapshot["deep_reasoning_effort"],
+            "snapshot_version": snapshot["snapshot_version"],
             "temperature": snapshot["temperature"],
             "llm_max_retries": snapshot["llm_max_retries"],
             "output_language": snapshot["output_language"],
@@ -439,7 +428,7 @@ class AnalysisService:
         except ValidationError as exc:
             raise UnsupportedInstrumentError(
                 snapshot.ticker,
-                snapshot.asset_type or "legacy request",
+                "retained request",
             ) from exc
 
     def run(
@@ -1110,6 +1099,9 @@ class AnalysisService:
         # an alternate execution path around current admission rules.
         retained = self.repository.require_retryable(run_id)
         request = self._creation_request_from_history(retained.request)
+        if retained.config_snapshot.get("snapshot_version") != 1:
+            from tradingagents.configuration.errors import ConfigurationError
+            raise ConfigurationError("Historical settings are audit-only; create a new Run")
         retained_settings = RunSettings.model_validate(retained.config_snapshot)
         self.configuration.execution_credentials(retained_settings)
         retained_dataflow_config = retained_settings.dataflow_config(self.settings)

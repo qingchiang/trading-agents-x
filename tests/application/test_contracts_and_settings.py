@@ -219,7 +219,7 @@ def test_environment_is_imported_only_from_explicit_mapping(tmp_path) -> None:
     _, resolved = import_configuration(settings).resolve_request(request)
 
     assert settings.host == "0.0.0.0"
-    assert resolved.llm_provider == "deepseek"
+    assert resolved.deep_binding.connection.compatibility == "deepseek"
     assert resolved.output_language is ReportLanguage.SIMPLIFIED_CHINESE
     assert resolved.output_language.prompt_label == (
         "Simplified Chinese (简体中文, zh-CN)"
@@ -287,17 +287,16 @@ def test_request_overrides_role_specific_imported_defaults(tmp_path) -> None:
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date="2026-07-24",
-        deep_model="deep-request",
-        deep_reasoning_effort="max",
+        models={"deep": {"model": "deep-request", "reasoning_effort": "max"}},
     )
 
     from tests.configuration_helpers import import_configuration
     _, resolved = import_configuration(settings).resolve_request(request)
 
-    assert resolved.quick_model == "quick-default"
-    assert resolved.deep_model == "deep-request"
-    assert resolved.quick_reasoning_effort == "low"
-    assert resolved.deep_reasoning_effort == "max"
+    assert resolved.quick_binding.model == "quick-default"
+    assert resolved.deep_binding.model == "deep-request"
+    assert resolved.quick_binding.reasoning_effort == "low"
+    assert resolved.deep_binding.reasoning_effort == "max"
 
 
 @pytest.mark.parametrize(
@@ -364,11 +363,7 @@ def test_omitted_request_values_inherit_and_materialize_imported_defaults(
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
 
     from tests.configuration_helpers import import_configuration
-    _, resolved = import_configuration(settings).resolve_request(request)
-    materialized = settings.materialize_request(
-        request,
-        run_settings=resolved,
-    )
+    materialized, resolved = import_configuration(settings).resolve_request(request)
 
     assert resolved.output_language == custom_language
     assert resolved.snapshot()["output_language"] == custom_language
@@ -377,8 +372,8 @@ def test_omitted_request_values_inherit_and_materialize_imported_defaults(
         == custom_language
     )
     assert materialized.output_language == custom_language
-    assert materialized.quick_reasoning_effort == "low"
-    assert materialized.deep_reasoning_effort == "high"
+    assert materialized.models.quick.reasoning_effort == "low"
+    assert materialized.models.deep.reasoning_effort == "high"
     assert "provenance" not in materialized.model_dump(mode="json")
     assert "provenance" not in resolved.snapshot()
 

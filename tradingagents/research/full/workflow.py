@@ -299,7 +299,7 @@ class ResearchGraph:
         return {
             "ticker": request.ticker,
             "analysis_date": request.analysis_date.isoformat(),
-            "asset_type": request.asset_type.value,
+            "asset_type": "stock",
             "profile": request.profile.value,
             "output_language": report_language_prompt_label(context.settings.output_language),
             "analysts": list(request.analysts),
@@ -486,7 +486,7 @@ class ResearchGraph:
             local_state: dict[str, Any] = {
                 "messages": [HumanMessage(content=context.request.ticker)],
                 "company_of_interest": context.request.ticker,
-                "asset_type": context.request.asset_type.value,
+                "asset_type": "stock",
                 "instrument_context": context.instrument_context,
                 "trade_date": context.request.analysis_date.isoformat(),
                 "market_report": "",

@@ -26,19 +26,11 @@ export interface components {
     AnalysisRequest: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      asset_type?: components["schemas"]["AssetType"] | null;
-      connection_id?: string | null;
-      deep_connection_id?: string | null;
-      deep_model?: string | null;
-      deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
-      llm_provider?: string | null;
       make_primary?: boolean | null;
+      models?: components["schemas"]["RoleSelections"];
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
-      quick_connection_id?: string | null;
-      quick_model?: string | null;
-      quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
       ticker: string;
     };
@@ -74,7 +66,6 @@ export interface components {
       node: string;
       task_kind: "semantic_structured" | "schema_serialization";
     };
-    AssetType: "stock";
     AuditedRangeEndpoint: {
       as_of_date: string;
       basis: components["schemas"]["MarketReferenceBasis"];
@@ -120,23 +111,16 @@ export interface components {
       configuration_initialized?: boolean;
       connections?: Record<string, components["schemas"]["ConnectionView"]>;
       defaults: components["schemas"]["CapabilityDefaults"];
-      legacy_connections?: Record<string, string>;
       output_languages: string[];
       profiles: string[];
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
       analysts?: string[];
-      deep_connection_id?: string | null;
-      deep_model: string;
-      deep_reasoning_effort: string | null;
       lan_enabled: boolean;
-      llm_provider: string;
+      models: components["schemas"]["RoleSelections"];
       output_language: string;
       profile: string;
-      quick_connection_id?: string | null;
-      quick_model: string;
-      quick_reasoning_effort: string | null;
       trash_retention_days: number;
     };
     ClaimImportance: "primary" | "supporting";
@@ -174,7 +158,7 @@ export interface components {
       env_names?: string[];
       group: string;
       key: string;
-      kind: "text" | "number" | "boolean" | "list" | "choice" | "routes" | "providers";
+      kind: "text" | "number" | "boolean" | "list" | "choice" | "routes" | "models";
       label: Record<string, string>;
       maximum?: number | null;
       minimum?: number | null;
@@ -195,41 +179,30 @@ export interface components {
       fields: components["schemas"]["ConfigurationField"][];
       group_descriptions?: Record<string, Record<string, string>>;
       presets?: Record<string, components["schemas"]["ModelConnection"]>;
-      provider_defaults: Record<string, components["schemas"]["ProviderConnection"]>;
       providers: Record<string, string>;
       route_options: Record<string, string[]>;
       tool_options: Record<string, string[]>;
     };
     ConfigurationValues: {
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      anthropic_effort?: string | null;
       cn_news_candidate_limit?: number;
       data_vendors?: Record<string, string>;
       data_vendors_by_market?: Record<string, Record<string, string>>;
-      deep_connection_id?: string | null;
-      deep_reasoning_effort?: string | null;
-      deep_think_llm?: string;
       global_news_article_limit?: number;
       global_news_candidate_limit?: number;
       global_news_lookback_days?: number;
       global_news_queries?: string[];
       global_news_query_limit?: number;
-      google_thinking_level?: string | null;
       llm_max_retries?: number | null;
-      llm_provider?: string;
+      models?: components["schemas"]["RoleSelections"];
       news_article_limit?: number;
       news_cache_enabled?: boolean;
       news_cache_refresh_seconds?: number;
       news_cache_retention_days?: number;
       news_cache_scope_limit?: number;
       news_cache_total_limit?: number;
-      openai_reasoning_effort?: string | null;
       output_language?: string;
       profile?: "fast" | "standard" | "deep";
-      providers?: Record<string, components["schemas"]["ProviderConnection"]>;
-      quick_connection_id?: string | null;
-      quick_reasoning_effort?: string | null;
-      quick_think_llm?: string;
       sentiment_filing_limit?: number;
       social_lookback_days?: number;
       temperature?: number | null;
@@ -536,6 +509,11 @@ export interface components {
       code: string;
       message: string;
     };
+    ModelSelection: {
+      connection_id?: string | null;
+      model?: string | null;
+      reasoning_effort?: string | null;
+    };
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;
@@ -636,14 +614,6 @@ export interface components {
       model_discovery_supported: boolean;
       selectable: boolean;
       unavailable_reason?: string | null;
-    };
-    ProviderConnection: {
-      api_version?: string | null;
-      auth_mode?: "bearer" | "system" | "static";
-      aws_profile?: string | null;
-      base_url?: string | null;
-      deployment?: string | null;
-      region?: string;
     };
     ProviderModelCatalog: {
       fetched_at: string;
@@ -896,6 +866,10 @@ export interface components {
       subject: string;
     };
     RiskReviewDisposition: "retained" | "modified" | "rejected";
+    RoleSelections: {
+      deep?: components["schemas"]["ModelSelection"] | null;
+      quick?: components["schemas"]["ModelSelection"] | null;
+    };
     RunAttemptView: {
       attempt: number;
       error_code?: string | null;
@@ -918,19 +892,11 @@ export interface components {
     RunCreateRequest: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      asset_type?: components["schemas"]["AssetType"] | null;
-      connection_id?: string | null;
-      deep_connection_id?: string | null;
-      deep_model?: string | null;
-      deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
-      llm_provider?: string | null;
       make_primary?: boolean | null;
+      models?: components["schemas"]["RoleSelections"];
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
-      quick_connection_id?: string | null;
-      quick_model?: string | null;
-      quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
       source_run_id?: string | null;
       ticker: string;
@@ -1020,25 +986,18 @@ export interface components {
     RunRequestSnapshot: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      asset_type?: string | null;
-      connection_id?: string | null;
-      deep_connection_id?: string | null;
-      deep_model?: string | null;
-      deep_reasoning_effort?: string | null;
       full_baseline_run_id?: string | null;
-      llm_provider?: string | null;
       make_primary?: boolean | null;
+      models?: components["schemas"]["RoleSelections"];
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
-      quick_connection_id?: string | null;
-      quick_model?: string | null;
-      quick_reasoning_effort?: string | null;
       research_kind?: "full" | "incremental";
       ticker: string;
     };
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     RunSummaryView: {
       attempt: number;
+      audit_snapshot?: Record<string, unknown> | null;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;
       created_at: string;
@@ -1067,6 +1026,7 @@ export interface components {
     RunTrashState: "active" | "trashed" | "all";
     RunView: {
       attempt: number;
+      audit_snapshot?: Record<string, unknown> | null;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;
       created_at: string;

@@ -103,7 +103,6 @@ def run_command(
         str | None,
         typer.Option("--analysts", help="Comma-separated analyst keys; omitted uses saved defaults."),
     ] = None,
-    provider: Annotated[str | None, typer.Option("--provider")] = None,
     connection: Annotated[str | None, typer.Option("--connection")] = None,
     quick_connection: Annotated[str | None, typer.Option("--quick-connection")] = None,
     deep_connection: Annotated[str | None, typer.Option("--deep-connection")] = None,
@@ -147,14 +146,10 @@ def run_command(
             analysis_date=cutoff,
             **({"profile": profile} if profile is not None else {}),
             **({"analysts": selected} if selected is not None else {}),
-            llm_provider=provider,
-            connection_id=connection,
-            quick_connection_id=quick_connection,
-            deep_connection_id=deep_connection,
-            quick_model=quick_model,
-            deep_model=deep_model,
-            quick_reasoning_effort=quick_reasoning,
-            deep_reasoning_effort=deep_reasoning,
+            models={
+                "quick": {"connection_id": quick_connection or connection, "model": quick_model, "reasoning_effort": quick_reasoning},
+                "deep": {"connection_id": deep_connection or connection, "model": deep_model, "reasoning_effort": deep_reasoning},
+            },
             output_language=output_language,
         )
     except ValidationError as exc:

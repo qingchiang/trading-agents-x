@@ -45,6 +45,7 @@ def test_cutover_preserves_current_failed_runs_and_source_bytes(source_0013, tmp
     assert report.removed_runs == 1
     assert report.retained_runs == 3
     assert report.retained_nodes == 1
+    assert report.missing_fields == {"connection_identity": 3}
     with sqlite3.connect(destination) as db:
         assert {row[0] for row in db.execute('SELECT id FROM runs')} == {
             'baseline', 'failed-current', 'cancelled-current'
@@ -52,7 +53,8 @@ def test_cutover_preserves_current_failed_runs_and_source_bytes(source_0013, tmp
         assert db.execute('SELECT count(*) FROM run_attempts').fetchone()[0] == 3
         assert db.execute('SELECT full_run_id FROM primary_research_cycles').fetchone()[0] == 'baseline'
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
-        assert db.execute("SELECT config_json FROM runs WHERE id='baseline'").fetchone()[0] == '{"historical_missing_connection":true}'
+        assert json.loads(db.execute("SELECT audit_snapshot_json FROM runs WHERE id='baseline'").fetchone()[0])["config"] == {"historical_missing_connection": True}
+        assert json.loads(db.execute("SELECT config_json FROM runs WHERE id='baseline'").fetchone()[0])["deep_binding"] is None
 
 
 @pytest.mark.parametrize('status', ['queued', 'running'])

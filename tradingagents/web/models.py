@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.history import RunAttemptView
 from tradingagents.domain.incremental import IncrementalRunContext
+from tradingagents.domain.model_selection import RoleSelections
 from tradingagents.domain.runs import (
     AnalysisCutoffContext,
     AnalysisRequest,
@@ -224,15 +225,9 @@ class ProviderModelCatalog(ApiModel):
 
 
 class CapabilityDefaults(ApiModel):
-    quick_connection_id: str | None = None
-    deep_connection_id: str | None = None
+    models: RoleSelections
     analysts: list[str] = Field(default_factory=lambda: ["market", "social", "news", "fundamentals"])
     profile: str
-    llm_provider: str
-    quick_model: str
-    deep_model: str
-    quick_reasoning_effort: str | None
-    deep_reasoning_effort: str | None
     output_language: str
     lan_enabled: bool
     trash_retention_days: int = Field(ge=0)
@@ -240,7 +235,6 @@ class CapabilityDefaults(ApiModel):
 
 class CapabilitiesResponse(ApiModel):
     connections: dict[str, ConnectionView] = Field(default_factory=dict)
-    legacy_connections: dict[str, str] = Field(default_factory=dict)
     configuration_initialized: bool = False
     profiles: list[str]
     analysts: list[str]

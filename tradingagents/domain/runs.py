@@ -11,7 +11,6 @@ from pydantic import Field, field_validator, model_validator
 from tradingagents.domain.common import (
     _SYMBOL_PATTERN,
     ArtifactGenerationMethod,
-    AssetType,
     FrozenModel,
     OutputLanguage,
     ReportLanguage,
@@ -26,6 +25,7 @@ from tradingagents.domain.instruments import (
     normalize_symbol,
     unsupported_crypto_base,
 )
+from tradingagents.domain.model_selection import RoleSelections
 from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, ResearchWarning, _coerce_warnings
@@ -61,7 +61,6 @@ class RunMetrics(FrozenModel):
 class AnalysisRequest(FrozenModel):
     ticker: str = Field(min_length=1, max_length=64)
     analysis_date: date
-    asset_type: AssetType | None = None
     profile: RunProfile = RunProfile.STANDARD
     analysts: tuple[Literal["market", "social", "news", "fundamentals"], ...] = (
         "market",
@@ -69,14 +68,7 @@ class AnalysisRequest(FrozenModel):
         "news",
         "fundamentals",
     )
-    connection_id: str | None = None
-    quick_connection_id: str | None = None
-    deep_connection_id: str | None = None
-    llm_provider: str | None = None
-    quick_model: str | None = None
-    deep_model: str | None = None
-    quick_reasoning_effort: str | None = None
-    deep_reasoning_effort: str | None = None
+    models: RoleSelections = Field(default_factory=RoleSelections)
     research_kind: Literal["full", "incremental"] = "full"
     full_baseline_run_id: str | None = Field(
         default=None,
@@ -89,6 +81,11 @@ class AnalysisRequest(FrozenModel):
     # Keep the union inline so Pydantic preserves the existing OpenAPI shape;
     # a named PEP 695 alias is emitted as a separate schema component.
     output_language: ReportLanguage | str | None = None
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def normalize_models(cls, value):
+        return {} if value is None else value
 
     @field_validator("ticker")
     @classmethod
@@ -124,17 +121,17 @@ class AnalysisRequest(FrozenModel):
         return normalize_report_language(value)
 
     @model_validator(mode="after")
-    def validate_asset_type(self) -> AnalysisRequest:
+    def validate_research_request(self) -> AnalysisRequest:
         if unsupported_crypto_base(self.ticker):
             raise ValueError("Crypto instruments are not supported")
         if not is_supported_equity_symbol(self.ticker):
             raise ValueError("Only listed equity instruments are supported")
-        if self.asset_type is None:
-            object.__setattr__(self, "asset_type", AssetType.STOCK)
         if self.research_kind == "full" and self.full_baseline_run_id is not None:
             raise ValueError("Full Research must not carry a Full Baseline")
         if self.research_kind == "incremental" and self.full_baseline_run_id is None:
             raise ValueError("Incremental Research requires exactly one full_baseline_run_id")
+        if self.research_kind == "incremental" and self.models.quick is not None:
+            raise ValueError("Incremental Research must not override the quick model role")
         return self
 
 
@@ -162,7 +159,6 @@ class RunRequestSnapshot(FrozenModel):
 
     ticker: str = Field(min_length=1, max_length=64)
     analysis_date: date
-    asset_type: str | None = None
     profile: RunProfile = RunProfile.STANDARD
     analysts: tuple[Literal["market", "social", "news", "fundamentals"], ...] = (
         "market",
@@ -170,14 +166,7 @@ class RunRequestSnapshot(FrozenModel):
         "news",
         "fundamentals",
     )
-    connection_id: str | None = None
-    quick_connection_id: str | None = None
-    deep_connection_id: str | None = None
-    llm_provider: str | None = None
-    quick_model: str | None = None
-    deep_model: str | None = None
-    quick_reasoning_effort: str | None = None
-    deep_reasoning_effort: str | None = None
+    models: RoleSelections = Field(default_factory=RoleSelections)
     research_kind: Literal["full", "incremental"] = "full"
     full_baseline_run_id: str | None = None
     make_primary: bool | None = None
@@ -275,6 +264,7 @@ class RunView(FrozenModel):
     # snapshot branch below.
     request: RunRequestSnapshot | AnalysisRequest
     config_snapshot: dict[str, Any]
+    audit_snapshot: dict[str, Any] | None = None
     attempt: int
     cancel_requested: bool
     error_code: str | None = None

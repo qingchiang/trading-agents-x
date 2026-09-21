@@ -30,11 +30,9 @@ import { editingCopy } from "../settingsEditingCopy";
 type Values = Record<string, unknown>;
 const groups = [
   "research",
-  "providers",
   "news",
   "sources",
   "cache",
-  "compatibility",
 ] as const;
 
 export default function Settings() {
@@ -470,7 +468,7 @@ export default function Settings() {
           {groups.filter(group => category === "research" ? group === "research" : category === "data" ? group === dataTab : category === "storage" ? group === "cache" : false).map((group) => {
             const fields = schema.fields.filter(
               (field) =>
-                !["llm_provider", "quick_connection_id", "deep_connection_id", "quick_think_llm", "deep_think_llm", "quick_reasoning_effort", "deep_reasoning_effort"].includes(field.key) && field.group === group,
+                field.key !== "models" && field.group === group,
             );
             const secretKeys =
               group === "sources"
@@ -491,9 +489,8 @@ export default function Settings() {
               >
                 <h2>{text[group]}</h2>
                 <p className="configuration-help">{schema.group_descriptions?.[group]?.[language] ?? (group === "research" ? editing.future : "")}</p>
-                {group === "providers" && <p>{text.keyHint}</p>}
                 <fieldset className="settings-edit-fields" disabled={conflict?.group === group}>
-                {group === "research" && <RoleConnections language={language} connections={view.connections ?? {}} value={{ quick: { connection: String(draft.quick_connection_id ?? ""), model: String(draft.quick_think_llm ?? ""), reasoning: String(draft.quick_reasoning_effort ?? "") }, deep: { connection: String(draft.deep_connection_id ?? ""), model: String(draft.deep_think_llm ?? ""), reasoning: String(draft.deep_reasoning_effort ?? "") } }} onChange={roles => setDraft(old => ({ ...old, quick_connection_id: roles.quick.connection, deep_connection_id: roles.deep.connection, quick_think_llm: roles.quick.model, deep_think_llm: roles.deep.model, quick_reasoning_effort: roles.quick.reasoning || null, deep_reasoning_effort: roles.deep.reasoning || null }))} />}
+                {group === "research" && <div id="setting-models"><RoleConnections language={language} connections={view.connections ?? {}} value={{ quick: { connection: String((draft as ConfigurationValues).models?.quick?.connection_id ?? ""), model: String((draft as ConfigurationValues).models?.quick?.model ?? ""), reasoning: String((draft as ConfigurationValues).models?.quick?.reasoning_effort ?? "") }, deep: { connection: String((draft as ConfigurationValues).models?.deep?.connection_id ?? ""), model: String((draft as ConfigurationValues).models?.deep?.model ?? ""), reasoning: String((draft as ConfigurationValues).models?.deep?.reasoning_effort ?? "") } }} onChange={roles => setDraft(old => ({ ...old, models: {quick: {connection_id: roles.quick.connection, model: roles.quick.model, reasoning_effort: roles.quick.reasoning || null}, deep: {connection_id: roles.deep.connection, model: roles.deep.model, reasoning_effort: roles.deep.reasoning || null}} }))} /></div>}
                 <div className="configuration-grid">{fields.map((field) => (
                   <div key={field.key} className={field.kind === "routes" ? "route-section" : undefined} data-invalid={!!fieldErrors[field.key]}>
                     {renderField(field)}

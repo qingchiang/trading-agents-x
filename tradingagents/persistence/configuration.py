@@ -3,13 +3,9 @@
 import json
 import sqlite3
 from contextlib import closing
-from copy import deepcopy
 from datetime import UTC, datetime
-from hashlib import sha256
-from io import StringIO
 
-from dotenv import dotenv_values
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,22 +19,18 @@ from tradingagents.configuration.models import (
     ConfigurationPatch,
     ConfigurationValues,
     ConfigurationView,
-    ImportIssue,
     ImportPreview,
     ImportRequest,
-    ProviderConnection,
 )
 from tradingagents.configuration.resolution import credential_owners, validate_values
 from tradingagents.configuration.settings import AppSettings, RunSettings
-from tradingagents.domain.common import report_language_value
+from tradingagents.domain.model_selection import ModelSelection, RoleSelections
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.llm.models import (
     ModelBinding,
     ModelConnection,
     connection_view,
     credential_name,
-    legacy_connection_id,
-    legacy_credential_fields,
     preset_connection,
 )
 from tradingagents.persistence import connections as connections
@@ -48,23 +40,6 @@ from tradingagents.persistence.models import (
     ModelConnectionRecord,
     create_sqlite_engine,
 )
-
-BOOTSTRAP_ENV = {
-    "TRADINGAGENTS_HOME",
-    "TRADINGAGENTS_DATABASE_PATH",
-    "TRADINGAGENTS_CACHE_DIR",
-    "TRADINGAGENTS_HOST",
-    "TRADINGAGENTS_PORT",
-    "TRADINGAGENTS_WORKER_POLL_SECONDS",
-    "TRADINGAGENTS_LEASE_SECONDS",
-    "TRADINGAGENTS_SQLITE_BUSY_TIMEOUT_MS",
-    "TRADINGAGENTS_PUBLISH_HOST",
-    "TRADINGAGENTS_WEB_PORT",
-    "TRADINGAGENTS_ENV_FILE",
-    "TRADINGAGENTS_LAN_ENABLED",
-    "TRADINGAGENTS_LAN_TOKEN",
-    "TRADINGAGENTS_SESSION_SECRET",
-}
 
 
 class ConfigurationStore:
@@ -129,18 +104,6 @@ class ConfigurationStore:
     def _document(self, raw, configured, revision, initialized, models=None):
         stored_keys = set(raw)
         models = models or {}
-        if (
-            not raw.get("quick_connection_id")
-            and legacy_connection_id(raw.get("llm_provider", "openai")) in models
-        ):
-            raw = {
-                **raw,
-                "quick_connection_id": legacy_connection_id(raw.get("llm_provider", "openai")),
-                "deep_connection_id": legacy_connection_id(raw.get("llm_provider", "openai")),
-            }
-        for alias, (owner, field) in legacy_credential_fields().items():
-            if credential_name(legacy_connection_id(owner), field) in configured:
-                configured.add(alias)
         return ConfigurationView(
             connections=models,
             initialized=initialized,
@@ -180,12 +143,15 @@ class ConfigurationStore:
                     raise ConfigurationError("Unknown configuration field")
                 raw.pop(key, None)
             updates = patch.values.model_dump(exclude_unset=True, mode="json")
-            if "providers" in updates:
-                providers = deepcopy(raw.get("providers", {}))
-                for provider, fields in updates["providers"].items():
-                    providers[provider] = {**providers.get(provider, {}), **fields}
-                updates["providers"] = providers
+            if "models" in updates:
+                defaults = ConfigurationValues().models.model_dump()
+                selected = {**defaults, **raw.get("models", {})}
+                for role, fields in updates["models"].items():
+                    selected[role] = {**(selected.get(role) or {}), **(fields or {})}
+                updates["models"] = selected
             raw.update(updates)
+            if not raw.get("models"):
+                raw["models"] = ConfigurationValues().models.model_dump()
             try:
                 validate_values(ConfigurationValues.model_validate(raw))
             except ValidationError as exc:
@@ -196,7 +162,10 @@ class ConfigurationStore:
             if set(patch.credentials) - set(credential_owners()):
                 raise ConfigurationError("Unknown credential field")
             try:
-                translated = connections.sync_legacy(session, raw, updates, patch.credentials)
+                if record is None and session.get(ModelConnectionRecord, "default") is None and not any(change.id == "default" and change.action == "create" for change in patch.connection_changes):
+                    conn = preset_connection("openai", identity="default")
+                    session.add(ModelConnectionRecord(id=conn.id, definition=conn.model_dump(mode="json")))
+                    session.flush()
                 connections.apply_changes(session, patch.connection_changes, raw)
             except ValueError as exc:
                 if isinstance(exc, ConfigurationError):
@@ -204,7 +173,7 @@ class ConfigurationStore:
                 raise ConfigurationError(
                     "Invalid connection configuration", fields=["connections"]
                 ) from exc
-            for name, value in translated.items():
+            for name, value in patch.credentials.items():
                 existing = session.get(CredentialRecord, name)
                 if value is None or not value.get_secret_value():
                     if existing:
@@ -226,9 +195,6 @@ class ConfigurationStore:
     def reveal(self, name: str) -> str | None:
         if name not in credential_owners():
             raise ConfigurationError("Unknown credential field")
-        alias = legacy_credential_fields().get(name)
-        if alias:
-            name = credential_name(legacy_connection_id(alias[0]), alias[1])
         with Session(self.engine) as session:
             record = session.get(CredentialRecord, name)
             return record.value if record else None
@@ -276,31 +242,10 @@ class ConfigurationStore:
                         )
                         if missing:
                             raise ConfigurationError("Connection requires: " + ", ".join(missing))
-                    else:
-                        row = session.get(
-                            ModelConnectionRecord, legacy_connection_id(run.llm_provider)
-                        )
-                        if row is None or row.definition.get("deleted"):
-                            raise ProviderConfigurationChanged(
-                                "Legacy connection deleted; create a new Run"
-                            )
-                        current = ModelConnection.model_validate(row.definition)
-                        retained = preset_connection(
-                            run.llm_provider, legacy=run.connection or {"base_url": run.backend_url}
-                        )
-                        if current.execution_identity() != retained.execution_identity():
-                            raise ProviderConfigurationChanged(
-                                "Provider connection changed; create a new Run"
-                            )
             return self._credential_snapshot(session)
 
     def _credential_snapshot(self, session):
         values = {row.name: row.value for row in session.scalars(select(CredentialRecord))}
-        # Compatibility clients resolve only the immutable migrated identity.
-        for alias, (owner, field) in legacy_credential_fields().items():
-            value = values.get(credential_name(legacy_connection_id(owner), field))
-            if value:
-                values[alias] = value
         return values
 
     def connection_discovery_snapshot(self, identity):
@@ -313,125 +258,51 @@ class ConfigurationStore:
             return conn, connections.connection_secrets(session, conn), self._view(session).values
 
     def resolve_request(self, request: AnalysisRequest, *, require_initialized=True):
+        request = AnalysisRequest.model_validate(request.model_dump(mode="python", exclude_unset=True))
         view = self.read()
         if require_initialized and not view.initialized:
-            raise ConfigurationRequired(
-                "Complete configuration in Settings before starting research"
-            )
+            raise ConfigurationRequired("Complete configuration in Settings before starting research")
         values = view.values
-        explicit_connections = any(
-            getattr(request, field) is not None
-            for field in (
-                ("connection_id", "deep_connection_id")
-                if request.research_kind == "incremental"
-                else ("connection_id", "quick_connection_id", "deep_connection_id")
-            )
-        )
-        if request.llm_provider is not None and explicit_connections:
-            raise ConfigurationError(
-                "Use connection IDs or legacy provider, not both", fields=["llm_provider"]
-            )
         payload = request.model_dump(mode="python", exclude_unset=True)
-        for field in ("profile", "analysts"):
-            if field not in payload:
-                payload[field] = getattr(values, field)
-        aliases = {"quick_model": "quick_think_llm", "deep_model": "deep_think_llm"}
-        for field in (
-            "llm_provider",
-            "quick_model",
-            "deep_model",
-            "quick_reasoning_effort",
-            "deep_reasoning_effort",
-            "output_language",
-        ):
+        for field in ("profile", "analysts", "output_language"):
             if payload.get(field) is None:
-                payload[field] = getattr(values, aliases.get(field, field))
-        bindings = {}
+                payload[field] = getattr(values, field)
+        selections, bindings = {}, {}
         for role in (("deep",) if request.research_kind == "incremental" else ("quick", "deep")):
-            identity = (
-                getattr(request, f"{role}_connection_id")
-                or request.connection_id
-                or (legacy_connection_id(request.llm_provider) if request.llm_provider else None)
-                or getattr(values, f"{role}_connection_id")
-                or legacy_connection_id(values.llm_provider)
+            selection = (getattr(request.models, role) or ModelSelection()).inherit(
+                getattr(values.models, role) or ModelSelection()
             )
-            entry = view.connections.get(identity)
+            entry = view.connections.get(selection.connection_id)
             if entry is None:
-                if not require_initialized:
-                    conn = preset_connection(values.llm_provider)
+                if not require_initialized and selection.connection_id == "default":
+                    connection = preset_connection("openai", identity="default")
                 else:
-                    raise ConfigurationError(
-                        "Connection does not exist", fields=[f"{role}_connection_id"]
-                    )
+                    raise ConfigurationError("Connection does not exist", fields=[f"models.{role}.connection_id"])
             else:
-                conn = entry.connection
-                if require_initialized and not conn.enabled:
-                    raise ConfigurationError(
-                        "Connection is disabled", fields=[f"{role}_connection_id"]
-                    )
-            bindings[role] = ModelBinding(
-                connection=conn,
-                model=payload[f"{role}_model"],
-                reasoning_effort=payload[f"{role}_reasoning_effort"],
-            )
-            from tradingagents.llm.reasoning_effort import resolve_reasoning_effort
-
+                connection = entry.connection
+                if not connection.enabled:
+                    raise ConfigurationError("Connection is disabled", fields=[f"models.{role}.connection_id"])
+            if not selection.model:
+                raise ConfigurationError("Select a model", fields=[f"models.{role}.model"])
+            binding = ModelBinding(connection=connection, model=selection.model, reasoning_effort=selection.reasoning_effort)
+            from tradingagents.llm.connections import validate_binding
             try:
-                resolve_reasoning_effort(
-                    {
-                        **conn.reasoning_defaults,
-                        "llm_provider": conn.compatibility,
-                        "quick_think_llm": bindings[role].model,
-                        "quick_reasoning_effort": bindings[role].reasoning_effort,
-                    },
-                    "quick",
-                )
+                validate_binding(binding)
             except ValueError as exc:
-                raise ConfigurationError(
-                    "Unsupported reasoning setting for this role",
-                    fields=[f"{role}_reasoning_effort"],
-                ) from exc
-            payload[f"{role}_connection_id"] = conn.id
-        if request.research_kind == "incremental":
-            bindings["quick"] = bindings["deep"]
-            for field in ("connection_id", "model", "reasoning_effort"):
-                payload[f"quick_{field}"] = payload[f"deep_{field}"]
-        # Materialized requests carry identities; legacy input is consumed above.
-        payload["llm_provider"] = None
+                raise ConfigurationError(str(exc), fields=[f"models.{role}.reasoning_effort"]) from None
+            selections[role], bindings[role] = selection, binding
+        payload["models"] = RoleSelections(**selections)
         materialized = AnalysisRequest.model_validate(payload)
-        data = values.model_dump(
-            exclude={"providers", "profile", "analysts", "trash_retention_days"}
-        )
         from tradingagents.configuration.defaults import build_default_config
-
+        data = values.model_dump(exclude={"models", "profile", "analysts", "trash_retention_days"})
         data = {**build_default_config(), **data}
-        connection = bindings["deep"].connection.transport.model_dump(exclude={"kind"})
-        resolved = RunSettings(
+        return materialized, RunSettings(
             profile=materialized.profile,
-            llm_provider=(
-                bindings["deep"].connection.compatibility
-                if bindings["quick"].connection.id == bindings["deep"].connection.id
-                else ""
-            ),
-            quick_binding=bindings["quick"],
-            deep_binding=bindings["deep"],
-            research_kind=materialized.research_kind,
-            quick_model=materialized.quick_model,
-            deep_model=materialized.deep_model,
-            backend_url=connection.get("base_url")
-            if bindings["quick"].connection.id == bindings["deep"].connection.id
-            else None,
-            connection=connection
-            if bindings["quick"].connection.id == bindings["deep"].connection.id
-            else None,
-            quick_reasoning_effort=materialized.quick_reasoning_effort,
-            deep_reasoning_effort=materialized.deep_reasoning_effort,
-            temperature=values.temperature,
-            llm_max_retries=values.llm_max_retries,
-            output_language=materialized.output_language,
+            quick_binding=bindings.get("quick"), deep_binding=bindings["deep"],
+            research_kind=materialized.research_kind, temperature=values.temperature,
+            llm_max_retries=values.llm_max_retries, output_language=materialized.output_language,
             data_config=data,
         )
-        return materialized, resolved
 
     def default_run_settings(self):
         from datetime import date
@@ -442,162 +313,32 @@ class ConfigurationStore:
         )[1]
 
     def preview_import(self, request: ImportRequest) -> ImportPreview:
-        patch, issues, fingerprint = self._import(request)
+        imported = self._import(request)
         view = self.read()
-        updates = patch.values.model_dump(mode="json", exclude_unset=True)
-        targets = {}
-        for name in patch.credentials:
-            alias = legacy_credential_fields().get(name)
-            if alias:
-                targets[name] = f"{legacy_connection_id(alias[0])}.{alias[1]}"
-        for owner in updates.get("providers", {}):
-            targets[f"providers.{owner}"] = legacy_connection_id(owner)
-        if "llm_provider" in updates:
-            targets["llm_provider"] = legacy_connection_id(updates["llm_provider"])
-        if self.settings.database_path.exists():
-            with closing(
-                sqlite3.connect(self.settings.database_path.as_uri() + "?mode=ro", uri=True)
-            ) as connection:
-                if connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE name='model_connections'"
-                ).fetchone():
-                    deleted = {
-                        row[0]
-                        for row in connection.execute(
-                            "SELECT id FROM model_connections WHERE json_extract(definition, '$.deleted')=1"
-                        )
-                    }
-                    for name, target in targets.items():
-                        if target.split(".")[0] in deleted:
-                            issues.append(
-                                ImportIssue(
-                                    name=name,
-                                    message="Original connection was deleted; exclude this field and configure a new connection manually",
-                                )
-                            )
+        updates = imported.patch.values.model_dump(mode="json", exclude_unset=True)
         return ImportPreview(
-            connection_targets=targets,
-            revision=view.revision,
-            fingerprint=fingerprint,
-            values=updates,
-            credentials=dict.fromkeys(patch.credentials, True),
-            issues=issues,
-            conflicts=[key for key in updates if view.sources[key] == "database"]
-            + [key for key in patch.credentials if view.credentials[key]],
+            connection_targets=imported.targets, revision=view.revision,
+            fingerprint=imported.fingerprint, values=updates,
+            credentials=imported.credentials, issues=imported.issues,
+            conflicts=[key for key in updates if view.sources.get(key) == "database"],
         )
 
     def apply_import(self, request: ImportRequest) -> ConfigurationView:
         if request.use_defaults:
             return self.save(ConfigurationPatch(revision=request.revision), initialize=True)
-        patch, issues, fingerprint = self._import(request)
-        issues = self.preview_import(request).issues
-        if issues:
-            raise ConfigurationError(
-                "Correct or exclude the reported import fields before applying"
-            )
-        if not request.fingerprint or fingerprint != request.fingerprint:
+        imported = self._import(request)
+        if imported.issues:
+            raise ConfigurationError("Correct or exclude the reported import fields before applying")
+        if not request.fingerprint or request.fingerprint != imported.fingerprint:
             raise ConfigurationConflict("Import source changed; preview again")
-        return self.save(patch, initialize=True)
+        return self.save(imported.patch, initialize=True)
 
-    def _import(self, request: ImportRequest):
-        from tradingagents.configuration.defaults import _ENV_OVERRIDES
-
-        environment = {}
-        uploaded_names = set()
-        for content, original in (
-            (request.enterprise, self.settings.import_enterprise),
-            (request.primary, self.settings.import_primary),
-        ):
-            parsed = (
-                dotenv_values(stream=StringIO(content.get_secret_value()), interpolate=False)
-                if content is not None
-                else {k: v.get_secret_value() for k, v in original.items()}
-            )
-            environment.update({k: v for k, v in parsed.items() if v is not None})
-            uploaded_names.update(parsed)
-        environment.update(
-            {k: v.get_secret_value() for k, v in self.settings.import_environment.items()}
-        )
-        environment = {k: v for k, v in environment.items() if k not in request.exclude and v != ""}
-        values, secrets, issues = {}, {}, []
-        provider = environment.get("TRADINGAGENTS_LLM_PROVIDER", "openai")
-        providers = {}
-        connection_fields = {
-            "OLLAMA_BASE_URL": ("ollama", "base_url"),
-            "AZURE_OPENAI_ENDPOINT": ("azure", "base_url"),
-            "AZURE_OPENAI_DEPLOYMENT_NAME": ("azure", "deployment"),
-            "OPENAI_API_VERSION": ("azure", "api_version"),
-            "AWS_DEFAULT_REGION": ("bedrock", "region"),
-            "AWS_REGION": ("bedrock", "region"),
-            "AWS_PROFILE": ("bedrock", "aws_profile"),
-            "TRADINGAGENTS_LLM_BACKEND_URL": (provider, "base_url"),
-        }
-        mapping = {**_ENV_OVERRIDES, "TRADINGAGENTS_TRASH_RETENTION_DAYS": "trash_retention_days"}
-        owners = credential_owners()
-        for name, value in environment.items():
-            if name in owners:
-                secrets[name] = SecretStr(value)
-            elif name in mapping and name not in connection_fields:
-                field = mapping[name]
-                try:
-                    checked = ConfigurationValues.model_validate({field: value})
-                    parsed = getattr(checked, field)
-                    if field == "output_language":
-                        parsed = report_language_value(parsed)
-                    values[field] = parsed
-                except (ValidationError, ValueError):
-                    issues.append(
-                        ImportIssue(
-                            name=name, message="Invalid value or outside the supported range"
-                        )
-                    )
-            elif (
-                (name in uploaded_names or name.startswith("TRADINGAGENTS_"))
-                and name not in connection_fields
-                and name not in BOOTSTRAP_ENV
-            ):
-                issues.append(ImportIssue(name=name, message="Unsupported import field"))
-        for name, (owner, field) in connection_fields.items():
-            if name in environment:
-                providers.setdefault(owner, {})[field] = environment[name]
-        if "AWS_BEARER_TOKEN_BEDROCK" in secrets:
-            providers.setdefault("bedrock", {})["auth_mode"] = "bearer"
-        elif "AWS_ACCESS_KEY_ID" in secrets or "AWS_SECRET_ACCESS_KEY" in secrets:
-            providers.setdefault("bedrock", {})["auth_mode"] = "static"
-        valid_providers = {}
-        for name, connection in providers.items():
-            try:
-                valid_providers[name] = ProviderConnection.model_validate(connection).model_dump()
-            except ValidationError as exc:
-                invalid_fields = {error["loc"][0] for error in exc.errors()}
-                issues.extend(
-                    ImportIssue(name=source, message="Invalid provider connection")
-                    for source, (owner, field) in connection_fields.items()
-                    if source in environment and owner == name and field in invalid_fields
-                )
-        if valid_providers:
-            values["providers"] = valid_providers
-        try:
-            validate_values(ConfigurationValues.model_validate(values))
-        except ValueError:
-            from tradingagents.llm.provider_registry import PROVIDER_REGISTRY
-
-            invalid_names = (
-                ["TRADINGAGENTS_LLM_PROVIDER"]
-                if provider not in PROVIDER_REGISTRY
-                else [
-                    name
-                    for name in environment
-                    if "REASONING" in name or "THINKING_LEVEL" in name or "ANTHROPIC_EFFORT" in name
-                ]
-            )
-            issues.extend(
-                ImportIssue(name=name, message="Provider or reasoning setting is invalid")
-                for name in invalid_names
-            )
-        fingerprint = sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()
-        return (
-            ConfigurationPatch(revision=request.revision, values=values, credentials=secrets),
-            issues,
-            fingerprint,
-        )
+    def _import(self, request):
+        from tradingagents.configuration.importing import parse_import
+        existing = {identity: view.connection for identity, view in self.read().connections.items()}
+        if self.settings.database_path.exists():
+            with closing(sqlite3.connect(self.settings.database_path.as_uri() + "?mode=ro", uri=True)) as db:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='model_connections'").fetchone():
+                    existing = {identity: ModelConnection.model_validate_json(definition)
+                                for identity, definition in db.execute("SELECT id, definition FROM model_connections")}
+        return parse_import(self.settings, request, existing)

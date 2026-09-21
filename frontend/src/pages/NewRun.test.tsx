@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -18,7 +18,7 @@ vi.mock("../api/client", async (importOriginal) => ({
   api: {
     analysisCutoffContext: vi.fn(),
     capabilities: vi.fn(),
-    providerModels: vi.fn(),
+    connectionModels: vi.fn(),
     createRun: vi.fn(),
     run: vi.fn(),
     creationTemplate: vi.fn(),
@@ -32,6 +32,7 @@ const capabilities = {
   profiles: ["fast", "standard", "deep"],
   analysts: ["market", "social", "news", "fundamentals"],
   output_languages: ["en", "zh-CN", "ja"],
+  connections: Object.fromEntries(["openai", "ollama"].map(id => [id, {connection: {id, name: id === "openai" ? "OpenAI" : "Ollama", preset: id, transport: {kind: "chat_completions", base_url: "https://example.invalid/v1"}}, selectable: true, credentials: {}, missing_fields: [], reasoning_efforts: ["provider_default", "low", "medium", "high"]}])),
   providers: {
     openai: {
       label: "OpenAI",
@@ -63,11 +64,7 @@ const capabilities = {
   },
   defaults: {
     profile: "standard",
-    llm_provider: "openai",
-    quick_model: "gpt-5.4-mini",
-    deep_model: "gpt-5.5",
-    quick_reasoning_effort: "low",
-    deep_reasoning_effort: "high",
+    models: { quick: { connection_id: "openai", model: "gpt-5.4-mini", reasoning_effort: "low" }, deep: { connection_id: "openai", model: "gpt-5.5", reasoning_effort: "high" } },
     output_language: "zh-CN",
     lan_enabled: false,
     trash_retention_days: 30,
@@ -143,7 +140,7 @@ beforeEach(async () => {
     ...analysisCutoffContext,
     instrument: instrument.trim().toUpperCase(),
   }));
-  vi.mocked(api.providerModels).mockResolvedValue(modelCatalog);
+  vi.mocked(api.connectionModels).mockResolvedValue(modelCatalog);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
   vi.mocked(api.baselineCandidates).mockResolvedValue({
     instrument: "NVDA",
@@ -168,7 +165,7 @@ test.each([
     </Router>,
   );
 
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   const date = screen.getByLabelText(/^Analysis date/);
   expect(date).toBeDisabled();
   expect(date).toHaveValue("");
@@ -199,7 +196,7 @@ test("preserves a valid manual date and resets it when a new market makes it fut
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   const ticker = screen.getByLabelText(/^Ticker/);
   const date = screen.getByLabelText(/^Analysis date/);
   fireEvent.change(ticker, { target: { value: "NVDA" } });
@@ -237,7 +234,7 @@ test("ignores a stale cutoff response after the ticker changes", async () => {
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   const ticker = screen.getByLabelText(/^Ticker/);
   const date = screen.getByLabelText(/^Analysis date/);
   fireEvent.change(ticker, { target: { value: "NVDA" } });
@@ -267,7 +264,7 @@ test("keeps submission unavailable when the cutoff context fails", async () => {
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -290,7 +287,7 @@ test("refreshes the cutoff when the page becomes visible and at valid_until", as
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -317,7 +314,7 @@ test("refreshes from the server validity window when the browser clock is wrong"
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -347,7 +344,7 @@ test("rechecks the server cutoff immediately before submitting an automatic date
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -370,7 +367,7 @@ test("keeps submission unavailable when the submit-time cutoff refresh fails", a
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -398,7 +395,7 @@ test("locks the instrument cutoff while the submit-time context is pending", asy
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   const ticker = screen.getByLabelText(/^Ticker/);
   const date = screen.getByLabelText(/^Analysis date/);
   fireEvent.change(ticker, { target: { value: "NVDA" } });
@@ -430,7 +427,7 @@ test("requires confirmation instead of submitting when a refreshed cutoff invali
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -462,7 +459,7 @@ test("shows the latest market context when the server rejects a crossed-midnight
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -491,7 +488,7 @@ test("lets a user choose an informative Full Baseline for Incremental research",
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -527,7 +524,7 @@ test("defaults generic research to Full while selecting a baseline for optional 
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -562,7 +559,7 @@ test("recommends Full research for a warned primary cycle without disabling Incr
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -599,7 +596,7 @@ test("keeps the user's Full choice and ignores a stale baseline response", async
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   const ticker = screen.getByLabelText(/^Ticker/);
   fireEvent.change(ticker, { target: { value: "NVDA" } });
   await waitFor(() => expect(api.baselineCandidates).toHaveBeenCalledWith("NVDA", "2026-08-29"));
@@ -628,7 +625,7 @@ test("reuses the idempotency key when a browser submission is retried", async ()
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -645,8 +642,7 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(secondKey).toBe(firstKey);
   expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
     ticker: "NVDA",
-    quick_reasoning_effort: "low",
-    deep_reasoning_effort: "high",
+    models: {quick: {reasoning_effort: "low"}, deep: {reasoning_effort: "high"}},
     output_language: "zh-CN",
   });
   expect(vi.mocked(api.createRun).mock.calls[1][0]).not.toHaveProperty(
@@ -670,7 +666,7 @@ test.each([
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "NVDA" },
   });
@@ -688,7 +684,7 @@ test("keeps UI locale and report output language independent", async () => {
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
   fireEvent.change(screen.getByLabelText(/^Ticker/), {
     target: { value: "7203.T" },
   });
@@ -739,14 +735,10 @@ test("loads a terminal run as an editable template and preserves custom values",
       request: {
         ticker: "7203.T",
         analysis_date: "2026-07-24",
-        asset_type: "stock",
+
         profile: "deep",
         analysts: ["market", "news"],
-        llm_provider: "openai",
-        quick_model: "source-quick-model",
-        deep_model: "source-deep-model",
-        quick_reasoning_effort: "source-low",
-        deep_reasoning_effort: "source-high",
+        models: { quick: { connection_id: "openai", model: "source-quick-model", reasoning_effort: "source-low" }, deep: { connection_id: "openai", model: "source-deep-model", reasoning_effort: "source-high" } },
         output_language: "Use concise Simplified Chinese",
       },
   });
@@ -759,14 +751,14 @@ test("loads a terminal run as an editable template and preserves custom values",
   );
 
   expect(await screen.findByDisplayValue("7203.T")).toBeVisible();
-  expect(screen.getByLabelText(/^Quick model/)).toHaveValue(
+  expect(within(screen.getByRole("group", { name: "Quick connection" })).getByLabelText("Model ID (manual input supported)")).toHaveValue(
     "source-quick-model",
   );
-  expect(screen.getByLabelText(/^Deep model/)).toHaveValue(
+  expect(within(screen.getByRole("group", { name: "Deep connection" })).getByLabelText("Model ID (manual input supported)")).toHaveValue(
     "source-deep-model",
   );
-  expect(screen.getByLabelText(/^Quick reasoning/)).toHaveValue("source-low");
-  expect(screen.getByLabelText(/^Deep reasoning/)).toHaveValue("source-high");
+  expect(within(screen.getByRole("group", { name: "Quick connection" })).getByLabelText("Reasoning effort")).toHaveValue("source-low");
+  expect(within(screen.getByRole("group", { name: "Deep connection" })).getByLabelText("Reasoning effort")).toHaveValue("source-high");
   expect(screen.getByLabelText(/^Report language/)).toHaveValue(
     "Use concise Simplified Chinese",
   );
@@ -783,11 +775,7 @@ test("loads a terminal run as an editable template and preserves custom values",
     ticker: "7203.T",
     profile: "deep",
     analysts: ["market", "news"],
-    llm_provider: "openai",
-    quick_model: "source-quick-model",
-    deep_model: "source-deep-model",
-    quick_reasoning_effort: "source-low",
-    deep_reasoning_effort: "source-high",
+    models: { quick: { connection_id: "openai", model: "source-quick-model", reasoning_effort: "source-low" }, deep: { connection_id: "openai", model: "source-deep-model", reasoning_effort: "source-high" } },
     output_language: "Use concise Simplified Chinese",
     source_run_id: "source-run",
   });
@@ -802,14 +790,10 @@ test("locks the update intent to Incremental fields and keeps the root Full base
     request: {
       ticker: "NVDA",
       analysis_date: "2026-07-24",
-      asset_type: "stock",
+
       profile: "deep",
       analysts: ["market", "news"],
-      llm_provider: "openai",
-      quick_model: "legacy-quick",
-      deep_model: "gpt-5.5",
-      quick_reasoning_effort: "low",
-      deep_reasoning_effort: "high",
+      models: { quick: { connection_id: "openai", model: "legacy-quick", reasoning_effort: "low" }, deep: { connection_id: "openai", model: "gpt-5.5", reasoning_effort: "high" } },
       output_language: "en",
       research_kind: "incremental",
       full_baseline_run_id: "full-baseline",
@@ -864,14 +848,10 @@ test("blocks a locked update when its requested Full baseline is no longer eligi
     request: {
       ticker: "NVDA",
       analysis_date: "2026-07-24",
-      asset_type: "stock",
+
       profile: "deep",
       analysts: ["market"],
-      llm_provider: "openai",
-      quick_model: "legacy-quick",
-      deep_model: "gpt-5.5",
-      quick_reasoning_effort: "low",
-      deep_reasoning_effort: "high",
+      models: { quick: { connection_id: "openai", model: "legacy-quick", reasoning_effort: "low" }, deep: { connection_id: "openai", model: "gpt-5.5", reasoning_effort: "high" } },
       output_language: "en",
       research_kind: "incremental",
       full_baseline_run_id: "expired-baseline",
@@ -900,7 +880,7 @@ test("blocks a locked update when its requested Full baseline is no longer eligi
   expect(api.createRun).not.toHaveBeenCalled();
 });
 
-test("falls back to configured defaults when a source provider is unavailable", async () => {
+test("preserves unavailable source connections until a replacement is chosen", async () => {
   vi.mocked(api.creationTemplate).mockResolvedValue({
       run_id: "unavailable-source",
       status: "failed",
@@ -908,14 +888,10 @@ test("falls back to configured defaults when a source provider is unavailable", 
       request: {
         ticker: "NVDA",
         analysis_date: "2026-07-24",
-        asset_type: "stock",
+
         profile: "standard",
         analysts: ["market"],
-        llm_provider: "anthropic",
-        quick_model: "claude-source-quick",
-        deep_model: "claude-source-deep",
-        quick_reasoning_effort: "low",
-        deep_reasoning_effort: "high",
+        models: { quick: { connection_id: "anthropic", model: "claude-source-quick", reasoning_effort: "low" }, deep: { connection_id: "anthropic", model: "claude-source-deep", reasoning_effort: "high" } },
         output_language: "ja",
       },
   });
@@ -927,12 +903,11 @@ test("falls back to configured defaults when a source provider is unavailable", 
   );
 
   expect(await screen.findByDisplayValue("NVDA")).toBeVisible();
-  expect(screen.getByLabelText(/^Provider/)).toHaveValue("openai");
-  expect(screen.getByLabelText(/^Quick model/)).toHaveValue("gpt-5.4-mini");
-  expect(screen.getByLabelText(/^Deep model/)).toHaveValue("gpt-5.5");
-  expect(
-    screen.getByText(/source provider anthropic is unavailable/i),
-  ).toBeVisible();
+  expect(screen.getByLabelText("Shared connection")).toHaveValue("anthropic");
+  expect(screen.getByDisplayValue("claude-source-quick")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("claude-source-deep")).toBeInTheDocument();
+  expect(screen.getAllByText(/Unavailable connection/).length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: /Queue research/ })).toBeDisabled();
 });
 
 test("shows a concise Simplified Chinese label", async () => {
@@ -966,7 +941,7 @@ test("preserves a configured custom report language", async () => {
       <NewRunRoutes />
     </Router>,
   );
-  await screen.findAllByRole("option", { name: "Quick" });
+  await screen.findByDisplayValue("gpt-5.4-mini");
 
   const language = screen.getByLabelText(/^Report language/);
   expect(language).toHaveValue(customLanguage);
@@ -988,109 +963,27 @@ test("preserves a configured custom report language", async () => {
   );
 });
 
-test("shows only configured providers and discovers models lazily", async () => {
-  render(
-    <Router initialPath="/runs/new">
-      <NewRunRoutes />
-    </Router>,
-  );
-
-  await screen.findAllByRole("option", { name: "Quick" });
-  expect(api.providerModels).toHaveBeenCalledWith("openai");
-  expect(screen.getByRole("option", { name: "OpenAI" })).toBeInTheDocument();
-  expect(
-    screen.queryByRole("option", { name: "Anthropic" }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.getAllByRole("option", { name: "Custom model ID" }),
-  ).toHaveLength(2);
-});
-
-test("unknown and custom model IDs expose inherited or explicit provider-default reasoning", async () => {
-  render(
-    <Router initialPath="/runs/new">
-      <NewRunRoutes />
-    </Router>,
-  );
-  await screen.findAllByRole("option", { name: "Future model" });
-
-  fireEvent.change(screen.getByLabelText(/^Quick model/), {
-    target: { value: "future-model" },
-  });
-  const quickReasoning = screen.getByLabelText(/^Quick reasoning/);
-  expect(Array.from(quickReasoning.querySelectorAll("option"), option => option.value)).toEqual(["", "provider_default"]);
-
-  fireEvent.change(screen.getByLabelText(/^Deep model/), {
-    target: { value: "__custom_model_id__" },
-  });
-  expect(Array.from(screen.getByLabelText(/^Deep reasoning/).querySelectorAll("option"), option => option.value))
-    .toEqual(["", "provider_default"]);
-  expect(
-    screen.getByPlaceholderText("Custom model ID"),
-  ).toBeInTheDocument();
-});
-
-test("keeps configured model IDs and custom entry when discovery is unavailable", async () => {
-  vi.mocked(api.providerModels).mockRejectedValue(
-    new Error("Catalog temporarily unavailable"),
-  );
-  render(
-    <Router initialPath="/runs/new">
-      <NewRunRoutes />
-    </Router>,
-  );
-
-  await screen.findByText("Catalog temporarily unavailable");
-  expect(screen.getByLabelText(/^Quick model/)).toHaveValue("gpt-5.4-mini");
-  expect(screen.getByLabelText(/^Deep model/)).toHaveValue("gpt-5.5");
-  expect(
-    screen.getAllByRole("option", { name: "Custom model ID" }),
-  ).toHaveLength(2);
-  expect(screen.getByLabelText(/^Quick reasoning/)).toHaveValue(
-    "provider_default",
-  );
-});
-
-test("supports independent custom IDs for every selectable provider", async () => {
-  vi.mocked(api.providerModels).mockImplementation(async (provider) =>
-    provider === "openai"
-      ? modelCatalog
-      : {
-          provider,
-          models: [],
-          source: "live",
-          fetched_at: "2026-07-28T00:00:00Z",
-          stale: false,
-          warning: null,
-        },
-  );
+test("refreshes a connection catalog without blocking manual model entry", async () => {
+  vi.mocked(api.connectionModels).mockRejectedValue(new Error("Catalog temporarily unavailable"));
   vi.mocked(api.createRun).mockResolvedValue({ id: "run-custom" } as RunView);
-  render(
-    <Router initialPath="/runs/new">
-      <NewRunRoutes />
-    </Router>,
-  );
-  await screen.findAllByRole("option", { name: "Quick" });
-
-  fireEvent.change(screen.getByLabelText(/^Provider/), {
-    target: { value: "ollama" },
-  });
-  await waitFor(() =>
-    expect(api.providerModels).toHaveBeenCalledWith("ollama"),
-  );
-  const customInputs = await screen.findAllByPlaceholderText("Custom model ID");
-  fireEvent.change(customInputs[0], { target: { value: "quick-local" } });
-  fireEvent.change(customInputs[1], { target: { value: "deep-local" } });
-  fireEvent.change(screen.getByLabelText(/^Ticker/), {
-    target: { value: "NVDA" },
-  });
+  render(<Router initialPath="/runs/new"><NewRunRoutes /></Router>);
+  await screen.findByDisplayValue("gpt-5.4-mini");
+  expect(api.connectionModels).not.toHaveBeenCalled();
+  expect(screen.queryByRole("option", {name: "Anthropic"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", {name: "Refresh models"})[0]);
+  expect(await screen.findByText("Catalog temporarily unavailable")).toBeInTheDocument();
+  expect(api.connectionModels).toHaveBeenCalledWith("openai", true);
+  fireEvent.change(screen.getByLabelText("Shared connection"), {target: {value: "ollama"}});
+  const quick = within(screen.getByRole("group", {name: "Quick connection"}));
+  const deep = within(screen.getByRole("group", {name: "Deep connection"}));
+  fireEvent.change(quick.getByLabelText("Model ID (manual input supported)"), {target: {value: "quick-local"}});
+  fireEvent.change(deep.getByLabelText("Model ID (manual input supported)"), {target: {value: "deep-local"}});
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {target: {value: "NVDA"}});
   await waitFor(() => expect(screen.getByLabelText(/^Analysis date/)).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
-
+  fireEvent.click(screen.getByRole("button", {name: /Queue research/}));
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
-  expect(vi.mocked(api.createRun).mock.calls[0][0]).toMatchObject({
-    llm_provider: "ollama",
-    quick_model: "quick-local",
-    deep_model: "deep-local",
-  });
+  expect(vi.mocked(api.createRun).mock.calls[0][0]).toMatchObject({models: {
+    quick: {connection_id: "ollama", model: "quick-local", reasoning_effort: "provider_default"},
+    deep: {connection_id: "ollama", model: "deep-local", reasoning_effort: "provider_default"},
+  }});
 });

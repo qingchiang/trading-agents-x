@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+from collections import Counter
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,6 +27,7 @@ class MigrationReport:
     removed_runs: int
     retained_nodes: int
     verified_tables: int
+    missing_fields: dict[str, int] = field(default_factory=dict)
     integrity: str = "ok"
 
     def to_dict(self):
@@ -58,7 +61,11 @@ def _convert(source, target):
     for row in source.execute("SELECT id, source_run_id, full_baseline_run_id FROM runs"):
         if row[0] in retained and any(value in removed for value in row[1:]):
             raise MigrationError("A retained Run references pre-Timeline history; resolve it before conversion")
+    legacy_identities = {provider: identity for identity, provider in source.execute(
+        "SELECT id, legacy_provider FROM model_connections WHERE legacy_provider IS NOT NULL"
+    )}
     copied = {}
+    missing = Counter()
     target.execute("PRAGMA foreign_keys=ON")
     target.execute("BEGIN")
     target.execute("PRAGMA defer_foreign_keys=ON")
@@ -76,11 +83,62 @@ def _convert(source, target):
         if table == 'primary_research_cycles':
             index = common.index('full_run_id')
             rows = [row for row in rows if row[index] in retained]
+        from tradingagents.persistence.cutover_projection import (
+            config_projection,
+            configuration_projection,
+            request_projection,
+            submission_projection,
+        )
+        if table == 'runs':
+            projected = []
+            for row in rows:
+                values = dict(zip(common, row, strict=True))
+                request = json.loads(values['request_json'])
+                config = json.loads(values['config_json'])
+                method = json.loads(values['method_snapshot_json']) if values['method_snapshot_json'] else None
+                submission = json.loads(values['submission_json']) if values['submission_json'] else None
+                values['audit_snapshot_json'] = json.dumps({'request': request, 'config': config, 'method': method, 'submission': submission})
+                projected_request = request_projection(request, config)
+                if any(not role.get('connection_id') for role in projected_request['models'].values()):
+                    missing['connection_identity'] += 1
+                values['request_json'] = json.dumps(projected_request)
+                values['config_json'] = json.dumps(config_projection(config, values['research_kind']))
+                canonical_submission = submission_projection(submission, legacy_identities)
+                values['submission_json'] = json.dumps(canonical_submission) if canonical_submission is not None else None
+                projected.append(values)
+            common = [*common, 'audit_snapshot_json']
+            names = ', '.join(f'"{name}"' for name in common)
+            rows = [tuple(values[name] for name in common) for values in projected]
+        elif table == 'application_configuration':
+            index = common.index('values_json')
+            rows = [tuple(json.dumps(configuration_projection(json.loads(value), legacy_identities)) if i == index else value for i, value in enumerate(row)) for row in rows]
+        elif table == 'configuration_credentials':
+            from tradingagents.configuration.importing import legacy_credential_fields
+            from tradingagents.llm.models import credential_name
+            aliases = legacy_credential_fields()
+            name_index, value_index = common.index('name'), common.index('value')
+            credentials = {row[name_index]: row[value_index] for row in rows}
+            for alias, (provider, field) in aliases.items():
+                if alias not in credentials:
+                    continue
+                identity = legacy_identities.get(provider)
+                if not identity:
+                    raise MigrationError("A credential alias has no recorded connection identity")
+                name = credential_name(identity, field)
+                if name in credentials and credentials[name] != credentials[alias]:
+                    raise MigrationError("Conflicting credential copies require resolution before conversion")
+                credentials[name] = credentials.pop(alias)
+            rows = [tuple(name if field == 'name' else value for field in common) for name, value in credentials.items()]
         if rows:
             target.executemany(
                 f'INSERT INTO "{table}" ({names}) VALUES ({", ".join("?" for _ in common)})', rows
             )
         copied[table] = (names, rows)
+    for (raw,) in target.execute("SELECT incremental_products_json FROM research_nodes WHERE research_kind='incremental'"):
+        products = json.loads(raw) if raw else {}
+        for name in ('analysis_brief', 'decision_outcome'):
+            if not products or products.get(name) is None:
+                missing[name] += 1
     if target.execute("PRAGMA foreign_key_check").fetchall():
         raise MigrationError("Destination relationship integrity validation failed")
     for table, (names, expected) in copied.items():
@@ -91,7 +149,7 @@ def _convert(source, target):
     if target.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
         raise MigrationError("Destination database integrity validation failed")
     nodes = target.execute("SELECT count(*) FROM research_nodes").fetchone()[0]
-    return MigrationReport(len(retained), len(removed), nodes, len(copied))
+    return MigrationReport(len(retained), len(removed), nodes, len(copied), dict(missing))
 
 
 def migrate_current(source: Path, destination: Path) -> MigrationReport:

@@ -7,16 +7,17 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from tests.research_helpers import model_settings
 from tradingagents.configuration.defaults import build_default_config
 from tradingagents.configuration.settings import RunSettings
 from tradingagents.llm.runtime import create_run_llms
 
 
 def _settings(*, retries=None, provider="openai") -> RunSettings:
-    return RunSettings(
-        llm_provider=provider,
+    return model_settings(
+        provider=provider,
         llm_max_retries=retries,
-        data_config=build_default_config({}),
+        data_config=build_default_config(),
     )
 
 
@@ -38,14 +39,15 @@ def test_run_settings_reject_invalid_retry_budgets(value):
 def test_retry_budget_is_forwarded_to_both_run_roles(monkeypatch, provider):
     calls = []
 
-    def factory(**kwargs):
+    def factory(provider, model, base_url=None, **kwargs):
+        kwargs.update(provider=provider, model=model, base_url=base_url)
         calls.append(kwargs)
         client = MagicMock()
         client.get_llm.return_value = object()
         return client
 
     monkeypatch.setattr(
-        "tradingagents.llm.runtime.create_llm_client",
+        "tradingagents.llm.connections.create_llm_client",
         factory,
     )
 
@@ -59,14 +61,15 @@ def test_retry_budget_is_forwarded_to_both_run_roles(monkeypatch, provider):
 def test_unset_retry_budget_preserves_provider_default(monkeypatch):
     calls = []
 
-    def factory(**kwargs):
+    def factory(provider, model, base_url=None, **kwargs):
+        kwargs.update(provider=provider, model=model, base_url=base_url)
         calls.append(kwargs)
         client = MagicMock()
         client.get_llm.return_value = object()
         return client
 
     monkeypatch.setattr(
-        "tradingagents.llm.runtime.create_llm_client",
+        "tradingagents.llm.connections.create_llm_client",
         factory,
     )
 
@@ -76,14 +79,8 @@ def test_unset_retry_budget_preserves_provider_default(monkeypatch):
 
 
 @pytest.mark.unit
-def test_environment_retry_string_is_resolved_at_settings_boundary():
-    config = build_default_config(
-        {"TRADINGAGENTS_LLM_MAX_RETRIES": "8"}
-    )
-
-    settings = RunSettings(
-        llm_max_retries=config["llm_max_retries"],
-        data_config=config,
-    )
-
-    assert settings.llm_max_retries == 8
+def test_environment_retry_string_is_resolved_by_explicit_import(tmp_path):
+    from tests.configuration_helpers import import_configuration
+    from tradingagents.configuration.settings import AppSettings
+    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path), "TRADINGAGENTS_LLM_MAX_RETRIES": "8"})
+    assert import_configuration(settings).read().values.llm_max_retries == 8

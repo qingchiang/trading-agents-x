@@ -10,7 +10,6 @@ from tradingagents.application.service import AnalysisService
 from tradingagents.configuration.models import ConfigurationPatch
 from tradingagents.configuration.settings import AppSettings
 from tradingagents.domain.runs import AnalysisRequest
-from tradingagents.llm.models import legacy_connection_id
 from tradingagents.persistence import upgrade_database
 from tradingagents.persistence._repository_common import IdempotencyConflictError
 from tradingagents.persistence.configuration import ConfigurationStore
@@ -21,7 +20,7 @@ def configured(tmp_path):
     upgrade_database(settings)
     store = ConfigurationStore(settings)
     store.save(
-        ConfigurationPatch(revision=0, credentials={"OPENAI_API_KEY": "fake-key"}), initialize=True
+        ConfigurationPatch(revision=0, connection_changes=[{"action": "create", "id": "default", "preset": "openai", "credentials": {"api_key": "fake-key"}}]), initialize=True
     )
     service = AnalysisService(
         settings,
@@ -91,7 +90,7 @@ def test_incremental_ignores_retired_unused_quick_connection(tmp_path, action):
     store.save(
         ConfigurationPatch(
             revision=1,
-            values={"quick_connection_id": "secondary"},
+            values={'models': {'quick': {'connection_id': "secondary"}}},
             connection_changes=[
                 {
                     "action": action,
@@ -101,28 +100,14 @@ def test_incremental_ignores_retired_unused_quick_connection(tmp_path, action):
             ],
         )
     )
-    request = AnalysisRequest(
-        ticker="GOOG",
-        analysis_date="2026-09-10",
-        research_kind="incremental",
-        full_baseline_run_id="baseline",
-        quick_connection_id="primary",
-        deep_connection_id="secondary",
-        quick_reasoning_effort="unsupported-ignored",
-        quick_model="ignored",
-    )
+    request = AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10", research_kind="incremental", full_baseline_run_id="baseline", models={"deep": {"connection_id": "secondary"}})
     materialized, settings = store.resolve_request(request)
-    assert settings.quick_binding == settings.deep_binding
-    assert materialized.quick_connection_id == "secondary"
+    assert settings.quick_binding is None
+    assert materialized.models.quick is None
     assert store.execution_credentials(settings)
     with pytest.raises(ConfigurationError):
         store.resolve_request(
-            AnalysisRequest(
-                ticker="GOOG",
-                analysis_date="2026-09-10",
-                quick_connection_id="primary",
-                deep_connection_id="secondary",
-            )
+            AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10", models={'quick': {'connection_id': "primary"}, 'deep': {'connection_id': "secondary"}})
         )
 
 
@@ -135,12 +120,12 @@ def test_submission_null_inheritance_and_source_identity(tmp_path):
     store.save(
         ConfigurationPatch(
             revision=1,
-            values={"quick_think_llm": "changed-model", "deep_think_llm": "changed-deep-model"},
+            values={'models': {'quick': {'model': "changed-model"}, 'deep': {'model': "changed-deep-model"}}},
         )
     )
     assert (
         service.enqueue(
-            request.model_copy(update={"connection_id": None, "deep_model": None}),
+            request.model_copy(update={"connection_id": None, 'models': {'deep': {'model': None}}}),
             idempotency_key="inherit",
         ).id
         == original.id
@@ -162,14 +147,3 @@ def test_schema_groups_and_localized_choices_are_discoverable():
                 set(labels) == {"en", "zh-CN", "ja"} for labels in field.option_labels.values()
             )
     assert schema.credential_metadata["FRED_API_KEY"].label == "FRED"
-
-
-def test_incremental_legacy_provider_ignores_quick_identity(tmp_path):
-    _, store, _ = configured(tmp_path)
-    request = AnalysisRequest(
-        ticker="GOOG", analysis_date="2026-09-10", research_kind="incremental",
-        full_baseline_run_id="baseline", llm_provider="openai", quick_connection_id="deleted",
-    )
-    materialized, settings = store.resolve_request(request)
-    assert materialized.deep_connection_id == legacy_connection_id("openai")
-    assert settings.quick_binding == settings.deep_binding

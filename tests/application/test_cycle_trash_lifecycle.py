@@ -15,6 +15,7 @@ from tradingagents.domain.errors import IncrementalRequestConflictError
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
 from tradingagents.persistence._repository_common import InvalidRunTransitionError, RunNotFoundError
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import (
     DecisionRecord,
     ResearchNodeRecord,
@@ -42,7 +43,7 @@ def _commit_node(
     )
     run, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
         information_cutoff_at=datetime.combine(
             analysis_date, datetime.max.time(), UTC
@@ -506,7 +507,7 @@ def test_two_connections_linearize_restore_against_incremental_retry_slot(
     )
     failed, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="1",
         information_cutoff_at=datetime(2026, 7, 25, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},

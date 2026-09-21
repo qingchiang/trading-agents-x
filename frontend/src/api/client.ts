@@ -71,7 +71,6 @@ export type ConfigurationField = components["schemas"]["ConfigurationField"];
 export type ConfigurationPatch = components["schemas"]["ConfigurationPatch"];
 export type ImportRequest = components["schemas"]["ImportRequest"];
 export type ImportPreview = components["schemas"]["ImportPreview"];
-export type ProviderConnection = components["schemas"]["ProviderConnection"];
 export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];

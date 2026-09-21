@@ -1,118 +1,46 @@
-"""Tests for explicit TRADINGAGENTS_* overlays at application boundaries."""
-
-from __future__ import annotations
+"""Legacy environment names are accepted only by explicit configuration import."""
 
 import pytest
+from pydantic import SecretStr
 
-from tradingagents.configuration.defaults import build_default_config
-
-
-def _config(**overrides):
-    return build_default_config(overrides)
-
-
-def test_no_env_uses_built_in_defaults():
-    config = _config()
-
-    assert config["llm_provider"] == "openai"
-    assert config["deep_think_llm"] == "gpt-5.5"
-    assert config["quick_think_llm"] == "gpt-5.4-mini"
-    assert config["backend_url"] is None
-    assert config["news_article_limit"] == 30
-    assert config["sentiment_filing_limit"] == 20
+from tradingagents.configuration.models import ImportRequest
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
-def test_string_overrides():
-    config = _config(
-        TRADINGAGENTS_LLM_PROVIDER="google",
-        TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
+def preview(tmp_path, **environment):
+    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)}, load_env_files=False)
+    request = ImportRequest(primary=SecretStr("\n".join(f"{name}={value}" for name, value in environment.items())))
+    return ConfigurationStore(settings).preview_import(request)
+
+
+def test_import_converts_roles_and_scalar_types(tmp_path):
+    result = preview(tmp_path, TRADINGAGENTS_LLM_PROVIDER="google",
         TRADINGAGENTS_QUICK_THINK_LLM="gemini-3-flash-preview",
-        TRADINGAGENTS_LLM_BACKEND_URL="https://example.invalid/v1",
-        TRADINGAGENTS_OUTPUT_LANGUAGE="Chinese",
-    )
-
-    assert config["llm_provider"] == "google"
-    assert config["deep_think_llm"] == "gemini-3-pro-preview"
-    assert config["quick_think_llm"] == "gemini-3-flash-preview"
-    assert config["backend_url"] == "https://example.invalid/v1"
-    assert config["output_language"] == "Chinese"
-
-
-def test_int_coercion():
-    config = _config(
-        TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="14",
-        TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS="7",
-    )
-
-    assert config["ticker_news_lookback_days"] == 14
-    assert config["social_lookback_days"] == 7
-
-
-def test_reasoning_thinking_overrides():
-    config = _config(
-        TRADINGAGENTS_OPENAI_REASONING_EFFORT="high",
-        TRADINGAGENTS_GOOGLE_THINKING_LEVEL="minimal",
-        TRADINGAGENTS_ANTHROPIC_EFFORT="low",
-        TRADINGAGENTS_QUICK_REASONING_EFFORT=" MAX ",
+        TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
         TRADINGAGENTS_DEEP_REASONING_EFFORT="provider_default",
-    )
-
-    assert config["openai_reasoning_effort"] == "high"
-    assert config["google_thinking_level"] == "minimal"
-    assert config["anthropic_effort"] == "low"
-    assert config["quick_reasoning_effort"] == " MAX "
-    assert config["deep_reasoning_effort"] == "provider_default"
-
-
-def test_reasoning_effort_defaults_to_none():
-    config = _config()
-
-    assert config["openai_reasoning_effort"] is None
-    assert config["google_thinking_level"] is None
-    assert config["anthropic_effort"] is None
-    assert config["quick_reasoning_effort"] is None
-    assert config["deep_reasoning_effort"] is None
+        TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="14",
+        TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS="7")
+    assert not result.issues
+    assert result.values["models"]["deep"]["model"] == "gemini-3-pro-preview"
+    assert result.values["models"]["deep"]["reasoning_effort"] == "provider_default"
+    assert result.values["models"]["quick"]["model"] == "gemini-3-flash-preview"
+    assert result.values["ticker_news_lookback_days"] == 14
+    assert result.values["social_lookback_days"] == 7
 
 
-def test_empty_env_value_does_not_clobber_default():
-    config = _config(
-        TRADINGAGENTS_LLM_PROVIDER="",
-        TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="",
-    )
-
-    assert config["llm_provider"] == "openai"
-    assert config["ticker_news_lookback_days"] == 14
+def test_empty_import_values_do_not_overwrite_defaults(tmp_path):
+    result = preview(tmp_path, TRADINGAGENTS_LLM_PROVIDER="", TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="")
+    assert not result.issues
+    assert "models" not in result.values
+    assert "ticker_news_lookback_days" not in result.values
 
 
-def test_invalid_int_raises():
-    with pytest.raises(
-        ValueError,
-        match="TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS",
-    ):
-        _config(TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="not-a-number")
-
-
-@pytest.mark.parametrize(
-    "env_name",
-    [
-        "TRADINGAGENTS_MAX_DEBATE_ROUNDS",
-        "TRADINGAGENTS_MAX_RISK_ROUNDS",
-        "TRADINGAGENTS_CHECKPOINT_ENABLED",
-        "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
-        "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
-    ],
-)
-def test_removed_legacy_environment_keys_are_ignored(env_name: str):
-    config = build_default_config({env_name: "legacy-value"})
-
-    assert "checkpoint_enabled" not in config
-    assert "memory_log_max_entries" not in config
-    assert "memory_cross_ticker_limit" not in config
-    assert "max_debate_rounds" not in config
-    assert "max_risk_discuss_rounds" not in config
-
-
-def test_unknown_env_var_is_ignored():
-    config = _config(TRADINGAGENTS_NONEXISTENT_KEY="oops")
-
-    assert "nonexistent_key" not in config
+@pytest.mark.parametrize("name,value", [
+    ("TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS", "not-a-number"),
+    ("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "3"),
+    ("TRADINGAGENTS_CHECKPOINT_ENABLED", "true"),
+    ("TRADINGAGENTS_NONEXISTENT_KEY", "oops"),
+])
+def test_invalid_or_retired_import_fields_are_reported(tmp_path, name, value):
+    assert [issue.name for issue in preview(tmp_path, **{name: value}).issues] == [name]

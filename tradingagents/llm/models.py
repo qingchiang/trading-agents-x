@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
-from uuid import NAMESPACE_URL, uuid5
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -144,10 +144,6 @@ class ModelBinding(ConnectionModel):
     reasoning_effort: str | None = None
 
 
-def legacy_connection_id(provider):
-    return str(uuid5(NAMESPACE_URL, "tradingagents:legacy-provider:" + provider))
-
-
 def credential_name(connection_id, field):
     return f"connection:{connection_id}:{field}"
 
@@ -176,7 +172,7 @@ def preset_connection(provider, *, identity=None, name=None, legacy=None, defaul
         if kind == "azure":
             transport.update({k: legacy.get(k) for k in ("deployment", "api_version")})
     payload = {
-        "id": identity or legacy_connection_id(provider),
+        "id": identity or str(uuid4()),
         "name": name or definition.label,
         "preset": provider,
         "compatibility": provider,
@@ -231,20 +227,3 @@ def connection_view(connection, credentials):
         unavailable_reason=reason,
         reasoning_efforts=["provider_default", *provider_effort_levels(connection.compatibility)],
     )
-
-
-def legacy_credential_fields():
-    from tradingagents.llm.api_key_env import PROVIDER_API_KEY_ENV
-
-    fields = {
-        name: (provider, "api_key") for provider, name in PROVIDER_API_KEY_ENV.items() if name
-    }
-    fields.update(
-        {
-            "AWS_ACCESS_KEY_ID": ("bedrock", "access_key_id"),
-            "AWS_SECRET_ACCESS_KEY": ("bedrock", "secret_access_key"),
-            "AWS_SESSION_TOKEN": ("bedrock", "session_token"),
-            "AWS_BEARER_TOKEN_BEDROCK": ("bedrock", "bearer_token"),
-        }
-    )
-    return fields

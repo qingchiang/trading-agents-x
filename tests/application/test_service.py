@@ -20,7 +20,6 @@ from langgraph.graph import END, START, StateGraph
 from tests.factories import analyst_report, research_decision
 from tests.research_helpers import stub_run_llms
 from tradingagents.application.service import AnalysisService
-from tradingagents.data.config import get_config
 from tradingagents.domain.artifacts import ResearchArtifactDraft
 from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
 from tradingagents.domain.errors import (
@@ -459,10 +458,10 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
 ) -> None:
     """Queued Runs retain non-secret LLM behavior that can change a method."""
     from tests.configuration_helpers import save_configuration
-    save_configuration(app_settings, {
-        "providers": {"openai": {"base_url": "https://gateway.example.invalid/v1"}},
-        "temperature": 0.2, "llm_max_retries": 3,
-    }, {"OPENAI_API_KEY": "method-snapshot-test-secret"})
+    save_configuration(app_settings, {"temperature": 0.2, "llm_max_retries": 3}, connection_changes=[{
+        "action": "update", "id": "default", "transport": {"kind": "chat_completions", "base_url": "https://gateway.example.invalid/v1"},
+        "credentials": {"api_key": "method-snapshot-test-secret"},
+    }])
     base_settings = app_settings
     request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
 
@@ -473,13 +472,17 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     ).enqueue(request, idempotency_key=f"method-snapshot-base-{field}")
     base_snapshot = repository.get_run(base_run.id).method_snapshot
 
-    assert base_snapshot["backend_url"] == "https://gateway.example.invalid/v1"
+    assert base_snapshot["deep_binding"]["connection"]["transport"]["base_url"] == "https://gateway.example.invalid/v1"
     assert base_snapshot["temperature"] == 0.2
     assert base_snapshot["llm_max_retries"] == 3
     assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
 
-    changed_values = {"providers": {"openai": {"base_url": changed_value}}} if field == "backend_url" else {field: changed_value}
-    save_configuration(app_settings, changed_values)
+    if field == "backend_url":
+        save_configuration(app_settings, connection_changes=[{
+            "action": "update", "id": "default", "transport": {"kind": "chat_completions", "base_url": changed_value},
+        }])
+    else:
+        save_configuration(app_settings, {field: changed_value})
     changed_settings = app_settings
     changed_run = AnalysisService(
         changed_settings,
@@ -488,7 +491,7 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     ).enqueue(request, idempotency_key=f"method-snapshot-changed-{field}")
     changed_snapshot = repository.get_run(changed_run.id).method_snapshot
 
-    assert changed_snapshot[field] == changed_value
+    assert (changed_snapshot["deep_binding"]["connection"]["transport"]["base_url"] if field == "backend_url" else changed_snapshot[field]) == changed_value
     assert (
         changed_snapshot["configuration_fingerprint"] != base_snapshot["configuration_fingerprint"]
     )
@@ -771,8 +774,8 @@ class _Graph:
             self.observed.append(
                 (
                     context.request.ticker,
-                    context.settings.llm_provider,
-                    get_config()["llm_provider"],
+                    context.settings.deep_binding.connection.compatibility,
+                    context.settings.output_language.value,
                 )
             )
         on_event(
@@ -1352,19 +1355,24 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
+    from tradingagents.configuration.models import ConfigurationPatch
+    service.configuration.save(ConfigurationPatch(
+        revision=service.configuration.read().revision,
+        connection_changes=[{"action": "create", "id": "deepseek", "preset": "deepseek", "credentials": {"api_key": "placeholder"}}],
+    ))
     _Graph.barrier = Barrier(2)
     requests = (
         AnalysisRequest(
             ticker="NVDA",
             analysis_date="2026-07-24",
             analysts=("market",),
-            llm_provider="openai",
+            models={role: {"connection_id": "default"} for role in ("quick", "deep")},
         ),
         AnalysisRequest(
             ticker="7203.T",
             analysis_date="2026-07-24",
             analysts=("market",),
-            llm_provider="deepseek",
+            models={role: {"connection_id": "deepseek"} for role in ("quick", "deep")},
             output_language="ja",
         ),
     )
@@ -1386,8 +1394,8 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
 
     assert {result.status for result in results} == {RunStatus.SUCCEEDED}
     assert set(_Graph.observed) == {
-        ("NVDA", "openai", "openai"),
-        ("7203.T", "deepseek", "deepseek"),
+        ("NVDA", "openai", "en"),
+        ("7203.T", "deepseek", "ja"),
     }
 
 
@@ -1433,7 +1441,6 @@ def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
         record.request_json = {
             **record.request_json,
             "ticker": "BTC-USD",
-            "asset_type": "crypto",
         }
     claimed = repository.claim_run(queued.id, "worker", 30)
 
@@ -1708,7 +1715,7 @@ def test_service_export_reads_the_durable_result(
     assert "Fixture thesis" in body
     if format == "json":
         payload = json.loads(body)
-        assert payload["schema_version"] == "11"
+        assert payload["schema_version"] == "12"
         assert payload["run"]["id"] == result.run_id
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]

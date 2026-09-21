@@ -732,31 +732,18 @@ def create_app(
                 "unavailable_reason": availability.reason,
                 "model_discovery_supported": definition.adapter != "custom",
             }
-        from tradingagents.llm.models import legacy_connection_id
-
         configuration = service.configuration.read()
         defaults = service.configuration.default_run_settings()
         return CapabilitiesResponse(
             configuration_initialized=configuration.initialized,
             connections=configuration.connections,
-            legacy_connections={name: legacy_connection_id(name) for name in providers},
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
             output_languages=["en", "zh-CN", "ja"],
             providers=providers,
             defaults={
-                "quick_connection_id": (
-                    defaults.quick_binding.connection.id if defaults.quick_binding else None
-                ),
-                "deep_connection_id": (
-                    defaults.deep_binding.connection.id if defaults.deep_binding else None
-                ),
+                "models": configuration.values.models,
                 "profile": defaults.profile.value,
-                "llm_provider": defaults.llm_provider,
-                "quick_model": defaults.quick_model,
-                "deep_model": defaults.deep_model,
-                "quick_reasoning_effort": defaults.quick_reasoning_effort,
-                "deep_reasoning_effort": defaults.deep_reasoning_effort,
                 "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
                 "trash_retention_days": configuration.values.trash_retention_days,

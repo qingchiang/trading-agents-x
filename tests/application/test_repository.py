@@ -56,6 +56,7 @@ from tradingagents.persistence._repository_common import (
     InvalidRunTransitionError,
     RunNotFoundError,
 )
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import DecisionRecord, RunAttemptRecord, RunRecord
 from tradingagents.persistence.repository import RunRepository
 
@@ -74,7 +75,7 @@ def _create(
     request = _request(ticker)
     return repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         idempotency_key=idempotency_key,
     )
 
@@ -948,53 +949,6 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
     assert historical_check.comparison_difference is None
 
 
-def test_legacy_crypto_completion_remains_execution_history_only(
-    repository: RunRepository,
-    app_settings: AppSettings,
-) -> None:
-    run, _ = _create(repository, app_settings)
-    repository.claim_run(run.id, "legacy-worker", 30)
-    evidence = EvidenceBundle(
-        instrument="NVDA",
-        analysis_date=date(2026, 7, 24),
-        items=(),
-    )
-    repository.seal_evidence(run.id, evidence)
-    with repository.sessions.begin() as session:
-        record = session.get(RunRecord, run.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
-    repository.complete(
-        run.id,
-        AnalysisResult(
-            run_id=run.id,
-            status=RunStatus.SUCCEEDED,
-            instrument="BTC-USD",
-            reports={},
-            decision=research_decision(evidence_refs=()),
-            evidence=evidence,
-        ),
-        evidence=evidence,
-    )
-
-    with repository.sessions() as session:
-        decision = session.scalar(
-            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
-        )
-        assert decision.asset_type == "crypto"
-    with repository.engine.connect() as connection:
-        tables = {
-            row[0]
-            for row in connection.exec_driver_sql(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-    assert "outcomes" not in tables
-    assert "reflections" not in tables
 
 
 def test_failed_run_retains_sealed_evidence_and_analyst_reports(
@@ -1050,14 +1004,14 @@ def test_research_template_requires_terminal_source_and_backup_is_consistent(
     ):
         repository.create_run(
             _request("AAPL"),
-            app_settings.resolve_run(_request("AAPL")).snapshot(),
+            ConfigurationStore(app_settings).resolve_request(_request("AAPL"), require_initialized=False)[1].snapshot(),
             source_run_id=source.id,
         )
     repository.request_cancel(source.id)
     template_request = _request("AAPL")
     created, _ = repository.create_run(
         template_request,
-        app_settings.resolve_run(template_request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(template_request, require_initialized=False)[1].snapshot(),
         source_run_id=source.id,
     )
     backup = repository.backup(tmp_path / "backup" / "snapshot.db")
@@ -1080,7 +1034,7 @@ def test_research_template_rejects_missing_source_and_idempotency_mismatch(
     with pytest.raises(RunNotFoundError):
         repository.create_run(
             request,
-            app_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             source_run_id="00000000-0000-0000-0000-000000000000",
         )
 
@@ -1088,14 +1042,14 @@ def test_research_template_rejects_missing_source_and_idempotency_mismatch(
     repository.request_cancel(source.id)
     repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         source_run_id=source.id,
         idempotency_key="template-submit",
     )
     with pytest.raises(IdempotencyConflictError):
         repository.create_run(
             request,
-            app_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
             idempotency_key="template-submit",
         )
 
@@ -1117,7 +1071,7 @@ def test_research_template_and_source_purge_are_race_safe(
         try:
             return repository.create_run(
                 request,
-                app_settings.resolve_run(request).snapshot(),
+                ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
                 source_run_id=source.id,
             )[0]
         except RunNotFoundError:

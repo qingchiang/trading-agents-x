@@ -82,7 +82,7 @@ def test_env_backend_url_precedence(tmp_path):
 
     from tests.configuration_helpers import import_configuration
     store = import_configuration(settings)
-    assert store.default_run_settings().backend_url == "http://proxy/v1"
+    assert store.default_run_settings().deep_binding.connection.transport.base_url == "http://proxy/v1"
 
 
 @pytest.mark.unit

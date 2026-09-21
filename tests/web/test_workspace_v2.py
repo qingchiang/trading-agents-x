@@ -6,6 +6,7 @@ from tests.factories import research_decision
 from tradingagents.domain.common import RunStatus
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
 def commit_full(
@@ -18,7 +19,7 @@ def commit_full(
     )
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="2",
         information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
         method_snapshot={"schema_version": "1"},
@@ -62,7 +63,7 @@ async def test_group_search_keeps_baseline_context_for_pending_incremental(
     )
     child, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_kind="incremental",
         full_baseline_run_id=baseline,
         incremental_input_fingerprint="fixture-pending",
@@ -92,7 +93,7 @@ async def test_lifecycle_preview_excludes_uncommitted_tasks_and_checks_scope(
     )
     child, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_kind="incremental",
         full_baseline_run_id=baseline,
         incremental_input_fingerprint="fixture-pending",

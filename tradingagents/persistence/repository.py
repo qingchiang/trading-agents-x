@@ -221,6 +221,7 @@ class RunRepository(ExecutionOperations, LifecycleOperations, ArtifactsOperation
             status=RunStatus(record.status),
             request=RunRequestSnapshot.model_validate(record.request_json),
             config_snapshot=record.config_json,
+            audit_snapshot=record.audit_snapshot_json,
             attempt=record.current_attempt,
             cancel_requested=record.cancel_requested,
             error_code=record.error_code,

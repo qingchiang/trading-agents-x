@@ -14,6 +14,7 @@ from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
 from tradingagents.persistence._repository_common import RunNotFoundError
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.models import (
     DecisionRecord,
     RunArtifactRecord,
@@ -28,7 +29,7 @@ def _cancel_and_trash(repository, app_settings, ticker: str):
     request = AnalysisRequest(ticker=ticker, analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     repository.request_cancel(run.id)
     repository.trash_runs((run.id,))
@@ -69,7 +70,7 @@ def _complete_trashed_run(repository, app_settings):
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     repository.claim_run(run.id, "fixture-worker", 30)
     evidence_item = EvidenceItem.create(
@@ -139,7 +140,7 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
     )
     child, _ = repository.create_run(
         child_request,
-        app_settings.resolve_run(child_request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(child_request, require_initialized=False)[1].snapshot(),
         source_run_id=run.id,
     )
     checkpoint_thread = repository.checkpoint_thread(run.id)

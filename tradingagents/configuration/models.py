@@ -2,11 +2,11 @@
 
 from copy import deepcopy
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from tradingagents.configuration.defaults import DEFAULT_CONFIG as D
+from tradingagents.domain.model_selection import ModelSelection, RoleSelections
 from tradingagents.llm.models import ConnectionChange, ConnectionView, ModelConnection
 
 
@@ -14,46 +14,15 @@ class ConfigurationModel(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
-class ProviderConnection(ConfigurationModel):
-    base_url: str | None = None
-    deployment: str | None = None
-    api_version: str | None = None
-    region: str = "us-west-2"
-    auth_mode: Literal["bearer", "system", "static"] = "system"
-    aws_profile: str | None = None
-
-    @field_validator("base_url")
-    @classmethod
-    def endpoint(cls, value):
-        if value is not None:
-            parsed = urlsplit(value)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.netloc
-                or parsed.username
-                or parsed.password
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValueError("Use an HTTP(S) service address without embedded credentials")
-        return value.rstrip("/") if value else None
-
-
 class ConfigurationValues(ConfigurationModel):
     profile: Literal["fast", "standard", "deep"] = "standard"
     analysts: list[Literal["market", "social", "news", "fundamentals"]] = Field(
         default_factory=lambda: ["market", "social", "news", "fundamentals"], min_length=1
     )
-    quick_connection_id: str | None = None
-    deep_connection_id: str | None = None
-    llm_provider: str = D["llm_provider"]
-    quick_think_llm: str = Field(default=D["quick_think_llm"], min_length=1)
-    deep_think_llm: str = Field(default=D["deep_think_llm"], min_length=1)
-    quick_reasoning_effort: str | None = D["quick_reasoning_effort"]
-    deep_reasoning_effort: str | None = D["deep_reasoning_effort"]
-    google_thinking_level: str | None = D["google_thinking_level"]
-    openai_reasoning_effort: str | None = D["openai_reasoning_effort"]
-    anthropic_effort: str | None = D["anthropic_effort"]
+    models: RoleSelections = Field(default_factory=lambda: RoleSelections(
+        quick=ModelSelection(connection_id="default", model="gpt-5.4-mini"),
+        deep=ModelSelection(connection_id="default", model="gpt-5.5"),
+    ))
     temperature: float | None = Field(default=D["temperature"], allow_inf_nan=False)
     llm_max_retries: int | None = Field(default=D["llm_max_retries"], ge=0)
     output_language: str = Field(default="en", min_length=1)
@@ -79,7 +48,6 @@ class ConfigurationValues(ConfigurationModel):
     data_vendors_by_market: dict[str, dict[str, str]] = Field(
         default_factory=lambda: deepcopy(D["data_vendors_by_market"])
     )
-    providers: dict[str, ProviderConnection] = Field(default_factory=dict)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -159,7 +127,7 @@ class ConfigurationField(ConfigurationModel):
     group: str
     label: dict[str, str]
     description: dict[str, str]
-    kind: Literal["text", "number", "boolean", "list", "choice", "routes", "providers"]
+    kind: Literal["text", "number", "boolean", "list", "choice", "routes", "models"]
     default: Any = None
     nullable: bool = False
     minimum: float | None = None
@@ -180,7 +148,6 @@ class ConfigurationSchema(ConfigurationModel):
     presets: dict[str, ModelConnection] = Field(default_factory=dict)
     fields: list[ConfigurationField]
     providers: dict[str, str]
-    provider_defaults: dict[str, ProviderConnection]
     credential_owners: dict[str, str]
     route_options: dict[str, list[str]]
     tool_options: dict[str, list[str]]

@@ -25,20 +25,20 @@ async def test_settings_initialize_save_reveal_and_reject_cross_origin(tmp_path)
             json={
                 "revision": 1,
                 "values": {"output_language": "ja"},
-                "credentials": {"DEEPSEEK_API_KEY": "private-ui-key"},
+                "credentials": {"FRED_API_KEY": "private-ui-key"},
             },
         )
         assert saved.status_code == 200
         assert "private-ui-key" not in saved.text
         revealed = await web_client.post(
-            "/api/v1/settings/credentials/reveal", json={"name": "DEEPSEEK_API_KEY"}
+            "/api/v1/settings/credentials/reveal", json={"name": "FRED_API_KEY"}
         )
         assert revealed.json()["value"] == "private-ui-key"
         assert revealed.headers["cache-control"] == "no-store"
         rejected = await web_client.post(
             "/api/v1/settings/credentials/reveal",
             headers={"Origin": "https://other.example"},
-            json={"name": "DEEPSEEK_API_KEY"},
+            json={"name": "FRED_API_KEY"},
         )
         assert rejected.status_code == 403
         conflict = await web_client.patch(
@@ -65,7 +65,7 @@ async def test_web_and_python_inherit_database_defaults_and_queued_snapshot_is_i
         ConfigurationPatch(
             revision=0,
             values={"profile": "deep", "analysts": ["news"]},
-            credentials={"OPENAI_API_KEY": "not-in-history"},
+            connection_changes=[{"action": "create", "id": "default", "preset": "openai", "credentials": {"api_key": "not-in-history"}}],
         ),
         initialize=True,
     )

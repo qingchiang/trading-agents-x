@@ -34,9 +34,7 @@ CREATE TABLE "decisions" (
 CREATE TABLE model_connections (
 	id VARCHAR(64) NOT NULL,
 	definition JSON NOT NULL,
-	legacy_provider VARCHAR(80),
-	PRIMARY KEY (id),
-	UNIQUE (legacy_provider)
+	PRIMARY KEY (id)
 );
 
 CREATE TABLE primary_research_cycles (
@@ -123,6 +121,7 @@ CREATE TABLE run_evidence (
 );
 
 CREATE TABLE runs (
+    audit_snapshot_json JSON,
 	id VARCHAR(36) NOT NULL,
 	source_run_id VARCHAR(36),
 	idempotency_key VARCHAR(200),
