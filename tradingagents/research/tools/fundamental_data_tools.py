@@ -7,10 +7,7 @@ from tradingagents.data.interface import route_to_vendor
 from tradingagents.research.tools.runtime import AnalysisToolRuntime, analysis_cutoff
 
 
-# Graph-only variants. Their public tool names intentionally match the legacy
-# tools above, but ``curr_date`` is hidden from the LLM and injected by ToolNode
-# from AgentState.trade_date. Direct/programmatic users keep the original tools
-# and their no-date live compatibility.
+# The workflow supplies each tool's immutable analysis date through ToolNode.
 @tool("get_fundamentals")
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol"],

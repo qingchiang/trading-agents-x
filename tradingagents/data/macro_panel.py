@@ -39,7 +39,7 @@ from tradingagents.data import boj, cn_macro, estat, fred, jp_macro
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.macro_common import exact_year_over_year, summarize_points
 from tradingagents.domain.data import ProvenanceRecord
-from tradingagents.provenance import attach_provenance
+from tradingagents.domain.data_result import DataResult
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +178,9 @@ def _cell(
     curr_date: str,
     source_stats: dict[str, dict[str, object]] | None = None,
     unavailable_sources: dict[str, str] | None = None,
-    series_records: list[ProvenanceRecord] | None = None,
     *,
     data_context: DataRequestContext,
-) -> str:
+) -> DataResult:
     """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
     ``spec`` is a ``(source, indicator)`` pair, or ``None`` (no free source yet)
@@ -191,8 +190,10 @@ def _cell(
     fetch/parse failure or empty series degrades to "n/a" so a single bad cell
     can't abort the prefetch (never-raise contract).
     """
+    observations = []
+    series_records = []
     if not spec:
-        return "n/a"
+        return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
     source, indicator = spec[:2]
     display = spec[2] if len(spec) >= 3 else "window"
     look_back_days = spec[3] if len(spec) >= 4 else None
@@ -200,7 +201,7 @@ def _cell(
     audit_source_chain = _FALLBACK_AUDIT_SERIES.get((source, indicator))
 
     def audit(data: dict | None, effective: str, timing: str) -> None:
-        if series_records is None or audit_source_chain is None:
+        if audit_source_chain is None:
             return
         actual_source = (
             str(data.get("actual_source"))
@@ -232,28 +233,28 @@ def _cell(
         if stats is not None:
             stats["unavailable"] = unavailable_sources[source]
         audit(None, "—", "retrieval unavailable")
-        return "n/a"
+        return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
     try:
         data = _SOURCES[source].fetch_series(indicator, curr_date, look_back_days, data_context=data_context)
         summary = summarize_points(data["points"]) if data else None
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
         audit(None, "—", "retrieval unavailable")
-        return "n/a"
+        return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
     if summary is None:
         audit(data, "—", "available; no observations in requested window")
-        return "n/a"
+        return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
     yoy = None
     if display == "exact_yoy":
         yoy = exact_year_over_year(data["points"])
         if yoy is None:
-            return "n/a"
+            return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
         rendered = f"{yoy.pct:+.1f}% YoY ({yoy.last_date})"
     elif display == "yoy_rate":
         try:
             value = float(summary.last_val)
         except (TypeError, ValueError):
-            return "n/a"
+            return DataResult("n/a", observations=tuple(observations), provenance=tuple(series_records))
         rendered = f"{value:+g}% YoY ({summary.last_date})"
     elif summary.delta is None:
         rendered = f"{summary.last_val} ({summary.last_date})"
@@ -263,7 +264,7 @@ def _cell(
     audit(data, summary.last_date, str(data.get("timing") or "observation-date filtered"))
     from datetime import datetime
 
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
 
     if data.get("retrieved_at"):
         observation_values = {
@@ -281,7 +282,7 @@ def _cell(
                 "current_value": yoy.last_val,
                 "pct": yoy.pct,
             }
-        publish_observation(
+        observations.append(make_observation(
             str(data.get("actual_source") or _SOURCE_LABELS.get(source, source)),
             "macro_indicator",
             indicator,
@@ -290,7 +291,7 @@ def _cell(
             retrieved_at=datetime.fromisoformat(data["retrieved_at"]),
             timing="current macro backdrop; observation date is not a release timestamp",
             fallback=bool(data.get("fallback_reason")),
-        )
+        ))
     if stats is not None:
         stats["successes"] = int(stats["successes"]) + 1
         dates = stats["dates"]
@@ -299,10 +300,10 @@ def _cell(
         timings = stats["timings"]
         if isinstance(timings, list) and data.get("timing"):
             timings.append(str(data["timing"]))
-    return f"{cell_label}: {rendered}" if cell_label else rendered
+    return DataResult(f"{cell_label}: {rendered}" if cell_label else rendered, observations=tuple(observations), provenance=tuple(series_records))
 
 
-def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) -> str:
+def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) -> DataResult:
     """Return a compact cross-region macro panel as of ``curr_date`` (markdown).
 
     A per-country comparison table (liquidity / inflation / activity across the
@@ -320,7 +321,7 @@ def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) 
         unavailable_sources["fred"] = "API key is not configured"
 
     source_stats: dict[str, dict[str, object]] = {}
-    series_records: list[ProvenanceRecord] = []
+    inputs: list[DataResult] = []
     rows = [
         "| Indicator | " + " | ".join(_REGIONS) + " |",
         "| --- |" + " --- |" * len(_REGIONS),
@@ -334,20 +335,19 @@ def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) 
                     curr_date,
                     source_stats,
                     unavailable_sources,
-                    series_records,
                     data_context=data_context,
                 )
                 for region in _REGIONS
             ]
-            rows.append(f"| {label} | " + " | ".join(cells) + " |")
+            inputs.extend(cells)
+            rows.append(f"| {label} | " + " | ".join(cell.content for cell in cells) + " |")
     regional = "\n".join(rows)
 
     risk_rows = ["| Risk / FX — cross-border capital flow | Latest |", "| --- | --- |"]
     for label, spec in _GLOBAL_RISK:
-        risk_rows.append(
-            f"| {label} | "
-            f"{_cell(spec, curr_date, source_stats, unavailable_sources, series_records, data_context=data_context)} |"
-        )
+        cell = _cell(spec, curr_date, source_stats, unavailable_sources, data_context=data_context)
+        inputs.append(cell)
+        risk_rows.append(f"| {label} | {cell.content} |")
     risk = "\n".join(risk_rows)
 
     panel = (
@@ -367,7 +367,7 @@ def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) 
         "Eastmoney data when no eligible recent NBS release is discoverable. "
         "Remaining gaps: US ISM PMI and China core inflation._"
     )
-    records = list(series_records)
+    records = [record for item in inputs for record in item.provenance]
     for source, stats in source_stats.items():
         attempts = int(stats["attempts"])
         successes = int(stats["successes"])
@@ -396,4 +396,4 @@ def get_global_macro_panel(curr_date: str, *, data_context: DataRequestContext) 
                 timing=timing,
             )
         )
-    return attach_provenance(panel, *records)
+    return DataResult(panel, observations=tuple(row for item in inputs for row in item.observations), provenance=tuple(records))

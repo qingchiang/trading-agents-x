@@ -40,7 +40,6 @@ def test_same_structured_observation_does_not_advance_after_refresh():
 
 def test_macro_window_display_change_reaches_evidence_without_advancing(monkeypatch):
     from tradingagents.data import fred, macro_panel
-    from tradingagents.data.source_observations import capture_observations
     from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
     from tradingagents.research.incremental.collection import assess_information_advancement
 
@@ -57,9 +56,8 @@ def test_macro_window_display_change_reaches_evidence_without_advancing(monkeypa
                 "retrieved_at": retrieved_at.isoformat(),
             },
         )
-        with capture_observations() as observations:
-            macro_panel._cell(("fred", "VIXCLS"), "2026-09-05", data_context=request_context())
-        return observations[0].evidence(date(2026, 9, 5))
+        result = macro_panel._cell(("fred", "VIXCLS"), "2026-09-05", data_context=request_context())
+        return result.observations[0].evidence(date(2026, 9, 5))
 
     baseline = produce([("2025-09-01", "10"), ("2026-09-04", "15")])
     current = produce([("2025-09-02", "12"), ("2026-09-04", "15")])
@@ -79,7 +77,6 @@ def test_macro_window_display_change_reaches_evidence_without_advancing(monkeypa
 
 def test_exact_yoy_comparator_reaches_evidence_and_revision_advances(monkeypatch):
     from tradingagents.data import fred, macro_panel
-    from tradingagents.data.source_observations import capture_observations
     from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
     from tradingagents.research.incremental.collection import assess_information_advancement
 
@@ -94,9 +91,8 @@ def test_exact_yoy_comparator_reaches_evidence_and_revision_advances(monkeypatch
                 "retrieved_at": datetime(2026, 9, 5, tzinfo=UTC).isoformat(),
             },
         )
-        with capture_observations() as observations:
-            macro_panel._cell(("fred", "cpi", "exact_yoy", 550), "2026-09-05", data_context=request_context())
-        return observations[0].evidence(date(2026, 9, 5))
+        result = macro_panel._cell(("fred", "cpi", "exact_yoy", 550), "2026-09-05", data_context=request_context())
+        return result.observations[0].evidence(date(2026, 9, 5))
 
     baseline = produce("100")
     current = produce("101")
@@ -124,17 +120,18 @@ def test_exact_yoy_comparator_reaches_evidence_and_revision_advances(monkeypatch
 def test_partial_background_preserves_cached_time_and_failed_source(monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.data import incremental_inputs
-    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.data.source_observations import make_observation
     from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
     from tradingagents.domain.data import ProvenanceRecord
-    from tradingagents.provenance import attach_provenance
 
     request = _request(enabled_domains=("news",))
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
     def panel(*_, data_context):
-        publish_observation("FRED", "macro_indicator", "rate", {"value": 4}, retrieved_at=retrieved)
-        return attach_provenance("panel", ProvenanceRecord("panel", "FRED", timing="partial coverage; 1/2 cells available"),
-                                 ProvenanceRecord("panel", "ECB", timing="retrieval unavailable"))
+        observation = make_observation("FRED", "macro_indicator", "rate", {"value": 4}, retrieved_at=retrieved)
+        return DataResult("panel", observations=(observation,), provenance=(
+            ProvenanceRecord("panel", "FRED", timing="partial coverage; 1/2 cells available"),
+            ProvenanceRecord("panel", "ECB", timing="retrieval unavailable"),
+        ))
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", panel)
     empty = CollectionDomainResult(domain="news", state="unavailable", diagnostic=CollectionDiagnostic(code="test"))
     domain, candidates = incremental_inputs.append_news_context(request, empty, lambda *_a, **_k: "No news found", data_context=request_context())
@@ -150,13 +147,14 @@ def test_optional_input_failures_remain_visible_without_erasing_success(monkeypa
 
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.data import incremental_inputs
-    from tradingagents.data.source_observations import publish_observation
     from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
     from tradingagents.domain.data import SourceObservation
 
     request = _request()
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
     observation = SourceObservation("yfinance", "financial_income", "NVDA", {"income": 1}, retrieved)
+    from tradingagents.data.source_observations import publish_observation
+
     def route(method, *_a, **_k):
         if method == "get_income_statement":
             publish_observation(observation.source, observation.kind, observation.key, observation.values, retrieved_at=retrieved)
@@ -183,14 +181,15 @@ def test_structured_news_keeps_source_limits_through_three_market_admission(monk
         test_incremental_us_collector as us,
     )
     from tradingagents.data import incremental_inputs
-    from tradingagents.data.source_observations import publish_observation
     from tradingagents.domain.data import ProvenanceRecord
     from tradingagents.provenance import attach_provenance
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult(""))
     monkeypatch.setattr(incremental_inputs, "get_market_investor_flows", lambda *_: DataResult(""))
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
+    from tradingagents.data.source_observations import publish_observation
+
     def route(method, *_a, **_k):
         if method != "get_news":
             return "No news found"

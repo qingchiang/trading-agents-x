@@ -716,8 +716,9 @@ at assembly time.
 
 `domain/data_result.py` defines source content, observations, provenance,
 diagnostics and bounded temporal spans independently of transport text.
-Professional signals return this result directly; Full and Incremental read
-its producer observations and numeric facts without an ambient observation sink.
+Professional signals and the cross-region macro panel return this result directly;
+Full and Incremental read their producer observations and numeric facts without
+an ambient observation sink.
 The market signal registry adds source policy and retains bounded failure handling.
 
 `source_observations` transports producer-owned records beside existing tool

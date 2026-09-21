@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from tests.data_policy import request_context
+from tradingagents.domain.data_result import DataResult
 
 
 def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
@@ -208,7 +209,7 @@ def test_refresh_failure_survives_incremental_admission_without_changing_article
     config = {**data_config(), "data_cache_dir": str(tmp_path)}
     request = _request(enabled_domains=("news",), baseline=current.date()-timedelta(days=4),
                        target=current.date(), window_start=current-timedelta(days=4), window_end=current)
-    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: "")
+    monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_, data_context: DataResult(""))
     attempt_time = current
     def fetch():
         if attempt_time == current:

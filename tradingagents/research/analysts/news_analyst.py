@@ -5,7 +5,6 @@ from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.jp.market import is_tokyo_ticker
 from tradingagents.data.lookahead import lookback_start_date
 from tradingagents.data.macro_panel import get_global_macro_panel
-from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
 from tradingagents.provenance import extract_provenance
@@ -55,14 +54,14 @@ def create_news_analyst(llm):
         # LLM to tool-call): it's context every analysis needs and macro is
         # market-agnostic. get_macro_indicators stays available as a microscope
         # for drilling into a specific series beyond the panel. Never raises.
-        with capture_observations() as context_observations:
-            macro_panel = get_global_macro_panel(current_date, data_context=runtime.context.data_context)
+        macro_input = get_global_macro_panel(current_date, data_context=runtime.context.data_context)
+        macro_panel = macro_input.content
         market_flows = (
             get_market_investor_flows(ticker, current_date)
             if is_tokyo_ticker(ticker)
             else DataResult("")
         )
-        context_observations.extend(market_flows.observations)
+        context_observations = (*macro_input.observations, *market_flows.observations)
         market_flow_context = market_flows.content
         market_flow_section = ""
         if market_flow_context:
@@ -117,7 +116,7 @@ def create_news_analyst(llm):
         } for o in context_observations]
 
         if len(result.tool_calls) == 0:
-            macro_records = extract_provenance(macro_panel)
+            macro_records = list(macro_input.provenance)
             if not macro_records:
                 macro_records.append(
                     ProvenanceRecord(

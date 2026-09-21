@@ -3,6 +3,7 @@ import pytest
 from tests.data_policy import request_context
 from tests.dataflows.test_incremental_us_collector import _request
 from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
+from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -33,7 +34,7 @@ def test_news_context_keeps_typed_diagnostic_and_continues_macro(
 
     def macro(*_args, data_context):
         calls.append("macro")
-        return ""
+        return DataResult("")
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", macro)
     domain = CollectionDomainResult(

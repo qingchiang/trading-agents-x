@@ -235,7 +235,7 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a, data_context: DataResult("")
     )
     monkeypatch.setattr(
         "tradingagents.data.incremental_inputs.get_market_investor_flows", lambda *_a: DataResult("")
@@ -404,7 +404,7 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel", lambda *_a, data_context: DataResult("")
     )
     synthesis_inputs = []
 

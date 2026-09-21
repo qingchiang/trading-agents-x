@@ -246,13 +246,13 @@ def collect_professional_signals(request, fetch):
 def append_news_context(request, domain, routed, *, data_context: DataRequestContext):
     observations = []
     responses = []
+    records = []
     failed = False
     typed_failures = []
     calls = [
         lambda: routed("get_global_news", request.analysis_cutoff.isoformat(),
                        (request.analysis_cutoff - request.baseline_analysis_cutoff).days,
                        _provenance=True, _stop_on_rate_limit=True),
-        lambda: get_global_macro_panel(request.analysis_cutoff.isoformat(), data_context=data_context),
     ]
     for call in calls:
         with capture_observations() as captured:
@@ -267,21 +267,25 @@ def append_news_context(request, domain, routed, *, data_context: DataRequestCon
             responses.append(response)
             failed = failed or _input_failed(response)
             observations.extend(captured)
+    context_sources = [lambda: get_global_macro_panel(request.analysis_cutoff.isoformat(), data_context=data_context)]
     if request.market == "japan":
+        context_sources.append(lambda: get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat()))
+    for fetch in context_sources:
         try:
-            flow = get_market_investor_flows(request.instrument, request.analysis_cutoff.isoformat())
+            context = fetch()
         except Exception as exc:
             failed = True
             code = _typed_vendor_failure_code(exc)
             if code is not None:
                 typed_failures.append(code)
         else:
-            observations.extend(flow.observations)
-            responses.append(flow.content)
-            failed = failed or _input_failed(flow.content)
+            observations.extend(context.observations)
+            records.extend(context.provenance)
+            responses.append(context.content)
+            failed = failed or _input_failed(context.content)
     return retain_input_limitations(
         augment_domain(request, domain, observations),
-        [record for response in responses for record in extract_provenance(response)],
+        [*records, *(record for response in responses for record in extract_provenance(response))],
         failure_code=(
             _context_failure_code(domain, "news_context_partial", typed_failures)
             if failed
