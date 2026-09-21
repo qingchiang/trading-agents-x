@@ -1,6 +1,5 @@
 """Guard the fundamentals analyst's point-in-time interpretation boundary."""
 
-import inspect
 from typing import TypedDict
 from unittest import mock
 
@@ -10,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 import tradingagents.research.analysts.fundamentals_analyst as fa
+from tests.factories import analyst_runtime
 from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet_for_analysis,
     get_cashflow_for_analysis,
@@ -35,15 +35,17 @@ def test_full_prefetches_financial_core_and_reuses_it_on_next_model_call(monkeyp
     monkeypatch.setattr(fa, "route_to_vendor", route)
     node = fa.create_fundamentals_analyst(Model())
     state = {"company_of_interest": "GOOG", "trade_date": "2026-09-05", "messages": []}
-    first = node(state)
-    node({**state, **first})
+    first = node(state, analyst_runtime())
+    node({**state, **first}, analyst_runtime())
     assert len(calls) == 4
     assert "core data get_cashflow" in prompts[0]
 
 
 @pytest.mark.unit
-def test_fundamentals_prompt_preserves_missing_and_historical_data_boundaries():
-    source = inspect.getsource(fa)
+def test_fundamentals_prompt_preserves_missing_and_historical_data_boundaries(monkeypatch):
+    from tests.factories import captured_analyst_prompt
+
+    source = captured_analyst_prompt(monkeypatch, "fundamentals")
     assert "missing or unprovided financial fields as unknown, never as zero" in source
     assert "not point-in-time historical data" in source
     assert "must not be presented as evidence" in source

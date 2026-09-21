@@ -161,8 +161,7 @@ application layer delegates vendor-specific behavior to the LLM subsystem.
 Connection credentials are scoped by ID and bound once per attempt. Admission
 and retry recheck connection references under their SQLite write transaction,
 so deletion cannot race a new queued reference.
-Incremental creation resolves only the deep role; its new quick binding is a
-compatibility placeholder copied from deep. Internal submission identity retains
+Incremental creation resolves only the deep role and retains no quick binding. Internal submission identity retains
 explicit overrides separately from resolved snapshots and is not exported.
 See [Application configuration](configuration.md) for migration and precedence.
 
@@ -170,7 +169,9 @@ Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
 context, dataflow configuration, cancellation callbacks, and artifact/evidence
 writers; the LangGraph runtime provides the event stream writer separately.
-Runs carry no historical review context. The dataflow
+Analyst nodes read language and source policy from that explicit runtime
+context. Pure language and instrument prompt helpers live in `research/prompts`;
+there is no mixed tool-and-prompt catalog. Runs carry no historical review context. The dataflow
 `ContextVar` bridge exists only to support established adapter signatures
 during one scoped invocation; there is no mutable package configuration or
 `set_config()` operation.

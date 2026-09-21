@@ -1,14 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.runtime import Runtime
 
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.interface import route_to_vendor
 from tradingagents.domain.data import SourceObservation
 from tradingagents.provenance import extract_provenance
+from tradingagents.research.prompts.instrument import get_instrument_context_from_state
+from tradingagents.research.prompts.language import get_language_instruction
+from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
-from tradingagents.research.tools.catalog import (
-    get_instrument_context_from_state,
-    get_language_instruction,
-)
 from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet_for_analysis,
     get_cashflow_for_analysis,
@@ -18,7 +18,7 @@ from tradingagents.research.tools.fundamental_data_tools import (
 
 
 def create_fundamentals_analyst(llm):
-    def fundamentals_analyst_node(state):
+    def fundamentals_analyst_node(state, runtime: Runtime[RunContext]):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
         inputs = state.get("fundamental_inputs")
@@ -53,7 +53,7 @@ def create_fundamentals_analyst(llm):
             + " Preserve source, requested-date, retrieval-time, and point-in-time limitation labels when citing exact figures. Do not create data-quality-warning or provenance sections; the workflow records source metadata separately."
             + " Core financial data has already been fetched below. Use these summaries first; tools can retrieve the cached statement detail. YTD values are cumulative, not standalone quarters.\n\n"
             + core
-            + get_language_instruction(),
+            + get_language_instruction(runtime.context.settings.output_language),
         )
 
         prompt = ChatPromptTemplate.from_messages(

@@ -1,11 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.runtime import Runtime
 
 from tradingagents.provenance import extract_provenance
+from tradingagents.research.prompts.instrument import get_instrument_context_from_state
+from tradingagents.research.prompts.language import get_language_instruction
+from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks
-from tradingagents.research.tools.catalog import (
-    get_instrument_context_from_state,
-    get_language_instruction,
-)
 from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
 from tradingagents.research.tools.market_data_validation_tools import (
     get_verified_market_snapshot_for_analysis,
@@ -15,7 +15,7 @@ from tradingagents.research.tools.technical_indicators_tools import get_indicato
 
 def create_market_analyst(llm):
 
-    def market_analyst_node(state):
+    def market_analyst_node(state, runtime: Runtime[RunContext]):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
 
@@ -60,7 +60,7 @@ The workflow injects the exact analysis date as the end/current date for every m
 
 Write a detailed and nuanced research report of the trends you observe. Provide specific evidence, uncertainty, and invalidation-relevant observations for the downstream research committee. Do not provide account-level sizing, entry, stop, target, or execution instructions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            + get_language_instruction()
+            + get_language_instruction(runtime.context.settings.output_language)
         )
 
         prompt = ChatPromptTemplate.from_messages(

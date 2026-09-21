@@ -1,3 +1,4 @@
+
 import copy
 from datetime import date
 from unittest import mock
@@ -7,6 +8,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
+from tests.factories import analyst_runtime
 from tradingagents.data.config import bind_config
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
@@ -52,7 +54,7 @@ def test_market_final_report_keeps_audit_data_out_of_the_narrative():
         ),
     )
     state = _state(content)
-    result = create_market_analyst(_final_llm())(state)
+    result = create_market_analyst(_final_llm())(state, analyst_runtime())
 
     report = result["market_report"]
     assert report == result["messages"][0].content
@@ -94,7 +96,7 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
         ),
     )
     state = _state(content)
-    result = create_fundamentals_analyst(_final_llm())(state)
+    result = create_fundamentals_analyst(_final_llm())(state, analyst_runtime())
 
     report = result["fundamentals_report"]
     assert report == result["messages"][0].content
@@ -158,7 +160,7 @@ def test_fundamentals_full_prefetch_does_not_report_methods_as_not_requested():
         "messages": [],
     }
 
-    result = create_fundamentals_analyst(_final_llm())(state)
+    result = create_fundamentals_analyst(_final_llm())(state, analyst_runtime())
 
     records = [
         record
@@ -185,7 +187,7 @@ def test_market_report_omits_appendix_by_default():
             timing="market-date filtered",
         ),
     )
-    result = create_market_analyst(_final_llm())(_state(content))
+    result = create_market_analyst(_final_llm())(_state(content), analyst_runtime())
 
     assert result["market_report"] == "MODEL REPORT"
     assert result["messages"][0].content == "MODEL REPORT"

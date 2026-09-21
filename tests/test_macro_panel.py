@@ -11,8 +11,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
+from tests.factories import analyst_runtime
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.data.config import bind_config
+from tradingagents.data.config import bind_config, get_config
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.provenance import attach_provenance, extract_provenance
@@ -419,7 +420,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
                 return_value=market_flows,
             ) as flows,
         ):
-            result = create_news_analyst(llm)(state)
+            result = create_news_analyst(llm)(state, analyst_runtime(get_config()))
         return captured, result, flows
 
     def test_panel_is_injected_into_prompt(self):

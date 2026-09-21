@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tradingagents.domain.runs import AnalysisRequest
-from tradingagents.research.tools.catalog import build_instrument_context
+from tradingagents.research.prompts.instrument import build_instrument_context
 
 
 def test_request_preserves_exchange_suffix() -> None:

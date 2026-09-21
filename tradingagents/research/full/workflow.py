@@ -78,7 +78,6 @@ from tradingagents.research.synthesis.output_validation import (
 )
 from tradingagents.research.synthesis.role_context import RoleContext, RoleContextBuilder
 from tradingagents.research.synthesis.structured_output import StructuredOutputResult
-from tradingagents.research.tools.catalog import get_news
 from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
 from tradingagents.research.tools.fundamental_data_tools import (
     get_balance_sheet_for_analysis,
@@ -92,6 +91,7 @@ from tradingagents.research.tools.market_data_validation_tools import (
 )
 from tradingagents.research.tools.news_data_tools import (
     get_global_news_for_analysis,
+    get_news,
     get_news_for_analysis,
 )
 from tradingagents.research.tools.prediction_markets_tools import (

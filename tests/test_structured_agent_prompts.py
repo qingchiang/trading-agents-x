@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
 from unittest.mock import MagicMock
 
 import pytest
 
 import tradingagents.research.analysts.sentiment_analyst as sentiment
+from tests.factories import analyst_runtime
 from tradingagents.research.prompts.constraints import NO_EXTERNAL_TOOLS
 
 
@@ -44,7 +44,8 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
             "trade_date": "2026-01-15",
             "asset_type": "stock",
             "messages": [],
-        }
+        },
+        analyst_runtime(),
     )
 
     text = "\n".join(
@@ -56,12 +57,13 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
 
 
 @pytest.mark.unit
-def test_tool_using_analysts_keep_immutable_date_guidance():
-    import tradingagents.research.analysts.market_analyst as market
-    import tradingagents.research.analysts.news_analyst as news
+@pytest.mark.parametrize("role", ["market", "news"])
+def test_tool_using_analysts_keep_immutable_date_guidance(monkeypatch, role):
+    from tests.factories import captured_analyst_prompt
 
-    for module in (market, news):
-        assert "tool-call date ranges" in inspect.getsource(module)
+    prompt = captured_analyst_prompt(monkeypatch, role)
+    assert "tool-call date ranges" in prompt
+    assert "2026-01-15" in prompt
 
 
 @pytest.mark.unit

@@ -1,30 +1,8 @@
-"""Sentiment analyst — multi-source sentiment analysis for a target ticker.
+"""Collect ticker sentiment from routed news, social feeds, and market signals.
 
-Previously named ``social_media_analyst``. Renamed and redesigned because
-the old version had a prompt that demanded social-media analysis but the
-only tool available was Yahoo Finance news — which led LLMs to fabricate
-Reddit/X/StockTwits content under prompt pressure (verified live).
-
-The redesigned agent pre-fetches complementary data sources before the LLM
-is invoked and injects them into the prompt as structured blocks:
-
-  1. News headlines     — routed by ticker (Yahoo Finance; EDINET for .T)
-  2. StockTwits messages — retail-trader posts indexed by cashtag, with
-                           user-labeled Bullish/Bearish sentiment tags
-  3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
-
-StockTwits and Reddit are US-retail platforms, so routed non-US markets receive
-clear unavailable placeholders plus any supported per-name official signals.
-Exchange-section investor flows are deliberately excluded: they belong to the
-News Analyst as regional context and cannot be attributed to a target ticker.
-
-The agent does not use tool-calling; the data is in the prompt from turn 0.
-It writes a rich Markdown research draft. The application separately seals
-the source evidence and calculates confidence from source coverage, while the
-common Analyst pipeline performs the small, non-fatal key-claim audit.
-
-See: https://github.com/TauricResearch/TradingAgents/issues/557
-See: https://github.com/TauricResearch/TradingAgents/issues/796
+US social feeds are omitted for routed markets. Exchange-wide flows belong to
+news context, while per-name signals contribute to sentiment source coverage.
+The model receives source blocks before producing its Markdown research draft.
 """
 
 import logging
@@ -32,8 +10,8 @@ from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.runtime import Runtime
 
-from tradingagents.data.config import get_config
 from tradingagents.data.lookahead import is_near_live, lookback_start_date
 from tradingagents.data.market_routing import market_suffix_of
 from tradingagents.data.market_signals import FetchedSentimentSignal, fetch_sentiment_signals
@@ -45,11 +23,10 @@ from tradingagents.research.analysts.sentiment_sources import (
     sentiment_confidence,
 )
 from tradingagents.research.prompts.constraints import NO_EXTERNAL_TOOLS
-from tradingagents.research.tools.catalog import (
-    get_instrument_context_from_state,
-    get_language_instruction,
-    get_news,
-)
+from tradingagents.research.prompts.instrument import get_instrument_context_from_state
+from tradingagents.research.prompts.language import get_language_instruction
+from tradingagents.research.runtime import RunContext
+from tradingagents.research.tools.news_data_tools import get_news
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +39,10 @@ def create_sentiment_analyst(llm):
     Markdown report for the common Markdown-first Analyst pipeline.
     """
 
-    def sentiment_analyst_node(state):
+    def sentiment_analyst_node(state, runtime: Runtime[RunContext]):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
-        config = get_config()
+        config = runtime.context.dataflow_config
         news_start_date = lookback_start_date(
             end_date,
             config["ticker_news_lookback_days"],
@@ -151,7 +128,7 @@ def create_sentiment_analyst(llm):
             news_start_date=news_start_date,
             social_start_date=social_start_date,
             end_date=end_date,
-            output_language=config["output_language"],
+            output_language=runtime.context.settings.output_language,
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
@@ -293,7 +270,7 @@ def _build_system_message(
     # explicit contract before every source block, including for English (for
     # which the shared helper intentionally returns an empty string).
     language_instruction = get_language_instruction(
-        "all explanatory prose in every structured text field"
+        output_language, "all explanatory prose in every structured text field"
     ).strip()
     if not language_instruction:
         language_instruction = (

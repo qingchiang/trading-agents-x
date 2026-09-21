@@ -129,3 +129,53 @@ def research_case(
             f"Fixture case statement grounded in [^{evidence_ref}]."
         ),
     )
+
+
+def analyst_runtime(config=None):
+    """Minimal explicit context for a direct analyst-node test."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from langgraph.runtime import Runtime
+
+    from tradingagents.configuration.defaults import DEFAULT_CONFIG
+
+    values = deepcopy(DEFAULT_CONFIG if config is None else config)
+    return Runtime(context=SimpleNamespace(
+        dataflow_config=values,
+        settings=SimpleNamespace(output_language=values["output_language"]),
+    ))
+
+
+def captured_analyst_prompt(monkeypatch, role, *, language="English"):
+    """Run an analyst with fixed source inputs and return the submitted prompt."""
+    from importlib import import_module
+    from unittest.mock import MagicMock
+
+    from langchain_core.messages import AIMessage
+    from langchain_core.runnables import RunnableLambda
+
+    from tradingagents.configuration.defaults import DEFAULT_CONFIG
+
+    module = import_module(f"tradingagents.research.analysts.{role}_analyst")
+    if role == "news":
+        monkeypatch.setattr(module, "get_global_macro_panel", lambda *_: "Offline macro input")
+    if role == "sentiment":
+        monkeypatch.setattr(module, "is_near_live", lambda *_: False)
+        monkeypatch.setattr(module.get_news, "func", lambda *_: "Offline news input")
+    captured = []
+
+    def invoke(prompt):
+        messages = prompt.to_messages() if hasattr(prompt, "to_messages") else prompt
+        captured.append("\n".join(str(message.content) for message in messages))
+        return AIMessage(content="Offline analyst report")
+
+    model = MagicMock()
+    model.bind_tools.return_value = RunnableLambda(invoke)
+    model.invoke.side_effect = invoke
+    node = getattr(module, f"create_{role}_analyst")(model)
+    node({
+        "company_of_interest": "NVDA", "trade_date": "2026-01-15", "messages": [],
+        "fundamental_inputs": {"responses": {}, "observations": []},
+    }, analyst_runtime({**DEFAULT_CONFIG, "output_language": language}))
+    return captured[0]

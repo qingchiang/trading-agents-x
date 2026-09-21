@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tradingagents.data.config import bind_config
+from tests.factories import analyst_runtime
+from tradingagents.data.config import bind_config, get_config
 from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
@@ -86,7 +87,7 @@ def _run(
         else:
             news.func.return_value = "NEWS_DATA"
         llm = llm or _capturing_llm(captured)
-        result = create_sentiment_analyst(llm)(_state(ticker, trade_date))
+        result = create_sentiment_analyst(llm)(_state(ticker, trade_date), analyst_runtime(get_config()))
     return captured, stocktwits, reddit, market_signals, news, result
 
 

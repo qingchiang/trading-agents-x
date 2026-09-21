@@ -1,6 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.runtime import Runtime
 
-from tradingagents.data.config import get_config
 from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.jp.market import is_tokyo_ticker
 from tradingagents.data.lookahead import lookback_start_date
@@ -8,11 +8,10 @@ from tradingagents.data.macro_panel import get_global_macro_panel
 from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import extract_provenance
+from tradingagents.research.prompts.instrument import get_instrument_context_from_state
+from tradingagents.research.prompts.language import get_language_instruction
+from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
-from tradingagents.research.tools.catalog import (
-    get_instrument_context_from_state,
-    get_language_instruction,
-)
 from tradingagents.research.tools.macro_data_tools import get_macro_indicators_for_analysis
 from tradingagents.research.tools.news_data_tools import (
     EXTENDED_TICKER_NEWS_LOOKBACK_DAYS,
@@ -25,12 +24,12 @@ from tradingagents.research.tools.prediction_markets_tools import (
 
 
 def create_news_analyst(llm):
-    def news_analyst_node(state):
+    def news_analyst_node(state, runtime: Runtime[RunContext]):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         asset_label = "instrument"
         instrument_context = get_instrument_context_from_state(state)
-        ticker_news_lookback_days = get_config()["ticker_news_lookback_days"]
+        ticker_news_lookback_days = runtime.context.dataflow_config["ticker_news_lookback_days"]
         ticker_news_start_date = lookback_start_date(
             current_date,
             ticker_news_lookback_days,
@@ -80,7 +79,7 @@ def create_news_analyst(llm):
             f"{macro_panel}\n"
             f"{market_flow_section}"
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            + get_language_instruction()
+            + get_language_instruction(runtime.context.settings.output_language)
         )
 
         prompt = ChatPromptTemplate.from_messages(

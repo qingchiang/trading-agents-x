@@ -9,7 +9,6 @@ import pytest
 
 import tradingagents.data.instrument_identity as identity_dataflow
 import tradingagents.data.yfinance_news as ynews
-import tradingagents.research.tools.catalog as au
 from tradingagents.domain.instruments import market_timezone
 
 
@@ -48,9 +47,9 @@ def test_identity_lookup_normalizes_symbol(monkeypatch):
             return {"longName": "Gold Futures", "quoteType": "FUTURE"}
 
     monkeypatch.setattr(identity_dataflow.yf, "Ticker", FakeTicker)
-    au.resolve_instrument_identity.cache_clear()
+    identity_dataflow.resolve_instrument_identity.cache_clear()
 
-    identity = au.resolve_instrument_identity("XAUUSD")
+    identity = identity_dataflow.resolve_instrument_identity("XAUUSD")
 
     assert seen["symbol"] == "GC=F"  # normalized, not the raw broker symbol
     assert identity.get("company_name") == "Gold Futures"

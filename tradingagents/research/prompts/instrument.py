@@ -1,59 +1,7 @@
+"""Instrument identity in model-visible research context."""
+
 from collections.abc import Mapping
 from typing import Any
-
-from tradingagents.data.instrument_identity import resolve_instrument_identity
-
-# Import tools from separate utility files
-from tradingagents.research.tools.core_stock_tools import get_stock_data
-from tradingagents.research.tools.fundamental_data_tools import (
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_income_statement,
-)
-from tradingagents.research.tools.macro_data_tools import get_macro_indicators
-from tradingagents.research.tools.market_data_validation_tools import get_verified_market_snapshot
-from tradingagents.research.tools.news_data_tools import (
-    get_global_news,
-    get_insider_transactions,
-    get_news,
-)
-from tradingagents.research.tools.prediction_markets_tools import get_prediction_markets
-from tradingagents.research.tools.technical_indicators_tools import get_indicators
-
-# Public surface: the data tools are imported here so agents and the graph
-# import them from one place, plus the instrument/language helpers defined below.
-__all__ = [
-    "get_stock_data",
-    "get_indicators",
-    "get_fundamentals",
-    "get_balance_sheet",
-    "get_cashflow",
-    "get_income_statement",
-    "get_news",
-    "get_global_news",
-    "get_insider_transactions",
-    "get_macro_indicators",
-    "get_prediction_markets",
-    "get_verified_market_snapshot",
-    "build_instrument_context",
-    "resolve_instrument_identity",
-    "get_instrument_context_from_state",
-    "get_language_instruction",
-]
-
-def get_language_instruction(response_scope: str = "your entire response") -> str:
-    """Return a prompt instruction for the configured output language.
-
-    Returns empty string when English (default), so no extra tokens are used.
-    Applied to analyst reports so a non-English run produces localized
-    user-facing research.
-    """
-    from tradingagents.data.config import get_config
-    lang = get_config().get("output_language", "English")
-    if lang.strip().lower() == "english":
-        return ""
-    return f" Write {response_scope} in {lang}."
 
 
 def build_instrument_context(

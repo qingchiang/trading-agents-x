@@ -26,6 +26,7 @@ from tradingagents.application.instrument_names import resolve_local_instrument_
 from tradingagents.configuration.settings import AppSettings, RunSettings
 from tradingagents.credentials import use_credentials
 from tradingagents.data.config import use_config
+from tradingagents.data.instrument_identity import resolve_instrument_identity
 from tradingagents.data.interface import resolve_instrument_eligibility, validate_market_routing
 from tradingagents.domain.artifacts import ResearchArtifactDraft
 from tradingagents.domain.collection import IncrementalCollectionPreflight
@@ -85,11 +86,8 @@ from tradingagents.research.incremental.collection import (
 )
 from tradingagents.research.incremental.synthesis import synthesize_incremental
 from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.prompts.instrument import build_instrument_context
 from tradingagents.research.runtime import RunCancelled, RunContext, WorkerShutdown
-from tradingagents.research.tools.catalog import (
-    build_instrument_context,
-    resolve_instrument_identity,
-)
 from tradingagents.version import __version__
 
 logger = logging.getLogger(__name__)
