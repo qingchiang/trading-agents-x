@@ -601,5 +601,3 @@ class ConfigurationStore:
             issues,
             fingerprint,
         )
-
-

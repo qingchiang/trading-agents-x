@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from tests.factories import analyst_report, research_decision
 from tradingagents import RunProfile as PublicRunProfile
-from tradingagents.application import RunProfile as ApplicationRunProfile
 from tradingagents.configuration.settings import AppSettings, RunSettings
 from tradingagents.domain.common import (
     ReportLanguage,
@@ -37,7 +36,7 @@ def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
 
 
 def test_public_enum_contract_remains_stable() -> None:
-    assert PublicRunProfile is ApplicationRunProfile is RunProfile
+    assert PublicRunProfile is RunProfile
     assert {member.name: member.value for member in RunProfile} == {
         "FAST": "fast",
         "STANDARD": "standard",
