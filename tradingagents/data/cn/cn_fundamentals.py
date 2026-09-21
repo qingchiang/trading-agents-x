@@ -18,8 +18,9 @@ from tradingagents.data.cn.sina_finance import (
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.y_finance import get_fundamentals as get_yfinance_fundamentals
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 

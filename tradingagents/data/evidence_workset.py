@@ -13,13 +13,10 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 import pandas as pd
 
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    extract_provenance,
-    strip_provenance_markers,
-    temporal_scope_from_records,
-)
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 class EvidenceToolArtifact(TypedDict):

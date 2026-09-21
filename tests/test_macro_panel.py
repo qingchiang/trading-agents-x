@@ -13,12 +13,9 @@ from langchain_core.runnables import RunnableLambda
 import tradingagents.configuration.defaults as default_config
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro, macro_panel
 from tradingagents.data.config import bind_config
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_provenance,
-    extract_provenance,
-    provenance_quality_issues,
-)
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_quality import provenance_quality_issues
+from tradingagents.provenance import attach_provenance, extract_provenance
 from tradingagents.research.analysts import news_analyst
 from tradingagents.research.analysts.news_analyst import create_news_analyst
 

@@ -257,7 +257,8 @@ def test_full_news_separates_availability_diagnostics_from_articles():
     from langchain_core.messages import ToolMessage
 
     from tradingagents.data.news_selection import NewsCandidate, render_candidate
-    from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+    from tradingagents.domain.data import ProvenanceRecord
+    from tradingagents.provenance import attach_evidence_span, attach_provenance
     from tradingagents.research.full.workflow import _collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)

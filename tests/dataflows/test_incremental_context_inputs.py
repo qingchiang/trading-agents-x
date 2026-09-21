@@ -20,7 +20,7 @@ def test_macro_cache_preserves_original_retrieval_across_instances(tmp_path, mon
 def test_same_structured_observation_does_not_advance_after_refresh():
     from dataclasses import replace
 
-    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.performance import PerformanceComponent, PerformanceObservation
     from tradingagents.research.incremental.collection import assess_information_advancement
 
@@ -124,7 +124,8 @@ def test_partial_background_preserves_cached_time_and_failed_source(monkeypatch)
     from tradingagents.data import incremental_inputs
     from tradingagents.data.source_observations import publish_observation
     from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
-    from tradingagents.provenance import ProvenanceRecord, attach_provenance
+    from tradingagents.domain.data import ProvenanceRecord
+    from tradingagents.provenance import attach_provenance
 
     request = _request(enabled_domains=("news",))
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
@@ -147,8 +148,9 @@ def test_optional_input_failures_remain_visible_without_erasing_success(monkeypa
 
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.data import incremental_inputs
-    from tradingagents.data.source_observations import SourceObservation, publish_observation
+    from tradingagents.data.source_observations import publish_observation
     from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
+    from tradingagents.domain.data import SourceObservation
 
     request = _request()
     retrieved = datetime(2026, 7, 24, 10, tzinfo=UTC)
@@ -180,7 +182,8 @@ def test_structured_news_keeps_source_limits_through_three_market_admission(monk
     )
     from tradingagents.data import incremental_inputs
     from tradingagents.data.source_observations import publish_observation
-    from tradingagents.provenance import ProvenanceRecord, attach_provenance
+    from tradingagents.domain.data import ProvenanceRecord
+    from tradingagents.provenance import attach_provenance
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     monkeypatch.setattr(incremental_inputs, "get_global_macro_panel", lambda *_: "")

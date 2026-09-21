@@ -71,13 +71,14 @@ from tradingagents.data.y_finance import (
     get_YFin_data_online,
 )
 from tradingagents.data.yfinance_news import get_global_news_yfinance, get_news_yfinance
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.instruments import normalize_symbol
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from tradingagents.provenance import ProvenanceRecord, attach_provenance, extract_provenance
+from tradingagents.provenance import attach_provenance, extract_provenance
 
 logger = logging.getLogger(__name__)
 

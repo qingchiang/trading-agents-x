@@ -8,7 +8,8 @@ from langchain_core.runnables import RunnableLambda
 
 import tradingagents.configuration.defaults as default_config
 from tradingagents.data.config import bind_config
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.fundamentals_analyst import create_fundamentals_analyst
 from tradingagents.research.analysts.market_analyst import create_market_analyst
 from tradingagents.research.full.workflow import _collect_evidence

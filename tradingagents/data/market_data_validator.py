@@ -16,8 +16,9 @@ import pandas as pd
 from stockstats import wrap
 
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, load_ohlcv
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (

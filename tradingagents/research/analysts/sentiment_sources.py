@@ -9,7 +9,8 @@ from typing import Literal
 from tradingagents.data.evidence_workset import StructuredNumericFact
 from tradingagents.data.market_routing import market_suffix_of
 from tradingagents.data.market_signals import FetchedSentimentSignal
-from tradingagents.provenance import ProvenanceRecord, extract_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import extract_provenance
 from tradingagents.research.state import PrefetchedEvidenceBlock, prefetched_evidence_block
 
 

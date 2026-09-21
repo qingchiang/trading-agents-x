@@ -2,7 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.interface import route_to_vendor
-from tradingagents.data.source_observations import SourceObservation
+from tradingagents.domain.data import SourceObservation
 from tradingagents.provenance import extract_provenance
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
 from tradingagents.research.tools.catalog import (

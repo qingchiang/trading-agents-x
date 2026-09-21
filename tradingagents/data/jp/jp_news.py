@@ -42,8 +42,9 @@ from tradingagents.data.news_cache import fetch_news_feed
 from tradingagents.data.news_diagnostics import candidate_filter_note
 from tradingagents.data.news_selection import candidate_scope, emit_news, merge_news_blocks
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 

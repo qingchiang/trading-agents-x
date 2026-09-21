@@ -15,8 +15,9 @@ from tradingagents.data.cn.sina_finance import (
     validate_analysis_date,
 )
 from tradingagents.data.y_finance import get_statement_frame
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorError
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -358,7 +359,8 @@ def _statement(
         axis=1, how="all"
     )
     entity_type = classify_entity(profile, populated_fields.columns)
-    from tradingagents.data.source_observations import publish_observation, scalar
+    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.domain.data import scalar
 
     for _, row in visible.iterrows():
         values = {}

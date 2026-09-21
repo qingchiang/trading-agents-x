@@ -10,7 +10,8 @@ import pytest
 
 from tradingagents.data.config import bind_config
 from tradingagents.data.market_signals import FetchedSentimentSignal, SentimentSignal
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.sentiment_analyst import create_sentiment_analyst
 from tradingagents.research.analysts.sentiment_sources import (
     SentimentConfidence,

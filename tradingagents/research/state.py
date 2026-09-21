@@ -7,11 +7,9 @@ from typing import Annotated, NotRequired, TypedDict
 from langgraph.graph import MessagesState
 
 from tradingagents.data.evidence_workset import StructuredNumericFact
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    strip_provenance_markers,
-    temporal_scope_from_records,
-)
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_quality import temporal_scope_from_records
+from tradingagents.provenance import strip_provenance_markers
 
 
 class PrefetchedEvidenceBlock(TypedDict):

@@ -23,11 +23,12 @@ from tradingagents.domain.collection import (
     IncrementalEvidenceCandidate,
 )
 from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
 from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
 from tradingagents.persistence.configuration import ConfigurationStore
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 

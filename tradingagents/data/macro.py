@@ -17,7 +17,8 @@ owners per cell, so panel and microscope agree on any indicator.
 """
 
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_provenance
 
 
 def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, str]:

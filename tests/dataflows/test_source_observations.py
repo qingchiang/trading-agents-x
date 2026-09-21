@@ -71,7 +71,8 @@ def test_japan_margin_publishes_conservative_release_date(monkeypatch):
 def test_incremental_admits_statement_rows_from_the_shared_producer(monkeypatch):
     from tests.dataflows.test_incremental_us_collector import _request
     from tradingagents.data.incremental_us import collect_us_incremental
-    from tradingagents.provenance import ProvenanceRecord, attach_provenance
+    from tradingagents.domain.data import ProvenanceRecord
+    from tradingagents.provenance import attach_provenance
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     class Stock:
@@ -115,7 +116,7 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
     from tests.dataflows.test_incremental_jp_collector import _request
     from tradingagents.data import incremental_jp
     from tradingagents.data.market_signals import FetchedSentimentSignal, sentiment_signal_specs
-    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.research.full.workflow import _collect_evidence
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
@@ -195,8 +196,8 @@ def test_financial_rate_limit_preserves_an_earlier_success():
 def test_cn_news_signal_deduplication_preserves_valid_domain_contracts():
     from tests.dataflows.test_incremental_cn_collector import _request
     from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
-    from tradingagents.data.source_observations import SourceObservation
     from tradingagents.domain.collection import CollectionDiagnostic, CollectionDomainResult
+    from tradingagents.domain.data import SourceObservation
 
     request = _request(enabled_domains=("news", "social"))
     observed = SourceObservation("CNINFO", "news_article", "record-1",
@@ -220,7 +221,7 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
 
     import pytest
 
-    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.evidence import EvidenceBundle
     from tradingagents.research.full.workflow import _collect_evidence
 
@@ -286,13 +287,13 @@ def test_routed_snapshot_retains_fallback_at_producer_boundary(monkeypatch):
 def test_cn_news_deduplication_preserves_failures_for_partial_and_empty_social():
     from tests.dataflows.test_incremental_cn_collector import _request
     from tradingagents.data.incremental_inputs import augment_domain, dedupe_news_domains
-    from tradingagents.data.source_observations import SourceObservation
     from tradingagents.domain.collection import (
         CollectionDiagnostic,
         CollectionDomainResult,
         CollectionSourceProvenance,
         CollectionSummary,
     )
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.incremental import IncrementalCollectionResult
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
@@ -344,7 +345,8 @@ def test_full_structured_near_live_guard_covers_each_ingress():
 
     from tradingagents.data.config import get_config
     from tradingagents.data.news_selection import NewsCandidate, render_candidate
-    from tradingagents.data.source_observations import SourceObservation, publish_observation
+    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.evidence import EvidenceItem
     from tradingagents.domain.runs import AnalysisRequest
     from tradingagents.research.full.workflow import ResearchGraph, _collect_evidence
@@ -383,7 +385,7 @@ def test_full_structured_near_live_guard_covers_each_ingress():
 def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit():
     from datetime import timedelta
 
-    from tradingagents.data.source_observations import SourceObservation
+    from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.instruments import market_timezone
     from tradingagents.research.full.workflow import _collect_evidence
 

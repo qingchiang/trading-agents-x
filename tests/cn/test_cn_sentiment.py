@@ -7,11 +7,8 @@ import pytest
 
 from tradingagents.data.cn import cn_sentiment
 from tradingagents.data.cn.common import AkShareRequestError, AkShareSchemaError
-from tradingagents.provenance import (
-    extract_provenance,
-    provenance_quality_issues,
-    strip_provenance_markers,
-)
+from tradingagents.domain.data_quality import provenance_quality_issues
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 @pytest.fixture(autouse=True)

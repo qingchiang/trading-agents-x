@@ -23,7 +23,8 @@ from tradingagents.data.jp.edinet_holdings import get_large_holdings
 from tradingagents.data.jp.jquants_sentiment import get_margin_balance, get_short_positions
 from tradingagents.data.jp.yfinance_sentiment import get_analyst_ratings_payload
 from tradingagents.data.lookahead import is_near_live
-from tradingagents.data.source_observations import SourceObservation, capture_observations
+from tradingagents.data.source_observations import capture_observations
+from tradingagents.domain.data import SourceObservation
 from tradingagents.domain.instruments import match_exchange_suffix
 
 logger = logging.getLogger(__name__)

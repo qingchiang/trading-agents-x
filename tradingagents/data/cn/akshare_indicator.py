@@ -9,7 +9,8 @@ from dateutil.relativedelta import relativedelta
 from tradingagents.data.cn.akshare_stock import ADJUSTMENT_FALLBACK_NOTE, fetch_ohlcv
 from tradingagents.data.market_data_validator import render_verified_market_snapshot
 from tradingagents.data.stockstats_utils import render_indicator_window
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_provenance
 
 _WARMUP_DAYS = 450
 

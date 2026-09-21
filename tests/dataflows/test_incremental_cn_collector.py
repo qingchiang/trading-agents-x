@@ -9,8 +9,9 @@ from tradingagents.data.cn import calendar
 from tradingagents.data.cn.common import AkShareRateLimitError
 from tradingagents.data.incremental_cn import collect_mainland_china_incremental
 from tradingagents.domain.collection import IncrementalCollectionRequest
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.performance import PerformanceComponentStatus
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,

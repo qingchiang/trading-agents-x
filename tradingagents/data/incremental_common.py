@@ -7,13 +7,10 @@ from tradingagents.domain.collection import (
     CollectionDomainResult,
     CollectionResultState,
 )
+from tradingagents.domain.data import EvidenceSpan
+from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.evidence import EvidenceOrigin
-from tradingagents.provenance import (
-    EvidenceSpan,
-    extract_evidence_spans,
-    extract_provenance,
-    temporal_scope_from_records,
-)
+from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 
 class CollectionUnavailable(ValueError):

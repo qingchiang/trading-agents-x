@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from tradingagents.data.financial_inputs import collect_financial_inputs
 from tradingagents.data.jp.jquants_sentiment import get_market_investor_flows
 from tradingagents.data.macro_panel import get_global_macro_panel
-from tradingagents.data.source_observations import SourceObservation, capture_observations
+from tradingagents.data.source_observations import capture_observations
 from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
@@ -20,6 +20,7 @@ from tradingagents.domain.collection import (
     IncrementalCollectionRequest,
     IncrementalEvidenceCandidate,
 )
+from tradingagents.domain.data import SourceObservation
 from tradingagents.domain.vendor_errors import (
     NoMarketDataError,
     VendorNotConfiguredError,

@@ -169,7 +169,8 @@ def _margin_published_by(record_date: str, curr: date) -> bool:
 
 
 def _margin_week(record: dict) -> str:
-    from tradingagents.data.source_observations import as_date, publish_observation
+    from tradingagents.data.source_observations import publish_observation
+    from tradingagents.domain.data import as_date
 
     period = as_date(record.get("Date"))
     if period:

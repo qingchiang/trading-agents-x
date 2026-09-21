@@ -9,9 +9,10 @@ from tradingagents.data import interface
 from tradingagents.data.incremental_jp import collect_japan_incremental
 from tradingagents.data.jp import edinet_news, jp_news
 from tradingagents.domain.collection import IncrementalCollectionRequest
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.performance import PerformanceComponentStatus
 from tradingagents.domain.vendor_errors import NoMarketDataError
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.incremental.collection import (
     calculate_stock_performance,
     default_incremental_collector,

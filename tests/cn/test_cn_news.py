@@ -13,12 +13,9 @@ from tradingagents.data.news_quality import (
     classify_chinese_google_article,
 )
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
-from tradingagents.provenance import (
-    extract_evidence_spans,
-    extract_provenance,
-    provenance_quality_issues,
-)
+from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 
 @pytest.fixture(autouse=True)

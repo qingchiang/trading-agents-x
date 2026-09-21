@@ -40,8 +40,9 @@ from tradingagents.data.jp.jquants_common import parse_number as _num
 from tradingagents.data.jp.jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.y_finance import get_analyst_forward
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 

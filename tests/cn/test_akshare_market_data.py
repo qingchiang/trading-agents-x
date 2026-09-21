@@ -14,8 +14,9 @@ from tradingagents.data import interface, stockstats_utils, y_finance
 from tradingagents.data.cn import akshare_indicator, akshare_stock, calendar, common
 from tradingagents.data.config import bind_config
 from tradingagents.data.rate_limit import stop_on_rate_limit_scope
+from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.domain.vendor_errors import NoMarketDataError
-from tradingagents.provenance import extract_provenance, provenance_quality_issues
+from tradingagents.provenance import extract_provenance
 
 
 def _eastmoney_frame(*, latest="2026-07-17", close=102.0):

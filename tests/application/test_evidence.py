@@ -31,6 +31,7 @@ from tradingagents.domain.common import (
     RunStatus,
     ScenarioReferenceCategory,
 )
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.decision import (
     AuditedRangeEndpoint,
     CalculationRecord,
@@ -71,7 +72,7 @@ from tradingagents.domain.runs import (
     RunMetrics,
     RunView,
 )
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.full.workflow import _collect_evidence, _evidence_from_records
 from tradingagents.research.synthesis.evidence_context import build_evidence_catalog
 

@@ -6,7 +6,8 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.data.interface import route_to_vendor
 from tradingagents.data.lookahead import is_near_live
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 from tradingagents.research.tools.runtime import AnalysisToolRuntime, tool_runtime_scope
 
 

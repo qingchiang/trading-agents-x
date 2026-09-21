@@ -9,9 +9,10 @@ from tradingagents.data.evidence_workset import (
     market_analytical_views,
     parse_ohlcv_frame,
 )
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.evidence import EvidenceItem, MeasurementKind
 from tradingagents.domain.evidence_tables import extract_evidence_tables
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 
 
 def _ohlcv(rows: int = 488) -> str:

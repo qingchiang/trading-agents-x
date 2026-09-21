@@ -5,13 +5,9 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from tradingagents.data import interface
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_provenance,
-    extract_provenance,
-    provenance_marker,
-    provenance_quality_issues,
-)
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_quality import provenance_quality_issues
+from tradingagents.provenance import attach_provenance, extract_provenance, provenance_marker
 
 
 @pytest.mark.unit

@@ -17,6 +17,7 @@ from tradingagents.domain.common import (
     RiskReviewDisposition,
     RunProfile,
 )
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.decision import RiskReviewAdjustment
 from tradingagents.domain.evidence import EvidenceItem, EvidenceQuality
 from tradingagents.domain.reports import (
@@ -31,7 +32,6 @@ from tradingagents.domain.reports import (
 )
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence.configuration import ConfigurationStore
-from tradingagents.provenance import ProvenanceRecord
 from tradingagents.research.full.workflow import (
     ResearchGraph,
     _evidence_from_record,

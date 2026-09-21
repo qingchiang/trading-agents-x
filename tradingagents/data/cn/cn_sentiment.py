@@ -22,8 +22,9 @@ from tradingagents.data.cn.common import (
 from tradingagents.data.cn.news_sources import disclosure_rows, research_rows
 from tradingagents.data.cn.sina_ratings import rating_rows as sina_rating_rows
 from tradingagents.data.evidence_workset import StructuredNumericFact
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.measurement import instrument_currency
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 from tradingagents.version import BROWSER_USER_AGENT
 
 _SSE_MARGIN = "https://query.sse.com.cn/marketdata/tradedata/queryMargin.do"

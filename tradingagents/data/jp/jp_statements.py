@@ -26,7 +26,8 @@ from datetime import UTC, datetime
 from tradingagents.data.jp import jquants_fundamentals as jqf
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.y_finance import get_statement_frame
-from tradingagents.provenance import ProvenanceRecord, attach_evidence_span, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_evidence_span, attach_provenance
 
 logger = logging.getLogger(__name__)
 

@@ -13,9 +13,10 @@ from tradingagents.data.incremental_us import collect_us_incremental
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.domain.collection import IncrementalCollectionRequest
 from tradingagents.domain.common import RunStatus
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.domain.vendor_errors import VendorRateLimitError
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 from tradingagents.research.incremental.collection import normalize_incremental_collection
 
 

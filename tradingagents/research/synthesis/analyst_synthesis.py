@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import Field, model_validator
 
 from tradingagents.domain.common import ArtifactGenerationMethod, FrozenModel
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_quality import provenance_quality_issues
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem, EvidenceQuality
 from tradingagents.domain.reports import (
     AnalystClaimType,
@@ -20,7 +22,6 @@ from tradingagents.domain.reports import (
     ReportSection,
     ResearchWarning,
 )
-from tradingagents.provenance import ProvenanceRecord, provenance_quality_issues
 from tradingagents.research.metrics import MetricsCallback
 from tradingagents.research.presentation import normalize_evidence_markdown, parse_markdown_sections
 from tradingagents.research.synthesis.evidence_context import (

@@ -18,7 +18,6 @@ from langgraph.runtime import Runtime
 from tradingagents.data.config import use_config
 from tradingagents.data.evidence_workset import artifact_records, is_evidence_tool_artifact
 from tradingagents.data.lookahead import is_near_live
-from tradingagents.data.source_observations import SourceObservation
 from tradingagents.domain.artifacts import (
     ArtifactGenerationObservation,
     ResearchArtifactContent,
@@ -29,6 +28,8 @@ from tradingagents.domain.common import (
     RunProfile,
     report_language_prompt_label,
 )
+from tradingagents.domain.data import ProvenanceRecord, SourceObservation
+from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.decision import ResearchDecision
 from tradingagents.domain.evidence import (
     EvidenceBundle,
@@ -42,11 +43,9 @@ from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, DecisionBrief, ResearchWarning
 from tradingagents.provenance import (
-    ProvenanceRecord,
     extract_evidence_spans,
     extract_provenance,
     strip_provenance_markers,
-    temporal_scope_from_records,
 )
 from tradingagents.research.analysts import (
     create_fundamentals_analyst,

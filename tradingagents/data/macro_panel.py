@@ -37,7 +37,8 @@ import logging
 
 from tradingagents.data import boj, cn_macro, estat, fred, jp_macro
 from tradingagents.data.macro_common import exact_year_over_year, summarize_points
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import attach_provenance
 
 logger = logging.getLogger(__name__)
 

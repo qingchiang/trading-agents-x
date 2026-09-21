@@ -6,7 +6,8 @@ from tradingagents.data.jp.market import is_tokyo_ticker
 from tradingagents.data.lookahead import lookback_start_date
 from tradingagents.data.macro_panel import get_global_macro_panel
 from tradingagents.data.source_observations import capture_observations
-from tradingagents.provenance import ProvenanceRecord, extract_provenance
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.provenance import extract_provenance
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
 from tradingagents.research.tools.catalog import (
     get_instrument_context_from_state,

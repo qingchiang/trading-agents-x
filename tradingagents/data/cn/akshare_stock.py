@@ -26,8 +26,9 @@ from tradingagents.data.cn.common import (
     load_akshare,
 )
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
+from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.instruments import NoMarketDataError
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import attach_provenance
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
