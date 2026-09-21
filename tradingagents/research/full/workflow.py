@@ -47,15 +47,17 @@ from tradingagents.research.synthesis.analyst_synthesis import (
     evidence_warnings as _evidence_warnings,
     invoke_analyst_report as _invoke_analyst_report,
 )
-from tradingagents.research.synthesis.deliberation import (
-    debate_round_has_material_progress,
+from tradingagents.research.synthesis.decision import invoke_research_decision
+from tradingagents.research.synthesis.decision_prompts import (
     decision_percentage_calculation_guidance,
     decision_scenario_assumption_guidance,
+)
+from tradingagents.research.synthesis.deliberation import (
+    debate_round_has_material_progress,
     invoke_debate_agenda,
     invoke_judge_draft,
     invoke_rebuttal,
     invoke_research_case,
-    invoke_research_decision,
     invoke_risk_review,
     write_research_markdown,
 )

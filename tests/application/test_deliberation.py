@@ -48,7 +48,22 @@ from tradingagents.domain.reports import (
     RiskReview,
 )
 from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.synthesis.decision import invoke_research_decision
+from tradingagents.research.synthesis.decision_prompts import (
+    _numeric_example_pair,
+    decision_reference_label_guidance,
+    decision_scenario_assumption_guidance,
+)
 from tradingagents.research.synthesis.deliberation import (
+    debate_round_has_material_progress,
+    invoke_debate_agenda,
+    invoke_judge_draft,
+    invoke_rebuttal,
+    invoke_research_case,
+    invoke_risk_review,
+    write_research_markdown,
+)
+from tradingagents.research.synthesis.drafts import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
@@ -62,26 +77,21 @@ from tradingagents.research.synthesis.deliberation import (
     ScenarioReferenceRangeDraft,
     ScenarioReferenceRangesDraft,
     ValuationAssessmentDraft,
-    _assemble_numeric_draft,
-    _canonicalize_calculation_result,
-    _emit_numeric_normalization_event,
-    _evaluate_formula,
-    _normalize_numeric_requirement_candidate,
-    _numeric_audit_snapshot,
-    _numeric_example_pair,
-    _preflight_numeric_requirements,
-    debate_round_has_material_progress,
-    decision_reference_label_guidance,
-    decision_scenario_assumption_guidance,
-    invoke_debate_agenda,
-    invoke_judge_draft,
-    invoke_rebuttal,
-    invoke_research_case,
-    invoke_research_decision,
-    invoke_risk_review,
-    write_research_markdown,
 )
+from tradingagents.research.synthesis.numeric_audit import _assemble_numeric_draft
 from tradingagents.research.synthesis.numeric_evidence import build_numeric_value_catalog
+from tradingagents.research.synthesis.numeric_generation import (
+    _emit_numeric_normalization_event,
+    _numeric_audit_snapshot,
+)
+from tradingagents.research.synthesis.numeric_math import (
+    _canonicalize_calculation_result,
+    _evaluate_formula,
+)
+from tradingagents.research.synthesis.numeric_preflight import (
+    _normalize_numeric_requirement_candidate,
+    _preflight_numeric_requirements,
+)
 from tradingagents.research.synthesis.output_validation import OutputValidationError
 from tradingagents.research.synthesis.structured_output import (
     StructuredOutputError,
@@ -4218,7 +4228,7 @@ def test_numeric_audit_snapshot_redacts_secrets_and_omits_oversize_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "tradingagents.research.synthesis.deliberation._NUMERIC_CANDIDATE_MAX_BYTES",
+        "tradingagents.research.synthesis.numeric_generation._NUMERIC_CANDIDATE_MAX_BYTES",
         32,
     )
     snapshot = _numeric_audit_snapshot(

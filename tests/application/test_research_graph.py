@@ -38,7 +38,7 @@ from tradingagents.research.metrics import MetricsCallback
 from tradingagents.research.prompts.perspectives import PERSPECTIVE_SPECS
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.synthesis.analyst_synthesis import AnalystAuditDraft
-from tradingagents.research.synthesis.deliberation import (
+from tradingagents.research.synthesis.drafts import (
     DecisionNumericDraft,
     JudgeAudit,
     RebuttalAudit,

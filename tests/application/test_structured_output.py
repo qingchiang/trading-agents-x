@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from tradingagents.domain.common import ArtifactGenerationMethod
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
-from tradingagents.research.synthesis.deliberation import invoke_research_decision
+from tradingagents.research.synthesis.decision import invoke_research_decision
 from tradingagents.research.synthesis.structured_output import (
     StructuredOutputError,
     StructuredOutputResult,

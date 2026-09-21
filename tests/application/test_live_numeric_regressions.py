@@ -24,16 +24,16 @@ from tradingagents.domain.evidence import (
     EvidenceTemporalScope,
 )
 from tradingagents.domain.evidence_tables import extract_evidence_tables
-from tradingagents.research.synthesis.deliberation import (
+from tradingagents.research.synthesis.drafts import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
     DecisionNumericRequirementDraft,
     ResearchDecisionCoreEnvelope,
-    _assemble_numeric_draft,
-    _preflight_numeric_requirements,
 )
+from tradingagents.research.synthesis.numeric_audit import _assemble_numeric_draft
 from tradingagents.research.synthesis.numeric_evidence import build_numeric_value_catalog
+from tradingagents.research.synthesis.numeric_preflight import _preflight_numeric_requirements
 
 _FIXTURE_PATH = (
     Path(__file__).parent / "fixtures" / "live_numeric_regressions_2026_08_03.json"

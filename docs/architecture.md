@@ -857,6 +857,10 @@ modules.
 The domain package owns typed research contracts and pure rules; it does not
 import application orchestration, persistence, market adapters or SDK clients.
 Research receives a scoped runtime context and explicit artifact/evidence sinks.
+Research synthesis separates readable deliberation, serializer drafts, decision
+prompt guidance, qualitative generation, numeric preflight, numeric generation,
+audit assembly and formula/display rules. These modules preserve generation
+budgets and exchange typed products; numeric audit does not invoke providers.
 The repository composes private execution, research-write, Timeline-query,
 artifact and lifecycle operations over a shared session factory. Operations that
 commit a research result retain their complete transaction boundary. Full
@@ -893,7 +897,7 @@ from the Primary assessment, including when another cycle completed more recentl
 `GET /api/v1/run-groups` matches the existing task filters before paging complete
 groups. A committed Full baseline supplies the parent context even when only an
 Incremental task matches. Committed children and related uncommitted tasks occupy
-separate arrays. Independent Full tasks and Legacy runs are standalone groups.
+separate arrays. Independent Full tasks are standalone groups.
 These reads do not load reports, Evidence or artifacts and create no new tables.
 
 `POST /api/v1/runs/lifecycle-preview` is a read-only ownership preview. It returns

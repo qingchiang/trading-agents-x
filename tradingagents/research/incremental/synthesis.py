@@ -27,10 +27,10 @@ from tradingagents.domain.incremental import (
 from tradingagents.llm.runtime import RunLLMs
 from tradingagents.research.metrics import MetricsCallback
 from tradingagents.research.presentation import parse_markdown_sections
-from tradingagents.research.synthesis.deliberation import (
+from tradingagents.research.synthesis.deliberation import write_research_markdown
+from tradingagents.research.synthesis.drafts import (
     ResearchDecisionCoreDraft,
     ResearchScenarioCoreDraft,
-    write_research_markdown,
 )
 from tradingagents.research.synthesis.output_validation import OutputValidationError
 from tradingagents.research.synthesis.structured_output import (
