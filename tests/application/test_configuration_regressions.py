@@ -1,6 +1,5 @@
 """User-visible regression cases for configuration upgrade and replay."""
 
-import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
@@ -68,69 +67,19 @@ def test_concurrent_identical_submissions_share_one_run(tmp_path):
     assert len(service.repository.list_events(runs[0].id)) == 1
 
 
-def test_legacy_replay_compares_retained_defaults(tmp_path):
+def test_missing_original_submission_identity_is_an_explicit_conflict(tmp_path):
     settings, store, service = configured(tmp_path)
     request = AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10")
     first = service.enqueue(request, idempotency_key="legacy")
     with sqlite3.connect(settings.database_path) as db:
         db.execute("UPDATE runs SET submission_json=NULL WHERE id=?", (first.id,))
     store.save(ConfigurationPatch(revision=1, values={"profile": "deep"}))
-    assert service.enqueue(request, idempotency_key="legacy").id == first.id
+    with pytest.raises(IdempotencyConflictError, match="not recorded"):
+        service.enqueue(request, idempotency_key="legacy")
     with pytest.raises(IdempotencyConflictError):
         service.enqueue(request.model_copy(update={"profile": "deep"}), idempotency_key="legacy")
 
 
-def test_upgrade_captures_current_legacy_connection_as_reset_baseline(tmp_path):
-    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
-    upgrade_database(settings, "0012_model_connections")
-    identity = legacy_connection_id("openai")
-    with sqlite3.connect(settings.database_path) as db:
-        definition = json.loads(
-            db.execute(
-                "SELECT definition FROM model_connections WHERE id=?", (identity,)
-            ).fetchone()[0]
-        )
-        definition["transport"] = {
-            "kind": "chat_completions",
-            "base_url": "https://saved.example/v1",
-        }
-        db.execute(
-            "UPDATE model_connections SET definition=? WHERE id=?",
-            (json.dumps(definition), identity),
-        )
-        db.execute("INSERT INTO application_configuration VALUES (1, '{}', 1, 7, '2026-09-10')")
-        db.execute(
-            "INSERT INTO configuration_credentials VALUES (?, ?)",
-            (f"connection:{identity}:api_key", "preserved-key"),
-        )
-    upgrade_database(settings)
-    store = ConfigurationStore(settings)
-    view = store.read()
-    assert view.initialized and view.revision == 8
-    conn = view.connections[identity].connection
-    assert conn.template_origin == "upgrade"
-    saved = store.save(
-        ConfigurationPatch(
-            revision=8,
-            connection_changes=[
-                {
-                    "action": "update",
-                    "id": identity,
-                    "transport": {
-                        "kind": "chat_completions",
-                        "base_url": "https://edited.example/v1",
-                    },
-                }
-            ],
-        )
-    )
-    reset = store.save(
-        ConfigurationPatch(
-            revision=saved.revision, connection_changes=[{"action": "reset", "id": identity}]
-        )
-    )
-    assert reset.connections[identity].connection.transport.base_url == "https://saved.example/v1"
-    assert store.reveal_connection(identity, "api_key") == "preserved-key"
 
 
 @pytest.mark.parametrize("action", ["update", "delete"])
@@ -177,36 +126,6 @@ def test_incremental_ignores_retired_unused_quick_connection(tmp_path, action):
         )
 
 
-def test_upgrade_preserves_new_connection_baselines_and_history(tmp_path):
-    from alembic import command
-
-    from tests.application.test_migrations import _alembic_config
-    from tests.application.test_model_connections import configured_store
-
-    settings, store = configured_store(tmp_path)
-    before = store.read()
-    service = AnalysisService(
-        settings,
-        eligibility_resolver=lambda ticker: {"symbol": ticker, "quote_type": "EQUITY"},
-        identity_resolver=lambda ticker, date: {"company_name": ticker},
-    )
-    run = service.enqueue(AnalysisRequest(ticker="GOOG", analysis_date="2026-09-10"))
-    command.downgrade(_alembic_config(settings), "0012_model_connections")
-    with sqlite3.connect(settings.database_path) as db:
-        columns = "request_json, config_json, method_snapshot_json"
-        retained = db.execute(f"SELECT {columns} FROM runs WHERE id=?", (run.id,)).fetchone()
-    upgrade_database(settings)
-    after = store.read()
-    assert after.revision == before.revision
-    assert after.initialized == before.initialized
-    assert after.connections == before.connections
-    with sqlite3.connect(settings.database_path) as db:
-        assert (
-            db.execute(f"SELECT {columns} FROM runs WHERE id=?", (run.id,)).fetchone() == retained
-        )
-        assert db.execute("SELECT submission_json FROM runs WHERE id=?", (run.id,)).fetchone() == (
-            None,
-        )
 
 
 def test_submission_null_inheritance_and_source_identity(tmp_path):

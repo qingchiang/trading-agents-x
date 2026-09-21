@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import UTC, datetime
-from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from alembic import command as alembic_command
-from alembic.config import Config
 from typer.testing import CliRunner
 
 import tradingagents.cli.main as cli
@@ -22,8 +18,6 @@ from tradingagents.domain.errors import (
     UnsupportedInstrumentError,
 )
 from tradingagents.domain.runs import AnalysisResult, RunEvent
-from tradingagents.persistence import upgrade_database
-from tradingagents.persistence.repository import RunRepository
 
 runner = CliRunner()
 
@@ -607,104 +601,6 @@ def test_package_export_requires_output_and_writes_binary(
     assert destination.read_bytes() == payload
 
 
-def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
-    monkeypatch,
-    cli_settings: AppSettings,
-    tmp_path: Path,
-) -> None:
-    upgrade_database(cli_settings)
-    repository = RunRepository(cli_settings)
-    request = cli.AnalysisRequest(
-        ticker="NVDA",
-        analysis_date="2026-07-24",
-    )
-    run, _ = repository.create_run(request, {"fixture": True})
-    repository.engine.dispose()
-    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
-    with resources.as_file(migration_root) as script_location:
-        config = Config()
-        config.set_main_option("script_location", str(script_location))
-        config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{cli_settings.database_path}")
-        config.attributes["busy_timeout_ms"] = cli_settings.busy_timeout_ms
-        alembic_command.downgrade(config, "0004_instrument_local_name")
-    repository = RunRepository(cli_settings)
-    with repository.engine.begin() as connection:
-        decision_id = connection.exec_driver_sql(
-            "INSERT INTO decisions "
-            "(run_id, ticker, market, asset_type, analysis_date, rating, "
-            "confidence, decision_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-            (
-                run.id,
-                request.ticker,
-                "US",
-                "stock",
-                request.analysis_date.isoformat(),
-                "buy",
-                0.5,
-                "{}",
-                "2026-08-20 00:00:00",
-            ),
-        ).scalar_one()
-        connection.exec_driver_sql(
-            "INSERT INTO outcomes "
-            "(decision_id, status, benchmark, holding_intervals, next_check_at) "
-            "VALUES (?, 'pending', 'SPY', 5, '2026-07-24 00:00:00')",
-            (decision_id,),
-        )
-        outcome_id = connection.exec_driver_sql(
-            "SELECT id FROM outcomes WHERE decision_id = ?",
-            (decision_id,),
-        ).scalar_one()
-        connection.exec_driver_sql(
-            "INSERT INTO reflections (outcome_id, text, created_at) "
-            "VALUES (?, ?, '2026-08-20 00:00:00')",
-            (outcome_id, "Legacy reflection."),
-        )
-    repository.engine.dispose()
-
-    destination = tmp_path / "backup" / "pre-migration.db"
-    monkeypatch.setattr(cli, "_settings", lambda: cli_settings)
-    monkeypatch.setattr(
-        cli,
-        "_service",
-        lambda: pytest.fail("backup must not construct AnalysisService"),
-    )
-
-    result = runner.invoke(cli.app, ["db", "backup", str(destination)])
-
-    assert result.exit_code == 0
-    with sqlite3.connect(cli_settings.database_path) as source:
-        assert source.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0004_instrument_local_name",
-        )
-        assert source.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
-        assert source.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
-    with sqlite3.connect(destination) as backup:
-        assert backup.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0004_instrument_local_name",
-        )
-        assert backup.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
-        assert backup.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
-
-    upgraded_settings = cli_settings.model_copy(update={"database_path": destination})
-    upgrade_database(upgraded_settings)
-    upgraded_repository = RunRepository(upgraded_settings)
-    try:
-        assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
-        with sqlite3.connect(destination) as upgraded:
-            assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-                "0013_submission_identity",
-            )
-            assert (
-                upgraded.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"
-                ).fetchall()
-                == []
-            )
-    finally:
-        upgraded_repository.engine.dispose()
 
 
 def test_database_backup_is_consistent_and_refuses_overwrite(

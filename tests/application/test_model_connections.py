@@ -317,43 +317,6 @@ def test_connection_model_discovery_is_isolated_and_only_relevant_changes_expire
     assert service.discover_connection("secondary").source == "cache"
 
 
-def test_migration_preserves_initialized_values_and_legacy_credentials(tmp_path):
-    import json
-    import sqlite3
-
-    from tradingagents.llm.models import legacy_connection_id
-
-    settings = AppSettings.from_env(environ={"TRADINGAGENTS_HOME": str(tmp_path)})
-    upgrade_database(settings, "0011_application_configuration")
-    with sqlite3.connect(settings.database_path) as db:
-        db.execute(
-            "INSERT INTO application_configuration VALUES (1, ?, 1, 7, '2026-09-10')",
-            (
-                json.dumps(
-                    {
-                        "llm_provider": "deepseek",
-                        "quick_think_llm": "deepseek-v4-flash",
-                        "deep_think_llm": "deepseek-v4-pro",
-                        "providers": {"deepseek": {"base_url": "https://retained.example/v1"}},
-                    }
-                ),
-            ),
-        )
-        db.execute(
-            "INSERT INTO configuration_credentials VALUES ('DEEPSEEK_API_KEY', 'migrated-secret')"
-        )
-    upgrade_database(settings)
-    store = ConfigurationStore(settings)
-    view = store.read()
-    identity = legacy_connection_id("deepseek")
-    assert view.initialized and view.revision == 8
-    assert view.values.quick_connection_id == view.values.deep_connection_id == identity
-    assert view.connections[identity].connection.transport.base_url == "https://retained.example/v1"
-    assert store.reveal_connection(identity, "api_key") == "migrated-secret"
-    assert "migrated-secret" not in view.model_dump_json()
-    assert store.reveal("DEEPSEEK_API_KEY") == "migrated-secret"
-    upgrade_database(settings)
-    assert store.read() == view
 
 
 def test_deleted_legacy_connection_cannot_be_rebound_by_import(tmp_path):
@@ -362,9 +325,10 @@ def test_deleted_legacy_connection_cannot_be_rebound_by_import(tmp_path):
 
     _, store = configured_store(tmp_path)
     original = legacy_connection_id("openai")
-    store.save(
-        ConfigurationPatch(revision=1, connection_changes=[{"action": "delete", "id": original}])
-    )
+    store.save(ConfigurationPatch(revision=1, connection_changes=[
+        {"action": "create", "id": original, "preset": "openai"},
+        {"action": "delete", "id": original},
+    ]))
     preview = store.preview_import(
         ImportRequest(primary="OPENAI_API_KEY=fake-import-key", revision=2)
     )

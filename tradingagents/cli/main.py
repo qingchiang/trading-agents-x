@@ -403,6 +403,22 @@ def export(
     console.print(f"Wrote {output.expanduser().resolve()}")
 
 
+@db_app.command("migrate-current")
+def migrate_current_database(
+    source: Annotated[Path, typer.Option("--source", exists=True, dir_okay=False)],
+    destination: Annotated[Path, typer.Option("--destination", dir_okay=False)],
+) -> None:
+    """Convert a stopped 0013 database into a new file; keep the source for rollback."""
+    from tradingagents.persistence.cutover import MigrationError, migrate_current
+
+    try:
+        report = migrate_current(source, destination)
+    except MigrationError as exc:
+        event_console.print(str(exc))
+        raise typer.Exit(code=1) from None
+    typer.echo(json.dumps(report.to_dict(), sort_keys=True))
+
+
 @db_app.command("backup")
 def backup_database(
     destination: Annotated[Path, typer.Argument(dir_okay=False)],

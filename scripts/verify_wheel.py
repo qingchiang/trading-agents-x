@@ -14,13 +14,11 @@ _REQUIRED_FILES = {
     "tradingagents/persistence/configuration.py",
     "tradingagents/application/submissions.py",
     "tradingagents/llm/models.py",
-    "tradingagents/persistence/alembic/versions/0012_model_connections.py",
-    "tradingagents/persistence/alembic/versions/0013_submission_identity.py",
-    "tradingagents/persistence/alembic/versions/0011_application_configuration.py",
+    "tradingagents/persistence/alembic/versions/0100_independent.py",
+    "tradingagents/persistence/alembic/baseline.sql",
     "tradingagents/client.py",
     "tradingagents/research/full/workflow.py",
     "tradingagents/data/data/edinet_code_map.json",
-    "tradingagents/persistence/alembic/versions/0001_markdown_research.py",
     "tradingagents/web/static/index.html",
 }
 _FORBIDDEN_FILES = {

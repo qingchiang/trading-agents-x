@@ -321,6 +321,11 @@ is treated as PIT Evidence or model output.
 
 ### Database
 
+New installations use the independent Alembic baseline. Existing databases
+must be converted offline from revision `0013_submission_identity` into a new
+file; normal startup refuses the predecessor without upgrading it. See
+[Offline database cutover](database-cutover.md) and [ADR 0007](adr/0007-independent-runtime-cutover.md).
+
 Alembic manages application tables:
 
 | Table | Responsibility |

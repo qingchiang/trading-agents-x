@@ -1,0 +1,136 @@
+"""The offline cutover consumes a frozen predecessor, never mutable ORM schema."""
+
+import json
+import sqlite3
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from tradingagents.persistence.cutover import MigrationError, migrate_current
+
+
+@pytest.fixture
+def source_0013(tmp_path):
+    source = tmp_path / "source.db"
+    with sqlite3.connect(source) as db:
+        db.executescript((Path(__file__).parents[1] / "fixtures/schema_0013.sql").read_text())
+        for identity, kind, status in [
+            ("legacy", None, "succeeded"), ("baseline", "full", "succeeded"),
+            ("failed-current", "full", "failed"), ("cancelled-current", "full", "cancelled"),
+        ]:
+            db.execute(
+                "INSERT INTO runs (id,status,request_json,config_json,version,current_attempt,"
+                "cancel_requested,metrics_json,created_at,updated_at,research_schema_version,"
+                "research_kind,method_snapshot_json,submission_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (identity, status, json.dumps({"ticker": "GOOG", "analysis_date": "2026-09-10"}),
+                 '{"historical_missing_connection":true}', "0.4.0", 1, False, '{}',
+                 "2026-09-10", "2026-09-10", "2" if kind else None, kind,
+                 '{"recorded":true}' if kind else None, None),
+            )
+            db.execute(
+                "INSERT INTO run_attempts (run_id,attempt,status,checkpoint_thread_id,resume_count,metrics_json) "
+                "VALUES (?,1,?,?,0,'{}')", (identity, status, f"run:{identity}:attempt:1"),
+            )
+        db.execute("INSERT INTO research_nodes (run_id,research_kind,created_at) VALUES ('baseline','full','2026-09-10')")
+        db.execute("INSERT INTO primary_research_cycles VALUES ('GOOG','baseline','2026-09-10','2026-09-10')")
+    return source
+
+
+def test_cutover_preserves_current_failed_runs_and_source_bytes(source_0013, tmp_path):
+    before = sha256(source_0013.read_bytes()).hexdigest()
+    destination = tmp_path / "current.db"
+    report = migrate_current(source_0013, destination)
+    assert sha256(source_0013.read_bytes()).hexdigest() == before
+    assert report.removed_runs == 1
+    assert report.retained_runs == 3
+    assert report.retained_nodes == 1
+    with sqlite3.connect(destination) as db:
+        assert {row[0] for row in db.execute('SELECT id FROM runs')} == {
+            'baseline', 'failed-current', 'cancelled-current'
+        }
+        assert db.execute('SELECT count(*) FROM run_attempts').fetchone()[0] == 3
+        assert db.execute('SELECT full_run_id FROM primary_research_cycles').fetchone()[0] == 'baseline'
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert db.execute("SELECT config_json FROM runs WHERE id='baseline'").fetchone()[0] == '{"historical_missing_connection":true}'
+
+
+@pytest.mark.parametrize('status', ['queued', 'running'])
+def test_cutover_rejects_active_work(source_0013, tmp_path, status):
+    with sqlite3.connect(source_0013) as db:
+        db.execute("UPDATE runs SET status=? WHERE id='failed-current'", (status,))
+    destination = tmp_path / 'new.db'
+    with pytest.raises(MigrationError, match='queued or running'):
+        migrate_current(source_0013, destination)
+    assert not destination.exists()
+
+
+def test_cutover_never_overwrites_destination(source_0013, tmp_path):
+    destination = tmp_path / 'existing.db'
+    destination.write_bytes(b'keep')
+    with pytest.raises(MigrationError, match='exists'):
+        migrate_current(source_0013, destination)
+    assert destination.read_bytes() == b'keep'
+
+
+def test_cutover_accepts_only_0013(source_0013, tmp_path):
+    with sqlite3.connect(source_0013) as db:
+        db.execute("UPDATE alembic_version SET version_num='0012_model_connections'")
+    destination = tmp_path / 'new.db'
+    with pytest.raises(MigrationError, match='0013'):
+        migrate_current(source_0013, destination)
+    assert not destination.exists()
+
+
+def test_cutover_failure_never_publishes_partial_database(source_0013, tmp_path):
+    with sqlite3.connect(source_0013) as db:
+        db.execute("UPDATE primary_research_cycles SET full_run_id='missing'")
+    destination = tmp_path / 'new.db'
+    with pytest.raises(MigrationError, match='integrity'):
+        migrate_current(source_0013, destination)
+    assert not destination.exists()
+    assert not list(tmp_path.glob('.cutover-*'))
+
+
+def test_normal_startup_rejects_predecessor_without_modifying_it(source_0013, tmp_path):
+    from tradingagents.configuration.settings import AppSettings
+    from tradingagents.persistence.migrations import IncompatibleDatabaseError, upgrade_database
+
+    before = source_0013.read_bytes()
+    settings = AppSettings.from_env(environ={
+        'TRADINGAGENTS_HOME': str(tmp_path),
+        'TRADINGAGENTS_DATABASE_PATH': str(source_0013),
+    })
+    with pytest.raises(IncompatibleDatabaseError, match='migrate-current'):
+        upgrade_database(settings)
+    assert source_0013.read_bytes() == before
+
+
+def test_conversion_retains_connection_identity_secrets_and_reset_template(source_0013, tmp_path):
+    from tradingagents.llm.models import preset_connection
+
+    connection = preset_connection('deepseek', identity='retained')
+    definition = connection.model_dump_json()
+    with sqlite3.connect(source_0013) as db:
+        db.execute("INSERT INTO model_connections VALUES (?,?,?)", ('retained', definition, 'deepseek'))
+        db.execute("INSERT INTO configuration_credentials VALUES (?,?)", ('connection:retained:api_key', 'fixture-secret'))
+        db.execute("INSERT INTO application_configuration VALUES (1,?,1,8,'2026-09-10')", ('{"deep_connection_id":"retained"}',))
+    destination = tmp_path / 'new.db'
+    report = migrate_current(source_0013, destination)
+    assert 'fixture-secret' not in repr(report)
+    with sqlite3.connect(destination) as db:
+        assert db.execute('SELECT definition FROM model_connections').fetchone()[0] == definition
+        assert db.execute('SELECT value FROM configuration_credentials').fetchone()[0] == 'fixture-secret'
+        assert db.execute('SELECT revision FROM application_configuration').fetchone()[0] == 8
+
+
+def test_cli_conversion_does_not_start_the_application(source_0013, tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from tradingagents.cli import main
+
+    monkeypatch.setattr(main, '_settings', lambda: pytest.fail('offline command must use explicit paths'))
+    destination = tmp_path / 'cli.db'
+    result = CliRunner().invoke(main.app, ['db', 'migrate-current', '--source', str(source_0013), '--destination', str(destination)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['retained_runs'] == 3
