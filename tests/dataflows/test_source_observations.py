@@ -117,7 +117,7 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
     from tradingagents.data import incremental_jp
     from tradingagents.data.market_signals import FetchedSentimentSignal, sentiment_signal_specs
     from tradingagents.domain.data import SourceObservation
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
     from tradingagents.research.incremental.collection import normalize_incremental_collection
 
     observed = SourceObservation(
@@ -141,9 +141,8 @@ def test_professional_signal_enters_incremental_and_full_with_same_identity(monk
         result,
         sealed_at=datetime(2026, 7, 25, tzinfo=UTC),
     )
-    full = _collect_evidence(
+    full = collect_evidence(
         [],
-        "",
         requested_date=request.analysis_cutoff,
         analyst="social",
         prefetched_blocks=[{"source_observation": observed.dump()}],
@@ -223,12 +222,12 @@ def test_full_statement_evidence_resolves_publication_day_in_its_market():
 
     from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.evidence import EvidenceBundle
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
 
     observation = SourceObservation("J-Quants", "financial_income", "9984.T:2026-06-30",
                                     {"Revenue": 100}, datetime(2026, 9, 5, tzinfo=UTC),
                                     effective_date=date(2026, 6, 30), available_on=date(2026, 9, 5))
-    items = _collect_evidence([], "", requested_date=date(2026, 9, 5), analyst="fundamentals",
+    items = collect_evidence([], requested_date=date(2026, 9, 5), analyst="fundamentals",
                               prefetched_blocks=[{"source_observation": observation.dump()}],
                               instrument="9984.T")
     assert items[0].available_at == datetime(2026, 9, 5, 23, 59, 59, 999999, tzinfo=ZoneInfo("Asia/Tokyo"))
@@ -244,7 +243,7 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
     from tradingagents.data.news_selection import NewsCandidate, finalize_news, render_candidate
     from tradingagents.data.source_observations import capture_observations, publish_observation
     from tradingagents.domain.vendor_errors import NoMarketDataError
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     def failed(*_a, **_k):
@@ -259,7 +258,7 @@ def test_routed_fallback_news_has_one_consistent_full_observation(monkeypatch):
         body = interface.route_to_vendor("get_news", "GOOG", "2026-09-01", "2026-09-05", _provenance=True)
     assert len(observed) == 1
     assert observed[0].fallback
-    sealed = _collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")], "",
+    sealed = collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")],
                                requested_date=current.date(), analyst="news", instrument="GOOG")
     combined = {item.ref: item for item in [*sealed, *(o.evidence(current.date(), instrument="GOOG") for o in observed)]}
     assert sum(item.evidence_type == "news_article" for item in combined.values()) == 1
@@ -349,7 +348,8 @@ def test_full_structured_near_live_guard_covers_each_ingress():
     from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.evidence import EvidenceItem
     from tradingagents.domain.runs import AnalysisRequest
-    from tradingagents.research.full.workflow import ResearchGraph, _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
+    from tradingagents.research.full.workflow import ResearchGraph
 
     retrieved = datetime(2026, 9, 5, 10, tzinfo=UTC)
     cutoff = date(2020, 1, 2)
@@ -368,11 +368,11 @@ def test_full_structured_near_live_guard_covers_each_ingress():
                               shutdown_requested=lambda: False)
     output = graph._create_analyst_collect_node("news")({}, SimpleNamespace(context=context))
     captured = [EvidenceItem.model_validate(item) for item in output["analyst_evidence_items"]["news"]]
-    prefetched = _collect_evidence([], "", requested_date=cutoff, analyst="news", instrument="GOOG",
+    prefetched = collect_evidence([], requested_date=cutoff, analyst="news", instrument="GOOG",
                                   prefetched_blocks=[{"source_observation": observation.dump()}])
     revision = NewsCandidate("yfinance", "revised", "### revised\n12345", "2020-01-01T10:00:00Z",
                              retrieved_at=retrieved.isoformat(), revision=True, market_day="2026-09-05")
-    rehydrated = _collect_evidence([ToolMessage(content=render_candidate(revision), tool_call_id="news", name="get_news")], "",
+    rehydrated = collect_evidence([ToolMessage(content=render_candidate(revision), tool_call_id="news", name="get_news")],
                                   requested_date=cutoff, analyst="news", instrument="GOOG")
     for items in (captured, prefetched, rehydrated):
         assert all(item.content is None for item in items)
@@ -387,7 +387,7 @@ def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit()
 
     from tradingagents.domain.data import SourceObservation
     from tradingagents.domain.instruments import market_timezone
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
 
     # The same instant falls on different US and Asian calendar dates.
     retrieved = datetime(2026, 9, 5, 1, tzinfo=UTC)
@@ -397,11 +397,11 @@ def test_full_near_live_guard_uses_original_retrieval_market_day_and_keeps_pit()
             cutoff = local_day - timedelta(days=age)
             row = SourceObservation("fixture", "macro_indicator", "rate", {"value": 2}, retrieved,
                                     effective_date=date(2020, 1, 1))
-            evidence = _collect_evidence([], "", requested_date=cutoff, analyst="news", instrument=ticker,
+            evidence = collect_evidence([], requested_date=cutoff, analyst="news", instrument=ticker,
                                          prefetched_blocks=[{"source_observation": row.dump()}])[0]
             assert (evidence.content is not None) == (0 <= age <= 5)
         pit = SourceObservation("fixture", "financial_income", "period", {"value": 2}, retrieved,
                                 effective_date=date(2019, 12, 31), available_on=date(2020, 1, 2))
-        evidence = _collect_evidence([], "", requested_date=date(2020, 1, 3), analyst="fundamentals", instrument=ticker,
+        evidence = collect_evidence([], requested_date=date(2020, 1, 3), analyst="fundamentals", instrument=ticker,
                                      prefetched_blocks=[{"source_observation": pit.dump()}])[0]
         assert evidence.content is not None

@@ -73,7 +73,7 @@ from tradingagents.domain.runs import (
     RunView,
 )
 from tradingagents.provenance import attach_evidence_span, attach_provenance
-from tradingagents.research.full.workflow import _collect_evidence, _evidence_from_records
+from tradingagents.research.full.evidence import collect_evidence, evidence_from_records
 from tradingagents.research.synthesis.evidence_context import build_evidence_catalog
 
 
@@ -100,19 +100,8 @@ def test_composite_tool_payload_creates_one_item_with_all_origins() -> None:
         _record("market data", "JPX", effective="2026-07-24"),
     )
     content = attach_provenance("ONE SHARED BODY", *records)
-    narrative = """Report.
-
-## Data Provenance
-
-| Evidence | Source | Requested / cutoff | Effective date / window | Timing status |
-|---|---|---|---|---|
-| filing | EDINET | 2026-07-24 | 2026-07-23 | point-in-time available |
-| market data | JPX | 2026-07-24 | 2026-07-24 | point-in-time available |
-"""
-
-    items = _collect_evidence(
+    items = collect_evidence(
         [ToolMessage(content=content, tool_call_id="fixture")],
-        narrative,
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )
@@ -152,7 +141,7 @@ def test_complete_artifact_is_collected_instead_of_model_overview() -> None:
         "analytical_views": {"row_count": 1},
     }
 
-    items = _collect_evidence(
+    items = collect_evidence(
         [
             ToolMessage(
                 content="MODEL-SAFE OVERVIEW",
@@ -160,7 +149,6 @@ def test_complete_artifact_is_collected_instead_of_model_overview() -> None:
                 tool_call_id="fixture",
             )
         ],
-        "",
         requested_date=date(2026, 7, 24),
         analyst="market",
     )
@@ -201,9 +189,8 @@ def test_exact_prefetched_bodies_are_aggregated_with_all_origins() -> None:
         },
     ]
 
-    items = _collect_evidence(
+    items = collect_evidence(
         [],
-        "Report.",
         requested_date=date(2026, 7, 24),
         analyst="social",
         prefetched_blocks=blocks,
@@ -218,7 +205,7 @@ def test_exact_prefetched_bodies_are_aggregated_with_all_origins() -> None:
 
 
 def test_composite_quality_is_low_for_mixed_or_fallback_origins() -> None:
-    item = _evidence_from_records(
+    item = evidence_from_records(
         (
             _record("filing", "EDINET"),
             _record(
@@ -240,7 +227,7 @@ def test_composite_quality_is_low_for_mixed_or_fallback_origins() -> None:
 
 
 def test_composite_quality_is_unavailable_when_every_origin_is_unavailable() -> None:
-    item = _evidence_from_records(
+    item = evidence_from_records(
         (
             _record("filing", "EDINET", timing="source unavailable"),
             _record("market data", "JPX", timing="retrieval failed"),
@@ -253,7 +240,7 @@ def test_composite_quality_is_unavailable_when_every_origin_is_unavailable() -> 
 
 
 def test_any_future_origin_withholds_the_entire_composite_body() -> None:
-    item = _evidence_from_records(
+    item = evidence_from_records(
         (
             _record("filing", "EDINET", effective="2026-07-23"),
             _record("market data", "JPX", effective="2026-07-25"),
@@ -294,9 +281,8 @@ def test_explicit_temporal_spans_split_composite_tool_content() -> None:
         temporal_scope="live_only",
     )
 
-    items = _collect_evidence(
+    items = collect_evidence(
         [ToolMessage(content=f"{pit}\n\n{live}", tool_call_id="fixture")],
-        "Report.",
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )
@@ -324,9 +310,8 @@ def test_unavailable_live_span_keeps_audit_record_without_body() -> None:
         temporal_scope="live_only",
     )
 
-    item = _collect_evidence(
+    item = collect_evidence(
         [ToolMessage(content=content, tool_call_id="fixture")],
-        "Report.",
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )[0]
@@ -348,9 +333,8 @@ def test_unbounded_mixed_temporal_content_fails_closed() -> None:
         ),
     )
 
-    item = _collect_evidence(
+    item = collect_evidence(
         [ToolMessage(content=content, tool_call_id="fixture")],
-        "Report.",
         requested_date=date(2026, 7, 24),
         analyst="fundamentals",
     )[0]

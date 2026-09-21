@@ -48,7 +48,7 @@ from tradingagents.persistence.models import (
     RunEvidenceRecord,
     RunRecord,
 )
-from tradingagents.research.full.workflow import GraphExecution
+from tradingagents.research.full.state import GraphExecution
 from tradingagents.research.incremental.synthesis import (
     _incremental_brief_fallback_title,
     _incremental_decision_core,

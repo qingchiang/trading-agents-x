@@ -14,7 +14,7 @@ from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.provenance import attach_provenance
 from tradingagents.research.analysts.fundamentals_analyst import create_fundamentals_analyst
 from tradingagents.research.analysts.market_analyst import create_market_analyst
-from tradingagents.research.full.workflow import _collect_evidence
+from tradingagents.research.full.evidence import collect_evidence
 
 
 @pytest.fixture(autouse=True)
@@ -59,9 +59,8 @@ def test_market_final_report_keeps_audit_data_out_of_the_narrative():
     report = result["market_report"]
     assert report == result["messages"][0].content
     assert report == "MODEL REPORT"
-    evidence = _collect_evidence(
+    evidence = collect_evidence(
         [*state["messages"], *result["messages"]],
-        report,
         requested_date=date(2026, 7, 17),
         analyst="market",
         prefetched_blocks=result["prefetched_evidence"],
@@ -101,9 +100,8 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
     report = result["fundamentals_report"]
     assert report == result["messages"][0].content
     assert report == "MODEL REPORT"
-    evidence = _collect_evidence(
+    evidence = collect_evidence(
         [*state["messages"], *result["messages"]],
-        report,
         requested_date=date(2026, 7, 17),
         analyst="fundamentals",
         prefetched_blocks=result["prefetched_evidence"],

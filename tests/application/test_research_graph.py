@@ -32,12 +32,10 @@ from tradingagents.domain.reports import (
 )
 from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence.configuration import ConfigurationStore
-from tradingagents.research.full.workflow import (
-    ResearchGraph,
-    _evidence_from_record,
-    _evidence_warnings,
-)
+from tradingagents.research.full.evidence import evidence_from_record
+from tradingagents.research.full.workflow import ResearchGraph, _evidence_warnings
 from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.prompts.perspectives import PERSPECTIVE_SPECS
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.synthesis.analyst_synthesis import AnalystAuditDraft
 from tradingagents.research.synthesis.deliberation import (
@@ -509,7 +507,7 @@ def test_profile_keeps_reasoning_and_serializer_on_the_same_model_tier(
         profile=profile,
         selected_analysts=("market",),
     )
-    spec = research_graph_module._PERSPECTIVE_SPECS[role]
+    spec = PERSPECTIVE_SPECS[role]
 
     if expected_tier == "deep":
         assert graph._deliberation_llm(spec) is deep
@@ -962,7 +960,7 @@ def test_retry_reuses_checkpointed_analyst_tool_artifacts(
 
 
 def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
-    item = _evidence_from_record(
+    item = evidence_from_record(
         ProvenanceRecord(
             evidence="Future filing",
             source="fixture",

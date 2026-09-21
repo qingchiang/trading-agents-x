@@ -72,7 +72,8 @@ from tradingagents.persistence._repository_common import EvidenceConflictError
 from tradingagents.persistence.checkpoints import CredentialSafeSqliteSaver as SqliteSaver
 from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.persistence.repository import RunRepository
-from tradingagents.research.full.workflow import GraphExecution, ResearchGraph
+from tradingagents.research.full.state import GraphExecution
+from tradingagents.research.full.workflow import ResearchGraph
 from tradingagents.research.incremental.collection import (
     IncrementalCollector,
     assess_information_advancement,

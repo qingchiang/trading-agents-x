@@ -122,7 +122,7 @@ def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path
     from tradingagents.data.incremental_us import _collect_news
     from tradingagents.data.news_cache import fetch_news_feed
     from tradingagents.data.news_selection import finalize_news
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     config = {**get_config(), "data_cache_dir": str(tmp_path)}
@@ -132,7 +132,7 @@ def test_cached_material_enters_full_and_incremental_with_original_time(tmp_path
         block = fetch_news_feed(*args, lambda: "No news found", config=config, now=lambda: current + timedelta(minutes=16))
         return finalize_news(block, "yfinance", "GOOG", args[2], args[3], 30)
     body = route()
-    full = _collect_evidence([ToolMessage(content=body, tool_call_id="news", name="get_news")], "",
+    full = collect_evidence([ToolMessage(content=body, tool_call_id="news", name="get_news")],
                              requested_date=current.date(), analyst="news")
     request = _request(enabled_domains=("news",), baseline=current.date()-timedelta(days=4),
                        target=current.date(), window_start=current-timedelta(days=4), window_end=current)
@@ -259,7 +259,7 @@ def test_full_news_separates_availability_diagnostics_from_articles():
     from tradingagents.data.news_selection import NewsCandidate, render_candidate
     from tradingagents.domain.data import ProvenanceRecord
     from tradingagents.provenance import attach_evidence_span, attach_provenance
-    from tradingagents.research.full.workflow import _collect_evidence
+    from tradingagents.research.full.evidence import collect_evidence
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
     article = NewsCandidate("cninfo", "real event", "### real event", "2026-09-04T10:00:00+08:00",
@@ -268,7 +268,7 @@ def test_full_news_separates_availability_diagnostics_from_articles():
     failure = ProvenanceRecord("get_news", "eastmoney", "2026-09-01 to 2026-09-05", "unknown", "source unavailable")
     body = attach_evidence_span(attach_provenance("## feed\n\n" + render_candidate(article), success), temporal_scope="point_in_time")
     body += "\n\n" + attach_provenance("### Source availability notes\n<Eastmoney unavailable>", failure)
-    evidence = _collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")], "",
+    evidence = collect_evidence([ToolMessage(content=body, name="get_news", tool_call_id="news")],
                                  requested_date=current.date(), analyst="news", instrument="600309.SS")
     articles = [item for item in evidence if item.evidence_type == "news_article"]
     assert len(articles) == 1

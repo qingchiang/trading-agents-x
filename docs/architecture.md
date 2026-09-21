@@ -174,7 +174,10 @@ context, dataflow configuration, cancellation callbacks, and artifact/evidence
 writers; the LangGraph runtime provides the event stream writer separately.
 Analyst nodes read language and source policy from that explicit runtime
 context. Pure language and instrument prompt helpers live in `research/prompts`;
-there is no mixed tool-and-prompt catalog. Runs carry no historical review context. The dataflow
+there is no mixed tool-and-prompt catalog. Full orchestration owns graph assembly,
+while `research/full/evidence.py` seals producer material and
+`research/full/state.py` owns graph state/output. Perspective objectives live in
+`research/prompts/perspectives.py`. Runs carry no historical review context. The dataflow
 `ContextVar` bridge exists only to support established adapter signatures
 during one scoped invocation; there is no mutable package configuration or
 `set_config()` operation.

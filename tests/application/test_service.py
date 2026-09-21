@@ -41,7 +41,7 @@ from tradingagents.persistence.models import (
     RunRecord,
 )
 from tradingagents.persistence.repository import RunRepository
-from tradingagents.research.full.workflow import GraphExecution
+from tradingagents.research.full.state import GraphExecution
 from tradingagents.research.runtime import RunCancelled, WorkerShutdown
 
 

@@ -20,7 +20,7 @@ from tradingagents.research.analysts.sentiment_sources import (
     SentimentSourceStatus,
     sentiment_confidence,
 )
-from tradingagents.research.full.workflow import _collect_evidence
+from tradingagents.research.full.evidence import collect_evidence
 
 _MODULE = "tradingagents.research.analysts.sentiment_analyst"
 
@@ -306,9 +306,8 @@ def test_japan_margin_figure_becomes_resolvable_evidence():
         signals=(FetchedSentimentSignal(spec=spec, body=body),),
     )[-1]
 
-    evidence = _collect_evidence(
+    evidence = collect_evidence(
         result["messages"],
-        result["sentiment_report"],
         requested_date=date(2026, 1, 15),
         analyst="social",
         prefetched_blocks=result["prefetched_evidence"],
