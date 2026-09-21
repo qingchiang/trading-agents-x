@@ -7,7 +7,7 @@ import pytest
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.data_policy import configure_data, request_context, reset_data
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
-from tests.source_results import news_source, replace_content, source_route
+from tests.source_results import market_fixture, news_source, replace_content, source_route
 from tradingagents.application.service import AnalysisService
 from tradingagents.data import incremental_us, interface, y_finance as yf_data
 from tradingagents.data.incremental_us import collect_us_incremental
@@ -64,7 +64,7 @@ Date,Open,High,Low,Close,Volume
 2026-07-24,109,111,108,110,1000
 2026-07-25,111,112,110,111,1000
 """
-    return DataResult(body).with_provenance(
+    return market_fixture(body).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
@@ -145,7 +145,7 @@ Date,Open,High,Low,Close,Volume
 2026-07-06,102,104,101,103,1000
 2026-07-07,103,105,102,104,1000
 """
-    response = DataResult(body).with_provenance(
+    response = market_fixture(body).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
@@ -543,3 +543,19 @@ def test_market_interval_includes_baseline_endpoint_when_snapshot_fails(target_c
     assert interval["min_close"] == min(101, target_close)
     assert interval["max_close"] == max(101, target_close)
     assert interval["maximum_drawdown"] == pytest.approx(min(0, target_close / 101 - 1))
+
+
+def test_market_collection_reads_producer_rows_independently_of_report_text():
+    from dataclasses import replace
+
+    response = replace(
+        _market_response(), content="Presentation changed; producer rows are unchanged."
+    )
+    result = collect_us_incremental(
+        _request(),
+        route_to_vendor=source_route(response),
+        now=lambda: datetime(2026, 7, 25, tzinfo=UTC),
+        data_context=request_context(),
+    )
+    assert result.stock_series.points[-1].adjusted_close == 110
+    assert result.stock_series.adjustment_basis == "yfinance_auto_adjusted_close"

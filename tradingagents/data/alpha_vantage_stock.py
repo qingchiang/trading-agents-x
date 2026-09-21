@@ -5,6 +5,7 @@ import pandas as pd
 
 from tradingagents.data.alpha_vantage_common import _filter_csv_by_date_range, _make_api_request
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.market_result import market_data
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.domain.data_result import DataResult
 
@@ -42,7 +43,21 @@ def get_stock(
 
     response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
 
-    return DataResult(_filter_csv_by_date_range(response, start_date, end_date))
+    content = _filter_csv_by_date_range(response, start_date, end_date)
+    frame = pd.read_csv(StringIO(content)).rename(
+        columns={
+            "timestamp": "Date",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+            "adjusted_close": "Adj Close",
+        }
+    )
+    return DataResult(
+        content, market_data=market_data(frame, symbol, "alpha_vantage_raw_with_adjusted_close")
+    )
 
 
 @source_metadata("get_verified_market_snapshot", "alpha_vantage")

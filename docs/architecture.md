@@ -525,6 +525,10 @@ model-visible content and a separate checkpointed artifact; prefetching analysts
 carry the same serialized result. News caches store article identities, revisions
 and original retrieval times. Neither graph stages nor Incremental collectors
 recover provenance or news observations from Markdown or hidden text markers.
+Stock adapters also return portable OHLCV rows with an explicit instrument and
+adjustment basis. Full analytical views and Incremental Performance consume
+these rows directly. Financial spans carry producer disclosure and period dates;
+market calendars and cutoff admission remain in the market collectors.
 
 ### Profiles
 

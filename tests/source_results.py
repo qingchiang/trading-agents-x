@@ -77,6 +77,9 @@ def replace_content(result: DataResult[str], old: str, new: str) -> DataResult[s
     return replace(
         result,
         content=result.content.replace(old, new),
+        market_data=market_fixture(result.content.replace(old, new)).market_data
+        if result.market_data
+        else None,
         provenance=tuple(
             replace(
                 record,
@@ -102,3 +105,52 @@ def source_route(result: DataResult[str]):
         )
 
     return fetch
+
+
+def market_fixture(content: str) -> DataResult[str]:
+    """Declare portable market rows from compact, readable test CSV literals."""
+    import csv
+    from io import StringIO
+
+    from tradingagents.domain.data_result import MarketData
+
+    match = re.search(r"^# Stock data for (.+?)(?: from |$)", content, re.MULTILINE)
+    instrument = match.group(1) if match else "FIXTURE"
+    header = content.casefold()
+    basis = (
+        "jquants_split_dividend_adjusted_close"
+        if "j-quants split/dividend-adjusted close" in header
+        else "yfinance_auto_adjusted_close"
+        if "auto-adjusted" in header
+        else "qfq_forward_adjusted"
+        if "qfq (forward-adjusted)" in header
+        else "unknown"
+    )
+    lines = content.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("Date,")), len(lines))
+    rows = tuple(dict(row) for row in csv.DictReader(StringIO("\n".join(lines[start:]))))
+    return DataResult(content, market_data=MarketData(instrument, basis, rows))
+
+
+def scoped_fixture(result, scope):
+    """Declare financial publication/period dates alongside readable fixture text."""
+    from datetime import date
+
+    available = re.findall(
+        r"(?:disclosed |Latest visible disclosure/update: )(\d{4}-\d{2}-\d{2})", result.content
+    )
+    effective = re.search(
+        r"(?:Effective period: |(?:FY|Q[1-4]) end )(\d{4}-\d{2}-\d{2})", result.content
+    )
+    for record in result.provenance:
+        if "market-date filtered" in record.timing:
+            available.extend(re.findall(r"\d{4}-\d{2}-\d{2}", record.effective))
+        elif any(
+            label in record.timing for label in ("publication", "disclosure-date")
+        ) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", record.effective):
+            available.append(record.effective)
+    return result.with_scope(
+        scope,
+        available_on=date.fromisoformat(max(available)) if available else None,
+        effective_date=date.fromisoformat(effective.group(1)) if effective else None,
+    )

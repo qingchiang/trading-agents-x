@@ -44,6 +44,8 @@ class EvidenceSpan:
     content: str | None
     records: tuple[ProvenanceRecord, ...]
     temporal_scope: TemporalScopeName
+    available_on: date | None = None
+    effective_date: date | None = None
 
 
 def scalar(value: Any) -> Any:
@@ -138,7 +140,9 @@ class SourceObservation:
 
             if instrument is None:
                 raise ValueError("instrument is required for date-only publication evidence")
-            available_at = datetime.combine(self.available_on, time.max, tzinfo=market_timezone(instrument))
+            available_at = datetime.combine(
+                self.available_on, time.max, tzinfo=market_timezone(instrument)
+            )
         source_id = re.sub(r"[^a-z0-9_.-]+", "_", self.source.casefold()).strip("_")
         return EvidenceItem.create(
             source=source_id,

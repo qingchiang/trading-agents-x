@@ -9,6 +9,7 @@ import pytest
 
 from tests.factories import analyst_report, research_case, research_decision
 from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
+from tests.source_results import market_fixture, scoped_fixture
 from tradingagents.application.service import AnalysisService
 from tradingagents.configuration.settings import AppSettings
 from tradingagents.data import incremental_cn, incremental_jp, incremental_us
@@ -95,7 +96,7 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
         ),
         evidence=baseline_evidence,
     )
-    market_response = DataResult(
+    market_response = market_fixture(
         "# Stock data for NVDA from 2026-07-20 to 2026-07-24\n# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)\n# Actual data source: yfinance\n\nDate,Open,High,Low,Close,Volume\n2026-07-20,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -185,7 +186,7 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
         ),
         evidence=baseline_evidence,
     )
-    market_response = DataResult(
+    market_response = market_fixture(
         "# Stock data for 7203.T from 2026-07-10 to 2026-07-24\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-21,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -352,7 +353,7 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
         ),
         evidence=baseline_evidence,
     )
-    market_response = DataResult(
+    market_response = market_fixture(
         "# Stock data for 600519.SS from 2026-07-17 to 2026-07-24\n# Price adjustment: qfq (forward-adjusted)\n# Actual data source: AkShare / Tencent\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-20,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -376,11 +377,10 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
             retrieved_at="2026-07-24T08:00:00Z",
         )
     )
-    fundamentals_response = (
+    fundamentals_response = scoped_fixture(
         DataResult(
             "## Company profile (CNINFO; current reference, not historical PIT)\n主营业务: 白酒生产"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / CNINFO company profile",
@@ -389,8 +389,8 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
                 timing="live-only current company reference; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
             )
-        )
-        .with_scope("live_only")
+        ),
+        "live_only",
     )
 
     def route(method, *_args, **_kwargs):

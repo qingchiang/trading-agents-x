@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import json
 import math
 from dataclasses import asdict
@@ -15,7 +13,7 @@ import pandas as pd
 
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_quality import temporal_scope_from_records
-from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.data_result import DataResult, MarketData
 from tradingagents.domain.measurement import instrument_currency
 
 
@@ -33,9 +31,9 @@ class EvidenceToolArtifact(TypedDict):
     column_measurements: NotRequired[dict[str, dict[str, str | None]]]
     structured_numeric_facts: NotRequired[list[dict[str, Any]]]
     data_result: NotRequired[dict[str, Any]]
+    market_data: NotRequired[dict[str, Any] | None]
 
 
-_OHLCV_REQUIRED = {"date", "close"}
 _OHLCV_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
 _RETURN_HORIZONS = (1, 5, 20, 60, 120, 252)
 _VOLATILITY_HORIZONS = (20, 60, 252)
@@ -52,7 +50,7 @@ def build_market_data_artifact(
 
     source_content = raw.content.strip()
     records = raw.provenance
-    frame = parse_ohlcv_frame(source_content, cutoff=end_date)
+    frame = market_frame(raw.market_data, cutoff=end_date)
     views = market_analytical_views(
         frame,
         symbol=symbol,
@@ -69,6 +67,7 @@ def build_market_data_artifact(
         "provenance": [asdict(record) for record in records],
         "temporal_scope": temporal_scope_from_records(records),
         "analytical_views": views,
+        "market_data": asdict(raw.market_data) if raw.market_data else None,
         "column_measurements": market_column_measurements(symbol),
     }
     return render_market_overview(dataset_id, views), artifact
@@ -126,43 +125,11 @@ def artifact_records(
     return tuple(dict.fromkeys(records))
 
 
-def parse_ohlcv_frame(content: str, *, cutoff: str) -> pd.DataFrame:
-    """Parse the first OHLCV CSV block and fail closed past the cutoff."""
-
-    lines = content.splitlines()
-    header_index = None
-    headers: list[str] = []
-    for index, line in enumerate(lines):
-        if not line.strip() or line.lstrip().startswith(("#", "<!--", "|")):
-            continue
-        try:
-            candidate = [cell.strip() for cell in next(csv.reader([line]))]
-        except (csv.Error, StopIteration):
-            continue
-        normalized = {cell.casefold() for cell in candidate}
-        if _OHLCV_REQUIRED.issubset(normalized):
-            header_index = index
-            headers = candidate
-            break
-    if header_index is None:
+def market_frame(data: MarketData | None, *, cutoff: str) -> pd.DataFrame:
+    """Normalize producer rows and fail closed past the analysis cutoff."""
+    if data is None or not data.rows:
         return pd.DataFrame(columns=_OHLCV_COLUMNS)
-
-    csv_lines = [",".join(headers)]
-    for line in lines[header_index + 1 :]:
-        if not line.strip() or line.lstrip().startswith(("#", "<!--", "|")):
-            break
-        try:
-            cells = next(csv.reader([line]))
-        except (csv.Error, StopIteration):
-            break
-        if len(cells) != len(headers):
-            break
-        csv_lines.append(line)
-
-    try:
-        frame = pd.read_csv(io.StringIO("\n".join(csv_lines)))
-    except (OSError, pd.errors.ParserError, ValueError):
-        return pd.DataFrame(columns=_OHLCV_COLUMNS)
+    frame = pd.DataFrame(data.rows)
     date_column = next(
         (column for column in frame.columns if column.casefold() == "date"),
         None,

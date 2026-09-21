@@ -4,10 +4,11 @@ from datetime import date, timedelta
 
 import pytest
 
+from tests.source_results import market_fixture
 from tradingagents.data.evidence_workset import (
     build_market_data_artifact,
     market_analytical_views,
-    parse_ohlcv_frame,
+    market_frame,
 )
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
@@ -28,7 +29,7 @@ def _ohlcv(rows: int = 488) -> str:
             f"{current.isoformat()},{close - 1:.2f},{close + 2:.2f},"
             f"{close - 2:.2f},{close:.2f},{1000000 + index * 1000}"
         )
-    return DataResult("\n".join(lines)).with_provenance(
+    return market_fixture("\n".join(lines)).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="fixture",
@@ -86,7 +87,7 @@ def test_ohlcv_artifact_carries_producer_owned_column_measurements() -> None:
 
 @pytest.mark.unit
 def test_analytical_views_are_reproducible_and_cutoff_safe() -> None:
-    frame = parse_ohlcv_frame(_ohlcv(40).content, cutoff="2024-01-31")
+    frame = market_frame(_ohlcv(40).market_data, cutoff="2024-01-31")
     views = market_analytical_views(
         frame,
         symbol="FIXTURE",
@@ -115,3 +116,18 @@ def test_non_tabular_vendor_result_degrades_without_exposing_secrets() -> None:
     assert artifact["analytical_views"]["status"] == "unavailable"
     assert artifact["analytical_views"]["row_count"] == 0
     assert "SAFE" not in overview
+
+
+def test_market_artifact_views_use_typed_rows_when_display_changes():
+    from dataclasses import replace
+
+    raw = _ohlcv(5)
+    _overview, artifact = build_market_data_artifact(
+        replace(raw, content="Display without a CSV table"),
+        symbol="FIXTURE",
+        start_date="2024-01-02",
+        end_date="2024-01-06",
+    )
+    assert artifact["analytical_views"]["row_count"] == 5
+    assert artifact["analytical_views"]["latest"]["Close"] == 101
+    assert DataResult.load(raw.dump()) == raw

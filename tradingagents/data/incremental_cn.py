@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import csv
 import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time
 from functools import partial
-from io import StringIO
 from zoneinfo import ZoneInfo
 
 from tradingagents.data.cn import calendar
@@ -51,21 +49,9 @@ from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
-_NEWS_ITEM = re.compile(
-    r"^### (?P<title>.+?)\n(?P<body>.*?)(?=^### |\Z)",
-    re.MULTILINE | re.DOTALL,
-)
 _PUBLISHED_AT = re.compile(
     r"^(?P<label>Disclosed|Published):\s*(?P<value>\d{4}-\d{2}-\d{2}"
     r"(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2}|\s+CST)?)?)",
-    re.MULTILINE,
-)
-_EFFECTIVE_DATE = re.compile(
-    r"^Effective period:\s*(?P<value>\d{4}-\d{2}-\d{2})",
-    re.MULTILINE,
-)
-_FUNDAMENTALS_VISIBLE = re.compile(
-    r"^Latest visible disclosure/update:\s*(?P<value>\d{4}-\d{2}-\d{2})",
     re.MULTILINE,
 )
 
@@ -148,7 +134,7 @@ def _collect_market(request, routed, now):
                 _stop_on_rate_limit=True,
             )
         source, body = _routed_source(response, now)
-        series, omitted = _market_series(request, source, body)
+        series, omitted = _market_series(request, source, response.market_data)
         current = tuple(
             point
             for point in series.points
@@ -316,7 +302,7 @@ def _collect_fundamentals(request, routed, now):
                         }
                     )
                 continue
-            available_on = _fundamentals_available_on(span.records, span.content)
+            available_on = span.available_on
             if available_on is None:
                 for actual_source in span_sources:
                     temporal_limited_sources[actual_source.source] = actual_source.model_copy(
@@ -330,7 +316,7 @@ def _collect_fundamentals(request, routed, now):
             available_at = _market_day_end(available_on)
             if not request.window_start < available_at <= request.window_end:
                 continue
-            effective = _effective_date(span.content)
+            effective = span.effective_date
             source = span_sources[0]
             item = EvidenceItem.create(
                 source=source.source,
@@ -454,22 +440,6 @@ def _span_is_unavailable(span):
     return all("unavailable" in record.timing.casefold() for record in span.records)
 
 
-def _fundamentals_available_on(records, body):
-    dates = []
-    visible = _FUNDAMENTALS_VISIBLE.search(body)
-    if visible is not None:
-        dates.append(date.fromisoformat(visible.group("value")))
-    for record in records:
-        timing = record.timing.casefold()
-        if "publication" not in timing and "disclosure-date" not in timing:
-            continue
-        try:
-            dates.append(date.fromisoformat(record.effective))
-        except ValueError:
-            continue
-    return max(dates) if dates else None
-
-
 def _fundamentals_temporal_limitation_code(sources):
     diagnostics = {source.diagnostic.code for source in sources if source.diagnostic}
     if diagnostics == {"unknown_fundamentals_temporal_scope"}:
@@ -483,31 +453,22 @@ def _fundamentals_temporal_limitation_code(sources):
     return "fundamentals_temporal_scope_unavailable" if diagnostics else None
 
 
-def _market_series(request, source, body):
-    match = re.search(r"^# Stock data for (?P<instrument>.+?) from ", body, re.MULTILINE)
-    if (
-        match is None
-        or match.group("instrument").strip().casefold() != request.instrument.casefold()
-    ):
+def _market_series(request, source, data):
+    if data is None or data.instrument.casefold() != request.instrument.casefold():
         raise CollectionUnavailable("market_instrument_mismatch")
-    header = body.casefold()
-    if source.source in {"akshare_tencent", "akshare_eastmoney"}:
-        if "qfq (forward-adjusted)" not in header:
-            raise CollectionUnavailable("mainland_qfq_basis_unverified")
-        basis = "qfq_forward_adjusted"
-    elif source.source == "yfinance":
-        if "auto-adjusted" not in header:
-            raise CollectionUnavailable("yfinance_adjustment_basis_unverified")
-        basis = "yfinance_auto_adjusted_close"
-    else:
+    expected = {
+        "akshare_tencent": ("qfq_forward_adjusted", "mainland_qfq_basis_unverified"),
+        "akshare_eastmoney": ("qfq_forward_adjusted", "mainland_qfq_basis_unverified"),
+        "yfinance": ("yfinance_auto_adjusted_close", "yfinance_adjustment_basis_unverified"),
+    }
+    if source.source not in expected:
         raise CollectionUnavailable("market_adjustment_basis_unverified")
-
-    lines = body.splitlines()
+    basis, diagnostic = expected[source.source]
+    if data.adjustment_basis != basis:
+        raise CollectionUnavailable(diagnostic)
     try:
-        csv_start = next(index for index, line in enumerate(lines) if line.startswith("Date,"))
-        rows = csv.DictReader(StringIO("\n".join(lines[csv_start:])))
         points, omitted = [], False
-        for row in rows:
+        for row in data.rows:
             session = date.fromisoformat(str(row["Date"]).strip())
             value = float(row.get("Close") or "nan")
             if not calendar.is_trade_date(session):
@@ -591,13 +552,3 @@ def _aware_now(now):
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Mainland-China collection clock must include a timezone")
     return value
-
-
-def _effective_date(content):
-    match = _EFFECTIVE_DATE.search(content)
-    if match is None:
-        return None
-    try:
-        return date.fromisoformat(match.group("value"))
-    except ValueError as exc:
-        raise CollectionUnavailable("invalid_mainland_effective_period") from exc

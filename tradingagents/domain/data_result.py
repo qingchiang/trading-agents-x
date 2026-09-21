@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+from datetime import date
 from typing import Any, TypedDict
 
 from tradingagents.domain.data import (
@@ -11,6 +12,8 @@ from tradingagents.domain.data import (
     ProvenanceRecord,
     SourceObservation,
     TemporalScopeName,
+    as_date,
+    scalar,
 )
 from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.news import NewsCandidate
@@ -35,6 +38,15 @@ class DataDiagnostic:
 
 
 @dataclass(frozen=True)
+class MarketData:
+    """Adapter-owned OHLCV rows and their explicit adjustment convention."""
+
+    instrument: str
+    adjustment_basis: str
+    rows: tuple[dict[str, str | int | float | None], ...]
+
+
+@dataclass(frozen=True)
 class DataResult[T]:
     """Source content and audit metadata travel together without text encoding."""
 
@@ -46,9 +58,23 @@ class DataResult[T]:
     numeric_facts: tuple[StructuredNumericFact, ...] = ()
     news: tuple[NewsCandidate, ...] = ()
     news_header: str | None = None
+    market_data: MarketData | None = None
 
-    def with_scope(self, scope: TemporalScopeName) -> DataResult:
-        return replace(self, spans=(EvidenceSpan(self.content or None, self.provenance, scope),))
+    def with_scope(
+        self,
+        scope: TemporalScopeName,
+        *,
+        available_on: date | None = None,
+        effective_date: date | None = None,
+    ) -> DataResult[T]:
+        return replace(
+            self,
+            spans=(
+                EvidenceSpan(
+                    self.content or None, self.provenance, scope, available_on, effective_date
+                ),
+            ),
+        )
 
     def with_provenance(self, *records: ProvenanceRecord) -> DataResult:
         return replace(self, provenance=tuple(dict.fromkeys((*self.provenance, *records))))
@@ -77,6 +103,9 @@ class DataResult[T]:
             ),
             numeric_facts=tuple(fact for part in parts for fact in part.numeric_facts),
             news=tuple(row for part in parts for row in part.news),
+            market_data=next(
+                (part.market_data for part in parts if part.market_data is not None), None
+            ),
         )
 
     def dump(self) -> dict[str, Any]:
@@ -85,10 +114,11 @@ class DataResult[T]:
             "observations": [row.dump() for row in self.observations],
             "provenance": [asdict(record) for record in self.provenance],
             "diagnostics": [asdict(issue) for issue in self.diagnostics],
-            "spans": [asdict(span) for span in self.spans],
+            "spans": [scalar(asdict(span)) for span in self.spans],
             "numeric_facts": list(self.numeric_facts),
             "news": [asdict(row) for row in self.news],
             "news_header": self.news_header,
+            "market_data": asdict(self.market_data) if self.market_data else None,
         }
 
     @classmethod
@@ -103,10 +133,17 @@ class DataResult[T]:
                     span["content"],
                     tuple(ProvenanceRecord(**record) for record in span["records"]),
                     span["temporal_scope"],
+                    as_date(span["available_on"]),
+                    as_date(span["effective_date"]),
                 )
                 for span in payload["spans"]
             ),
             numeric_facts=tuple(payload["numeric_facts"]),
             news=tuple(NewsCandidate(**row) for row in payload["news"]),
             news_header=payload["news_header"],
+            market_data=MarketData(
+                **{**payload["market_data"], "rows": tuple(payload["market_data"]["rows"])}
+            )
+            if payload["market_data"]
+            else None,
         )

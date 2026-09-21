@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.macro_common import SeriesCache
+from tradingagents.data.market_result import market_data
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import (
@@ -97,7 +98,10 @@ def get_YFin_data_online(
     header += f"# Total records: {len(data)}\n"
     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-    return DataResult(header + csv_string)
+    return DataResult(
+        header + csv_string,
+        market_data=market_data(data, canonical, "yfinance_auto_adjusted_close"),
+    )
 
 
 @source_metadata("get_indicators", "yfinance")
@@ -588,7 +592,10 @@ def get_insider_transactions(
         header = f"# Insider Transactions data for {canonical}\n"
         header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return DataResult(header + csv_string)
+        return DataResult(
+            header + csv_string,
+            market_data=market_data(data, canonical, "yfinance_auto_adjusted_close"),
+        )
 
     except Exception as e:
         return DataResult(f"Error retrieving insider transactions for {ticker}: {str(e)}")

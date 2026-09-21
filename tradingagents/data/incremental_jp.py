@@ -8,13 +8,11 @@ turns bounded Japanese archives into a completeness claim.
 
 from __future__ import annotations
 
-import csv
 import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time
 from functools import partial
-from io import StringIO
 from zoneinfo import ZoneInfo
 
 from tradingagents.data.collection_progress import report_collection_progress
@@ -56,11 +54,6 @@ from tradingagents.domain.vendor_errors import VendorRateLimitError
 
 _TOKYO = ZoneInfo("Asia/Tokyo")
 DEFAULT_ROUTE_TO_VENDOR = _default_route_to_vendor
-_EFFECTIVE_DATE = re.compile(r"^Effective period:\s*(?P<value>\d{4}-\d{2}-\d{2})", re.MULTILINE)
-_DISCLOSURE_DATE = re.compile(r"\bdisclosed\s+(?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE)
-_FUNDAMENTAL_PERIOD_END = re.compile(
-    r"\b(?:FY|Q[1-4]) end (?P<value>\d{4}-\d{2}-\d{2})\b", re.IGNORECASE
-)
 
 
 def collect_japan_incremental(
@@ -136,7 +129,7 @@ def _collect_market(request, routed, now):
             _require_adjusted=True,
         )
         source, body = _routed_source(response, now)
-        series, omitted = _market_series(request, source, body)
+        series, omitted = _market_series(request, source, response.market_data)
         current = tuple(
             point
             for point in series.points
@@ -283,14 +276,13 @@ def _collect_fundamentals(request, routed, now):
                     )
                 bases.append(CollectionTemporalBasis.NEAR_LIVE_ADVISORY)
                 continue
-            disclosed = _fundamentals_disclosure_date(span.content)
-            if disclosed is None:
+            available_on = span.available_on
+            if available_on is None:
                 continue
-            available_on = _fundamentals_available_on(span.records, disclosed)
             available_at = _market_day_end(available_on)
             if not request.window_start < available_at <= request.window_end:
                 continue
-            effective = _fundamentals_effective_date(span.content) or disclosed
+            effective = span.effective_date or span.available_on
             source = span_sources[0]
             item = EvidenceItem.create(
                 source=source.source,
@@ -404,30 +396,21 @@ def _sources_from_records(records, now):
     )
 
 
-def _market_series(request, source, body):
-    match = re.search(r"^# Stock data for (?P<instrument>.+?) from ", body, re.MULTILINE)
-    if (
-        match is None
-        or match.group("instrument").strip().casefold() != request.instrument.casefold()
-    ):
+def _market_series(request, source, data):
+    if data is None or data.instrument.casefold() != request.instrument.casefold():
         raise CollectionUnavailable("market_instrument_mismatch")
-    header = body.casefold()
-    if source.source.casefold() == "jquants":
-        if "j-quants split/dividend-adjusted close" not in header:
-            raise CollectionUnavailable("jquants_adjustment_basis_unverified")
-        basis = "jquants_split_dividend_adjusted_close"
-    elif source.source.casefold() == "yfinance":
-        if "auto-adjusted" not in header:
-            raise CollectionUnavailable("yfinance_adjustment_basis_unverified")
-        basis = "yfinance_auto_adjusted_close"
-    else:
+    expected = {
+        "jquants": ("jquants_split_dividend_adjusted_close", "jquants_adjustment_basis_unverified"),
+        "yfinance": ("yfinance_auto_adjusted_close", "yfinance_adjustment_basis_unverified"),
+    }
+    if source.source not in expected:
         raise CollectionUnavailable("market_adjustment_basis_unverified")
-    lines = body.splitlines()
+    basis, diagnostic = expected[source.source]
+    if data.adjustment_basis != basis:
+        raise CollectionUnavailable(diagnostic)
     try:
-        csv_start = next(index for index, line in enumerate(lines) if line.startswith("Date,"))
-        rows = csv.DictReader(StringIO("\n".join(lines[csv_start:])))
         points, omitted = [], False
-        for row in rows:
+        for row in data.rows:
             session = date.fromisoformat(str(row["Date"]).strip())
             value = float(row.get("Close") or "nan")
             if not is_tse_open(session):
@@ -457,44 +440,6 @@ def _market_series(request, source, body):
         retrieved_at=source.retrieved_at,
         points=tuple(points),
     ), omitted
-
-
-def _fundamentals_disclosure_date(body):
-    match = _DISCLOSURE_DATE.search(body)
-    return date.fromisoformat(match.group("value")) if match else None
-
-
-def _fundamentals_effective_date(body):
-    match = _EFFECTIVE_DATE.search(body) or _FUNDAMENTAL_PERIOD_END.search(body)
-    if match is None:
-        return None
-    try:
-        return date.fromisoformat(match.group("value"))
-    except ValueError as exc:
-        raise CollectionUnavailable("invalid_fundamentals_effective_period") from exc
-
-
-def _fundamentals_available_on(records, disclosed):
-    observed_dates = [disclosed]
-    for record in records:
-        observed_dates.extend(_reliable_record_observation_dates(record))
-    return max(observed_dates)
-
-
-def _reliable_record_observation_dates(record):
-    """Return dates that identify observed composition, never query bounds."""
-    timing = record.timing.casefold()
-    effective = record.effective.strip()
-    if "market-date filtered" in timing:
-        return tuple(
-            date.fromisoformat(value) for value in re.findall(r"\d{4}-\d{2}-\d{2}", effective)
-        )
-    if "publication" in timing or "disclosure-date" in timing:
-        try:
-            return (date.fromisoformat(effective),)
-        except ValueError:
-            return ()
-    return ()
 
 
 def _fundamentals_temporal_limitation_code(sources):

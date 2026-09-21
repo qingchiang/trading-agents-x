@@ -8,13 +8,11 @@ Incremental collection contract.
 
 from __future__ import annotations
 
-import csv
 import math
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache, partial
-from io import StringIO
 from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
@@ -41,6 +39,7 @@ from tradingagents.domain.collection import (
     IncrementalCollectionRequest,
     IncrementalEvidenceCandidate,
 )
+from tradingagents.domain.data_quality import temporal_scope_from_records
 from tradingagents.domain.evidence import EvidenceItem, EvidenceOrigin
 from tradingagents.domain.incremental import IncrementalCollectionResult
 from tradingagents.domain.performance import (
@@ -172,7 +171,7 @@ def _collect_market(
             _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
-        series, omitted = _market_series(request, instrument, source, body)
+        series, omitted = _market_series(request, instrument, source, response.market_data)
         current_points = tuple(
             point
             for point in series.points
@@ -251,7 +250,7 @@ def _collect_benchmark(
             _stop_on_rate_limit=True,
         )
         source, body = _routed_text(response, now=now)
-        series, _omitted = _market_series(request, symbol, source, body)
+        series, _omitted = _market_series(request, symbol, source, response.market_data)
         return BenchmarkSeriesResult(name=name, series=series)
     except _Unavailable as exc:
         return BenchmarkSeriesResult(
@@ -293,7 +292,7 @@ def _collect_fundamentals(
         source, body = _routed_text(response, now=now)
         if _is_empty_response(body):
             return _bounded_empty("fundamentals", source), None
-        if "live" not in body.casefold() and "not point-in-time" not in body.casefold():
+        if temporal_scope_from_records(response.provenance) != "live_only":
             raise _Unavailable("unsupported_fundamentals_temporal_basis")
         item = EvidenceItem.create(
             source=source.source,
@@ -408,27 +407,15 @@ def _routed_text(
     )
 
 
-def _market_series(
-    request: IncrementalCollectionRequest,
-    instrument: str,
-    source: CollectionSourceProvenance,
-    body: str,
-) -> tuple[MarketSeriesResult, bool]:
-    header = body.casefold()
-    match = re.search(r"^# Stock data for (?P<instrument>.+?) from ", body, re.MULTILINE)
-    if match is None or match.group("instrument").strip().casefold() != instrument.casefold():
+def _market_series(request, instrument, source, data) -> tuple[MarketSeriesResult, bool]:
+    if data is None or data.instrument.casefold() != instrument.casefold():
         raise _Unavailable("market_instrument_mismatch")
-    if "auto-adjusted" not in header or "yfinance" not in header:
+    if data.adjustment_basis != "yfinance_auto_adjusted_close":
         raise _Unavailable("market_adjustment_basis_unverified")
-    lines = body.splitlines()
-    try:
-        csv_start = next(index for index, line in enumerate(lines) if line.startswith("Date,"))
-    except StopIteration as exc:
-        raise _Unavailable("market_series_malformed") from exc
     points = []
     omitted = False
     try:
-        for row in csv.DictReader(StringIO("\n".join(lines[csv_start:]))):
+        for row in data.rows:
             session = date.fromisoformat(str(row["Date"]).strip())
             raw_value = row.get("Close") or row.get("Adj Close")
             value = float(raw_value) if raw_value is not None else math.nan

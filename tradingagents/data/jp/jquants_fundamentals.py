@@ -16,6 +16,7 @@ from tradingagents.data.jp.jquants_common import (
     to_jquants_code,
 )
 from tradingagents.data.result_metadata import source_metadata
+from tradingagents.domain.data import ProvenanceRecord, as_date
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.instruments import NoMarketDataError
 
@@ -216,22 +217,40 @@ def get_fundamentals(
     """Headline fundamentals overview from the latest disclosed period."""
     canonical, records = _fetch_summary_periods(ticker, curr_date)
     r = records[0]
-    return DataResult(
-        "\n".join(
-            [
-                f"# Fundamentals overview for {canonical} (J-Quants summary)",
-                f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
-                f"Reporting basis: {_reporting_basis(r)}",
-                f"Net sales: {_fmt(r.get('Sales'))}",
-                f"Operating profit: {_fmt_field(r, 'OP')}    "
-                f"Ordinary profit: {_fmt_field(r, 'OdP')}",
-                f"Net profit: {_fmt(r.get('NP'))}",
-                f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
-                f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
-                f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
-                f"financing: {_fmt(r.get('CFF'))}",
-                f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
-            ]
+    return (
+        DataResult(
+            "\n".join(
+                [
+                    f"# Fundamentals overview for {canonical} (J-Quants summary)",
+                    f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
+                    f"Reporting basis: {_reporting_basis(r)}",
+                    f"Net sales: {_fmt(r.get('Sales'))}",
+                    f"Operating profit: {_fmt_field(r, 'OP')}    "
+                    f"Ordinary profit: {_fmt_field(r, 'OdP')}",
+                    f"Net profit: {_fmt(r.get('NP'))}",
+                    f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
+                    f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
+                    f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
+                    f"financing: {_fmt(r.get('CFF'))}",
+                    f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
+                ]
+            )
+        )
+        .with_provenance(
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="jquants",
+                requested=curr_date or "live retrieval",
+                effective=r.get("DiscDate") or "unknown",
+                timing="disclosure-date filtered"
+                if curr_date
+                else "live retrieval; no historical cutoff supplied",
+            )
+        )
+        .with_scope(
+            "point_in_time" if curr_date else "unknown",
+            available_on=as_date(r.get("DiscDate")),
+            effective_date=as_date(r.get("CurPerEn")),
         )
     )
 

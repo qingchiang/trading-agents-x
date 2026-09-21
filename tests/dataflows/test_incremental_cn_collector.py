@@ -6,7 +6,13 @@ import pytest
 import requests
 
 from tests.data_policy import request_context
-from tests.source_results import news_source, replace_content, source_route
+from tests.source_results import (
+    market_fixture,
+    news_source,
+    replace_content,
+    scoped_fixture,
+    source_route,
+)
 from tradingagents.data.cn import calendar
 from tradingagents.data.cn.common import AkShareRateLimitError
 from tradingagents.data.incremental_cn import collect_mainland_china_incremental
@@ -61,7 +67,7 @@ def _request(
 
 
 def _tencent_market_response() -> str:
-    return DataResult(
+    return market_fixture(
         "# Stock data for 600519.SS from 2026-07-17 to 2026-07-24\n# Price adjustment: qfq (forward-adjusted)\n# Actual data source: AkShare / Tencent\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-20,100,102,99,101,1000\n2026-07-22,102,104,101,103,1000\n2026-07-24,109,111,108,110,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -155,17 +161,20 @@ def test_default_collector_dispatches_mainland_path(monkeypatch) -> None:
 
 
 def test_mainland_collector_admits_later_published_cninfo_correction() -> None:
-    response = news_source(
-        "## 600519.SS company announcements (CNINFO)\n\n### [direct] Annual-report correction\nDisclosed: 2026-07-22 10:00 CST\nEffective period: 2025-12-31\n",
-        ProvenanceRecord(
-            evidence="get_news",
-            source="CNINFO",
-            requested="2026-07-17 to 2026-07-24",
-            effective="2026-07-17 to 2026-07-24",
-            timing="publication-date filtered; returned_items=1",
-            retrieved_at="2026-07-24T08:00:00Z",
+    response = scoped_fixture(
+        news_source(
+            "## 600519.SS company announcements (CNINFO)\n\n### [direct] Annual-report correction\nDisclosed: 2026-07-22 10:00 CST\nEffective period: 2025-12-31\n",
+            ProvenanceRecord(
+                evidence="get_news",
+                source="CNINFO",
+                requested="2026-07-17 to 2026-07-24",
+                effective="2026-07-17 to 2026-07-24",
+                timing="publication-date filtered; returned_items=1",
+                retrieved_at="2026-07-24T08:00:00Z",
+            ),
         ),
-    ).with_scope("point_in_time")
+        "point_in_time",
+    )
 
     collected = collect_mainland_china_incremental(
         _request(enabled_domains=("news",)),
@@ -187,17 +196,20 @@ def test_mainland_collector_admits_later_published_cninfo_correction() -> None:
 
 
 def test_mainland_collector_discloses_source_omitted_by_global_news_cap() -> None:
-    admitted = news_source(
-        "## CNINFO\n\n### [direct] Official filing\nDisclosed: 2026-07-22 10:00 CST\n",
-        ProvenanceRecord(
-            evidence="get_news",
-            source="CNINFO",
-            requested="2026-07-17 to 2026-07-24",
-            effective="2026-07-17 to 2026-07-24",
-            timing="publication-date filtered; returned_items=1; duplicate_items=0; kept_items=1; shared_limit=1",
-            retrieved_at="2026-07-24T08:00:00Z",
+    admitted = scoped_fixture(
+        news_source(
+            "## CNINFO\n\n### [direct] Official filing\nDisclosed: 2026-07-22 10:00 CST\n",
+            ProvenanceRecord(
+                evidence="get_news",
+                source="CNINFO",
+                requested="2026-07-17 to 2026-07-24",
+                effective="2026-07-17 to 2026-07-24",
+                timing="publication-date filtered; returned_items=1; duplicate_items=0; kept_items=1; shared_limit=1",
+                retrieved_at="2026-07-24T08:00:00Z",
+            ),
         ),
-    ).with_scope("point_in_time")
+        "point_in_time",
+    )
     omitted = news_source(
         "",
         ProvenanceRecord(
@@ -226,11 +238,10 @@ def test_mainland_collector_discloses_source_omitted_by_global_news_cap() -> Non
 
 
 def test_mainland_collector_preserves_pit_and_near_live_fundamentals() -> None:
-    pit = (
+    pit = scoped_fixture(
         DataResult(
             "# China A-share Fundamentals for 600519.SS\n## Financial abstract (AkShare / Sina)\nLatest visible disclosure/update: 2026-07-22\nEffective period: 2025-12-31\nBasic EPS: 2.0\n"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / Sina financial abstract",
@@ -239,14 +250,13 @@ def test_mainland_collector_preserves_pit_and_near_live_fundamentals() -> None:
                 timing="publication/update-date filtered; later conflicting date wins",
                 retrieved_at="2026-07-24T08:00:00Z",
             )
-        )
-        .with_scope("point_in_time")
+        ),
+        "point_in_time",
     )
-    live = (
+    live = scoped_fixture(
         DataResult(
             "## Company profile (CNINFO; current reference, not historical PIT)\n主营业务: 白酒生产\n"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / CNINFO company profile",
@@ -255,8 +265,8 @@ def test_mainland_collector_preserves_pit_and_near_live_fundamentals() -> None:
                 timing="live-only current company reference; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
             )
-        )
-        .with_scope("live_only")
+        ),
+        "live_only",
     )
     request = _request(enabled_domains=("fundamentals",))
     collected = collect_mainland_china_incremental(
@@ -286,9 +296,8 @@ def test_mainland_collector_preserves_pit_and_near_live_fundamentals() -> None:
 
 
 def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
-    response = (
-        DataResult("## Current valuation snapshot\nPE: 20")
-        .with_provenance(
+    response = scoped_fixture(
+        DataResult("## Current valuation snapshot\nPE: 20").with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance current valuation snapshot",
@@ -297,8 +306,8 @@ def test_mainland_collector_omits_six_day_old_live_snapshot() -> None:
                 timing="current-only snapshot; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
             )
-        )
-        .with_scope("live_only")
+        ),
+        "live_only",
     )
     request = _request(
         enabled_domains=("fundamentals",),
@@ -362,7 +371,7 @@ def test_mainland_calendar_uses_prior_completed_session_and_not_yet_observable(
         configured_routes={},
     )
     calls = []
-    response = DataResult(
+    response = market_fixture(
         "# Stock data for 600519.SS from 2026-04-03 to 2026-04-06\n# Price adjustment: qfq (forward-adjusted)\n\nDate,Open,High,Low,Close,Volume\n2026-04-03,99,101,98,100,1000\n"
     ).with_provenance(
         ProvenanceRecord(

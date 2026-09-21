@@ -359,7 +359,7 @@ class JPFundamentalsTests(unittest.TestCase):
         )
         self.assertEqual(
             records["J-Quants official summary"].effective,
-            "disclosures <= 2026-06-26",
+            "unknown",
         )
 
     def test_look_ahead_date_is_propagated_to_both_sources(self):

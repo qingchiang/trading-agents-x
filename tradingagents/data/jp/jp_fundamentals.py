@@ -43,7 +43,7 @@ from tradingagents.data.jp.jquants_stock import _fetch_ohlcv_frame, fetch_topix_
 from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_analyst_forward
-from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data import ProvenanceRecord, as_date
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.measurement import instrument_currency
 
@@ -347,7 +347,9 @@ def _beta(hist, curr_date: str) -> float | None:
     return beta if pd.notna(beta) else None  # never emit a NaN/inf beta
 
 
-def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestContext) -> DataResult[str]:
+def _valuation_block(
+    ticker: str, curr_date: str, *, data_context: DataRequestContext
+) -> DataResult[str]:
     """Render the computed, date-safe valuation block for ``ticker`` as of ``curr_date``."""
     _canonical, records = jqf.fetch_periods(ticker, curr_date)
     statements = [r for r in records if _is_statement(r)]
@@ -418,7 +420,21 @@ def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestCo
         for line in lines
         if line is not None and (analyst_forward is None or line != analyst_forward.content)
     ]
-    result = DataResult("\n".join(official_lines))
+    disclosed = max(
+        (as_date(row.get("DiscDate")) for row in statements if as_date(row.get("DiscDate"))),
+        default=None,
+    )
+    available_on = max(filter(None, (disclosed, as_date(price_date))), default=None)
+    effective_date = as_date(statements[0].get("CurPerEn"))
+    result = DataResult("\n".join(official_lines)).with_provenance(
+        ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="J-Quants official summary",
+            requested=curr_date,
+            effective=disclosed.isoformat() if disclosed else "unknown",
+            timing="disclosure-date filtered",
+        )
+    )
     if price_date:
         result = result.with_provenance(
             ProvenanceRecord(
@@ -429,6 +445,9 @@ def _valuation_block(ticker: str, curr_date: str, *, data_context: DataRequestCo
                 timing="market-date filtered",
             )
         )
+    result = result.with_scope(
+        "point_in_time", available_on=available_on, effective_date=effective_date
+    )
     if analyst_forward is not None:
         combined = DataResult.combine((result, analyst_forward))
         return replace(combined, content="\n".join(line for line in lines if line is not None))
@@ -460,16 +479,4 @@ def get_fundamentals(
             content=base.content
             + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)",
         )
-    return result.with_provenance(
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="J-Quants official summary",
-            requested=curr_date or "live retrieval",
-            effective=f"disclosures <= {curr_date}"
-            if curr_date
-            else "latest disclosure at retrieval",
-            timing="disclosure-date filtered"
-            if curr_date
-            else "live retrieval; no historical cutoff supplied",
-        )
-    )
+    return result

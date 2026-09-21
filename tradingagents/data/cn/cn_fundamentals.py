@@ -20,7 +20,7 @@ from tradingagents.data.lookahead import is_near_live
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.y_finance import get_fundamentals as get_yfinance_fundamentals
-from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data import ProvenanceRecord, as_date
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.vendor_errors import NoMarketDataError, VendorRateLimitError
 
@@ -324,7 +324,13 @@ def get_fundamentals(
         )
 
     abstract_block = (
-        DataResult(abstract_body).with_provenance(abstract_record).with_scope("point_in_time")
+        DataResult(abstract_body)
+        .with_provenance(abstract_record)
+        .with_scope(
+            "point_in_time",
+            available_on=as_date(effective) if not abstract.empty else None,
+            effective_date=as_date(abstract["ReportDate"].max()) if not abstract.empty else None,
+        )
     )
     return DataResult.combine(
         (

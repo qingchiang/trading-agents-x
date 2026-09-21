@@ -9,6 +9,7 @@ import pandas as pd
 
 from tradingagents.data.context import DataRequestContext
 from tradingagents.data.jp.jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
+from tradingagents.data.market_result import market_data
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
 from tradingagents.domain.data_result import DataResult
@@ -164,4 +165,11 @@ def get_stock(
         + f"# Total records: {len(out)}\n"
         + f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
-    return DataResult(header + csv_string)
+    return DataResult(
+        header + csv_string,
+        market_data=market_data(
+            out,
+            canonical,
+            "jquants_split_dividend_adjusted_close" if all_adjusted_closes else "raw_close",
+        ),
+    )

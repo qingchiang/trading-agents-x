@@ -26,6 +26,7 @@ from tradingagents.data.cn.common import (
     load_akshare,
 )
 from tradingagents.data.context import DataRequestContext
+from tradingagents.data.market_result import market_data
 from tradingagents.data.rate_limit import stop_on_rate_limit_requested
 from tradingagents.data.result_metadata import source_metadata
 from tradingagents.domain.data import ProvenanceRecord
@@ -452,7 +453,10 @@ def get_stock(
     timing = "market-date filtered; qfq adjusted; future rows excluded"
     if result.fallback_reason:
         timing += f"; fallback: {result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
-    return DataResult(header + output.to_csv(index=False)).with_provenance(
+    return DataResult(
+        header + output.to_csv(index=False),
+        market_data=market_data(output, result.canonical, "qfq_forward_adjusted"),
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source=result.source,

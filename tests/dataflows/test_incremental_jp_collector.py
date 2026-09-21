@@ -6,7 +6,14 @@ from unittest import mock
 import pytest
 
 from tests.data_policy import configure_data, request_context
-from tests.source_results import news_fixture, news_source, replace_content, source_route
+from tests.source_results import (
+    market_fixture,
+    news_fixture,
+    news_source,
+    replace_content,
+    scoped_fixture,
+    source_route,
+)
 from tradingagents.data import interface
 from tradingagents.data.incremental_jp import collect_japan_incremental
 from tradingagents.data.jp import edinet_news, jp_news
@@ -63,7 +70,7 @@ def _request(
 
 
 def _jquants_market_response() -> str:
-    return DataResult(
+    return market_fixture(
         "# Stock data for 7203.T from 2026-07-13 to 2026-07-24\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC; raw fallback unavailable for Incremental Performance)\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-21,100,102,99,101,1000\n2026-07-22,102,104,101,103,1000\n2026-07-24,109,111,108,110,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -78,11 +85,12 @@ def _jquants_market_response() -> str:
 
 
 def _pit_span(content: str, record: ProvenanceRecord) -> str:
-    return (
+    return scoped_fixture(
         news_source(content, record)
         if record.evidence == "get_news"
-        else DataResult(content).with_provenance(record)
-    ).with_scope("point_in_time")
+        else DataResult(content).with_provenance(record),
+        "point_in_time",
+    )
 
 
 def test_japan_collector_uses_adjusted_jquants_series_and_completed_tse_sessions() -> None:
@@ -149,7 +157,7 @@ def test_japan_collector_requests_baseline_completed_tse_session_after_golden_we
             "data_vendors_by_market": {".T": {"core_stock_apis": "jquants,yfinance"}}
         },
     )
-    response = DataResult(
+    response = market_fixture(
         "# Stock data for 7203.T from 2019-04-26 to 2019-05-08\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2019-04-26,99,101,98,100,1000\n2019-05-07,100,102,99,101,1000\n2019-05-08,102,104,101,103,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -188,7 +196,7 @@ def test_japan_collector_uses_baseline_information_cutoff_before_tse_close() -> 
             "window_end": datetime(2026, 7, 28, 15, tzinfo=UTC),
         }
     )
-    response = DataResult(
+    response = market_fixture(
         "# Stock data for 7203.T from 2026-07-23 to 2026-07-28\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2026-07-23,99,101,98,100,1000\n2026-07-27,100,102,99,101,1000\n2026-07-28,102,104,101,103,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -220,7 +228,7 @@ def test_japan_collector_uses_baseline_information_cutoff_before_tse_close() -> 
 
 
 def test_japan_collector_retains_configured_yfinance_fallback_basis() -> None:
-    response = DataResult(
+    response = market_fixture(
         _jquants_market_response()
         .content.replace(
             "J-Quants split/dividend-adjusted close (AdjC; raw fallback unavailable for Incremental Performance)",
@@ -621,17 +629,20 @@ Disclosed: 2026-07-22 11:00 JST
 
 
 def test_japan_collector_admits_explicit_live_only_news_without_pit_availability() -> None:
-    response = news_source(
-        "### Analyst consensus update\nRequested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 8%; analyst count: 10\n",
-        ProvenanceRecord(
-            evidence="get_news",
-            source="yfinance analyst consensus",
-            requested="2026-07-24",
-            effective="retrieval-time analyst snapshot",
-            timing="live non-point-in-time",
-            retrieved_at="2026-07-24T15:00:00Z",
+    response = scoped_fixture(
+        news_source(
+            "### Analyst consensus update\nRequested 2026-07-24, retrieved 2026-07-24T15:00:00Z\nEPS: 100; PE: 12; growth: 8%; analyst count: 10\n",
+            ProvenanceRecord(
+                evidence="get_news",
+                source="yfinance analyst consensus",
+                requested="2026-07-24",
+                effective="retrieval-time analyst snapshot",
+                timing="live non-point-in-time",
+                retrieved_at="2026-07-24T15:00:00Z",
+            ),
         ),
-    ).with_scope("live_only")
+        "live_only",
+    )
     request = _request(enabled_domains=("news",))
     collected = collect_japan_incremental(
         request,
@@ -760,7 +771,7 @@ def test_japan_collector_marks_yfinance_fundamentals_failure_unavailable() -> No
 
 
 def test_japan_collector_preserves_jquants_source_after_adjustment_validation_failure() -> None:
-    response = DataResult(
+    response = market_fixture(
         "# Stock data for 7203.T from 2026-07-17 to 2026-07-24\n\nDate,Open,High,Low,Close,Volume\n2026-07-22,102,104,101,103,1000\n"
     ).with_provenance(
         ProvenanceRecord(
@@ -787,44 +798,11 @@ def test_japan_collector_preserves_jquants_source_after_adjustment_validation_fa
     assert domain.sources[0].diagnostic.code == "jquants_adjustment_basis_unverified"
 
 
-def test_japan_collector_preserves_fundamentals_source_after_effective_period_validation_failure() -> (
-    None
-):
-    response = _pit_span(
-        """# Fundamentals overview for 7203.T
-Latest disclosure: FY end 2026-03-31 (disclosed 2026-07-22)
-Effective period: 2026-13-31
-""",
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="J-Quants official summary",
-            requested="2026-07-24",
-            effective="2026-07-22",
-            timing="disclosure-date filtered",
-            retrieved_at="2026-07-24T15:00:00Z",
-        ),
-    )
-    collected = collect_japan_incremental(
-        _request(enabled_domains=("fundamentals",)),
-        route_to_vendor=source_route(response),
-        now=lambda: datetime(2026, 7, 24, 15, 1, tzinfo=UTC),
-        data_context=request_context(),
-    )
-
-    domain = collected.collection_summary.domains[0]
-    assert domain.state.value == "unavailable"
-    assert domain.diagnostic is not None
-    assert domain.diagnostic.code == "invalid_fundamentals_effective_period"
-    assert domain.sources[0].source == "j-quants_official_summary"
-    assert domain.sources[0].diagnostic.code == "invalid_fundamentals_effective_period"
-
-
 def test_japan_collector_omits_unknown_fundamentals_temporal_scope_with_disclosure_body() -> None:
-    response = (
+    response = scoped_fixture(
         DataResult(
             "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22)\nEffective period: 2026-03-31\n"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -833,8 +811,8 @@ def test_japan_collector_omits_unknown_fundamentals_temporal_scope_with_disclosu
                 timing="disclosure-date filtered",
                 retrieved_at="2026-07-24T15:00:00Z",
             )
-        )
-        .with_scope("unknown")
+        ),
+        "unknown",
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
@@ -854,9 +832,8 @@ def test_japan_collector_omits_unknown_fundamentals_temporal_scope_with_disclosu
 
 def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_retrieval() -> None:
     for retrieved_at in (None, "2026-07-24T15:00:00"):
-        response = (
-            DataResult("Live analyst consensus snapshot: EPS 100; PE 12")
-            .with_provenance(
+        response = scoped_fixture(
+            DataResult("Live analyst consensus snapshot: EPS 100; PE 12").with_provenance(
                 ProvenanceRecord(
                     evidence="get_fundamentals",
                     source="yfinance analyst consensus",
@@ -865,8 +842,8 @@ def test_japan_collector_omits_live_only_fundamentals_without_aware_producer_ret
                     timing="live non-point-in-time",
                     retrieved_at=retrieved_at,
                 )
-            )
-            .with_scope("live_only")
+            ),
+            "live_only",
         )
         collected = collect_japan_incremental(
             _request(enabled_domains=("fundamentals",)),
@@ -931,9 +908,10 @@ def test_japan_collector_labels_live_fundamentals_near_live_and_omits_them_after
 
 
 def test_japan_collector_preserves_all_live_span_origins() -> None:
-    response = (
-        DataResult("Two live-only analyst sources from the configured fallback response.")
-        .with_provenance(
+    response = scoped_fixture(
+        DataResult(
+            "Two live-only analyst sources from the configured fallback response."
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance analyst consensus",
@@ -950,8 +928,8 @@ def test_japan_collector_preserves_all_live_span_origins() -> None:
                 timing="fallback vendor selected; live non-point-in-time",
                 retrieved_at="2026-07-24T15:00:00Z",
             ),
-        )
-        .with_scope("live_only")
+        ),
+        "live_only",
     )
     collected = collect_japan_incremental(
         _request(enabled_domains=("fundamentals",)),
@@ -969,11 +947,10 @@ def test_japan_collector_preserves_all_live_span_origins() -> None:
 
 
 def test_japan_collector_preserves_mixed_pit_fundamentals_origin_semantics() -> None:
-    response = (
+    response = scoped_fixture(
         DataResult(
             "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\n"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -990,8 +967,8 @@ def test_japan_collector_preserves_mixed_pit_fundamentals_origin_semantics() -> 
                 timing="market-date filtered",
                 retrieved_at="2026-07-24T15:00:00Z",
             ),
-        )
-        .with_scope("point_in_time")
+        ),
+        "point_in_time",
     )
     request = _request(enabled_domains=("fundamentals",)).model_copy(
         update={"window_end": datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)}
@@ -1020,11 +997,10 @@ def test_japan_collector_preserves_mixed_pit_fundamentals_origin_semantics() -> 
 
 
 def test_japan_collector_does_not_treat_summary_cutoff_as_current_market_observation() -> None:
-    response = (
+    response = scoped_fixture(
         DataResult(
             "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\n"
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -1041,8 +1017,8 @@ def test_japan_collector_does_not_treat_summary_cutoff_as_current_market_observa
                 timing="market-date filtered",
                 retrieved_at="2026-07-24T03:00:00Z",
             ),
-        )
-        .with_scope("point_in_time")
+        ),
+        "point_in_time",
     )
     request = _request(enabled_domains=("fundamentals",)).model_copy(
         update={"window_end": datetime(2026, 7, 24, 3, 0, tzinfo=UTC)}
@@ -1062,11 +1038,10 @@ def test_japan_collector_does_not_treat_summary_cutoff_as_current_market_observa
 
 
 def test_japan_collector_keeps_pit_fundamentals_when_a_nested_live_span_ages_out() -> None:
-    official = (
+    official = scoped_fixture(
         DataResult(
             "# Fundamentals overview for 7203.T\nLatest disclosure: FY end 2026-03-31 (disclosed 2026-07-22; Consolidated, Japanese GAAP)\nEffective period: 2026-03-31\nOfficial correction published after the Full Baseline."
-        )
-        .with_provenance(
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="J-Quants official summary",
@@ -1079,12 +1054,11 @@ def test_japan_collector_keeps_pit_fundamentals_when_a_nested_live_span_ages_out
                 timing="market-date filtered",
                 retrieved_at="2026-07-30T00:00:00Z",
             ),
-        )
-        .with_scope("point_in_time")
+        ),
+        "point_in_time",
     )
-    live = (
-        DataResult("- Forward PE: analyst consensus live only")
-        .with_provenance(
+    live = scoped_fixture(
+        DataResult("- Forward PE: analyst consensus live only").with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance analyst consensus",
@@ -1093,8 +1067,8 @@ def test_japan_collector_keeps_pit_fundamentals_when_a_nested_live_span_ages_out
                 timing="live non-point-in-time",
                 retrieved_at="2026-07-30T00:00:00Z",
             )
-        )
-        .with_scope("live_only")
+        ),
+        "live_only",
     )
     response = DataResult.combine((official, live))
     request = _request(enabled_domains=("fundamentals",), target=date(2026, 7, 24))
