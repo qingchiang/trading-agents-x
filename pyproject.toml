@@ -67,7 +67,7 @@ Changelog = "https://github.com/qingchiang/trading-agents-x/blob/main/CHANGELOG.
 include = ["tradingagents*"]
 
 [tool.setuptools.package-data]
-"tradingagents.data" = ["data/*.json"]
+"tradingagents.data" = ["resources/*.json"]
 "tradingagents.persistence" = ["alembic/script.py.mako", "alembic/baseline.sql"]
 "tradingagents.web" = ["static/*", "static/assets/*"]
 

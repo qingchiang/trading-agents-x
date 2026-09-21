@@ -7,7 +7,7 @@ code. EDINET's ``documents.json`` is date-keyed only and has no code-table
 endpoint, and the official code table (``EdinetcodeDlInfo.csv``) has no clean
 static download. So we ship a committed seed snapshot and self-heal at runtime:
 
-  * **Seed** — ``data/edinet_code_map.json`` (built by
+  * **Seed** — ``resources/edinet_code_map.json`` (built by
     ``scripts/build_edinet_code_map.py``), a possibly-stale ``4-digit base
     secCode → EDINET code`` table for listed issuers. Read-only, in-package.
   * **Learned cache** — ``edinet_code_map_learned.json`` under the config
@@ -36,7 +36,7 @@ from tradingagents.domain.instruments import tokyo_securities_base
 
 logger = logging.getLogger(__name__)
 
-_SEED_PACKAGE = "tradingagents.data.data"
+_SEED_PACKAGE = "tradingagents.data.resources"
 _SEED_FILENAME = "edinet_code_map.json"
 _CACHE_FILENAME = "edinet_code_map_learned.json"
 

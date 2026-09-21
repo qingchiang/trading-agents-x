@@ -235,15 +235,12 @@ review. Deleted connection identities cannot be restored by reapplying a draft.
 
 A connection's restore action previews changes to non-sensitive parameters and
 places them in the draft for review and saving. It preserves credentials, name,
-and enabled state. New connections use **Restore creation settings**. Existing
-legacy-provider connections repaired by migration `0013_submission_identity` use
-**Restore upgrade settings**: their current saved parameters at that upgrade
-become the baseline. The migration does not change their current endpoint,
-credentials, enabled state, or historical Run snapshots. It increments the
-configuration revision when repairing a baseline. Tests use temporary databases;
-upgrading an existing installation remains a separate deployment operation.
+and enabled state. New connections use **Restore creation settings**. Connections
+converted from `0013` retain their recorded creation or upgrade template and the
+corresponding restore label; conversion does not replace that template with
+current defaults.
 
-### Submission replay and Incremental compatibility
+### Submission replay and Incremental roles
 
 An idempotency key identifies the normalized original submission, including
 explicit research overrides and `source_run_id`, separately from its resolved
@@ -251,17 +248,18 @@ request and execution snapshot. Repeating the same submission returns the
 original Run before resolving current defaults, checking connections, or querying
 data sources. Changing an explicit override returns 409. Omitting a setting and
 explicitly selecting its default remain different submissions; `null` on a field
-whose meaning is inheritance is equivalent to omission. Legacy rows have no
-invented submission identity: replay compares retained request and connection
-snapshot information, and rejects comparisons that cannot establish equivalence.
+whose meaning is inheritance is equivalent to omission. Conversion retains an
+original submission identity only when it can be recovered from recorded facts.
+Reusing a historical key with an unknown original identity returns an explicit
+conflict. The runtime never guesses equivalence or creates a duplicate Run.
 The internal identity is excluded from research exports.
 
-New Incremental submissions resolve and validate only their deep connection,
-model and reasoning settings. Legacy callers may still send quick fields; these
-are ignored. The stored dual-binding representation uses a copy of the deep
-binding as its quick placeholder. Method records and the interface display only
-the actual deep role. Old snapshots remain unchanged, and execution/retry reads
-only the credentials it needs. Full Research continues to validate both roles.
+New Incremental submissions resolve and validate only `models.deep`; an explicit
+`models.quick` override is rejected. There is no quick placeholder in the
+execution snapshot. Full Research resolves both roles. Historical original
+snapshots remain separate audit records; converted reading projections preserve
+missing identity fields as unrecorded. Execution and retry read only the
+credentials needed by their retained executable bindings.
 
 Google connections always use the Gemini Developer API with the configured
 endpoint and DB key. Ambient Google keys or Vertex backend selection variables

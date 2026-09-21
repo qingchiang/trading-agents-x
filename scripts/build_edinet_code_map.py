@@ -43,7 +43,7 @@ DEFAULT_OUTPUT = (
     Path(__file__).resolve().parent.parent
     / "tradingagents"
     / "data"
-    / "data"
+    / "resources"
     / "edinet_code_map.json"
 )
 

@@ -12,13 +12,13 @@ from zipfile import ZipFile
 _REQUIRED_FILES = {
     "tradingagents/cli/main.py",
     "tradingagents/persistence/configuration.py",
-    "tradingagents/application/submissions.py",
+    "tradingagents/domain/submissions.py",
     "tradingagents/llm/models.py",
     "tradingagents/persistence/alembic/versions/0100_independent.py",
     "tradingagents/persistence/alembic/baseline.sql",
     "tradingagents/client.py",
     "tradingagents/research/full/workflow.py",
-    "tradingagents/data/data/edinet_code_map.json",
+    "tradingagents/data/resources/edinet_code_map.json",
     "tradingagents/web/static/index.html",
 }
 _FORBIDDEN_FILES = {
@@ -84,7 +84,10 @@ def verify(wheel: Path) -> None:
         missing = sorted(_REQUIRED_FILES - names)
         forbidden = sorted(_FORBIDDEN_FILES & names)
         forbidden.extend(
-            sorted(name for name in names if name.startswith("tradingagents/evals/"))
+            sorted(name for name in names if name.startswith((
+                "tradingagents/evals/", "tradingagents/agents/", "tradingagents/graph/",
+                "tradingagents/dataflows/", "tradingagents/llm_clients/", "cli/",
+            )))
         )
         if missing:
             raise ValueError(f"wheel is missing required files: {', '.join(missing)}")
