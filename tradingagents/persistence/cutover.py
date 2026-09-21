@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 from collections import Counter
 from contextlib import closing
@@ -36,7 +37,8 @@ class MigrationReport:
 
 def _tables(connection):
     return {
-        row[0] for row in connection.execute(
+        row[0]
+        for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
     }
@@ -48,22 +50,29 @@ def _convert(source, target):
         raise MigrationError("Only 0013_submission_identity can be converted")
     if source.execute("SELECT 1 FROM runs WHERE status IN ('queued','running') LIMIT 1").fetchone():
         raise MigrationError("Stop Web and worker and finish or cancel all queued or running Runs")
-    if source.execute("PRAGMA quick_check").fetchall() != [("ok",)] or source.execute("PRAGMA foreign_key_check").fetchall():
+    if (
+        source.execute("PRAGMA quick_check").fetchall() != [("ok",)]
+        or source.execute("PRAGMA foreign_key_check").fetchall()
+    ):
         raise MigrationError("Source database integrity validation failed")
     removed = {
-        row[0] for row in source.execute(
+        row[0]
+        for row in source.execute(
             "SELECT id FROM runs WHERE research_schema_version IS NULL AND research_kind IS NULL"
         )
     }
-    retained = {
-        row[0] for row in source.execute("SELECT id FROM runs")
-    } - removed
+    retained = {row[0] for row in source.execute("SELECT id FROM runs")} - removed
     for row in source.execute("SELECT id, source_run_id, full_baseline_run_id FROM runs"):
         if row[0] in retained and any(value in removed for value in row[1:]):
-            raise MigrationError("A retained Run references pre-Timeline history; resolve it before conversion")
-    legacy_identities = {provider: identity for identity, provider in source.execute(
-        "SELECT id, legacy_provider FROM model_connections WHERE legacy_provider IS NOT NULL"
-    )}
+            raise MigrationError(
+                "A retained Run references pre-Timeline history; resolve it before conversion"
+            )
+    legacy_identities = {
+        provider: identity
+        for identity, provider in source.execute(
+            "SELECT id, legacy_provider FROM model_connections WHERE legacy_provider IS NOT NULL"
+        )
+    }
     copied = {}
     missing = Counter()
     target.execute("PRAGMA foreign_keys=ON")
@@ -74,14 +83,14 @@ def _convert(source, target):
         columns = [row[1] for row in target.execute(f'PRAGMA table_info("{table}")')]
         source_columns = {row[1] for row in source.execute(f'PRAGMA table_info("{table}")')}
         common = [name for name in columns if name in source_columns]
-        names = ', '.join(f'"{name}"' for name in common)
+        names = ", ".join(f'"{name}"' for name in common)
         rows = source.execute(f'SELECT {names} FROM "{table}"').fetchall()
-        owner = 'id' if table == 'runs' else 'run_id' if 'run_id' in common else None
+        owner = "id" if table == "runs" else "run_id" if "run_id" in common else None
         if owner:
             index = common.index(owner)
             rows = [row for row in rows if row[index] in retained]
-        if table == 'primary_research_cycles':
-            index = common.index('full_run_id')
+        if table == "primary_research_cycles":
+            index = common.index("full_run_id")
             rows = [row for row in rows if row[index] in retained]
         from tradingagents.persistence.cutover_projection import (
             config_projection,
@@ -90,37 +99,72 @@ def _convert(source, target):
             request_projection,
             submission_projection,
         )
-        if table == 'runs':
+
+        if table == "runs":
             projected = []
             for row in rows:
                 values = dict(zip(common, row, strict=True))
-                request = json.loads(values['request_json'])
-                config = json.loads(values['config_json'])
-                method = json.loads(values['method_snapshot_json']) if values['method_snapshot_json'] else None
-                submission = json.loads(values['submission_json']) if values['submission_json'] else None
-                values['audit_snapshot_json'] = json.dumps({'request': request, 'config': config, 'method': method, 'submission': submission})
+                request = json.loads(values["request_json"])
+                config = json.loads(values["config_json"])
+                method = (
+                    json.loads(values["method_snapshot_json"])
+                    if values["method_snapshot_json"]
+                    else None
+                )
+                submission = (
+                    json.loads(values["submission_json"]) if values["submission_json"] else None
+                )
+                values["audit_snapshot_json"] = json.dumps(
+                    {
+                        "request": request,
+                        "config": config,
+                        "method": method,
+                        "submission": submission,
+                    }
+                )
                 projected_request = request_projection(request, config)
-                if any(not role.get('connection_id') for role in projected_request['models'].values()):
-                    missing['connection_identity'] += 1
-                values['request_json'] = json.dumps(projected_request)
-                values['config_json'] = json.dumps(config_projection(config, values['research_kind']))
+                if any(
+                    not role.get("connection_id") for role in projected_request["models"].values()
+                ):
+                    missing["connection_identity"] += 1
+                values["request_json"] = json.dumps(projected_request)
+                values["config_json"] = json.dumps(
+                    config_projection(config, values["research_kind"])
+                )
                 canonical_submission = submission_projection(submission, legacy_identities)
-                values['submission_json'] = json.dumps(canonical_submission) if canonical_submission is not None else None
+                values["submission_json"] = (
+                    json.dumps(canonical_submission) if canonical_submission is not None else None
+                )
                 projected.append(values)
-            common = [*common, 'audit_snapshot_json']
-            names = ', '.join(f'"{name}"' for name in common)
+            common = [*common, "audit_snapshot_json"]
+            names = ", ".join(f'"{name}"' for name in common)
             rows = [tuple(values[name] for name in common) for values in projected]
-        elif table == 'model_connections':
-            index = common.index('definition')
-            rows = [tuple(json.dumps(connection_projection(json.loads(value))) if i == index else value for i, value in enumerate(row)) for row in rows]
-        elif table == 'application_configuration':
-            index = common.index('values_json')
-            rows = [tuple(json.dumps(configuration_projection(json.loads(value), legacy_identities)) if i == index else value for i, value in enumerate(row)) for row in rows]
-        elif table == 'configuration_credentials':
+        elif table == "model_connections":
+            index = common.index("definition")
+            rows = [
+                tuple(
+                    json.dumps(connection_projection(json.loads(value))) if i == index else value
+                    for i, value in enumerate(row)
+                )
+                for row in rows
+            ]
+        elif table == "application_configuration":
+            index = common.index("values_json")
+            rows = [
+                tuple(
+                    json.dumps(configuration_projection(json.loads(value), legacy_identities))
+                    if i == index
+                    else value
+                    for i, value in enumerate(row)
+                )
+                for row in rows
+            ]
+        elif table == "configuration_credentials":
             from tradingagents.configuration.importing import legacy_credential_fields
             from tradingagents.llm.models import credential_name
+
             aliases = legacy_credential_fields()
-            name_index, value_index = common.index('name'), common.index('value')
+            name_index, value_index = common.index("name"), common.index("value")
             credentials = {row[name_index]: row[value_index] for row in rows}
             for alias, (provider, field) in aliases.items():
                 if alias not in credentials:
@@ -130,17 +174,24 @@ def _convert(source, target):
                     raise MigrationError("A credential alias has no recorded connection identity")
                 name = credential_name(identity, field)
                 if name in credentials and credentials[name] != credentials[alias]:
-                    raise MigrationError("Conflicting credential copies require resolution before conversion")
+                    raise MigrationError(
+                        "Conflicting credential copies require resolution before conversion"
+                    )
                 credentials[name] = credentials.pop(alias)
-            rows = [tuple(name if field == 'name' else value for field in common) for name, value in credentials.items()]
+            rows = [
+                tuple(name if field == "name" else value for field in common)
+                for name, value in credentials.items()
+            ]
         if rows:
             target.executemany(
                 f'INSERT INTO "{table}" ({names}) VALUES ({", ".join("?" for _ in common)})', rows
             )
         copied[table] = (names, rows)
-    for (raw,) in target.execute("SELECT incremental_products_json FROM research_nodes WHERE research_kind='incremental'"):
+    for (raw,) in target.execute(
+        "SELECT incremental_products_json FROM research_nodes WHERE research_kind='incremental'"
+    ):
         products = json.loads(raw) if raw else {}
-        for name in ('analysis_brief', 'decision_outcome'):
+        for name in ("analysis_brief", "decision_outcome"):
             if not products or products.get(name) is None:
                 missing[name] += 1
     if target.execute("PRAGMA foreign_key_check").fetchall():
@@ -156,6 +207,16 @@ def _convert(source, target):
     return MigrationReport(len(retained), len(removed), nodes, len(copied), dict(missing))
 
 
+def _source_signature(source: Path) -> dict[Path, tuple[int, int, int, int]]:
+    """Detect source or WAL changes without opening SQLite or creating sidecars."""
+    result = {}
+    for path in (source, Path(str(source) + "-wal")):
+        if path.exists():
+            stat = path.stat()
+            result[path] = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    return result
+
+
 def migrate_current(source: Path, destination: Path) -> MigrationReport:
     """Publish a validated database atomically without overwriting either input.
 
@@ -169,26 +230,41 @@ def migrate_current(source: Path, destination: Path) -> MigrationReport:
         raise MigrationError("Source database does not exist")
     try:
         with TemporaryDirectory(prefix=".cutover-", dir=destination.parent) as temporary:
+            before = _source_signature(source)
+            snapshot = Path(temporary) / "source.db"
+            if Path(str(source) + "-journal").exists():
+                raise MigrationError("Recover the source with the old program before conversion")
+            for path in before:
+                copied = Path(str(snapshot) + str(path)[len(str(source)) :])
+                shutil.copyfile(path, copied)
+                os.chmod(copied, 0o600)
+            if _source_signature(source) != before:
+                raise MigrationError(
+                    "Source changed during snapshot; stop Web and worker and retry"
+                )
             working = Path(temporary) / "current.db"
-            settings = AppSettings.from_env(environ={
-                "TRADINGAGENTS_HOME": temporary,
-                "TRADINGAGENTS_DATABASE_PATH": str(working),
-            })
+            settings = AppSettings.from_env(
+                environ={
+                    "TRADINGAGENTS_HOME": temporary,
+                    "TRADINGAGENTS_DATABASE_PATH": str(working),
+                }
+            )
             upgrade_database(settings)
             os.chmod(working, 0o600)
-            with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as old:
+            with closing(sqlite3.connect(snapshot.as_uri() + "?mode=ro", uri=True)) as old:
                 old.execute("PRAGMA query_only=ON")
-                source_version = old.execute("PRAGMA data_version").fetchone()
                 old.execute("BEGIN")
                 with closing(sqlite3.connect(working)) as new:
                     report = _convert(old, new)
                     new.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     new.execute("PRAGMA journal_mode=DELETE")
                 old.rollback()
-                if old.execute("PRAGMA data_version").fetchone() != source_version:
-                    raise MigrationError("Source changed during conversion; stop Web and worker and retry")
-            with working.open('rb') as handle:
+            with working.open("rb") as handle:
                 os.fsync(handle.fileno())
+            if _source_signature(source) != before:
+                raise MigrationError(
+                    "Source changed during conversion; stop Web and worker and retry"
+                )
             # link() fails if another process created the destination meanwhile.
             os.link(working, destination)
             return report

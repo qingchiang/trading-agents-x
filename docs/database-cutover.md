@@ -19,7 +19,10 @@ has an earlier revision.
    `TRADINGAGENTS_DATABASE_PATH` to the new database.
 5. Restart Web and worker together with the new program and database path.
 
-The source is read-only; an existing destination is never overwritten. A failed
+The converter copies the source database and any committed WAL into a private
+working directory before opening SQLite. It never creates SQLite sidecars beside
+the source, and rejects source changes during snapshot or conversion. An existing
+destination is never overwritten. A failed
 conversion leaves no published target. The converter checks database integrity,
 foreign keys and copied values before publishing the completed file. It omits
 cross-version checkpoints, retains current-schema execution history (including
