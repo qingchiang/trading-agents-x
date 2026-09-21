@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 from yfinance.exceptions import YFRateLimitError
 
+from tests.research_helpers import stub_run_llms
 from tradingagents.application.contracts import AnalysisRequest, RunStatus
 from tradingagents.application.database import RunRecord
 from tradingagents.application.errors import (
@@ -108,7 +109,7 @@ def test_execution_revalidates_before_graph_construction(app_settings, repositor
         repository=repository,
         eligibility_resolver=resolve,
         graph_factory=Graph,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
     )
     queued = service.enqueue(_request())
     claimed = repository.claim_run(queued.id, "fixture-worker", 30)

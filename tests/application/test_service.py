@@ -18,6 +18,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from tests.factories import analyst_report, research_decision
+from tests.research_helpers import stub_run_llms
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
@@ -60,7 +61,7 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -112,7 +113,7 @@ def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selecte
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -153,7 +154,7 @@ def test_completed_first_full_replays_before_later_full_primary_validation(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -656,7 +657,7 @@ def test_atomic_research_commit_rolls_back_every_persisted_boundary(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -829,7 +830,7 @@ def test_failed_atomic_full_commit_keeps_execution_history_without_node_or_decis
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_DecisionlessGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -1033,7 +1034,7 @@ def _service(
     return AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -1180,7 +1181,7 @@ def test_service_persists_preferred_instrument_display_name(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda _ticker, _date: identity,
         eligibility_resolver=_equity_resolver,
@@ -1212,7 +1213,7 @@ def test_service_persists_cutoff_safe_local_name_once(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda _ticker, _date: {"company_name": "Toyota Motor Corporation"},
         eligibility_resolver=_equity_resolver,
@@ -1244,7 +1245,7 @@ def test_instrument_identity_failure_does_not_fail_research_run(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=fail_identity,
         eligibility_resolver=_equity_resolver,
@@ -1271,7 +1272,7 @@ def test_service_commits_artifact_and_event_before_callback(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -1323,7 +1324,7 @@ def test_artifact_persistence_failure_fails_attempt_and_retains_checkpoint(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -1581,7 +1582,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_ResumableGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -1629,7 +1630,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_CancellingCheckpointGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,

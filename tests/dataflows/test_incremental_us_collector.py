@@ -5,13 +5,14 @@ from datetime import UTC, date, datetime
 import pytest
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
+from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
 from tradingagents.application.contracts import (
     AnalysisRequest,
     IncrementalCollectionRequest,
     RunStatus,
 )
 from tradingagents.application.incremental_collection import normalize_incremental_collection
-from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
+from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows import incremental_us, interface, y_finance as yf_data
 from tradingagents.dataflows.config import bind_config, reset_config
 from tradingagents.dataflows.errors import VendorRateLimitError
@@ -461,7 +462,7 @@ def test_default_us_collector_commits_a_full_to_incremental_service_journey(
     service = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,

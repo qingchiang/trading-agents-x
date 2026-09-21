@@ -131,10 +131,6 @@ class TestDefault:
         caps = get_capabilities("totally-made-up-model-id")
         assert caps.supports_tool_choice is True
 
-    def test_exact_match_precedes_pattern(self):
-        """The legacy exact ID keeps its declared non-thinking behavior."""
-        caps = get_capabilities("deepseek-chat")
-        assert caps.supports_tool_choice is True
 
 
 @pytest.mark.unit

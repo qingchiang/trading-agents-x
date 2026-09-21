@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from tests.application.test_service import _equity_resolver, _Graph, _service
 from tests.factories import analyst_report, research_decision
+from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
 from tradingagents.application.contracts import (
     AnalysisRequest,
     BenchmarkSeriesResult,
@@ -37,6 +38,7 @@ from tradingagents.application.database import (
     RunEvidenceRecord,
     RunRecord,
 )
+from tradingagents.application.decision_components import baseline_component_ids
 from tradingagents.application.errors import (
     InvalidIncrementalBaselineError,
     NoInformationAdvancementError,
@@ -46,11 +48,9 @@ from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import EvidenceConflictError
 from tradingagents.application.service import (
     AnalysisService,
-    _baseline_component_ids,
     _incremental_brief_fallback_title,
     _incremental_decision_core,
     _incremental_decision_from_core,
-    default_incremental_synthesizer,
 )
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
@@ -112,7 +112,7 @@ def _incremental_service(
     return AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=identity_resolver,
         eligibility_resolver=eligibility_resolver,
@@ -957,7 +957,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
             content="A bounded update for conditional Decision generation.",
         )
     )
-    component_ids = _baseline_component_ids(baseline_decision)
+    component_ids = baseline_component_ids(baseline_decision)
 
     class _Invoker:
         def __init__(self, parsed, prompts):
@@ -1108,7 +1108,7 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
     )
     baseline_decision = repository.get_result(baseline.run_id).decision
     assert baseline_decision is not None
-    component_ids = _baseline_component_ids(baseline_decision)
+    component_ids = baseline_component_ids(baseline_decision)
     candidate = IncrementalEvidenceCandidate(
         evidence=EvidenceItem.create(
             source="fixture.news",

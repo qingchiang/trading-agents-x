@@ -12,6 +12,7 @@ from tests.factories import (
     research_case,
     research_decision,
 )
+from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -31,7 +32,7 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.database import RunRecord
-from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
+from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.dataflows import incremental_cn, incremental_jp, incremental_us
 from tradingagents.dataflows.cn import calendar as cn_calendar
@@ -131,7 +132,7 @@ Date,Open,High,Low,Close,Volume
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_synthesizer=default_incremental_synthesizer,
     )
@@ -255,7 +256,7 @@ Date,Open,High,Low,Close,Volume
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_synthesizer=default_incremental_synthesizer,
     )
@@ -428,7 +429,7 @@ Date,Open,High,Low,Close,Volume
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         eligibility_resolver=lambda symbol: {
             "symbol": symbol,
             "quote_type": "EQUITY",
@@ -568,7 +569,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
         incremental_collector=collect,
         incremental_synthesizer=lambda input_: default_incremental_synthesizer(input_).model_copy(

@@ -71,12 +71,12 @@ from .contracts import (
     ResearchNodeComparison,
     ResearchNodeComparisonSelection,
     ResearchReassessment,
-    ResearchReassessmentEntry,
     RunEvent,
     RunExport,
     RunStatus,
     report_language_prompt_label,
 )
+from .decision_components import baseline_component_ids
 from .eligibility import validate_instrument_eligibility
 from .errors import (
     FutureAnalysisCutoffError,
@@ -225,58 +225,6 @@ def _instrument_display_name(identity: Any) -> str | None:
     return None
 
 
-def _baseline_component_ids(decision) -> tuple[str, ...]:
-    component_ids = ["executive_summary", "thesis"]
-    for field in ("catalysts", "risks", "invalidation_conditions"):
-        component_ids.extend(f"{field}.{index}" for index, _ in enumerate(getattr(decision, field)))
-    for scenario in decision.scenarios:
-        component_ids.append(f"scenarios.{scenario.kind.value}.outcome")
-        component_ids.extend(
-            f"scenarios.{scenario.kind.value}.core_assumptions.{index}"
-            for index, _ in enumerate(scenario.core_assumptions)
-        )
-    component_ids.extend(
-        f"risk_review_adjustments.{index}.explanation"
-        for index, _ in enumerate(decision.risk_review_adjustments)
-    )
-    return tuple(component_ids)
-
-
-def default_incremental_synthesizer(
-    synthesis_input: IncrementalSynthesisInput,
-) -> IncrementalSynthesis:
-    """Test-only deterministic seam; production always supplies a model-backed synthesizer."""
-    return IncrementalSynthesis(
-        analysis_brief=IncrementalAnalysisBrief(
-            markdown=(
-                "# Incremental analysis\n\n"
-                "No material change was identified by the deterministic test synthesizer."
-            ),
-            report_sections=parse_markdown_sections(
-                "# Incremental analysis\n\n"
-                "No material change was identified by the deterministic test synthesizer.",
-                namespace="incremental",
-                fallback_title="Incremental analysis",
-            ),
-        ),
-        reassessment=ResearchReassessment(
-            entries=tuple(
-                ResearchReassessmentEntry(
-                    component_id=component_id,
-                    disposition=ReassessmentDisposition.REAFFIRMED,
-                    reason="The bounded update does not change this baseline component.",
-                )
-                for component_id in _baseline_component_ids(synthesis_input.full_baseline_decision)
-            )
-        ),
-        decision_outcome=IncrementalDecisionOutcome.UNCHANGED,
-        decision_outcome_reason=(
-            "The bounded update does not require any Full Decision field to change."
-        ),
-        decision=synthesis_input.full_baseline_decision,
-    )
-
-
 class AnalysisService:
     """The only component allowed to coordinate graph and durable state."""
 
@@ -285,7 +233,7 @@ class AnalysisService:
         settings: AppSettings,
         *,
         repository: RunRepository | None = None,
-        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (create_run_llms),
+        llm_factory: Callable[..., RunLLMs] = (create_run_llms),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
         eligibility_resolver: EligibilityResolver = resolve_instrument_eligibility,
@@ -820,7 +768,7 @@ class AnalysisService:
                             run_id=run.id,
                             on_event=on_event,
                         )
-                    expected_components = set(_baseline_component_ids(baseline_result.decision))
+                    expected_components = set(baseline_component_ids(baseline_result.decision))
                     if {
                         entry.component_id for entry in synthesis.reassessment.entries
                     } != expected_components:
@@ -958,15 +906,10 @@ class AnalysisService:
                         run_settings,
                         callbacks=[metrics],
                     )
-                    if isinstance(llms, RunLLMs):
-                        quick_llm = llms.quick
-                        deep_llm = llms.deep
-                        quick_serializer_llm = llms.quick_serializer
-                        deep_serializer_llm = llms.deep_serializer
-                    else:
-                        quick_llm, deep_llm = llms
-                        quick_serializer_llm = quick_llm
-                        deep_serializer_llm = deep_llm
+                    quick_llm = llms.quick
+                    deep_llm = llms.deep
+                    quick_serializer_llm = llms.quick_serializer
+                    deep_serializer_llm = llms.deep_serializer
                 graph = self.graph_factory(
                     quick_llm=quick_llm,
                     deep_llm=deep_llm,
@@ -1396,12 +1339,8 @@ class AnalysisService:
             callbacks=[metrics],
             purpose="incremental",
         )
-        if isinstance(llms, RunLLMs):
-            semantic_llm = llms.deep
-            serializer_llm = llms.deep_serializer
-        else:
-            _quick_llm, semantic_llm = llms
-            serializer_llm = semantic_llm
+        semantic_llm = llms.deep
+        serializer_llm = llms.deep_serializer
 
         def event_writer(raw: dict[str, Any]) -> None:
             self._persist_graph_event(run_id, raw, on_event)
@@ -1455,7 +1394,7 @@ class AnalysisService:
                 )
             )
         )
-        expected_components = set(_baseline_component_ids(synthesis_input.full_baseline_decision))
+        expected_components = set(baseline_component_ids(synthesis_input.full_baseline_decision))
 
         def validate_assessment(
             value: _IncrementalAssessmentPayload,

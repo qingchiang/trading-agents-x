@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from tests.application.test_cycle_trash_lifecycle import _commit_node, _warning_products
 from tests.application.test_service import _equity_resolver, _Graph
+from tests.research_helpers import stub_run_llms
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ResearchNodeComparisonSelection,
@@ -35,7 +36,7 @@ def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(
     writer = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -402,7 +403,7 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
     foreign = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
