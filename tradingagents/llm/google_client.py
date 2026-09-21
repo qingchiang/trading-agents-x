@@ -79,7 +79,7 @@ class GoogleClient(BaseLLMClient):
                 llm_kwargs[key] = self.kwargs[key]
 
         # Unified api_key maps to provider-specific google_api_key
-        google_api_key = self.kwargs.get("api_key") or self.kwargs.get("google_api_key") or credential("GOOGLE_API_KEY")
+        google_api_key = self.kwargs.get("api_key") or credential("GOOGLE_API_KEY")
         if not google_api_key:
             raise ValueError("Configure the Google credential in Settings")
         if google_api_key:
