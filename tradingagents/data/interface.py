@@ -258,14 +258,13 @@ def parse_vendor_chain(value: str) -> list[str]:
     return vendors
 
 
-def validate_market_routing(config: dict | None = None) -> None:
+def validate_market_routing(config: dict) -> None:
     """Fail fast when any effective default/market route cannot serve a method.
 
     Validation follows the same tool -> market -> default precedence as runtime
     routing. Assemblers may implement only part of a category, so each resolved
     chain is checked collectively for the specific method being validated.
     """
-    config = get_config() if config is None else config
     default_routes = config.get("data_vendors", {})
     tool_routes = config.get("tool_vendors", {})
     routes = config.get("data_vendors_by_market", {})
@@ -331,7 +330,7 @@ def validate_market_routing(config: dict | None = None) -> None:
                     )
 
 
-def get_vendor(category: str, method: str = None, market: str = "", config: dict = None) -> str:
+def get_vendor(category: str, method: str, market: str, config: dict) -> str:
     """Get the configured vendor for a data category or specific tool method.
 
     Resolution order (first match wins):
@@ -340,13 +339,9 @@ def get_vendor(category: str, method: str = None, market: str = "", config: dict
          e.g. ``.T`` routes Japanese tickers to JP vendors.
       3. Default category config (``data_vendors[category]``).
 
-    ``market=""`` skips step 2, reproducing the original behavior exactly, so
-    US / unsuffixed tickers are unaffected. ``config`` may be passed to reuse a
-    snapshot the caller already loaded (``get_config()`` deep-copies).
+    ``market=""`` skips the market override for US or unsuffixed tickers.
+    All routing decisions use the configuration supplied by the caller.
     """
-    if config is None:
-        config = get_config()
-
     # Check tool-level configuration first (if method provided)
     if method:
         tool_vendors = config.get("tool_vendors", {})

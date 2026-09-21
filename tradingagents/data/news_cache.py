@@ -10,7 +10,6 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from tradingagents.data.config import get_config
 from tradingagents.data.news_selection import NewsCandidate, render_candidate, split_candidates
 from tradingagents.domain.instruments import market_timezone
 
@@ -57,7 +56,7 @@ def fetch_news_feed(
     *,
     budget=100,
     now=None,
-    config=None,
+    config,
     global_feed=False,
 ):
     """Reuse exact refreshes and merge previously observed, eligible candidates.
@@ -65,7 +64,6 @@ def fetch_news_feed(
     Failures never certify a successful refresh. Cache errors degrade to the
     normal fetch, including when persistence fails after that fetch completed.
     """
-    config = get_config() if config is None else config
     current = now() if now else datetime.now(UTC)
     fetched = None
     attempted_error = None

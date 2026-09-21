@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 
 def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
-    from tradingagents.data.config import get_config, use_config
+    from tradingagents.data.config import get_config
     from tradingagents.data.news_cache import fetch_news_feed
 
     current = datetime(2026, 9, 5, 10, tzinfo=UTC)
@@ -13,10 +13,10 @@ def test_news_cache_reuses_refresh_and_retains_disappeared_candidates(tmp_path):
         return ("## feed\n\n### old event\nPublished: 2026-09-03T10:00:00Z"
                 if len(calls) == 1 else "No news found")
 
-    with use_config({**get_config(), "data_cache_dir": str(tmp_path)}):
-        first = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current)
-        second = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=1))
-        third = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=16))
+    config = {**get_config(), "data_cache_dir": str(tmp_path)}
+    first = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current, config=config)
+    second = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=1), config=config)
+    third = fetch_news_feed("test", "GOOG", "2026-09-01", "2026-09-05", fetch, now=lambda: current + timedelta(minutes=16), config=config)
     assert len(calls) == 2
     assert all("old event" in body for body in (first, second, third))
     assert "2026-09-05T10:00:00+00:00" in third

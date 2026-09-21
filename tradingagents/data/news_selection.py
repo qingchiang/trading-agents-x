@@ -10,7 +10,6 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from tradingagents.data.config import get_config
 from tradingagents.data.news_quality import canonical_headline
 
 _candidate_mode: ContextVar[bool] = ContextVar("news_candidate_mode", default=False)
@@ -25,10 +24,10 @@ def candidate_scope() -> Iterator[None]:
         _candidate_mode.reset(token)
 
 
-def source_output_limit(default: int | None = None) -> int:
+def source_output_limit(default: int) -> int:
     if _candidate_mode.get():
         return 100
-    return max(1, int(default if default is not None else get_config()["news_article_limit"]))
+    return max(1, int(default))
 
 
 def in_candidate_scope() -> bool:
