@@ -131,19 +131,25 @@ def research_case(
     )
 
 
-def analyst_runtime(config=None):
-    """Minimal explicit context for a direct analyst-node test."""
+def analyst_runtime(config=None, *, analysis_date="2020-01-15"):
+    """Build a current runtime for direct analyst and graph-tool tests."""
     from copy import deepcopy
-    from types import SimpleNamespace
 
     from langgraph.runtime import Runtime
 
+    from tests.research_helpers import model_settings
     from tradingagents.configuration.defaults import DEFAULT_CONFIG
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.research.runtime import RunContext
 
     values = deepcopy(DEFAULT_CONFIG if config is None else config)
-    return Runtime(context=SimpleNamespace(
+    return Runtime(context=RunContext(
+        run_id="offline-analyst",
+        request=AnalysisRequest(ticker="NVDA", analysis_date=analysis_date),
+        settings=model_settings(data_config=values, output_language=values["output_language"]),
         dataflow_config=values,
-        settings=SimpleNamespace(output_language=values["output_language"]),
+        instrument_context="",
+        cancel_requested=lambda: False,
     ))
 
 
@@ -162,7 +168,7 @@ def captured_analyst_prompt(monkeypatch, role, *, language="English"):
         monkeypatch.setattr(module, "get_global_macro_panel", lambda *_: "Offline macro input")
     if role == "sentiment":
         monkeypatch.setattr(module, "is_near_live", lambda *_: False)
-        monkeypatch.setattr(module.get_news, "func", lambda *_: "Offline news input")
+        monkeypatch.setattr(module, "route_to_vendor", lambda *_, **__: "Offline news input")
     captured = []
 
     def invoke(prompt):

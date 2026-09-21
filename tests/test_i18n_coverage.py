@@ -32,7 +32,7 @@ def test_report_agent_applies_explicit_runtime_language(monkeypatch, role):
     from tests.factories import captured_analyst_prompt
 
     prompt = captured_analyst_prompt(monkeypatch, role, language="简体中文")
-    assert "in 简体中文." in prompt
+    assert "in Simplified Chinese (简体中文, zh-CN)." in prompt
 
 
 @pytest.mark.unit

@@ -69,26 +69,25 @@ from tradingagents.research.synthesis.output_validation import (
 )
 from tradingagents.research.synthesis.role_context import RoleContext, RoleContextBuilder
 from tradingagents.research.synthesis.structured_output import StructuredOutputResult
-from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
+from tradingagents.research.tools.core_stock_tools import get_stock_data
 from tradingagents.research.tools.fundamental_data_tools import (
-    get_balance_sheet_for_analysis,
-    get_cashflow_for_analysis,
-    get_fundamentals_for_analysis,
-    get_income_statement_for_analysis,
+    get_balance_sheet,
+    get_cashflow,
+    get_fundamentals,
+    get_income_statement,
 )
-from tradingagents.research.tools.macro_data_tools import get_macro_indicators_for_analysis
+from tradingagents.research.tools.macro_data_tools import get_macro_indicators
 from tradingagents.research.tools.market_data_validation_tools import (
-    get_verified_market_snapshot_for_analysis,
+    get_verified_market_snapshot,
 )
 from tradingagents.research.tools.news_data_tools import (
-    get_global_news_for_analysis,
+    get_global_news,
     get_news,
-    get_news_for_analysis,
 )
 from tradingagents.research.tools.prediction_markets_tools import (
-    get_prediction_markets_for_analysis,
+    get_prediction_markets,
 )
-from tradingagents.research.tools.technical_indicators_tools import get_indicators_for_analysis
+from tradingagents.research.tools.technical_indicators_tools import get_indicators
 
 
 class ResearchGraph:
@@ -201,26 +200,25 @@ class ResearchGraph:
         tool_nodes = {
             "market": ToolNode(
                 [
-                    get_stock_data_for_analysis,
-                    get_indicators_for_analysis,
-                    get_verified_market_snapshot_for_analysis,
+                    get_stock_data,
+                    get_indicators,
+                    get_verified_market_snapshot,
                 ]
             ),
-            "social": ToolNode([get_news]),
             "news": ToolNode(
                 [
-                    get_news_for_analysis,
-                    get_global_news_for_analysis,
-                    get_macro_indicators_for_analysis,
-                    get_prediction_markets_for_analysis,
+                    get_news,
+                    get_global_news,
+                    get_macro_indicators,
+                    get_prediction_markets,
                 ]
             ),
             "fundamentals": ToolNode(
                 [
-                    get_fundamentals_for_analysis,
-                    get_balance_sheet_for_analysis,
-                    get_cashflow_for_analysis,
-                    get_income_statement_for_analysis,
+                    get_fundamentals,
+                    get_balance_sheet,
+                    get_cashflow,
+                    get_income_statement,
                 ]
             ),
         }
@@ -228,14 +226,15 @@ class ResearchGraph:
         for analyst in self.selected_analysts:
             builder = StateGraph(AgentState, context_schema=RunContext)
             builder.add_node("agent", factories[analyst]())
-            builder.add_node("tools", tool_nodes[analyst])
             builder.add_edge(START, "agent")
-            builder.add_conditional_edges(
-                "agent",
-                _analyst_route,
-                {"tools": "tools", "done": END},
-            )
-            builder.add_edge("tools", "agent")
+            if analyst in tool_nodes:
+                builder.add_node("tools", tool_nodes[analyst])
+                builder.add_conditional_edges(
+                    "agent", _analyst_route, {"tools": "tools", "done": END},
+                )
+                builder.add_edge("tools", "agent")
+            else:
+                builder.add_edge("agent", END)
             subgraphs[analyst] = builder.compile()
         return subgraphs
 

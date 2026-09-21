@@ -12,14 +12,14 @@ from tradingagents.research.prompts.instrument import get_instrument_context_fro
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
-from tradingagents.research.tools.macro_data_tools import get_macro_indicators_for_analysis
+from tradingagents.research.tools.macro_data_tools import get_macro_indicators
 from tradingagents.research.tools.news_data_tools import (
     EXTENDED_TICKER_NEWS_LOOKBACK_DAYS,
-    get_global_news_for_analysis,
-    get_news_for_analysis,
+    get_global_news,
+    get_news,
 )
 from tradingagents.research.tools.prediction_markets_tools import (
-    get_prediction_markets_for_analysis,
+    get_prediction_markets,
 )
 
 
@@ -44,10 +44,10 @@ def create_news_analyst(llm):
         )
 
         tools = [
-            get_news_for_analysis,
-            get_global_news_for_analysis,
-            get_macro_indicators_for_analysis,
-            get_prediction_markets_for_analysis,
+            get_news,
+            get_global_news,
+            get_macro_indicators,
+            get_prediction_markets,
         ]
 
         # Cross-region macro backdrop is prefetched and injected (not left to the

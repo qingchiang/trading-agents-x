@@ -173,7 +173,9 @@ runtime context and `ToolRuntime` carry the request, analysis date, instrument
 context, dataflow configuration, cancellation callbacks, and artifact/evidence
 writers; the LangGraph runtime provides the event stream writer separately.
 Analyst nodes read language and source policy from that explicit runtime
-context. Pure language and instrument prompt helpers live in `research/prompts`;
+context. Every model-facing data tool requires this context and an injected
+analysis date; each tool has one internal implementation. The sentiment analyst
+prefetches its inputs and has no tool-call loop. Pure language and instrument prompt helpers live in `research/prompts`;
 there is no mixed tool-and-prompt catalog. Full orchestration owns graph assembly,
 while `research/full/evidence.py` seals producer material and
 `research/full/state.py` owns graph state/output. Perspective objectives live in
@@ -813,7 +815,8 @@ recorded.
 ## Implementation map
 
 The root package intentionally exposes only `TradingAgents`, `AnalysisRequest`,
-`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__` as its
+`AnalysisResult`, `ArtifactGenerationObservation`, `ResearchDecision`,
+`RunProfile`, and `__version__` as its
 public Python API. Specialized contracts remain owned by their subsystem
 modules.
 

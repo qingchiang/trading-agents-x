@@ -10,10 +10,10 @@ from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks, prefetched_evidence_block
 from tradingagents.research.tools.fundamental_data_tools import (
-    get_balance_sheet_for_analysis,
-    get_cashflow_for_analysis,
-    get_fundamentals_for_analysis,
-    get_income_statement_for_analysis,
+    get_balance_sheet,
+    get_cashflow,
+    get_fundamentals,
+    get_income_statement,
 )
 
 
@@ -38,10 +38,10 @@ def create_fundamentals_analyst(llm):
             )
 
         tools = [
-            get_fundamentals_for_analysis,
-            get_balance_sheet_for_analysis,
-            get_cashflow_for_analysis,
-            get_income_statement_for_analysis,
+            get_fundamentals,
+            get_balance_sheet,
+            get_cashflow,
+            get_income_statement,
         ]
 
         system_message = (

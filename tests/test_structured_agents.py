@@ -71,7 +71,7 @@ def _run(
             f"{_MODULE}.fetch_sentiment_signals",
             return_value=signals,
         ) as market_signals,
-        mock.patch(f"{_MODULE}.get_news") as news,
+        mock.patch(f"{_MODULE}.route_to_vendor") as news,
         mock.patch(f"{_MODULE}.is_near_live", return_value=live),
         mock.patch(f"{_MODULE}.datetime") as clock,
     ):
@@ -83,9 +83,9 @@ def _run(
             tzinfo=UTC,
         )
         if news_side_effect:
-            news.func.side_effect = news_side_effect
+            news.side_effect = news_side_effect
         else:
-            news.func.return_value = "NEWS_DATA"
+            news.return_value = "NEWS_DATA"
         llm = llm or _capturing_llm(captured)
         result = create_sentiment_analyst(llm)(_state(ticker, trade_date), analyst_runtime(get_config()))
     return captured, stocktwits, reddit, market_signals, news, result
@@ -161,7 +161,7 @@ def test_markdown_draft_is_persisted_with_local_confidence():
 def test_us_run_uses_social_sources_and_separate_windows():
     captured, stocktwits, reddit, signals, news, _ = _run()
 
-    news.func.assert_called_once_with("NVDA", "2026-01-01", "2026-01-15")
+    news.assert_called_once_with("get_news", "NVDA", "2026-01-01", "2026-01-15", _provenance=True)
     stocktwits.assert_called_once_with(
         "NVDA",
         limit=30,
@@ -258,7 +258,7 @@ def test_news_error_degrades_to_a_redacted_type_marker():
 @pytest.mark.parametrize(
     ("language", "expected"),
     [
-        ("Chinese", "structured text field in Chinese"),
+        ("Chinese", "structured text field in Simplified Chinese"),
         ("Japanese", "structured text field in Japanese"),
         ("English", "structured text field in English"),
     ],

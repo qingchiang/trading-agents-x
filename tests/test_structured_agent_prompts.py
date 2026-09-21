@@ -24,8 +24,8 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
         lambda *args, **kwargs: "reddit",
     )
     monkeypatch.setattr(
-        sentiment.get_news,
-        "func",
+        sentiment,
+        "route_to_vendor",
         lambda *args, **kwargs: "news",
         raising=False,
     )

@@ -67,17 +67,6 @@ class TestVerifiedSnapshot:
 
 @pytest.mark.unit
 class TestTool:
-    def test_tool_delegates_to_builder(self, monkeypatch):
-        from tradingagents.research.tools.market_data_validation_tools import (
-            get_verified_market_snapshot,
-        )
-        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
-        out = get_verified_market_snapshot.invoke(
-            {"symbol": "COF", "curr_date": "2026-05-20"}
-        )
-        assert "Verified market data snapshot for COF" in out
-        assert "Data source: yfinance" in out
-
     def test_renderer_labels_supplied_vendor(self):
         snap = validator.render_verified_market_snapshot(
             _sample_ohlcv(),

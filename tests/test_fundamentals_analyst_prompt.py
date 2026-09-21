@@ -11,10 +11,10 @@ from langgraph.prebuilt import ToolNode
 import tradingagents.research.analysts.fundamentals_analyst as fa
 from tests.factories import analyst_runtime
 from tradingagents.research.tools.fundamental_data_tools import (
-    get_balance_sheet_for_analysis,
-    get_cashflow_for_analysis,
-    get_fundamentals_for_analysis,
-    get_income_statement_for_analysis,
+    get_balance_sheet,
+    get_cashflow,
+    get_fundamentals,
+    get_income_statement,
 )
 
 
@@ -57,10 +57,10 @@ def test_fundamentals_prompt_preserves_missing_and_historical_data_boundaries(mo
 @pytest.mark.unit
 def test_analysis_tool_schemas_hide_injected_date_from_the_llm():
     for analysis_tool in (
-        get_fundamentals_for_analysis,
-        get_balance_sheet_for_analysis,
-        get_cashflow_for_analysis,
-        get_income_statement_for_analysis,
+        get_fundamentals,
+        get_balance_sheet,
+        get_cashflow,
+        get_income_statement,
     ):
         schema = analysis_tool.tool_call_schema.model_json_schema()
         assert "curr_date" not in schema["properties"]
@@ -73,7 +73,7 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
         trade_date: str
 
     workflow = StateGraph(ToolState)
-    workflow.add_node("tools", ToolNode([get_balance_sheet_for_analysis]))
+    workflow.add_node("tools", ToolNode([get_balance_sheet]))
     workflow.add_edge(START, "tools")
     workflow.add_edge("tools", END)
     graph = workflow.compile()
@@ -96,7 +96,7 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
         "tradingagents.research.tools.fundamental_data_tools.route_to_vendor",
         return_value="SAFE",
     ) as router:
-        result = graph.invoke(state)
+        result = graph.invoke(state, context=analyst_runtime(analysis_date=state["trade_date"]).context)
 
     router.assert_called_once_with(
         "get_balance_sheet",

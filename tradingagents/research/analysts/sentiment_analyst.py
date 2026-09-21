@@ -12,11 +12,13 @@ from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.runtime import Runtime
 
+from tradingagents.data.interface import route_to_vendor
 from tradingagents.data.lookahead import is_near_live, lookback_start_date
 from tradingagents.data.market_routing import market_suffix_of
 from tradingagents.data.market_signals import FetchedSentimentSignal, fetch_sentiment_signals
 from tradingagents.data.reddit import fetch_reddit_posts
 from tradingagents.data.stocktwits import fetch_stocktwits_messages
+from tradingagents.domain.common import report_language_prompt_label
 from tradingagents.research.analysts.sentiment_sources import (
     SentimentSourceInput,
     prepare_sentiment_sources,
@@ -26,7 +28,6 @@ from tradingagents.research.prompts.constraints import NO_EXTERNAL_TOOLS
 from tradingagents.research.prompts.instrument import get_instrument_context_from_state
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
-from tradingagents.research.tools.news_data_tools import get_news
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = get_news.func(ticker, news_start_date, end_date)
+            news_block = route_to_vendor("get_news", ticker, news_start_date, end_date, _provenance=True)
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
             news_block = f"<news unavailable: {type(exc).__name__}>"
@@ -128,7 +129,7 @@ def create_sentiment_analyst(llm):
             news_start_date=news_start_date,
             social_start_date=social_start_date,
             end_date=end_date,
-            output_language=runtime.context.settings.output_language,
+            output_language=report_language_prompt_label(runtime.context.settings.output_language),
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,

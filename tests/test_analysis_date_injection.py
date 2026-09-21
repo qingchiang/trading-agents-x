@@ -14,19 +14,19 @@ from tradingagents.domain.runs import AnalysisRequest
 from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
 from tradingagents.research.runtime import RunContext
-from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
-from tradingagents.research.tools.macro_data_tools import get_macro_indicators_for_analysis
+from tradingagents.research.tools.core_stock_tools import get_stock_data
+from tradingagents.research.tools.macro_data_tools import get_macro_indicators
 from tradingagents.research.tools.market_data_validation_tools import (
-    get_verified_market_snapshot_for_analysis,
+    get_verified_market_snapshot,
 )
 from tradingagents.research.tools.news_data_tools import (
-    get_global_news_for_analysis,
-    get_news_for_analysis,
+    get_global_news,
+    get_news,
 )
 from tradingagents.research.tools.prediction_markets_tools import (
-    get_prediction_markets_for_analysis,
+    get_prediction_markets,
 )
-from tradingagents.research.tools.technical_indicators_tools import get_indicators_for_analysis
+from tradingagents.research.tools.technical_indicators_tools import get_indicators
 
 
 class _ToolState(TypedDict):
@@ -35,7 +35,11 @@ class _ToolState(TypedDict):
     company_of_interest: str
 
 
-def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
+def _invoke_tool(tool, args, trade_date="2020-01-15", context=None, config=None):
+    from tests.factories import analyst_runtime
+    from tradingagents.data.config import get_config
+
+    context = context or analyst_runtime(config or get_config(), analysis_date=trade_date).context
     workflow = StateGraph(
         _ToolState,
         **({"context_schema": RunContext} if context is not None else {}),
@@ -69,20 +73,20 @@ def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
 @pytest.mark.unit
 def test_market_and_news_tool_schemas_hide_workflow_dates():
     tools = (
-        get_stock_data_for_analysis,
-        get_indicators_for_analysis,
-        get_verified_market_snapshot_for_analysis,
-        get_news_for_analysis,
-        get_global_news_for_analysis,
-        get_macro_indicators_for_analysis,
-        get_prediction_markets_for_analysis,
+        get_stock_data,
+        get_indicators,
+        get_verified_market_snapshot,
+        get_news,
+        get_global_news,
+        get_macro_indicators,
+        get_prediction_markets,
     )
     for analysis_tool in tools:
         properties = analysis_tool.tool_call_schema.model_json_schema()["properties"]
         assert "curr_date" not in properties
         assert "end_date" not in properties
     assert set(
-        get_news_for_analysis.tool_call_schema.model_json_schema()["properties"]
+        get_news.tool_call_schema.model_json_schema()["properties"]
     ) == {"ticker", "window"}
 
 
@@ -93,7 +97,7 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         return_value="SAFE",
     ) as router:
         result = _invoke_tool(
-            get_stock_data_for_analysis,
+            get_stock_data,
             {"symbol": "NVDA", "start_date": "2019-12-01"},
         )
 
@@ -137,7 +141,7 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
     ):
         warnings.simplefilter("always")
         result = _invoke_tool(
-            get_stock_data_for_analysis,
+            get_stock_data,
             {"symbol": "NVDA", "start_date": "2019-12-01"},
             context=context,
         )
@@ -164,15 +168,11 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
 def test_news_tool_node_derives_window_from_injected_trade_date():
     with (
         mock.patch(
-            "tradingagents.research.tools.news_data_tools.get_config",
-            return_value={"ticker_news_lookback_days": 14},
-        ),
-        mock.patch(
             "tradingagents.research.tools.news_data_tools.route_to_vendor",
             return_value="SAFE",
         ) as router,
     ):
-        _invoke_tool(get_news_for_analysis, {"ticker": "9984.T"})
+        _invoke_tool(get_news, {"ticker": "9984.T"})
 
     router.assert_called_once_with(
         "get_news",
@@ -190,7 +190,7 @@ def test_news_tool_node_supports_bounded_extended_window():
         return_value="SAFE",
     ) as router:
         _invoke_tool(
-            get_news_for_analysis,
+            get_news,
             {"ticker": "9984.T", "window": "extended"},
         )
 
@@ -205,20 +205,19 @@ def test_news_tool_node_supports_bounded_extended_window():
 
 @pytest.mark.unit
 def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
+    from tradingagents.configuration.defaults import build_default_config
+
+    config = {**build_default_config(), "ticker_news_lookback_days": 120}
     with (
-        mock.patch(
-            "tradingagents.research.tools.news_data_tools.get_config",
-            return_value={"ticker_news_lookback_days": 120},
-        ),
         mock.patch(
             "tradingagents.research.tools.news_data_tools.route_to_vendor",
             return_value="SAFE",
         ) as router,
     ):
-        _invoke_tool(get_news_for_analysis, {"ticker": "9984.T"})
+        _invoke_tool(get_news, {"ticker": "9984.T"}, config=config)
         _invoke_tool(
-            get_news_for_analysis,
-            {"ticker": "9984.T", "window": "extended"},
+            get_news,
+            {"ticker": "9984.T", "window": "extended"}, config=config,
         )
 
     expected = mock.call(
@@ -253,7 +252,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
     )
 
     historical = _invoke_tool(
-        get_prediction_markets_for_analysis,
+        get_prediction_markets,
         {"topic": "Fed rate cut", "limit": 3},
     )
 
@@ -265,7 +264,7 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
         lambda curr_date, ticker: True,
     )
     live = _invoke_tool(
-        get_prediction_markets_for_analysis,
+        get_prediction_markets,
         {"topic": "Fed rate cut", "limit": 3},
         trade_date="2026-07-17",
     )

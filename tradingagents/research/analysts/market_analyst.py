@@ -6,11 +6,11 @@ from tradingagents.research.prompts.instrument import get_instrument_context_fro
 from tradingagents.research.prompts.language import get_language_instruction
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.state import missing_evidence_blocks
-from tradingagents.research.tools.core_stock_tools import get_stock_data_for_analysis
+from tradingagents.research.tools.core_stock_tools import get_stock_data
 from tradingagents.research.tools.market_data_validation_tools import (
-    get_verified_market_snapshot_for_analysis,
+    get_verified_market_snapshot,
 )
-from tradingagents.research.tools.technical_indicators_tools import get_indicators_for_analysis
+from tradingagents.research.tools.technical_indicators_tools import get_indicators
 
 
 def create_market_analyst(llm):
@@ -20,9 +20,9 @@ def create_market_analyst(llm):
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
-            get_stock_data_for_analysis,
-            get_indicators_for_analysis,
-            get_verified_market_snapshot_for_analysis,
+            get_stock_data,
+            get_indicators,
+            get_verified_market_snapshot,
         ]
 
         system_message = (

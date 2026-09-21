@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 
 from langgraph.prebuilt import ToolRuntime
 
@@ -25,9 +25,7 @@ def tool_runtime_scope(
     dataflow_config = getattr(context, "dataflow_config", None)
     analysis_date = getattr(request, "analysis_date", None)
     if analysis_date is None or not isinstance(dataflow_config, Mapping):
-        with nullcontext():
-            yield injected_date
-        return
+        raise ValueError("data tools require an explicit analysis runtime context")
     expected = analysis_date.isoformat()
     if injected_date != expected:
         raise ValueError(
