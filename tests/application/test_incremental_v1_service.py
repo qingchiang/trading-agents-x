@@ -25,6 +25,7 @@ from tradingagents.domain.collection import (
     IncrementalEvidenceCandidate,
 )
 from tradingagents.domain.common import NumericAuditStatus, ReportLanguage, RunStatus
+from tradingagents.domain.data import SourceObservation
 from tradingagents.domain.decision_components import baseline_component_ids
 from tradingagents.domain.errors import (
     InvalidIncrementalBaselineError,
@@ -865,27 +866,49 @@ def test_incremental_assessment_respects_one_repair_budget(
         ("updated", True),
     ),
 )
+@pytest.mark.parametrize("extra_source_text", ["", "\nAdditional source limitation."])
 def test_production_incremental_synthesis_generates_decision_only_when_updated(
     app_settings,
     repository,
     outcome: str,
     full_research_required: bool,
+    extra_source_text: str,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
     baseline_decision = repository.get_result(baseline.run_id).decision
     assert baseline_decision is not None
-    candidate = IncrementalEvidenceCandidate(
-        evidence=EvidenceItem.create(
-            source="fixture.news",
-            evidence_type="filing",
-            requested_date=date(2026, 7, 24),
-            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
-            content="A bounded update for conditional Decision generation.",
-        )
+    observation = SourceObservation(
+        source="fixture.news", kind="filing", key="quarterly-update",
+        values={"detail": "UNIQUE-SOURCE-FACT", "amount": 0, "unit": "USD"},
+        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+        available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+        timing="Publication time verified", fallback=True,
     )
+    evidence = observation.evidence(date(2026, 7, 24), instrument="NVDA")
+    if extra_source_text:
+        evidence = EvidenceItem.create(
+            **evidence.model_dump(exclude={"ref", "content", "origins"}),
+            origins=evidence.origins,
+            content=observation.content + extra_source_text,
+        )
+    candidate = IncrementalEvidenceCandidate(evidence=evidence)
     component_ids = baseline_component_ids(baseline_decision)
+
+    def collect(request, *, data_context):
+        result = _pit_collection(request, candidate)
+        domains = tuple(
+            domain.model_copy(update={"sources": _sources(
+                candidate.evidence.source, observation.retrieved_at, fallback=True,
+            )}) if domain.domain == "news" else domain
+            for domain in result.collection_summary.domains
+        )
+        return result.model_copy(update={
+            "collection_summary": result.collection_summary.model_copy(
+                update={"domains": domains},
+            ),
+        })
 
     class _Invoker:
         def __init__(self, parsed, prompts):
@@ -989,7 +1012,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
+        incremental_collector=collect,
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1012,6 +1035,17 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     )
     assert semantic.prompts
     assert serializer.prompts
+    saved = repository.get_evidence(result.run_id)
+    assert saved.items == (candidate.evidence,)
+    for prompt in (*semantic.prompts, *serializer.prompts):
+        assert prompt.count("UNIQUE-SOURCE-FACT") == (2 if extra_source_text else 1)
+        if extra_source_text:
+            assert "Additional source limitation." in prompt
+        assert candidate.evidence.ref in prompt
+        assert "2026-07-22T12:00:00Z" in prompt
+        assert "2026-07-24T12:00:00+00:00" in prompt
+        assert "Publication time verified" in prompt
+        assert '"fallback":true' in prompt
     assert all(
         confidence_instruction in prompt for prompt in (*semantic.prompts, *serializer.prompts)
     )

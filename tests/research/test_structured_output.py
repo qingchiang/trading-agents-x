@@ -525,6 +525,36 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("has_candidate", [False, True])
+def test_numeric_repair_receives_its_value_catalog_exactly_once(has_candidate: bool) -> None:
+    item = EvidenceItem.create(
+        source="fixture", evidence_type="numeric-context-marker",
+        requested_date=date(2026, 7, 24), effective_date=date(2026, 7, 24), value=100,
+    )
+    bundle = EvidenceBundle(
+        instrument="NVDA", analysis_date=date(2026, 7, 24), items=(item,),
+    )
+    core = {"raw": AIMessage(content=""), "parsed": _decision_payload(item.ref)}
+    numeric = _FakeLLM(
+        primary=(
+            {"raw": AIMessage(content=""), "parsed": {"requested": "invalid"}}
+            if has_candidate else RuntimeError("unavailable")
+        ),
+        recovery=RuntimeError("unavailable"),
+    )
+
+    invoke_research_decision(
+        _FakeLLM(primary=core, recovery=core), numeric_llm=numeric,
+        prompt="Completed synthesis brief.", state={"evidence_bundle": bundle.model_dump()},
+        node="committee.final.serialize", require_risk_adjustments=False,
+    )
+
+    assert len(numeric.calls) == 2
+    for _method, prompt in numeric.calls:
+        assert prompt.count("numeric-context-marker (fixture)") == 1
+        assert item.ref in prompt
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_reason", "expected_issue"),
     (

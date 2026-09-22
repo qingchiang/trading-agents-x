@@ -62,16 +62,7 @@ class PreparedEvidence:
 
     @property
     def inline_characters(self) -> int:
-        return len(
-            json.dumps(
-                {
-                    "catalog": self.catalog,
-                    "memo": self.memo,
-                    "query_results": self.query_results,
-                },
-                ensure_ascii=False,
-            )
-        )
+        return len(prepared_evidence_prompt(self))
 
 
 def build_evidence_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
@@ -266,13 +257,68 @@ def prepared_evidence_prompt(prepared: PreparedEvidence) -> str:
     """Render the bounded evidence workset for a formal structured prompt."""
 
     return (
-        "EVIDENCE CATALOG (metadata and analytical views only):\n"
-        + json.dumps(prepared.catalog, ensure_ascii=False)
+        "EVIDENCE CATALOG (items inherit item_defaults; metadata and analytical views only):\n"
+        + json.dumps(
+            compact_evidence_catalog(prepared.catalog),
+            ensure_ascii=False, separators=(",", ":"),
+        )
         + "\n\nEPHEMERAL EVIDENCE MEMO:\n"
         + prepared.memo
-        + "\n\nACTUAL READ-ONLY QUERY RESULTS:\n"
-        + json.dumps(prepared.query_results, ensure_ascii=False)
+        + "\n\nACTUAL READ-ONLY QUERY RESULTS "
+        "(inherit unchanged metadata from the catalog by ref):\n"
+        + json.dumps(
+            evidence_query_deltas(prepared.catalog, prepared.query_results),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     )
+
+
+def evidence_query_deltas(
+    catalog: dict[str, Any],
+    results: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """Render source bodies once beside their already supplied catalog metadata.
+
+    Queries remain complete audit objects. Only exact metadata repetitions are
+    removed from the prompt; unknown refs, table results and differing values
+    pass through unchanged.
+    """
+    by_ref = {item["ref"]: item for item in catalog["items"]}
+    projected = []
+    for result in results:
+        metadata = by_ref.get(result.get("ref"), {})
+        projected.append({
+            key: value
+            for key, value in result.items()
+            if key == "ref" or key not in metadata or value != metadata[key]
+        })
+    return tuple(projected)
+
+
+def compact_evidence_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Factor repeated metadata into explicit defaults without dropping facts."""
+    items = catalog["items"]
+    candidates = {
+        "available_at": None, "value": None, "unit": None,
+        "dataset_id": None, "analytical_views": None,
+        "table_ids": [], "origins": [], "fallback": False,
+        "requested_date": catalog["analysis_date"],
+    }
+    defaults = {
+        key: value for key, value in candidates.items()
+        if all(key in item for item in items)
+        and sum(item[key] == value for item in items) > 1
+    }
+    return {
+        **catalog,
+        "item_defaults": defaults,
+        "items": [
+            {key: value for key, value in item.items()
+             if key not in defaults or value != defaults[key]}
+            for item in items
+        ],
+    }
 
 
 def _catalog_item(item: EvidenceItem, table_ids: list[str]) -> dict[str, Any]:

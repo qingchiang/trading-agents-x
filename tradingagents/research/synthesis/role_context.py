@@ -13,6 +13,8 @@ from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, ClaimImportance
 from tradingagents.research.synthesis.evidence_context import (
     build_evidence_catalog,
+    compact_evidence_catalog,
+    evidence_query_deltas,
     get_evidence_item_payload,
 )
 
@@ -35,7 +37,13 @@ You are operating inside an evidence-first, research-only system.
   reference levels are allowed. Never provide account allocation, position
   sizing, order quantities/types, or mandatory execution instructions.
 - Preserve readable analysis and use evidence footnotes selectively rather than
-  citing every sentence or table cell."""
+  citing every sentence or table cell.
+- Organize the response around this role's material judgments, causal reasoning,
+  counterevidence and unresolved uncertainty. Refer to upstream conclusions
+  concisely instead of retelling whole reports or repeating their tables.
+- Routed evidence inherits catalog metadata by ref; its passage supplements
+  that entry rather than representing an additional independent source.
+  Catalog items inherit item_defaults unless the item explicitly overrides them."""
 
 
 @dataclass(frozen=True)
@@ -100,7 +108,7 @@ class RoleContextBuilder:
             "stage": stage,
             "analyst_reports": reports,
             "artifacts": artifacts or {},
-            "routed_evidence": evidence,
+            "routed_evidence": evidence_query_deltas(self.catalog, evidence),
         }
         role_objective = self._role_objective(
             title=title,
@@ -209,7 +217,7 @@ class RoleContextBuilder:
                 "English",
             ),
             "profile": self.state.get("profile"),
-            "evidence_catalog": self.catalog,
+            "evidence_catalog": compact_evidence_catalog(self.catalog),
         }
         language_rule = (
             "\n- Write every human-readable field in this complete output-language "

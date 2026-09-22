@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
@@ -7,8 +8,62 @@ from tradingagents.domain.evidence_tables import extract_evidence_tables
 from tradingagents.research.synthesis.evidence_context import (
     build_analyst_evidence_context,
     build_evidence_catalog,
+    prepared_evidence_prompt,
     query_evidence_table_payload,
 )
+
+
+def test_analyst_prompt_supplies_catalog_metadata_only_once() -> None:
+    bundle = _bundle(20)
+    snapshot = bundle.model_dump_json()
+    prepared = build_analyst_evidence_context(
+        bundle, evidence_refs=(bundle.items[0].ref,),
+    )
+
+    prompt = prepared_evidence_prompt(prepared)
+
+    assert prompt.count('"latest_close"') == 1
+    assert "2025-01-02,99,102,98,100,1000000" in prompt
+    assert bundle.items[0].ref in prompt
+    assert bundle.model_dump_json() == snapshot
+
+
+def test_prompt_catalog_defaults_preserve_every_item_field() -> None:
+    bundle = _bundle(20)
+    other = EvidenceItem.create(
+        source="second source", evidence_type="observation",
+        requested_date=bundle.analysis_date, value=0, unit="USD", fallback=True,
+    )
+    bundle = EvidenceBundle(
+        instrument=bundle.instrument, analysis_date=bundle.analysis_date,
+        items=(*bundle.items, other), tables=bundle.tables,
+    )
+    prepared = build_analyst_evidence_context(
+        bundle, evidence_refs=tuple(item.ref for item in bundle.items),
+    )
+
+    prompt = prepared_evidence_prompt(prepared)
+    catalog = json.loads(prompt.split("\n", 1)[1].split("\n\nEPHEMERAL")[0])
+
+    assert "item_defaults" in catalog
+    restored = [{**catalog["item_defaults"], **item} for item in catalog["items"]]
+    assert restored == prepared.catalog["items"]
+    assert len(json.dumps(catalog)) < len(json.dumps(prepared.catalog))
+
+
+def test_analyst_prompt_preserves_source_and_table_queries_with_catalog_inheritance() -> None:
+    bundle = _bundle(200)
+    prepared = build_analyst_evidence_context(
+        bundle, evidence_refs=(bundle.items[0].ref,),
+    )
+    prompt = prepared_evidence_prompt(prepared)
+    queries = json.loads(prompt.split("(inherit unchanged metadata from the catalog by ref):\n")[1])
+    source = queries[0]
+
+    assert {**prepared.catalog["items"][0], **source} == prepared.query_results[0]
+    assert queries[1:] == list(prepared.query_results[1:])
+    assert source["content_omitted"] is True
+    assert source["content"] is None
 
 
 def _bundle(rows: int = 20) -> EvidenceBundle:

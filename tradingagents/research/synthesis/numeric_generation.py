@@ -325,6 +325,8 @@ def _invoke_decision_numeric(
             "When requirements are present, requested must be "
             f"true. {percentage_rules} {display_scale_rules} "
             f"{reference_label_rules} {language_rules}\n"
+        ),
+        candidate_repair_context=(
             "VALID OBSERVED VALUE REFS:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"

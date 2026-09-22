@@ -102,6 +102,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         include_candidate_in_repair: bool = False,
         candidate_only_repair: bool = False,
         repair_instructions: str | None = None,
+        candidate_repair_context: str | None = None,
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
         ) = None,
@@ -119,6 +120,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         self.include_candidate_in_repair = include_candidate_in_repair
         self.candidate_only_repair = candidate_only_repair
         self.repair_instructions = repair_instructions
+        self.candidate_repair_context = candidate_repair_context
         self.truncation_recovery = truncation_recovery
         self.sectioned_recovery_reasons = sectioned_recovery_reasons
         self.sectioned_recovery_after_repair = sectioned_recovery_after_repair
@@ -301,6 +303,18 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
             reason_code=primary_reason,
             validation_issues=primary_validation_issues,
         )
+        repair_instructions = self.repair_instructions
+        # Supplement candidate-only repairs when the original task is omitted.
+        # Without a candidate, that task already contains this context.
+        if (
+            self.candidate_only_repair
+            and self.include_candidate_in_repair
+            and primary_candidate is not None
+            and self.candidate_repair_context
+        ):
+            repair_instructions = (
+                (repair_instructions or "") + "\n" + self.candidate_repair_context
+            )
         recovery_prompt = _recovery_prompt(
             prompt,
             schema=self.schema,
@@ -312,7 +326,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                 if self.include_candidate_in_repair
                 else None
             ),
-            repair_instructions=self.repair_instructions,
+            repair_instructions=repair_instructions,
             candidate_only=self.candidate_only_repair,
         )
         try:

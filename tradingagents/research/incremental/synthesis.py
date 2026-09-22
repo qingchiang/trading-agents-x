@@ -25,6 +25,7 @@ from tradingagents.domain.incremental import (
     ResearchReassessment,
 )
 from tradingagents.llm.runtime import RunLLMs
+from tradingagents.research.incremental.context import incremental_prompt_input
 from tradingagents.research.metrics import MetricsCallback
 from tradingagents.research.presentation import parse_markdown_sections
 from tradingagents.research.synthesis.deliberation import write_research_markdown
@@ -150,6 +151,7 @@ def synthesize_incremental(
     serializer_llm = llms.deep_serializer
 
     output_language = report_language_prompt_label(run_settings.output_language)
+    bounded_input = incremental_prompt_input(synthesis_input)
     semantic_prompt = (
         "Write a concise, user-facing Incremental Research analysis report. Assess every Full "
         "Baseline Decision Component using only the typed input. Do not use sibling "
@@ -160,7 +162,7 @@ def synthesize_incremental(
         "and unresolved questions. Keep audit metadata out of the narrative. "
         f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
         f"Write all human-readable prose in {output_language}.\n\n"
-        + synthesis_input.model_dump_json(indent=2)
+        + bounded_input
     )
     with metrics.phase("incremental.synthesis.semantic", event_writer=event_writer):
         semantic_output = write_research_markdown(
@@ -230,14 +232,16 @@ def synthesize_incremental(
         "rewritten. An overturned component always requires updated. Do not serialize a "
         "Research Decision. Full Research Required is independent of decision_outcome, so "
         "either outcome may include a reason. Every reassessment entry and the outcome need "
-        "a concise reason. Include Evidence references only when the permitted bundles "
+        "a concise reason. Copy component_id exactly from baseline_component_ids; "
+        "never construct IDs from section labels or prose. Include Evidence references "
+        "only when the permitted bundles "
         "support them. Limited or missing optional Research Availability alone must not "
         "create a Full Research Required reason, and required_coverage codes are forbidden. "
         "Use only the typed reason codes for material thesis reversal, identity uncertainty, "
         "unreliable attribution, or material Evidence conflict. Write all human-readable "
         f"prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
         f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
-        f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+        f"BOUNDED INPUT:\n{bounded_input}"
     )
     assessment_example = {
         "reassessment": {
@@ -294,7 +298,7 @@ def synthesize_incremental(
             f"readable prose in {output_language}. {_FINAL_CONFIDENCE_PROSE_INSTRUCTION}\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
-            f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+            f"BOUNDED INPUT:\n{bounded_input}"
         )
         decision_example = {"decision": baseline_decision.model_dump(mode="json")}
 
@@ -340,7 +344,7 @@ def synthesize_incremental(
                         f"Write all human-readable prose in {output_language}.\n\n"
                         f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
                         f"SMALL ASSESSMENT:\n{assessment.model_dump_json(indent=2)}\n\n"
-                        f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+                        f"BOUNDED INPUT:\n{bounded_input}"
                     ),
                     example={
                         "decision": _incremental_decision_core(baseline_decision).model_dump(

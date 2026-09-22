@@ -180,7 +180,9 @@ Quality requirements:
 Report requirements:
 - Return Markdown only, not JSON and not a code fence.
 - Use clear headings, complete analysis, and informative GFM tables whenever
-  comparison helps the reader. There is no table-count or table-size limit.
+  comparison supports a material conclusion. Explain the implications of a
+  table instead of repeating its values in prose. Group related observations;
+  preserve consequential differences, counterevidence and coverage limits.
 - Tables are presentation material: localize headings, units, scale, and
   precision for readers. Do not reproduce a complete raw daily-price or source
   table; summarize or resample it and leave the complete table in Evidence.

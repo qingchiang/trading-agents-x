@@ -331,14 +331,14 @@ class AnalysisService:
             "research_schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
             "application_version": __version__,
             "prompt_versions": {
-                "analyst": "v6-sealed-context",
-                "research_case": "v6-readable",
-                "debate_agenda": "v9-thinking-json",
-                "rebuttal": "v5-compact",
-                "research_judge": "v6-readable",
-                "risk_review": "v6-readable",
-                "final_committee_brief": "v3-input-evidence-binding",
-                "final_committee": "v14-dimensionless-display-scale",
+                "analyst": "v7-compact-evidence",
+                "research_case": "v7-compact-evidence",
+                "debate_agenda": "v10-focused-context",
+                "rebuttal": "v6-compact-evidence",
+                "research_judge": "v7-compact-evidence",
+                "risk_review": "v7-compact-evidence",
+                "final_committee_brief": "v4-compact-evidence",
+                "final_committee": "v15-numeric-repair-context",
             },
             "research_kind": request.research_kind,
             "quick_binding": snapshot.get("quick_binding") if request.research_kind == "full" else None,
@@ -382,7 +382,7 @@ class AnalysisService:
         }
         if request.research_kind == "incremental":
             method_snapshot["prompt_versions"] = {
-                "incremental_synthesis": "v1-bounded-full-baseline",
+                "incremental_synthesis": "v2-compact-source-content",
             }
         canonical = json.dumps(
             method_snapshot,

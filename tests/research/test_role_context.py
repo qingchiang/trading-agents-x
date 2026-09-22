@@ -106,6 +106,24 @@ def test_full_report_context_does_not_duplicate_primary_claims() -> None:
     ) == 1
 
 
+def test_role_prompt_keeps_one_copy_of_routed_evidence_metadata() -> None:
+    builder = RoleContextBuilder(_state())
+    snapshot = builder.bundle.model_dump_json()
+
+    context = builder.build(
+        title="Bull Researcher",
+        objective="Build the constructive case.",
+        stage="opening_case",
+        report_mode="full",
+        evidence_refs=builder.primary_evidence_refs(),
+    )
+
+    assert context.prompt.count('"latest_close"') == 1
+    assert "Complete localized report" in context.prompt
+    assert context.evidence_refs == builder.primary_evidence_refs()
+    assert builder.bundle.model_dump_json() == snapshot
+
+
 def test_agenda_context_contains_cases_without_the_evidence_catalog() -> None:
     state = _state()
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])

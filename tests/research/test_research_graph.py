@@ -366,7 +366,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         )
         assert (
             decision_artifact.prompt_version
-            == "final-committee-v14-dimensionless-display-scale"
+            == "final-committee-v15-numeric-repair-context"
         )
         final_prompt = next(
             prompt
@@ -717,8 +717,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v6-sealed-context"),
-        ("news", "analyst-news-v6-sealed-context"),
+        ("market", "analyst-market-v7-compact-evidence"),
+        ("news", "analyst-news-v7-compact-evidence"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
     agenda = next(artifact for artifact in artifacts if artifact.stage == "agenda")

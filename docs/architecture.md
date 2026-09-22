@@ -449,6 +449,14 @@ analytical views, table summaries/resampling, and source passages that do not
 duplicate a large fact table. Read-only local lookups operate on the sealed
 artifacts without recontacting the provider.
 
+Model-facing catalogs factor repeated metadata into explicit `item_defaults`;
+each item's explicit fields override those defaults. Source-query passages
+inherit unchanged catalog metadata by Evidence ref rather than repeating it.
+Read-only query results and sealed Evidence remain complete. This is a rendering
+projection, not a change to source selection, Evidence identity or PIT admission.
+Analyst context character metrics measure the rendered prepared Evidence text;
+they exclude the collection memo and remaining report instructions.
+
 Data adapters may attach small producer-owned structured numeric facts (for
 example analyst target prices and consensus EPS) beside readable source prose.
 Evidence sealing converts those facts into `source_format=structured` tables,
@@ -508,6 +516,12 @@ numeric fields are omitted with an explicit warning instead of discarding the
 strict qualitative conclusion. Failed initial and repair candidates are kept
 only as a size-bounded, recursively redacted numeric audit appendix; raw
 provider messages, prompts, and hidden reasoning are never persisted.
+Numeric repair includes its value/scenario/requirement catalogs exactly once:
+repairs with a parsed candidate receive the catalogs as supplemental context,
+while repairs without a candidate retain them in the original task. The repair
+budget and numeric validation rules are unchanged. Analyst and deliberation
+prompts ask for material reasoning and counterevidence without repeated report
+retelling; they impose no hard narrative-length cap.
 
 Every artifact records its prompt version and top-level structured generation
 method. Agenda's top-level method describes Agenda generation; Final's
@@ -610,6 +624,14 @@ referenceable but is never copied into the current Node.
 
 The semantic synthesis call produces both the readable Incremental analysis
 brief and the source text used by strict structured serializers.
+All synthesis stages use the same compact input projection. When source content
+exactly matches a producer observation's kind, key and serialized values, the
+projection supplies that structured observation once and labels the omitted
+duplicate body. Any additional source text prevents this substitution. Original
+Evidence, provenance, retrieval/publication times, source limitations and fallback
+facts remain in the immutable bundle. The input also enumerates the valid Full
+Baseline component IDs so serializers can copy them without inventing names.
+The Method Snapshot versions this projection; historical snapshots are not rewritten.
 Markdown Evidence references are normalized against the baseline and current
 bundles before the brief is committed. A bounded assessment serializer then
 produces the required Research Reassessment, whole-Decision outcome, outcome
