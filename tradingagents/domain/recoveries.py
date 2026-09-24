@@ -9,15 +9,12 @@ from tradingagents.domain.runs import RunEvent, StructuredRecoveryNotice
 
 _RETRY_EVENTS = {
     "node.output_retry": "structured",
-    "node.numeric_audit_retry": "numeric",
 }
 _RECOVERED_EVENTS = {
     "node.output_recovered": "structured",
-    "node.numeric_audit_recovered": "numeric",
 }
 _FAILED_EVENTS = {
     "node.output_failed": "structured",
-    "node.numeric_audit_degraded": "numeric",
 }
 
 

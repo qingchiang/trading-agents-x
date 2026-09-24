@@ -118,9 +118,6 @@ class ArtifactsOperations:
                 "node.output_retry",
                 "node.output_recovered",
                 "node.output_failed",
-                "node.numeric_audit_retry",
-                "node.numeric_audit_recovered",
-                "node.numeric_audit_degraded",
             }
         )
         with self.sessions() as session:

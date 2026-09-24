@@ -249,7 +249,7 @@ def migrate_current(source: Path, destination: Path) -> MigrationReport:
                     "TRADINGAGENTS_DATABASE_PATH": str(working),
                 }
             )
-            upgrade_database(settings)
+            upgrade_database(settings, revision="0100_independent")
             os.chmod(working, 0o600)
             with closing(sqlite3.connect(snapshot.as_uri() + "?mode=ro", uri=True)) as old:
                 old.execute("PRAGMA query_only=ON")
@@ -259,6 +259,10 @@ def migrate_current(source: Path, destination: Path) -> MigrationReport:
                     new.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     new.execute("PRAGMA journal_mode=DELETE")
                 old.rollback()
+            upgrade_database(settings)
+            with closing(sqlite3.connect(working)) as migrated:
+                migrated.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                migrated.execute("PRAGMA journal_mode=DELETE")
             with working.open("rb") as handle:
                 os.fsync(handle.fileno())
             if _source_signature(source) != before:

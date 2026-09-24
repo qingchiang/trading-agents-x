@@ -191,7 +191,7 @@ print(result.decision)
 
 root package が公開するのは `TradingAgents`、`AnalysisRequest`、
 `AnalysisResult`、`ResearchDecision`、`RunProfile`、`__version__` のみです。
-Evidence、deliberation、numeric audit の内部型は、それぞれの所有 module
+Evidence、deliberation、Decision reference の内部型は、それぞれの所有 module
 から import します。
 
 旧 `TradingAgentsGraph` 公開 export と `(final_state, decision)` tuple は

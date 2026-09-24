@@ -11,7 +11,7 @@ repository hygiene.
 | Instrument admission, dates, Evidence, Decision and numeric presentation | `tests/domain` |
 | Full profiles across US/JP/CN, model-role budgets, recovery and sealed Evidence | `tests/research/test_research_graph.py` |
 | Readable deliberation and decision generation | `tests/research/test_deliberation.py`, `test_decision_generation.py` |
-| Numeric requirements, audit assembly and recorded regressions | `tests/research/test_numeric_requirements.py`, `test_numeric_audit.py`, `test_live_numeric_regressions.py` |
+| Decision references and numeric-audit removal migration | `tests/research/test_decision_references.py`, `tests/persistence/test_remove_numeric_audit.py` |
 | Routing, actual-source fallback, cache identity, PIT and bounded collection | `tests/data`, including `cn` and `jp` |
 | Independent connections, credential rotation, defaults and explicit import | `tests/configuration` |
 | SDK protocol differences and model discovery | `tests/llm` |

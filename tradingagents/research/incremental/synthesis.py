@@ -31,9 +31,11 @@ from tradingagents.research.presentation import parse_markdown_sections
 from tradingagents.research.synthesis.deliberation import write_research_markdown
 from tradingagents.research.synthesis.drafts import (
     ResearchDecisionCoreDraft,
+    ResearchDecisionDraft,
     ResearchScenarioCoreDraft,
 )
 from tradingagents.research.synthesis.output_validation import OutputValidationError
+from tradingagents.research.synthesis.references import REFERENCE_GUIDANCE, assemble_decision
 from tradingagents.research.synthesis.structured_output import (
     StructuredOutputResult,
     StructuredOutputRunner,
@@ -82,7 +84,7 @@ class _IncrementalDecisionPayload(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    decision: ResearchDecision
+    decision: ResearchDecisionDraft
 
 
 def _incremental_decision_core(decision: ResearchDecision) -> ResearchDecisionCoreDraft:
@@ -108,29 +110,6 @@ def _incremental_decision_core(decision: ResearchDecision) -> ResearchDecisionCo
         ),
         risk_review_adjustments=decision.risk_review_adjustments,
     )
-
-
-def _incremental_decision_from_core(
-    core: ResearchDecisionCoreDraft,
-    baseline: ResearchDecision,
-) -> ResearchDecision:
-    baseline_scenarios = {scenario.kind: scenario for scenario in baseline.scenarios}
-    payload = core.model_dump(mode="python")
-    payload["scenarios"] = tuple(
-        {
-            **scenario.model_dump(mode="python"),
-            "reference_ranges": baseline_scenarios[scenario.kind].reference_ranges,
-        }
-        for scenario in core.scenarios
-    )
-    for field in (
-        "valuation_assessment",
-        "market_reference_levels",
-        "calculation_records",
-        "numeric_audit_status",
-    ):
-        payload[field] = getattr(baseline, field)
-    return ResearchDecision.model_validate(payload)
 
 
 def synthesize_incremental(
@@ -161,8 +140,7 @@ def synthesize_incremental(
         "its effect on the current Decision, stock and benchmark Performance context, "
         "and unresolved questions. Keep audit metadata out of the narrative. "
         f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
-        f"Write all human-readable prose in {output_language}.\n\n"
-        + bounded_input
+        f"Write all human-readable prose in {output_language}.\n\n" + bounded_input
     )
     with metrics.phase("incremental.synthesis.semantic", event_writer=event_writer):
         semantic_output = write_research_markdown(
@@ -214,8 +192,7 @@ def synthesize_incremental(
             raise OutputValidationError("incremental.outcome.overturned_unchanged")
         allowed = set(allowed_evidence_refs)
         if any(
-            not set(entry.evidence_refs).issubset(allowed)
-            for entry in value.reassessment.entries
+            not set(entry.evidence_refs).issubset(allowed) for entry in value.reassessment.entries
         ) or any(
             not set(reason.evidence_refs).issubset(allowed)
             for reason in value.full_research_required_reasons
@@ -287,8 +264,8 @@ def synthesize_incremental(
             "Serialize one complete updated Research Decision from the semantic brief, "
             "small assessment, and typed bounded input. The Decision must differ from the "
             "Full Baseline in at least one real field. Do not emit a field patch or changed-"
-            "fields list. Primary generation may update valuation, scenarios, market "
-            "references, and calculations when supported by permitted Evidence. Classify "
+            "fields list. Preserve supported current scenario ranges and market references. "
+            f"{REFERENCE_GUIDANCE} Classify "
             "confidence by rubric, not as a probability: low means the core judgment remains "
             "tentative because important gaps, conflicts, or unresolved assumptions remain; "
             "medium means the main direction is supported but important uncertainty could "
@@ -305,12 +282,14 @@ def synthesize_incremental(
         def validate_decision(
             value: _IncrementalDecisionPayload,
         ) -> _IncrementalDecisionPayload:
-            if value.decision.model_dump(mode="json") == baseline_decision.model_dump(
-                mode="json"
-            ):
+            candidate = assemble_decision(
+                value.decision,
+                bundle=synthesis_input.incremental_evidence,
+                allowed_evidence_refs=set(allowed_evidence_refs),
+                node="incremental.synthesis.decision",
+            )
+            if candidate == baseline_decision:
                 raise OutputValidationError("incremental.decision.updated_identical")
-            if not set(value.decision.evidence_refs).issubset(set(allowed_evidence_refs)):
-                raise OutputValidationError("incremental.decision.refs_invalid")
             return value
 
         def decision_core_recovery() -> StructuredOutputResult[_IncrementalDecisionPayload]:
@@ -338,8 +317,8 @@ def synthesize_incremental(
                         "core from the semantic brief and bounded input. Include exactly "
                         "base, bull, and bear scenarios. Do not serialize the Research "
                         "Reassessment, Full Research Required reasons, or any optional "
-                        "numeric appendix; the application preserves the audited numeric "
-                        "appendix from the direct Full Baseline. "
+                        "reference fields. Unavailable optional references remain empty; never "
+                        "copy baseline reference values into changed research automatically. "
                         f"{_FINAL_CONFIDENCE_PROSE_INSTRUCTION} "
                         f"Write all human-readable prose in {output_language}.\n\n"
                         f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
@@ -355,11 +334,20 @@ def synthesize_incremental(
                 )
                 .value
             )
+            event_writer(
+                {
+                    "event_type": "decision.reference_omitted",
+                    "node": "incremental.synthesis.decision",
+                    "payload": {
+                        "field_path": "optional_references",
+                        "validation_issues": ["reference.core_only_recovery"],
+                    },
+                }
+            )
             return StructuredOutputResult(
                 value=_IncrementalDecisionPayload(
-                    decision=_incremental_decision_from_core(
-                        decision_core.decision,
-                        baseline_decision,
+                    decision=ResearchDecisionDraft.model_validate(
+                        decision_core.decision.model_dump()
                     )
                 ),
                 generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
@@ -387,7 +375,13 @@ def synthesize_incremental(
                 example=decision_example,
                 allowed_evidence_refs=allowed_evidence_refs,
             )
-        decision = decision_output.value.decision
+        decision = assemble_decision(
+            decision_output.value.decision,
+            bundle=synthesis_input.incremental_evidence,
+            allowed_evidence_refs=set(allowed_evidence_refs),
+            node="incremental.synthesis.decision",
+            event_writer=event_writer,
+        )
 
     return IncrementalSynthesis(
         analysis_brief=analysis_brief,

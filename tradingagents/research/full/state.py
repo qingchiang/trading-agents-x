@@ -6,7 +6,6 @@ from typing import Annotated, Any, TypedDict
 
 from tradingagents.domain.decision import ResearchDecision
 from tradingagents.domain.evidence import EvidenceBundle
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reports import AnalystReport, ResearchWarning
 
 
@@ -41,7 +40,6 @@ class ResearchState(TypedDict, total=False):
     judge_draft: dict[str, Any]
     decision_brief: dict[str, Any]
     final_decision: dict[str, Any]
-    numeric_audit: dict[str, Any] | None
     rebuttal_round: int
     debate_continue: bool
     warnings: Annotated[list[dict[str, Any]], operator.add]
@@ -53,5 +51,4 @@ class GraphExecution:
     evidence: EvidenceBundle
     reports: dict[str, AnalystReport]
     decision: ResearchDecision
-    numeric_audit: DecisionNumericAuditAppendix | None = None
     warnings: tuple[ResearchWarning, ...] = ()

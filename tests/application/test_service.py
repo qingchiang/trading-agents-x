@@ -62,10 +62,10 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
     run = repository.get_run(result.run_id)
 
     assert result.status is RunStatus.SUCCEEDED
-    assert run.research_schema_version == "2"
+    assert run.research_schema_version == "3"
     assert run.information_cutoff_at == datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)
     assert run.method_snapshot["schema_version"] == "1"
-    assert run.method_snapshot["research_schema_version"] == "2"
+    assert run.method_snapshot["research_schema_version"] == "3"
     assert run.method_snapshot["prompt_versions"]
     assert run.method_snapshot["enabled_roles"] == [
         "market",

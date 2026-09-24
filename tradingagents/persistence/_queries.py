@@ -6,7 +6,6 @@ from typing import Literal
 from sqlalchemy import func, or_, select
 
 from tradingagents.domain.common import (
-    NumericAuditStatus,
     RunStatus,
     RunTrashState,
 )
@@ -20,11 +19,9 @@ from tradingagents.domain.history import (
     RunPage,
     RunSummaryView,
 )
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import (
     AnalystReport,
-    ResearchWarning,
 )
 from tradingagents.domain.runs import (
     AnalysisResult,
@@ -34,7 +31,6 @@ from tradingagents.domain.runs import (
 from tradingagents.persistence._repository_common import (
     RunNotFoundError,
     _aware,
-    _numeric_audit_warning_message,
 )
 from tradingagents.persistence.models import (
     DecisionRecord,
@@ -357,11 +353,6 @@ class QueriesOperations:
                 None,
             )
         )
-        numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(decision_record.numeric_audit_json)
-            if decision_record and decision_record.numeric_audit_json
-            else None
-        )
         evidence = (
             EvidenceBundle.model_validate(evidence_record.bundle_json) if evidence_record else None
         )
@@ -374,24 +365,7 @@ class QueriesOperations:
                         if isinstance(report, AnalystReport)
                         for warning in report.warnings
                     ),
-                    *(
-                        (
-                            ResearchWarning(
-                                code=(
-                                    f"decision.numeric_audit_{decision.numeric_audit_status.value}"
-                                ),
-                                message=(_numeric_audit_warning_message(numeric_audit)),
-                                source="committee.final.serialize.numeric",
-                            ),
-                        )
-                        if decision is not None
-                        and decision.numeric_audit_status
-                        in {
-                            NumericAuditStatus.PARTIAL,
-                            NumericAuditStatus.INCOMPLETE,
-                        }
-                        else ()
-                    ),
+
                 )
             )
         )
@@ -403,7 +377,6 @@ class QueriesOperations:
             instrument_local_name=view.instrument_local_name,
             reports=reports,
             decision=decision,
-            numeric_audit=numeric_audit,
             evidence=evidence,
             metrics=view.metrics,
             recoveries=self.list_recoveries(run_id),

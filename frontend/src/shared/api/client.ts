@@ -49,12 +49,8 @@ export type RebuttalReview = components["schemas"]["RebuttalReview"];
 export type JudgeDraft = components["schemas"]["JudgeDraft"];
 export type RiskReview = components["schemas"]["RiskReview"];
 export type ResearchDecision = components["schemas"]["ResearchDecision"];
-export type DecisionNumericAuditAppendix =
-  components["schemas"]["DecisionNumericAuditAppendix"];
-export type NumericAuditSnapshot = components["schemas"]["NumericAuditSnapshot"];
-export type NumericAuditOmission = components["schemas"]["NumericAuditOmission"];
-export type NumericRequirementCheck =
-  components["schemas"]["NumericRequirementCheck"];
+
+
 export type EvidenceBundle = components["schemas"]["EvidenceBundle"];
 export type EvidenceItem = components["schemas"]["EvidenceItem"];
 export type EvidenceTable = components["schemas"]["EvidenceTable"];
@@ -62,7 +58,6 @@ export type EvidenceTableColumn =
   components["schemas"]["EvidenceTableColumn"];
 export type EvidenceTableCell = components["schemas"]["EvidenceTableCell"];
 export type EvidenceTableRow = components["schemas"]["EvidenceTableRow"];
-export type CalculationRecord = components["schemas"]["CalculationRecord"];
 export type Capabilities = components["schemas"]["CapabilitiesResponse"];
 export type ConfigurationView = components["schemas"]["ConfigurationView"];
 export type ConfigurationValues = components["schemas"]["ConfigurationValues"];

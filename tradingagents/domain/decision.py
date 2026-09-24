@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date
 from typing import Any, Literal
 
@@ -10,10 +9,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 from tradingagents.domain.common import (
-    _DECISION_COMPONENT_PATH_PATTERN,
-    _RESEARCH_ID_PATTERN,
     FrozenModel,
-    NumericAuditStatus,
     ResearchConfidenceLevel,
     ResearchRating,
     ResearchScenarioKind,
@@ -22,14 +18,18 @@ from tradingagents.domain.common import (
     _field_value,
     _StableStrEnum,
     _unique_evidence_refs,
-    _unique_research_ids,
 )
 from tradingagents.domain.evidence import MeasurementKind
-from tradingagents.domain.numeric_audit import MarketReferenceBasis
+
+
+class MarketReferenceBasis(_StableStrEnum):
+    OBSERVED = "observed"
+    INTERPRETED = "interpreted"
+    DERIVED = "derived"
 
 
 class NumericTemporalBasis(_StableStrEnum):
-    """How the application determined the date of a formal numeric value."""
+    """Temporal scope of the supporting evidence, not a forecast date."""
 
     POINT_IN_TIME = "point_in_time"
     LIVE_SNAPSHOT = "live_snapshot"
@@ -53,15 +53,14 @@ class EvidenceValueLocator(FrozenModel):
         return self
 
 
-class AuditedRangeEndpoint(FrozenModel):
+class ReferenceRangeEndpoint(FrozenModel):
     """One evidence-backed endpoint of a scenario or valuation range."""
 
-    value: float
+    value: float = Field(allow_inf_nan=False, strict=True)
     basis: MarketReferenceBasis
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     date_evidence_refs: tuple[str, ...] = Field(min_length=1)
     source_locator: EvidenceValueLocator | None = None
-    calculation_id: str | None = None
     as_of_date: date
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
@@ -73,30 +72,19 @@ class AuditedRangeEndpoint(FrozenModel):
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-    @field_validator("calculation_id")
-    @classmethod
-    def validate_calculation_id(cls, value: str | None) -> str | None:
-        if value is not None and not _RESEARCH_ID_PATTERN.fullmatch(value):
-            raise ValueError("invalid calculation identifier")
-        return value
-
     @model_validator(mode="after")
-    def validate_basis(self) -> AuditedRangeEndpoint:
+    def validate_basis(self) -> ReferenceRangeEndpoint:
         if not set(self.date_evidence_refs).issubset(self.evidence_refs):
             raise ValueError("date evidence refs must be included in endpoint refs")
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed endpoint requires an Evidence locator")
-            if self.calculation_id:
-                raise ValueError("observed endpoint must not reference a calculation")
             if self.source_locator.evidence_ref not in self.evidence_refs:
                 raise ValueError("observed endpoint refs must include its locator ref")
         elif self.basis is MarketReferenceBasis.INTERPRETED:
-            if self.source_locator is not None or self.calculation_id:
-                raise ValueError("interpreted endpoint must not claim a locator or calculation")
+            if self.source_locator is not None:
+                raise ValueError("interpreted endpoint must not claim an observed locator")
         elif self.basis is MarketReferenceBasis.DERIVED:
-            if not self.calculation_id:
-                raise ValueError("derived endpoint requires a calculation")
             if self.source_locator is not None:
                 raise ValueError("derived endpoint must not claim an observed locator")
         return self
@@ -107,8 +95,8 @@ class ScenarioReferenceRange(FrozenModel):
 
     category: ScenarioReferenceCategory
     label: str = Field(min_length=1, max_length=120)
-    low: AuditedRangeEndpoint
-    high: AuditedRangeEndpoint
+    low: ReferenceRangeEndpoint
+    high: ReferenceRangeEndpoint
     measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
     unit: str | None = Field(default=None, min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
@@ -137,48 +125,9 @@ class ResearchScenario(FrozenModel):
         return _unique_evidence_refs(value)
 
 
-class ValuationAssessment(FrozenModel):
-    method: str = Field(min_length=1)
-    low: AuditedRangeEndpoint
-    high: AuditedRangeEndpoint
-    measurement_kind: MeasurementKind
-    unit: str = Field(min_length=1, max_length=32)
-    limitations: tuple[str, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_valuation(self) -> ValuationAssessment:
-        if self.low.basis is not MarketReferenceBasis.DERIVED:
-            raise ValueError("valuation low endpoint must be derived")
-        if self.high.basis is not MarketReferenceBasis.DERIVED:
-            raise ValueError("valuation high endpoint must be derived")
-        if self.measurement_kind is MeasurementKind.UNKNOWN:
-            raise ValueError("valuation measurement must be known")
-        if self.high.value < self.low.value:
-            raise ValueError("valuation high must be >= low")
-        return self
-
-    @property
-    def calculation_ids(self) -> tuple[str, ...]:
-        return tuple(
-            dict.fromkeys(
-                item
-                for item in (self.low.calculation_id, self.high.calculation_id)
-                if item is not None
-            )
-        )
-
-    @property
-    def input_evidence_refs(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys((*self.low.evidence_refs, *self.high.evidence_refs)))
-
-    @property
-    def as_of_date(self) -> date:
-        return max(self.low.as_of_date, self.high.as_of_date)
-
-
 class MarketReferenceLevel(FrozenModel):
     label: str = Field(min_length=1, max_length=120)
-    value: float
+    value: float = Field(allow_inf_nan=False, strict=True)
     measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
     unit: str | None = Field(default=None, min_length=1, max_length=32)
     as_of_date: date
@@ -187,7 +136,6 @@ class MarketReferenceLevel(FrozenModel):
     date_evidence_refs: tuple[str, ...] = Field(min_length=1)
     basis: MarketReferenceBasis = MarketReferenceBasis.OBSERVED
     source_locator: EvidenceValueLocator | None = None
-    calculation_ids: tuple[str, ...] = ()
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
     @field_validator("evidence_refs", "date_evidence_refs")
@@ -198,11 +146,6 @@ class MarketReferenceLevel(FrozenModel):
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-    @field_validator("calculation_ids")
-    @classmethod
-    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
-
     @model_validator(mode="after")
     def validate_basis(self) -> MarketReferenceLevel:
         if not set(self.date_evidence_refs).issubset(self.evidence_refs):
@@ -210,18 +153,12 @@ class MarketReferenceLevel(FrozenModel):
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed market reference requires an Evidence locator")
-            if self.calculation_ids:
-                raise ValueError("observed market reference cannot use calculations")
             if self.source_locator.evidence_ref not in self.evidence_refs:
                 raise ValueError("market reference refs must include its locator ref")
         elif self.basis is MarketReferenceBasis.INTERPRETED:
-            if self.source_locator is not None or self.calculation_ids:
-                raise ValueError(
-                    "interpreted market reference cannot claim direct or derived audit"
-                )
+            if self.source_locator is not None:
+                raise ValueError("interpreted market reference cannot claim an observed locator")
         elif self.basis is MarketReferenceBasis.DERIVED:
-            if not self.calculation_ids:
-                raise ValueError("derived market reference requires a calculation")
             if self.source_locator is not None:
                 raise ValueError("derived market reference cannot claim a locator")
         return self
@@ -248,57 +185,6 @@ class RiskReviewAdjustment(FrozenModel):
         return _unique_evidence_refs(value)
 
 
-class DecisionCalculationUse(FrozenModel):
-    """One readable decision component that relies on a calculation."""
-
-    component_path: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
-    label: str = Field(min_length=1, max_length=200)
-
-
-class CalculationRecord(FrozenModel):
-    """A decision-critical calculation, not a presentation-table cell."""
-
-    id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
-    formula: str = Field(min_length=1)
-    inputs: dict[str, int | float] = Field(min_length=1)
-    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
-    date_evidence_refs: tuple[str, ...] = ()
-    result: int | float
-    unit: str = Field(min_length=1, max_length=32)
-    as_of_date: date
-    temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
-    limitations: tuple[str, ...] = Field(min_length=1)
-    decision_uses: tuple[DecisionCalculationUse, ...] = ()
-
-    @field_validator("inputs")
-    @classmethod
-    def validate_inputs(
-        cls,
-        value: dict[str, int | float],
-    ) -> dict[str, int | float]:
-        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
-            raise ValueError("calculation input names must be identifiers")
-        if any(isinstance(item, bool) for item in value.values()):
-            raise ValueError("calculation inputs must be numeric")
-        return value
-
-    @field_validator("input_evidence_refs")
-    @classmethod
-    def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @field_validator("date_evidence_refs")
-    @classmethod
-    def validate_date_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @model_validator(mode="after")
-    def validate_date_ref_subset(self) -> CalculationRecord:
-        if not set(self.date_evidence_refs).issubset(self.input_evidence_refs):
-            raise ValueError("calculation date refs must belong to input evidence refs")
-        return self
-
-
 class ResearchDecision(FrozenModel):
     """Research-only conclusion; deliberately excludes account-level advice."""
 
@@ -316,11 +202,8 @@ class ResearchDecision(FrozenModel):
         min_length=3,
         max_length=3,
     )
-    valuation_assessment: ValuationAssessment | None = None
     market_reference_levels: tuple[MarketReferenceLevel, ...] = ()
-    calculation_records: tuple[CalculationRecord, ...] = ()
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
-    numeric_audit_status: NumericAuditStatus | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -339,15 +222,8 @@ class ResearchDecision(FrozenModel):
                 for endpoint_name in ("low", "high"):
                     endpoint = _field_value(reference_range, endpoint_name)
                     merged.extend(_field_value(endpoint, "evidence_refs") or ())
-        valuation = value.get("valuation_assessment")
-        if valuation is not None:
-            for endpoint_name in ("low", "high"):
-                endpoint = _field_value(valuation, endpoint_name)
-                merged.extend(_field_value(endpoint, "evidence_refs") or ())
         for level in value.get("market_reference_levels") or ():
             merged.extend(_field_value(level, "evidence_refs") or ())
-        for calculation in value.get("calculation_records") or ():
-            merged.extend(_field_value(calculation, "input_evidence_refs") or ())
         for adjustment in value.get("risk_review_adjustments") or ():
             merged.extend(_field_value(adjustment, "evidence_refs") or ())
         return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}

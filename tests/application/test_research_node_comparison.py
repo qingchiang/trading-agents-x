@@ -192,7 +192,7 @@ def test_comparison_distinguishes_schema_absence_null_empty_and_semantic_values(
         )
         historical = dict(old_decision.decision_json)
         historical.pop("unresolved_questions")
-        historical["valuation_assessment"] = None
+        historical["market_reference_levels"] = None
         historical["catalysts"] = []
         historical["time_horizon"] = "unavailable / not applicable / unchanged / unsupported"
         old_decision.decision_json = historical
@@ -214,7 +214,7 @@ def test_comparison_distinguishes_schema_absence_null_empty_and_semantic_values(
     assert sections["unresolved_questions"].values[0].state == (
         "not_recorded_under_this_schema"
     )
-    assert sections["valuation_assessment"].values[0].state == "null"
+    assert sections["market_reference_levels"].values[0].state == "null"
     assert sections["catalysts"].values[0].state == "empty"
     assert sections["time_horizon"].values[0].state == "recorded"
 

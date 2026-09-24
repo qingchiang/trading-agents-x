@@ -28,77 +28,7 @@ test("keeps research readable and exposes technical records only in diagnostics"
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
   await screen.findByRole("heading", { name: "Recovery records" });
   expect(screen.getByText("debate.agenda.serialize", { selector: "code" })).toBeVisible();
-  expect(screen.getByText("Decision-critical calculation audit")).toBeVisible();
-});
-
-test("keeps a degraded numeric audit compact and opens run warnings on demand", async () => {
-  const degraded = structuredClone(detail);
-  degraded.result!.decision!.numeric_audit_status = "incomplete";
-  degraded.result!.numeric_audit = {
-    status: "incomplete",
-    omitted_components: [
-      {
-        component_path: "numeric.valuation",
-        component_type: "valuation",
-        issue_codes: ["numeric.valuation.unknown_calculation"],
-      },
-    ],
-    snapshots: [
-      {
-        phase: "initial",
-        method: "tool_call",
-        reason_code: "semantic_validation",
-        validation_issues: ["semantic.numeric.valuation.invalid"],
-        schema_valid: false,
-        candidate: { marker: "initial-value" },
-        candidate_digest: "a".repeat(64),
-      },
-      {
-        phase: "repair",
-        method: "tool_call_recovered",
-        reason_code: "semantic_validation",
-        validation_issues: ["semantic.numeric.valuation.unknown_calculation"],
-        schema_valid: true,
-        candidate: {
-          valuation_assessment: { method: "repair-value" },
-        },
-        candidate_digest: "b".repeat(64),
-      },
-    ],
-  };
-  degraded.result!.warnings = [
-    {
-      code: "decision.numeric_audit_incomplete",
-      message: "Optional numeric conclusions were omitted.",
-      evidence_ref: null,
-      source: "committee.final.serialize.numeric",
-    },
-  ];
-  vi.mocked(api.run).mockResolvedValue(degraded);
-
-  render(
-    <Router initialPath="/timelines/NVDA?node=run-1&view=decision">
-      <ReaderFixture />
-    </Router>,
-  );
-
-  expect(
-    await screen.findByText(
-      "Optional valuation and market-reference figures were omitted; the qualitative decision remains audited.",
-    ),
-  ).toBeVisible();
-  expect(screen.getByText("Optional numeric conclusions were omitted.")).toBeVisible();
   expect(screen.queryByText("Decision-critical calculation audit")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  await screen.findByRole("heading", { name: "Decision-critical calculation audit" });
-  expect(screen.queryByText(/repair-value/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText("Audit snapshots"));
-  fireEvent.click(screen.getByRole("button", { name: "Raw record: Raw candidate" }));
-  expect(await screen.findByText(/repair-value/)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Initial candidate" }));
-  expect(await screen.findByText(/initial-value/)).toBeVisible();
-
 });
 
 test("opens a locked Full clone template instead of rerunning immediately", async () => {
@@ -290,9 +220,8 @@ test("dispatches Incremental research to its own summary and root-baseline updat
   expect(screen.queryByRole("heading", { name: "Performance" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "More" }));
   fireEvent.click(screen.getByRole("link", { name: "Run & diagnostics" }));
-  await screen.findByText("Decision-critical calculation audit");
-  expect(screen.getByText("Observed market anchor")).toBeVisible();
-  expect(screen.getByText("calc_market_reference")).not.toBeVisible();
+  await screen.findByRole("heading", { name: "Recovery records" });
+  expect(screen.queryByText("Decision-critical calculation audit")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getAllByRole("link", { name: "Read research" })[0]);
   fireEvent.click(await screen.findByRole("link", { name: "Reassessment" }));

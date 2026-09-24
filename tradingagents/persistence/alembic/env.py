@@ -36,14 +36,19 @@ def run_migrations_online() -> None:
         # Finish it before handing the connection to Alembic; otherwise SQLite
         # keeps the DDL but rolls back the alembic_version row on close.
         connection.commit()
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            render_as_batch=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+        # Explicit BEGIN makes SQLite DDL, data conversion and the revision
+        # marker atomic, including failures before the first DML statement.
+        with connection.begin():
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+                render_as_batch=True,
+                transactional_ddl=True,
+            )
+            with context.begin_transaction():
+                context.run_migrations()
 
 
 if context.is_offline_mode():

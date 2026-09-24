@@ -105,11 +105,6 @@ class ResearchOperations:
                 rating=result.decision.rating.value,
                 confidence=result.decision.confidence.value,
                 decision_json=result.decision.model_dump(mode="json"),
-                numeric_audit_json=(
-                    result.numeric_audit.model_dump(mode="json")
-                    if result.numeric_audit is not None
-                    else None
-                ),
                 created_at=now,
             )
             session.add(decision)
@@ -257,7 +252,6 @@ class ResearchOperations:
                     rating=result.decision.rating.value,
                     confidence=result.decision.confidence.value,
                     decision_json=result.decision.model_dump(mode="json"),
-                    numeric_audit_json=None,
                     created_at=now,
                 )
             )

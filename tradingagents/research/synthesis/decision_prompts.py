@@ -5,10 +5,6 @@ from __future__ import annotations
 from tradingagents.domain.common import (
     ReportLanguage,
 )
-from tradingagents.research.synthesis.drafts import ResearchDecisionCoreDraft
-from tradingagents.research.synthesis.numeric_evidence import (
-    NumericValueCatalogEntry,
-)
 
 
 def decision_scenario_assumption_guidance(output_language: str) -> str:
@@ -41,54 +37,6 @@ def decision_scenario_assumption_guidance(output_language: str) -> str:
     )
 
 
-def decision_operand_guidance() -> str:
-    """Give both serializers one unambiguous operand naming convention."""
-    return (
-        "Use short ASCII operand names such as v1, v2, cash, or total_debt, "
-        "matching [A-Za-z][A-Za-z0-9_]* and avoiding Python keywords. "
-        "Keep dates, units and human-readable labels outside operand names. "
-        "Each name must be unique and appear exactly as that identifier in the formula; "
-        "use every declared input and no undeclared names. Never use numeric literals "
-        "such as 2026 or 1e3, spaces, punctuation or hyphens as operand names. "
-    )
-
-
-def decision_percentage_calculation_guidance() -> str:
-    """Return the stable wire contract for decision percentage calculations."""
-
-    return (
-        "For unit %, percent, or pct, formulas must return a fractional ratio in "
-        "the 0-to-1 convention and must not multiply by 100; stated_value uses "
-        "reader-facing percentage points, and the application deterministically "
-        "converts the formula result. For example, "
-        "(target_price - close_price) / close_price = 0.4546 uses "
-        "stated_value=45.46 and unit=%. A decline formula yielding -0.6132 uses "
-        "stated_value=-61.32 and unit=%. Percentage-point formulas also return a "
-        "fractional difference and use unit=pp; the application multiplies by 100. "
-        "Basis-point formulas return a fractional difference and use unit=bps; the "
-        "application multiplies by 10,000. Never multiply these formulas by their "
-        "reader-facing scale."
-    )
-
-
-def decision_display_scale_guidance() -> str:
-    """Return the canonical contract for compact reader-facing quantities."""
-
-    return (
-        "Every numeric requirement must declare display_scale separately from its "
-        "canonical unit. Display scale describes only the formula result and must "
-        "never be inherited from an input's measurement scale. Use base, thousand, "
-        "ten_thousand, million, hundred_million, billion, or trillion. Results with "
-        "unit %, percent, pct, pp, percentage points, bps, basis points, x, or 倍 "
-        "are dimensionless and must use display_scale=base. For example, a growth "
-        "formula using net-income inputs 332,129 and 245,447 that are each measured "
-        "in million JPY still has unit=% and display_scale=base, not million. For an "
-        "amount example, raw result 80,598,000,000 with unit=USD and "
-        "display_scale=hundred_million compares with stated_value=805.98. Do not "
-        "encode result scale in unit strings such as billion USD, 亿美元, or 百万日元."
-    )
-
-
 def decision_reference_label_guidance(output_language: str) -> str:
     """Return localized naming rules for analyst target references."""
 
@@ -117,47 +65,9 @@ def decision_reference_label_guidance(output_language: str) -> str:
 def _decision_language_rules(output_language: str) -> str:
     return (
         "Write every human-readable field in the requested report language: "
-        f"{output_language}. Keep rating values, schema enums, IDs, formula "
-        "variable names, Evidence refs, and unit wire values in "
+        f"{output_language}. Keep rating values, schema enums, IDs, Evidence refs, and unit wire values in "
         "their required schema format. " + decision_scenario_assumption_guidance(output_language)
     )
-
-
-def _decision_component_text(
-    decision: ResearchDecisionCoreDraft,
-    component_path: str,
-) -> str | None:
-    """Resolve the bounded public field paths accepted by numeric requirements."""
-
-    parts = component_path.split(".")
-    if component_path in {"executive_summary", "thesis"}:
-        return str(getattr(decision, component_path))
-    if parts[0] in {"catalysts", "risks", "invalidation_conditions"} and len(parts) == 2:
-        values = getattr(decision, parts[0])
-        index = int(parts[1])
-        return values[index] if index < len(values) else None
-    if parts[0] == "scenarios" and len(parts) in {3, 4}:
-        scenario = next(
-            (item for item in decision.scenarios if item.kind.value == parts[1]),
-            None,
-        )
-        if scenario is None:
-            return None
-        if parts[2] == "outcome" and len(parts) == 3:
-            return scenario.outcome
-        if parts[2] == "core_assumptions" and len(parts) == 4:
-            index = int(parts[3])
-            return (
-                scenario.core_assumptions[index] if index < len(scenario.core_assumptions) else None
-            )
-    if parts[0] == "risk_review_adjustments" and len(parts) == 3 and parts[2] == "explanation":
-        index = int(parts[1])
-        return (
-            decision.risk_review_adjustments[index].explanation
-            if index < len(decision.risk_review_adjustments)
-            else None
-        )
-    return None
 
 
 def _decision_example_text(output_language: str) -> dict[str, str]:
@@ -237,20 +147,3 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "The range uses observed market levels and is not a valuation conclusion."
         ),
     }
-
-
-def _numeric_example_pair(
-    value_catalog: tuple[NumericValueCatalogEntry, ...],
-) -> tuple[NumericValueCatalogEntry, NumericValueCatalogEntry] | None:
-    """Return one compatible, strictly ordered pair for the prompt example."""
-
-    for index, first in enumerate(value_catalog):
-        for second in value_catalog[index + 1 :]:
-            if (
-                first.measurement_kind is not second.measurement_kind
-                or first.unit != second.unit
-                or first.value == second.value
-            ):
-                continue
-            return tuple(sorted((first, second), key=lambda item: item.value))
-    return None

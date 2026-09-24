@@ -20,7 +20,7 @@ def commit_full(
     run, _ = web_repository.create_run(
         request,
         ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
         method_snapshot={"schema_version": "1"},
     )

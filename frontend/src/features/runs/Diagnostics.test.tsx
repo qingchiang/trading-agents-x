@@ -2,17 +2,14 @@ import { render, screen, within } from "@testing-library/react";
 import { expect, test } from "vitest";
 import i18n from "../../shared/i18n";
 import RunMetricsPanel from "./RunMetricsPanel";
-import NumericAuditAppendixView from "../research/NumericAuditAppendixView";
-import { buildEvidenceReferenceIndex } from "../research/evidence";
 
 test("shows recorded zero separately from missing metrics and never invents a completed audit", async () => {
   await i18n.changeLanguage('en');
-  const { container } = render(<><RunMetricsPanel metrics={{ llm_calls: 0 }} attempts={[]} events={[]} artifacts={[]} /><NumericAuditAppendixView calculationRecords={[]} evidenceIndex={buildEvidenceReferenceIndex(null)} onEvidence={() => {}} /></>);
+  const { container } = render(<><RunMetricsPanel metrics={{ llm_calls: 0 }} attempts={[]} events={[]} artifacts={[]} /></>);
   const calls = screen.getByText('LLM calls').parentElement!;
   expect(within(calls).getByText('0')).toBeVisible();
   const tools = screen.getByText('Tool calls').parentElement!;
   expect(within(tools).getByText('Not recorded')).toBeVisible();
-  expect(screen.getByText('Audit not recorded')).toBeVisible();
   expect(container.querySelector('.run-metrics-disclosure')).toBeNull();
 });
 

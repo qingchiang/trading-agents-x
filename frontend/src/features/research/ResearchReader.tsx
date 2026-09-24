@@ -16,7 +16,6 @@ import EvidenceSourceDrawer from "./EvidenceSourceDrawer";
 import PerformanceSection from "./PerformanceSection";
 import ReadingAnchorNotice from "./ReadingAnchorNotice";
 import { baselineComponentText,groupReassessment,reassessmentDispositionCounts,type ReassessmentGroupKey,} from "./reassessment";
-import { NumericNoticeHandled,numericWarningLabel } from "./researchWarnings";
 import { WorkspaceNavigationButtons } from "./ResearchWorkspace";
 import { useReadingPosition } from "./useReadingPosition";
 
@@ -368,15 +367,13 @@ export default function ResearchReader({ selectedRunId: runId, actionsTarget }: 
         <WorkspaceNavigationButtons />
       </div>
 
-      <NumericNoticeHandled.Provider value={runWarnings.some(warning => numericWarningLabel(warning) !== null)}><Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
+      <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         {activeView === "decision" && isIncremental && detail.research_node && (
           <IncrementalDecisionPanel
             decision={decision}
             node={detail.research_node}
-            numericAudit={detail.result?.numeric_audit}
             evidenceIndex={evidenceIndex}
             onEvidence={openSourceDrawer}
-            onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
           />
         )}
 
@@ -439,13 +436,11 @@ export default function ResearchReader({ selectedRunId: runId, actionsTarget }: 
         {activeView === "decision" && !isIncremental && (
           <DecisionPanel
             decision={decision}
-            numericAudit={detail.result?.numeric_audit}
             onEvidence={openSourceDrawer}
             evidenceIndex={evidenceIndex}
-            onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
           />
         )}
-      </Suspense></NumericNoticeHandled.Provider>
+      </Suspense>
 
       <Suspense fallback={<div className="loading" role="status">{t("loading")}</div>}>
         <EvidenceSourceDrawer
@@ -462,17 +457,13 @@ export default function ResearchReader({ selectedRunId: runId, actionsTarget }: 
 function IncrementalDecisionPanel({
   decision,
   node,
-  numericAudit,
   evidenceIndex,
   onEvidence,
-  onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
   node: ResearchNodeView;
-  numericAudit: AnalysisResult["numeric_audit"];
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
-  onOpenWarnings: () => void;
 }) {
   const { t } = useTranslation();
   if (!decision) {
@@ -491,10 +482,8 @@ function IncrementalDecisionPanel({
       <IncrementalOutcomeSummary node={node} />
       <ResearchDecisionContentView
         decision={decision}
-        numericAudit={numericAudit}
         evidenceIndex={evidenceIndex}
         onEvidence={onEvidence}
-        onOpenWarnings={onOpenWarnings}
       />
     </article>
   );
@@ -1079,24 +1068,18 @@ function ReportsPanel({
 
 function DecisionPanel({
   decision,
-  numericAudit,
   onEvidence,
   evidenceIndex,
-  onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
-  numericAudit: AnalysisResult["numeric_audit"];
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
-  onOpenWarnings: () => void;
 }) {
   return (
     <ResearchDecisionView
       decision={decision}
-      numericAudit={numericAudit}
       onEvidence={onEvidence}
       evidenceIndex={evidenceIndex}
-      onOpenWarnings={onOpenWarnings}
     />
   );
 }
@@ -1110,7 +1093,7 @@ function ResearchLimitations({ warnings, sections = [] }: { warnings: VisibleWar
     <ul>{items.map(warning => {
       const reference = typeof warning === "string" ? undefined : warning.evidence_ref;
       const related = reference ? sections.filter(section => section.source_refs?.includes(reference)) : [];
-      return <li key={warningKey(warning)}>{numericWarningLabel(warning) ? t(numericWarningLabel(warning)!) : warningMessage(warning)}
+      return <li key={warningKey(warning)}>{warningMessage(warning)}
         {related.map(section => <a className="text-link limitation-section-link" key={section.id} href={`#${section.anchor}`} onClick={event => {
           event.preventDefault();
           const target = document.getElementById(`user-content-${section.anchor}`);

@@ -16,23 +16,11 @@ from tradingagents.domain.artifacts import ArtifactGenerationObservation, Resear
 from tradingagents.domain.common import (
     ArtifactGenerationMethod,
     DebateImportance,
-    NumericAuditAppendixStatus,
-    NumericAuditComponentType,
-    NumericAuditPhase,
-    NumericAuditStatus,
-    NumericCalculationStatus,
-    NumericDisplayStatus,
     ResearchRating,
     RunStatus,
     RunTrashState,
 )
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
-from tradingagents.domain.numeric_audit import (
-    DecisionNumericAuditAppendix,
-    NumericAuditOmission,
-    NumericAuditSnapshot,
-    NumericRequirementCheck,
-)
 from tradingagents.domain.reports import (
     AnalystClaimType,
     AnalystReport,
@@ -507,7 +495,7 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         "stage": "analyst",
         "role": "market",
         "round": 0,
-            "schema_version": "2",
+            "schema_version": "3",
         "prompt_version": "research-v1",
         "generation_method": "tool_call",
         "generation_observations": [
@@ -710,32 +698,6 @@ def test_recovery_events_surface_as_audit_notices_not_top_level_warnings(
     assert result.recoveries[0].validation_issue_codes == ("schema.thesis",)
 
 
-def test_partial_numeric_audit_surfaces_after_result_reload(
-    repository: RunRepository,
-    app_settings: AppSettings,
-) -> None:
-    run, _ = _create(repository, app_settings)
-    repository.claim_run(run.id, "worker", 30)
-    repository.append_artifact(
-        run.id,
-        ResearchArtifactDraft(
-            node="committee.final",
-            stage="decision",
-            role="final_committee",
-            generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=research_decision().model_copy(
-                update={"numeric_audit_status": NumericAuditStatus.PARTIAL}
-            ),
-        ),
-    )
-
-    result = repository.get_result(run.id)
-
-    assert [warning.code for warning in result.warnings] == [
-        "decision.numeric_audit_partial"
-    ]
-
-
 def test_complete_persists_result_and_hydrates_legacy_decision_json(
     repository: RunRepository,
     app_settings: AppSettings,
@@ -792,57 +754,6 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
         risks=("Multiple compression",),
         invalidation_conditions=("Growth misses expectations",),
         time_horizon="6-12 months",
-    ).model_copy(update={"numeric_audit_status": NumericAuditStatus.PARTIAL})
-    numeric_audit = DecisionNumericAuditAppendix(
-        status=NumericAuditAppendixStatus.PARTIAL,
-        requirement_checks=(
-            NumericRequirementCheck(
-                requirement_id="req_forward_pe",
-                calculation_id="calc_forward_pe",
-                component_path="thesis",
-                label="Forward PE",
-                stated_value=45.8,
-                fraction_digits=1,
-                unit="x",
-                formula="close_price / eps",
-                inputs={"close_price": 4000.0, "eps": 87.35},
-                input_evidence_refs=(evidence_item.ref,),
-                canonical_result=45.79278763594734,
-                comparison_result=45.79278763594734,
-                comparison_difference=45.79278763594734 - 45.8,
-                rounded_stated_value=45.8,
-                rounded_canonical_result=45.8,
-                calculation_status=NumericCalculationStatus.VERIFIED,
-                display_status=NumericDisplayStatus.MATCHED,
-            ),
-        ),
-        snapshots=(
-            NumericAuditSnapshot(
-                phase=NumericAuditPhase.REPAIR,
-                method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
-                reason_code="semantic_validation",
-                validation_issues=(
-                    "semantic.numeric.calculation.calc_1.formula.invalid_syntax",
-                ),
-                schema_valid=True,
-                candidate={
-                    "requested": True,
-                    "appendix_only_marker": "must-not-enter-memory",
-                    "calculation_records": [],
-                },
-                candidate_digest="a" * 64,
-            ),
-        ),
-        omitted_components=(
-            NumericAuditOmission(
-                component_path="numeric.calculation.calc_1",
-                component_type=NumericAuditComponentType.CALCULATION,
-                reference_label="calc_1",
-                issue_codes=(
-                    "numeric.calculation.calc_1.formula.invalid_syntax",
-                ),
-            ),
-        ),
     )
     result = AnalysisResult(
         run_id=run.id,
@@ -850,7 +761,6 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
         instrument="NVDA",
         reports={"market": report},
         decision=decision,
-        numeric_audit=numeric_audit,
     )
 
     repository.append_artifact(
@@ -896,7 +806,6 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
     restored = repository.get_result(run.id)
     assert restored.status is RunStatus.SUCCEEDED
     assert restored.decision == decision
-    assert restored.numeric_audit == numeric_audit
     assert restored.evidence == evidence
     with repository.sessions.begin() as session:
         retained_decision = session.scalar(
@@ -911,37 +820,6 @@ def test_complete_persists_result_and_hydrates_legacy_decision_json(
     assert "memory_refs" not in legacy_restored.decision.model_dump()
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
-    assert "appendix_only_marker" not in legacy_restored.decision.model_dump_json()
-
-
-    with repository.sessions() as session:
-        record = session.scalar(
-            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
-        )
-        assert record is not None
-        historical_audit = dict(record.numeric_audit_json or {})
-        historical_checks = []
-        for item in historical_audit.get("requirement_checks", []):
-            historical = dict(item)
-            historical.pop("display_scale", None)
-            historical.pop("comparison_result", None)
-            historical.pop("comparison_difference", None)
-            historical.pop("date_evidence_refs", None)
-            historical_checks.append(historical)
-        record.numeric_audit_json = {
-            **historical_audit,
-            "requirement_checks": historical_checks,
-        }
-        session.commit()
-
-    historical_result = repository.get_result(run.id)
-    assert historical_result.numeric_audit is not None
-    historical_check = historical_result.numeric_audit.requirement_checks[0]
-    assert historical_check.comparison_result is None
-    assert historical_check.comparison_difference is None
-
-
-
 
 def test_failed_run_retains_sealed_evidence_and_analyst_reports(
     repository: RunRepository,

@@ -12,7 +12,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
-from tests.support.factories import analyst_report, research_case, research_decision
+from tests.support.factories import analyst_report, research_decision
 from tests.support.source_results import source_message
 from tradingagents.application.exporting import (
     render_run_export_markdown,
@@ -21,35 +21,22 @@ from tradingagents.application.exporting import (
 from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifact
 from tradingagents.domain.common import (
     ArtifactGenerationMethod,
-    NumericAuditAppendixStatus,
-    NumericAuditComponentType,
-    NumericAuditPhase,
-    NumericAuditStatus,
-    NumericCalculationStatus,
-    NumericDisplayStatus,
     ResearchScenarioKind,
-    RiskReviewDisposition,
     RunStatus,
     ScenarioReferenceCategory,
 )
 from tradingagents.domain.data import ProvenanceRecord
 from tradingagents.domain.data_result import DataResult
 from tradingagents.domain.decision import (
-    AuditedRangeEndpoint,
-    CalculationRecord,
-    DecisionCalculationUse,
-    EvidenceValueLocator,
-    MarketReferenceLevel,
-    RiskReviewAdjustment,
+    MarketReferenceBasis,
+    ReferenceRangeEndpoint,
     ScenarioReferenceRange,
-    ValuationAssessment,
 )
 from tradingagents.domain.evidence import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     EvidenceTemporalScope,
-    MeasurementKind,
     TableDataType,
 )
 from tradingagents.domain.evidence_tables import extract_evidence_tables
@@ -58,13 +45,6 @@ from tradingagents.domain.incremental import (
     IncrementalAnalysisBrief,
     IncrementalBaselineContext,
     IncrementalExportContext,
-)
-from tradingagents.domain.numeric_audit import (
-    DecisionNumericAuditAppendix,
-    MarketReferenceBasis,
-    NumericAuditOmission,
-    NumericAuditSnapshot,
-    NumericRequirementCheck,
 )
 from tradingagents.domain.reports import DecisionBrief, ReportSection, ResearchWarning
 from tradingagents.domain.runs import (
@@ -582,7 +562,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
                 attempt=1,
                 stage="decision_brief",
                 role="final_committee",
-                schema_version="2",
+                schema_version="3",
                 prompt_version="final-committee-brief-v1",
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
                 generation_observations=(
@@ -882,97 +862,6 @@ def test_markdown_export_uses_canonical_report_order() -> None:
     )
 
 
-def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
-    decision = research_decision(thesis="Forward PE is 82.1x.").model_copy(
-        update={
-            "calculation_records": (
-                CalculationRecord(
-                    id="calc_guidance_pe",
-                    formula="price / eps",
-                    inputs={"price": 3075, "eps": 37.46},
-                    input_evidence_refs=("ev_0123456789ab",),
-                    result=3075 / 37.46,
-                    unit="x",
-                    as_of_date=date(2026, 7, 24),
-                    limitations=("Guidance may change.",),
-                    decision_uses=(
-                        DecisionCalculationUse(
-                            component_path="thesis",
-                            label="Forward PE",
-                        ),
-                    ),
-                ),
-            ),
-            "numeric_audit_status": NumericAuditStatus.PARTIAL,
-        }
-    )
-    run_export = RunExport(
-        run=RunView(
-            id="fixture-run",
-            status=RunStatus.SUCCEEDED,
-            request=AnalysisRequest(ticker="3778.T", analysis_date="2026-07-24"),
-            config_snapshot={},
-            attempt=1,
-            cancel_requested=False,
-            created_at=now,
-            updated_at=now,
-        ),
-        result=AnalysisResult(
-            run_id="fixture-run",
-            status=RunStatus.SUCCEEDED,
-            instrument="3778.T",
-            reports={},
-            decision=decision,
-            numeric_audit=DecisionNumericAuditAppendix(
-                status=NumericAuditAppendixStatus.PARTIAL,
-                requirement_checks=(
-                    NumericRequirementCheck(
-                        requirement_id="req_forward_pe",
-                        calculation_id="calc_forward_pe",
-                        component_path="thesis",
-                        label="Forward PE",
-                        stated_value=45.8,
-                        fraction_digits=1,
-                        unit="x",
-                        formula="price / eps",
-                        inputs={"price": 3075, "eps": 37.46},
-                        input_evidence_refs=("ev_0123456789ab",),
-                        canonical_result=3075 / 37.46,
-                        comparison_result=3075 / 37.46,
-                        comparison_difference=(3075 / 37.46) - 45.8,
-                        rounded_stated_value=45.8,
-                        rounded_canonical_result=82.1,
-                        calculation_status=NumericCalculationStatus.VERIFIED,
-                        display_status=NumericDisplayStatus.MISMATCHED,
-                        issue_codes=("numeric.requirement.req_forward_pe.result_mismatch",),
-                    ),
-                ),
-                snapshots=(),
-                omitted_components=(
-                    NumericAuditOmission(
-                        component_path="risks.0",
-                        component_type=NumericAuditComponentType.DECISION_CLAIM,
-                        reference_label="Remaining EPS",
-                        issue_codes=("numeric.requirement.req_eps_remaining.missing_calculation",),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-    markdown = render_run_export_markdown(run_export)
-
-    assert "Thesis: Forward PE" in markdown
-    assert "## Decision-Critical Calculation Audit" in markdown
-    assert "Structured display value" in markdown
-    assert "45.8 x" in markdown
-    assert "82.09 x" in markdown
-    assert "`mismatched`" in markdown
-    assert "Decision-critical derived value · Remaining EPS" in markdown
-    assert "Candidate was not parseable" not in markdown
-
-
 def test_markdown_export_includes_total_and_per_node_metrics() -> None:
     now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     metrics = RunMetrics(
@@ -1029,204 +918,6 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
     assert ("| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | 4.000s |") in markdown
     assert ("| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | 2.500s |") in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
-
-
-def test_markdown_export_emits_each_audit_section_once() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
-    warning = ResearchWarning(
-        code="evidence.partial",
-        message="Historical coverage is partial.",
-        source="fixture",
-    )
-    narrative = "MODEL REPORT"
-    report = analyst_report(
-        confidence=0.7,
-        warnings=(warning,),
-        narrative=narrative,
-    )
-    base_decision = research_decision(
-        confidence="medium",
-        thesis="FINAL THESIS",
-        risks=("Demand weakens.",),
-        invalidation_conditions=("A new filing changes the evidence.",),
-    )
-    decision = base_decision.model_copy(
-        update={
-            "valuation_assessment": ValuationAssessment(
-                method="Scenario-weighted multiple",
-                low=AuditedRangeEndpoint(
-                    value=100,
-                    basis=MarketReferenceBasis.DERIVED,
-                    evidence_refs=("ev_0123456789ab",),
-                    date_evidence_refs=("ev_0123456789ab",),
-                    calculation_id="calc_valuation_low",
-                    as_of_date=date(2026, 7, 24),
-                ),
-                high=AuditedRangeEndpoint(
-                    value=125,
-                    basis=MarketReferenceBasis.DERIVED,
-                    evidence_refs=("ev_0123456789ab",),
-                    date_evidence_refs=("ev_0123456789ab",),
-                    calculation_id="calc_valuation_high",
-                    as_of_date=date(2026, 7, 24),
-                ),
-                measurement_kind=MeasurementKind.CURRENCY,
-                unit="USD",
-                limitations=("Cycle duration remains uncertain.",),
-            ),
-            "market_reference_levels": (
-                MarketReferenceLevel(
-                    label="Recent support",
-                    value=98,
-                    unit="USD",
-                    as_of_date=date(2026, 7, 24),
-                    interpretation="Observation only, not an entry order.",
-                    evidence_refs=("ev_0123456789ab",),
-                    date_evidence_refs=("ev_0123456789ab",),
-                    source_locator=EvidenceValueLocator(evidence_ref="ev_0123456789ab"),
-                ),
-                MarketReferenceLevel(
-                    label="Unclassified signal",
-                    value=7.25,
-                    measurement_kind=MeasurementKind.UNKNOWN,
-                    unit=None,
-                    as_of_date=date(2026, 7, 24),
-                    interpretation="The source did not publish a unit.",
-                    evidence_refs=("ev_0123456789ab",),
-                    date_evidence_refs=("ev_0123456789ab",),
-                    basis=MarketReferenceBasis.INTERPRETED,
-                ),
-            ),
-            "risk_review_adjustments": (
-                RiskReviewAdjustment(
-                    source_role="conservative",
-                    disposition=RiskReviewDisposition.MODIFIED,
-                    subject="Confidence calibration",
-                    explanation="Confidence was reduced.",
-                    evidence_refs=("ev_0123456789ab",),
-                ),
-            ),
-            "numeric_audit_status": NumericAuditStatus.COMPLETE,
-        }
-    )
-    artifacts = (
-        ResearchArtifact(
-            id="analyst-artifact",
-            run_id="fixture-run",
-            attempt=1,
-            stage="analyst",
-            role="market",
-            generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=report,
-            created_at=now,
-        ),
-        ResearchArtifact(
-            id="review-artifact",
-            run_id="fixture-run",
-            attempt=1,
-            stage="case",
-            role="bear",
-            generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=research_case(role="bear"),
-            created_at=now,
-        ),
-        ResearchArtifact(
-            id="decision-artifact",
-            run_id="fixture-run",
-            attempt=1,
-            stage="decision",
-            role="final_committee",
-            generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=decision,
-            created_at=now,
-        ),
-    )
-    run_export = RunExport(
-        run=RunView(
-            id="fixture-run",
-            status=RunStatus.SUCCEEDED,
-            request=AnalysisRequest(
-                ticker="NVDA",
-                analysis_date="2026-07-24",
-            ),
-            config_snapshot={},
-            attempt=1,
-            cancel_requested=False,
-            created_at=now,
-            updated_at=now,
-        ),
-        result=AnalysisResult(
-            run_id="fixture-run",
-            status=RunStatus.SUCCEEDED,
-            instrument="NVDA",
-            reports={"market": report},
-            decision=decision,
-            numeric_audit=DecisionNumericAuditAppendix(
-                status=NumericAuditAppendixStatus.PARTIAL,
-                snapshots=(
-                    NumericAuditSnapshot(
-                        phase=NumericAuditPhase.INITIAL,
-                        method=ArtifactGenerationMethod.TOOL_CALL,
-                        reason_code="semantic_validation",
-                        validation_issues=(
-                            "semantic.numeric.calculation.calc_valuation.formula.invalid_syntax",
-                        ),
-                        schema_valid=True,
-                        candidate={
-                            "requested": True,
-                            "calculation_records": [{"id": "calc_valuation"}],
-                        },
-                        candidate_digest="b" * 64,
-                    ),
-                ),
-                omitted_components=(
-                    NumericAuditOmission(
-                        component_path="numeric.calculation.calc_valuation",
-                        component_type=NumericAuditComponentType.CALCULATION,
-                        reference_label="calc_valuation",
-                        issue_codes=("numeric.calculation.calc_valuation.formula.invalid_syntax",),
-                    ),
-                ),
-            ),
-            warnings=(warning,),
-        ),
-        artifacts=artifacts,
-    )
-
-    markdown = render_run_export_markdown(run_export)
-
-    assert "unit unspecified" not in markdown
-
-    assert markdown.count("## Research Process") == 1
-    assert markdown.count("## Reports") == 1
-    assert markdown.count("## Research Decision") == 1
-    assert markdown.count("## Warnings") == 1
-    assert markdown.count("## Performance") == 1
-    assert markdown.count("## Sources") == 1
-    assert markdown.count("MODEL REPORT") == 1
-    assert markdown.count("Historical coverage is partial.") == 1
-    assert "review-artifact" in markdown
-    assert "analyst-artifact" not in markdown
-    assert "decision-artifact" not in markdown
-    assert "#### Key Claim Audit" in markdown
-    assert "Fixture case statement" in markdown
-    assert "Non-personalized research opinion" in markdown
-    assert "### Scenarios" in markdown
-    assert "### Valuation Assessment" in markdown
-    assert "- Numeric audit: `complete`" in markdown
-    assert "Scenario-weighted multiple" in markdown
-    assert "### Market Reference Levels" in markdown
-    assert "Observation only, not an entry order." in markdown
-    assert "### Final Committee Response to Risk Review" in markdown
-    assert "Confidence calibration" in markdown
-    assert markdown.count("## Unverified Numeric Drafts") == 1
-    assert "calc_valuation" in markdown
-    package = render_run_export_package(run_export)
-    with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        exported = json.loads(archive.read("run.json"))
-    assert exported["result"]["numeric_audit"]["status"] == "partial"
-    assert markdown.index("## Reports") < markdown.index("## Research Process")
-    assert markdown.index("## Research Process") < markdown.index("## Research Decision")
 
 
 @pytest.mark.parametrize(
@@ -1291,7 +982,7 @@ def test_export_localizes_scenario_range_categories_and_omissions(
     omission_label: str,
 ) -> None:
     ref = "ev_0123456789ab"
-    endpoint = AuditedRangeEndpoint(
+    endpoint = ReferenceRangeEndpoint(
         value=100,
         basis=MarketReferenceBasis.INTERPRETED,
         evidence_refs=(ref,),
@@ -1345,41 +1036,19 @@ def test_export_localizes_scenario_range_categories_and_omissions(
             instrument="6501.T",
             reports={},
             decision=decision,
-            numeric_audit=DecisionNumericAuditAppendix(
-                status=NumericAuditAppendixStatus.PARTIAL,
-                snapshots=(
-                    NumericAuditSnapshot(
-                        phase=NumericAuditPhase.REPAIR,
-                        method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
-                        reason_code="semantic_validation",
-                        schema_valid=True,
-                    ),
-                ),
-                omitted_components=(
-                    NumericAuditOmission(
-                        component_path="numeric.scenario.base.ranges.1",
-                        component_type=NumericAuditComponentType.SCENARIO_RANGE,
-                        scenario_kind=ResearchScenarioKind.BASE,
-                        reference_label="Secondary target range",
-                        issue_codes=("numeric.scenario.base.ranges.1.low.invalid",),
-                    ),
-                ),
-            ),
         ),
     )
 
     markdown = render_run_export_markdown(run_export)
 
     assert category_label in markdown
-    assert omission_label in markdown
-    assert "Secondary target range" in markdown
     assert "`100`–`4,199.41` JPY" in markdown
     assert '"value":4199.4116' in run_export.model_dump_json()
 
 
 def test_numeric_date_evidence_must_be_part_of_endpoint_evidence() -> None:
     with pytest.raises(ValueError, match="date evidence refs"):
-        AuditedRangeEndpoint(
+        ReferenceRangeEndpoint(
             value=100,
             basis=MarketReferenceBasis.INTERPRETED,
             evidence_refs=("ev_0123456789ab",),
@@ -1401,9 +1070,7 @@ def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> 
         items=(item,),
     )
     now = datetime(2026, 8, 1, 12, tzinfo=UTC)
-    decision = research_decision(evidence_refs=(item.ref,)).model_copy(
-        update={"numeric_audit_status": NumericAuditStatus.INCOMPLETE}
-    )
+    decision = research_decision(evidence_refs=(item.ref,))
     warning = ResearchWarning(
         code="report.audit_incomplete",
         message="The readable report was preserved, but its audit is incomplete.",
@@ -1436,20 +1103,6 @@ def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> 
             },
             decision=decision,
             evidence=evidence,
-            numeric_audit=DecisionNumericAuditAppendix(
-                status=NumericAuditAppendixStatus.INCOMPLETE,
-                snapshots=(
-                    NumericAuditSnapshot(
-                        phase=NumericAuditPhase.INITIAL,
-                        method=ArtifactGenerationMethod.TOOL_CALL,
-                        reason_code="schema_validation",
-                        validation_issues=(),
-                        schema_valid=False,
-                        candidate=None,
-                        candidate_digest="c" * 64,
-                    ),
-                ),
-            ),
             warnings=(warning,),
         ),
         evidence=evidence,
@@ -1461,8 +1114,6 @@ def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> 
     assert "[E01]" in readable
     assert item.ref not in readable
     assert f"`{item.ref}`" in sources
-    assert "### 初次候选" in readable
-    assert "未记录校验问题" in readable
     assert "可读报告已保留，但关键观点审计不完整。" in readable
     assert "Evidence:" not in readable
     assert "Calculations:" not in readable

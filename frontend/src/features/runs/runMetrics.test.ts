@@ -87,7 +87,7 @@ test("groups phase metrics by role in persisted event order", () => {
     outputStatus: "failed",
   });
   expect(groups[0].nodes.map((row) => row.phase)).toEqual([
-    "semanticStructured",
+    "workflowOther",
     "schemaSerialization",
   ]);
   expect(groups[0].nodes[0].observations[0].client_role).toBe(
@@ -104,7 +104,7 @@ test("classifies every displayed phase explicitly", () => {
   expect(metricPhase("case.bull.audit")).toBe("audit");
   expect(metricPhase("debate.agenda.serialize")).toBe("semanticStructured");
   expect(metricPhase("committee.final.serialize.numeric")).toBe(
-    "semanticStructured",
+    "workflowOther",
   );
   expect(metricPhase("committee.final.serialize.core")).toBe(
     "schemaSerialization",
@@ -120,7 +120,7 @@ test("applies failed, degraded, audit, recovery, and retry priority", () => {
       event(2, node, "node.numeric_audit_recovered"),
       event(3, node, "node.numeric_audit_degraded"),
     ]),
-  ).toBe("degraded");
+  ).toBe("normal");
   expect(
     nodeOutputStatus("case.bull.audit", [
       event(1, "case.bull.audit", "node.output_failed"),

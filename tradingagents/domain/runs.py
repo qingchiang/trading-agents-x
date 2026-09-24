@@ -26,7 +26,6 @@ from tradingagents.domain.instruments import (
     unsupported_crypto_base,
 )
 from tradingagents.domain.model_selection import RoleSelections
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, ResearchWarning, _coerce_warnings
 
@@ -215,7 +214,6 @@ class AnalysisResult(FrozenModel):
     instrument_local_name: str | None = None
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
-    numeric_audit: DecisionNumericAuditAppendix | None = None
     evidence: EvidenceBundle | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
     recoveries: tuple[StructuredRecoveryNotice, ...] = ()

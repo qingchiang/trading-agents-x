@@ -4,7 +4,6 @@ import type { RunDetail, RunEvent, ResearchArtifact, EvidenceBundle } from "../.
 import { formatResearchDate } from "../../shared/researchDate";
 import { researchLocation } from "../research/researchLinks";
 import { Link } from "../../app/router";
-import ResearchNumericAudit from "../research/ResearchNumericAudit";
 import RunMetricsPanel from "./RunMetricsPanel";
 import StatusBadge from "../../shared/StatusBadge";
 import JsonRecord from "../../shared/JsonRecord";
@@ -37,7 +36,6 @@ export default function RunDiagnostics({ detail, events, artifacts, evidence }: 
       <JsonRecord label={t('diagnosticOverview')} value={run} />
     </section>
     <RunMetricsPanel metrics={run.metrics} attempts={detail.attempts ?? []} events={events} artifacts={artifacts} />
-    <ResearchNumericAudit detail={detail} evidence={evidence} />
     <section className="diagnostic-block">
       <h2>{t('diagnosticRecoveries')}</h2>
       {result?.recoveries?.length ? result.recoveries.map((item, index) => <article className="diagnostic-recovery" key={`${item.node}:${item.attempt}:${index}`}>

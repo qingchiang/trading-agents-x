@@ -74,10 +74,8 @@ invalidation_conditions
 unresolved_questions
 time_horizon
 scenarios[base, bull, bear]
-valuation_assessment
 market_reference_levels
 risk_review_adjustments
-numeric_audit_status
 ```
 
 Final Decision confidence is a rubric-based `low`, `medium`, or `high` research
@@ -85,65 +83,28 @@ support level rather than a numeric probability. Numeric confidence retained by
 analyst, judge, and sentiment-stage contracts describes their bounded process
 outputs and is not projected onto the final Decision contract.
 
-Failed optional numeric candidates never enter `ResearchDecision`. A separate
-`DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
-snapshots (initial and repair), their safe validation issue codes, and the
-components omitted from the canonical decision. It is persisted atomically
-with the decision for user inspection and export, while ratings and thesis
-generation use only the canonical decision.
+The final serializer produces the strict research core and optional scenario
+reference ranges and market reference levels in one response. Optional candidates
+are validated individually: finite numeric values, ordered ranges, required
+metadata, Evidence reference closure, source locators and temporal constraints.
+An invalid candidate is omitted without retrying the model or discarding the
+core; a content-free `decision.reference_omitted` event records its field path
+and bounded issue codes. Unparseable responses and invalid core fields still use
+the ordinary bounded structured-output recovery.
 
-Decision-critical calculations keep model-proposed formulas, named numeric
-inputs, units, limitations, and evidence references. The strict qualitative
-decision core also declares every derived exact number that materially affects
-its thesis, risks, invalidation conditions, scenarios, or risk-review response.
-Final qualitative serialization uses the provider's schema-focused client,
-while Final numeric selection uses the corresponding reasoning client. For
-DeepSeek V4 this means thinking-mode JSON Output followed by local Pydantic,
-Evidence, formula, date, and semantic validation; JSON validity is not treated
-as schema or research correctness.
-Debate Agenda likewise uses the profile-selected reasoning client because
-identifying material disagreements is a semantic research task rather than a
-mechanical audit. Shallow Analyst and deliberation audits continue to use
-schema-focused clients or deterministic extraction.
-The numeric serializer must satisfy those declarations with calculation IDs;
-each retained calculation publishes its decision-component uses. The
-application evaluates formulas with a restricted arithmetic interpreter and is
-the sole source of the canonical result and date. A missing or invalid optional
-calculation degrades numeric audit status to `partial` without discarding an
-otherwise valid qualitative decision. Canonical dates come from the latest
-relevant Evidence Ledger effective date and are never guessed from the analysis
-date.
+Reference values are model-reported research content, not locally recomputed or
+program-verified numbers. `observed`, `interpreted` and `derived` describe their
+basis. Dates describe supporting data, not forecast horizons. There is no
+independent valuation card, numeric catalog generation, formula interpreter,
+calculation record, numeric audit status or numeric repair phase. Normal
+presentation rounding does not change persisted values.
 
-Formula results remain in canonical units. Reader-facing compact quantities use
-a separate, typed display scale (for example `hundred_million`); unit text is
-never parsed to infer that scale. Ratio formulas for percent and percentage-point
-values are converted by the application, as are ratio formulas expressed in
-basis points. The persisted audit comparison therefore retains both the raw
-canonical result and the deterministically scaled reader-facing value.
-Reader-facing values that differ by no more than one declared last-place unit
-and one percent relative error are retained as `approximately_matched`; this
-does not weaken formula, unit, sign, Evidence, or PIT validation and does not
-degrade an otherwise complete numeric audit. Display scale describes only the
-formula result and is never inherited from an input's source measurement scale.
-The application deterministically normalizes percentage, percentage-point,
-basis-point, and multiple results to `base`; compact amount scales remain
-explicit serializer declarations.
-Serializer-facing operands remain ASCII identifiers. If a provider returns an
-otherwise unambiguous Unicode identifier (including year-prefixed Unicode
-labels) or a declared keyword used as an operand, the application performs
-boundary-aware token replacement and
-rewrites the formula AST and operands to stable `v1`, `v2`, and later names
-before validation. Numeric literals (including scientific, hexadecimal and
-complex notation), punctuation-bearing names, collisions, and incomplete mappings
-remain invalid; the application never guesses an ambiguous
-mapping. Each observed formula input binds its value and date to Evidence; the
-union of input date refs must be a subset of the calculation's input Evidence
-refs. Unknown date refs and valid date refs omitted from that input set remain
-distinct audit failures. A displayed derived range declares separate
-low and high requirements, so one scalar requirement cannot validate two
-different calculations.
+Incremental `unchanged` reuses the complete direct Full Baseline Decision.
+Incremental `updated` serializes current references together with the current
+conclusion. Core-only recovery leaves optional references empty and records an
+omission; it never automatically attaches baseline numbers to changed prose.
 
-Non-personalized ratings, conditional investment views, auditable valuation
+Non-personalized ratings, conditional investment views, scenario valuation
 ranges, scenarios, and market reference levels are allowed. Position
 percentage, account configuration, order quantity/type, broker instructions,
 mandatory entry/stop/take-profit levels, guarantees, and personalized
@@ -338,6 +299,15 @@ must be converted offline from revision `0013_submission_identity` into a new
 file; normal startup refuses the predecessor without upgrading it. See
 [Offline database cutover](database-cutover.md) and [ADR 0007](adr/0007-independent-runtime-cutover.md).
 
+Revision `0101_remove_numeric_audit` converts Decision rows and Decision artifact
+copies to Research/Artifact Schema 3, recomputes changed artifact hashes, and drops
+the numeric audit column. It preserves reference values, research prose, Evidence
+digests, baseline relationships, original events, metrics and method snapshots.
+The migration refuses active runs and retained checkpoints, and executes inside
+an explicit SQLite transaction. Back up before upgrading; rollback requires the
+backup and old program. Runtime hydration and UI accept only the current numeric
+contract; historical raw events remain generic diagnostic records.
+
 Alembic manages application tables:
 
 | Table | Responsibility |
@@ -347,7 +317,7 @@ Alembic manages application tables:
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
-| `decisions` | typed final decision, numeric audit appendix, market identity |
+| `decisions` | typed final decision and market identity |
 | `research_nodes` | same-identity successful Run role, direct Full-baseline relation, and Node-owned Incremental product JSON |
 | `primary_research_cycles` | the only mutable per-instrument Timeline pointer |
 
@@ -474,10 +444,9 @@ they exclude the collection memo and remaining report instructions.
 Data adapters may attach small producer-owned structured numeric facts (for
 example analyst target prices and consensus EPS) beside readable source prose.
 Evidence sealing converts those facts into `source_format=structured` tables,
-so Final numeric audit does not scrape narrative text for a number, unit, or
-observation date. Calculation inputs may identify only the Evidence refs that
-establish their dates; explanatory background refs remain auditable without
-advancing or blocking the calculation date.
+preserving exact source values, units, dates and provenance independently of
+Decision serialization. Removing decision recomputation does not remove these
+producer facts, data-side indicators or the Evidence table browser.
 
 ### Markdown-first deliberation
 
@@ -508,7 +477,7 @@ DebateAgenda       short summary plus prioritized issue IDs and questions
 RebuttalReview     role Markdown plus addressed and open issue IDs
 JudgeDraft         judge Markdown, preliminary rating, and issue dispositions
 RiskReview         role Markdown plus challenged and unresolved issue IDs
-ResearchDecision   strict final opinion, scenarios, calculations, and evidence
+ResearchDecision   strict final opinion, scenario ranges, market references, and evidence
 ```
 
 Cases and risk reviews use a reasoning-model Markdown write followed by a
@@ -520,16 +489,10 @@ continues with no open rebuttal issues, Deep conservatively keeps agenda issues
 open, and a judge fallback leaves rating/confidence unknown while marking every
 issue unresolved. Graph routing depends on stable issue IDs and dispositions,
 not on parsing prose. The Final Committee uses a reasoning pass to form the
-synthesis brief, a strict serializer for the qualitative decision core, and a
-reasoning-client structured generation pass for the optional numeric appendix. Only derived,
-decision-critical valuation, scenario, or market-reference arithmetic uses
-`CalculationRecord`; directly observed market references remain evidence-backed
-observations. A numeric appendix gets one bounded repair. If it still cannot be
-fully audited, independently valid components are retained and the remaining
-numeric fields are omitted with an explicit warning instead of discarding the
-strict qualitative conclusion. Failed initial and repair candidates are kept
-only as a size-bounded, recursively redacted numeric audit appendix; raw
-provider messages, prompts, and hidden reasoning are never persisted.
+synthesis brief and a single serializer for the Decision and its optional
+references. The brief explains assumptions and reference-level meanings without
+a mandatory formula/operand checklist. Serialization preserves adopted research
+content and does not invent ranges for scenarios without support.
 Structured calls retain a content-free `node.model_call_diagnostic` event for
 both initial and repair invocations, including failures that later recover.
 It records a local call ID, schema, phase, character counts, elapsed time,
@@ -537,35 +500,15 @@ available usage and finish reason, and bounded exception types/cause types and
 stack locations. Binding errors have their own diagnostic event. Provider
 messages, stack source lines and response bodies are excluded. Run/attempt and
 model configuration remain linked through the existing Run records.
-Numeric preflight rejection diagnostics retain only allowlisted operands,
-formula and Evidence references before normalization, plus changed normalized
-fragments. Credentials are redacted before event delivery. At most eight
-rejected candidates are recorded per preflight, with an 8 KiB limit per fragment;
-oversized fragments retain only a digest and size, and additional candidates
-are counted. These events use normal Run persistence and purge semantics and
-do not require optional worker file logs. Audit omissions and validation rules
-remain authoritative; diagnostics never enter model inputs or the Decision.
-
-The prompt-only Numeric Value Catalog shares repeated table-label prefixes and
-Evidence reference lists through explicit source IDs. Values retain their original
-value IDs, suffix labels, numbers, dates and measurement IDs; concatenating the
-source prefix and suffix reconstructs the original label. Source IDs never replace
-Evidence/value IDs in model output or canonical locators. No values are filtered
-by this projection, and PIT limitations apply to every linked value.
-
-Numeric repair includes its value/scenario/requirement catalogs exactly once:
-repairs with a parsed candidate receive the catalogs as supplemental context,
-while repairs without a candidate retain them in the original task. The repair
-budget and numeric validation rules are unchanged. Analyst and deliberation
-prompts ask for material reasoning and counterevidence without repeated report
-retelling; they impose no hard narrative-length cap.
+Analyst and deliberation prompts ask for material reasoning and counterevidence
+without repeated report retelling; they impose no hard narrative-length cap.
 
 Every artifact records its prompt version and top-level structured generation
 method. Agenda's top-level method describes Agenda generation; Final's
 top-level method continues to describe the qualitative core. Component-level
 `generation_observations` identify the logical client role, semantic-structured
-or schema-serialization task, node, and final method for Agenda, Final core,
-and Final numeric generation. These logical roles remain explicit even when a
+or schema-serialization task, node, and final method for Agenda and Final
+Decision serialization. These logical roles remain explicit even when a
 provider reuses the same physical client. Historical artifacts without these
 observations remain valid and are displayed as not recorded. No artifact stores
 hidden reasoning traces or raw provider conversations.
@@ -629,7 +572,7 @@ responsibility rather than separate public graph nodes:
 | `context` | Deterministic role-context assembly; no provider call |
 | `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
 | `audit` | Schema-focused extraction of a small report/deliberation audit envelope |
-| `debate.agenda.serialize`, `committee.final.serialize.numeric` | Semantic structured generation by the selected reasoning client |
+| `debate.agenda.serialize` | Semantic structured generation by the selected reasoning client |
 | `committee.final.serialize.core` and other `serialize` phases | Schema serialization by a schema-focused client |
 | other suffixes | Workflow or system activity outside the standard phases |
 
@@ -918,9 +861,9 @@ The domain package owns typed research contracts and pure rules; it does not
 import application orchestration, persistence, market adapters or SDK clients.
 Research receives a scoped runtime context and explicit artifact/evidence sinks.
 Research synthesis separates readable deliberation, serializer drafts, decision
-prompt guidance, qualitative generation, numeric preflight, numeric generation,
-audit assembly and formula/display rules. These modules preserve generation
-budgets and exchange typed products; numeric audit does not invoke providers.
+prompt guidance, Decision serialization, optional reference validation and
+presentation formatting. These modules preserve generation budgets and exchange
+typed products; reference validation does not invoke providers.
 The repository composes private execution, research-write, Timeline-query,
 artifact and lifecycle operations over a shared session factory. Operations that
 commit a research result retain their complete transaction boundary. Full
@@ -940,7 +883,7 @@ across cycles. These are derived reads and introduce no persistence migration.
 The instrument route `/timelines/:instrument?node=:id` is the research reader.
 Run routes `/runs/:id` show execution and diagnostics; retired reading query
 values do not redirect to research. Selecting history does not select a Primary
-Cycle. Technical snapshots, recovery records, numeric audit appendices, and
+Cycle. Technical snapshots, recovery records, and
 raw events are available on the Run diagnostics page; evidence and consequential
 limitations stay reachable from research reading. Presentation never rewrites
 stored reports or export products. The dashboard uses bounded summary and Run

@@ -25,7 +25,7 @@ from tradingagents.domain.collection import (
     IncrementalCollectionRequest,
     IncrementalEvidenceCandidate,
 )
-from tradingagents.domain.common import NumericAuditStatus, ReportLanguage, RunStatus
+from tradingagents.domain.common import ReportLanguage, RunStatus
 from tradingagents.domain.data import SourceObservation
 from tradingagents.domain.decision_components import baseline_component_ids
 from tradingagents.domain.errors import (
@@ -57,8 +57,6 @@ from tradingagents.persistence.models import (
 from tradingagents.research.full.state import GraphExecution
 from tradingagents.research.incremental.synthesis import (
     _incremental_brief_fallback_title,
-    _incremental_decision_core,
-    _incremental_decision_from_core,
 )
 from tradingagents.research.synthesis.structured_output import StructuredOutputError
 
@@ -859,12 +857,13 @@ def test_incremental_assessment_respects_one_repair_budget(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "full_research_required"),
+    ("outcome", "full_research_required", "core_recovery"),
     (
-        ("unchanged", False),
-        ("unchanged", True),
-        ("updated", False),
-        ("updated", True),
+        ("unchanged", False, False),
+        ("unchanged", True, False),
+        ("updated", False, False),
+        ("updated", False, True),
+        ("updated", True, False),
     ),
 )
 @pytest.mark.parametrize("repeat_retrieval", [False, True])
@@ -874,10 +873,25 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     repository,
     outcome: str,
     full_research_required: bool,
+    core_recovery: bool,
     extra_source_text: str,
     repeat_retrieval: bool,
 ) -> None:
-    baseline = _service(app_settings, repository).run(
+    from dataclasses import replace
+
+    from tradingagents.domain.decision import MarketReferenceLevel
+
+    class ReferenceGraph(_Graph):
+        def execute(self, context, **kwargs):
+            execution = super().execute(context, **kwargs)
+            ref = execution.evidence.items[0].ref
+            reference = MarketReferenceLevel(label="Baseline conditional value", value=100,
+                basis="derived", evidence_refs=(ref,), date_evidence_refs=(ref,),
+                as_of_date=date(2026, 7, 20), unit="USD", interpretation="Baseline assumptions.")
+            return replace(execution, decision=execution.decision.model_copy(
+                update={"market_reference_levels": (reference,)}))
+
+    baseline = _service(app_settings, repository, graph_factory=ReferenceGraph).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
     baseline_decision = repository.get_result(baseline.run_id).decision
@@ -934,6 +948,8 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         def invoke(self, prompt, config=None):
             del config
             self.prompts.append(prompt)
+            if isinstance(self.parsed, dict) and "raw" in self.parsed:
+                return self.parsed
             return {
                 "raw": AIMessage(content=""),
                 "parsed": self.parsed,
@@ -1003,14 +1019,19 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
                     },
                     self.prompts,
                 )
-            if schema.__name__ == "_IncrementalDecisionPayload":
-                updated = baseline_decision.model_copy(
-                    update={"thesis": "The new filing materially updates the thesis."}
-                )
-                return _Invoker(
-                    {"decision": updated.model_dump(mode="json")},
-                    self.prompts,
-                )
+            if schema.__name__ == "_IncrementalDecisionPayload" and core_recovery:
+                return _Invoker({"raw": AIMessage(content="", response_metadata={"finish_reason": "length"}), "parsed": None}, self.prompts)
+            if schema.__name__ in {"_IncrementalDecisionPayload", "_IncrementalDecisionSection"}:
+                updated = baseline_decision.model_dump(mode="json")
+                updated['thesis'] = "The new filing materially updates the thesis."
+                if schema.__name__ == "_IncrementalDecisionSection":
+                    updated.pop('market_reference_levels')
+                    for scenario in updated['scenarios']:
+                        scenario.pop('reference_ranges')
+                else:
+                    updated['market_reference_levels'][0]['value'] = 140
+                    updated['market_reference_levels'].append({"label": "Invalid optional reference"})
+                return _Invoker({"decision": updated}, self.prompts)
             raise AssertionError(f"unexpected schema: {schema.__name__}")
 
     serializer = _SerializerLLM()
@@ -1045,6 +1066,8 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     expected_calls = [("_IncrementalAssessmentPayload", None)]
     if outcome == "updated":
         expected_calls.append(("_IncrementalDecisionPayload", None))
+    if core_recovery:
+        expected_calls.append(("_IncrementalDecisionSection", None))
     assert serializer.calls == expected_calls
     confidence_instruction = (
         "Never express final Decision confidence as a number, decimal, percentage, or probability"
@@ -1094,6 +1117,16 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     assert (
         result.decision.model_dump(mode="json") == baseline_decision.model_dump(mode="json")
     ) is (outcome == "unchanged")
+    assert baseline_decision.market_reference_levels[0].value == 100
+    if outcome == "unchanged":
+        assert result.decision.market_reference_levels[0].value == 100
+    elif core_recovery:
+        assert result.decision.market_reference_levels == ()
+    else:
+        assert [level.value for level in result.decision.market_reference_levels] == [140]
+    if outcome == "updated":
+        assert any(event.event_type == 'decision.reference_omitted'
+                   for event in repository.list_events(result.run_id))
     node = repository.get_research_node(result.run_id)
     assert node is not None
     assert node.decision_outcome is IncrementalDecisionOutcome(outcome)
@@ -1216,20 +1249,6 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
     failed_run = repository.list_runs(status=RunStatus.FAILED).items[0]
     assert repository.evidence_status(failed_run.id).status == "pending"
     assert repository.get_research_node(failed_run.id) is None
-
-
-def test_incremental_decision_core_preserves_baseline_numeric_appendix() -> None:
-    baseline = research_decision().model_copy(
-        update={"numeric_audit_status": NumericAuditStatus.NOT_APPLICABLE}
-    )
-    core = _incremental_decision_core(baseline).model_copy(
-        update={"thesis": "Updated qualitative thesis."}
-    )
-
-    decision = _incremental_decision_from_core(core, baseline)
-
-    assert decision.thesis == "Updated qualitative thesis."
-    assert decision.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
 
 
 def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(

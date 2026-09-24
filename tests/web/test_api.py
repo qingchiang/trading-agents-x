@@ -67,7 +67,7 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -159,7 +159,7 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 17, 14, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -324,7 +324,7 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -475,7 +475,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -717,7 +717,7 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
         ConfigurationStore(web_settings)
         .resolve_request(request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -793,7 +793,7 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -857,7 +857,7 @@ async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
         ConfigurationStore(web_settings)
         .resolve_request(baseline_request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -919,7 +919,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
         ConfigurationStore(web_settings)
         .resolve_request(request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
     )
@@ -977,7 +977,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
                 "cycle_id": run.id,
                 "instrument": "NVDA",
                 "analysis_date": "2026-07-24",
-                "research_schema_version": "2",
+                "research_schema_version": "3",
                 "information_cutoff_at": "2026-07-24T23:59:59Z",
                 "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
                 "research_kind": "full",
@@ -1014,7 +1014,7 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         analysis_date: date,
         *,
         make_primary: bool | None = None,
-        research_schema_version: str = "2",
+        research_schema_version: str = "3",
     ) -> str:
         request = AnalysisRequest(
             ticker="NVDA",
@@ -1123,7 +1123,7 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
         ConfigurationStore(web_settings)
         .resolve_request(request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
     )
@@ -1212,7 +1212,7 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
             ConfigurationStore(web_settings)
             .resolve_request(request, require_initialized=False)[1]
             .snapshot(),
-            research_schema_version="2",
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
         )
@@ -1279,7 +1279,7 @@ async def test_terminal_run_creation_template_is_lightweight_and_uses_today_inde
         ConfigurationStore(web_settings)
         .resolve_request(request, require_initialized=False)[1]
         .snapshot(),
-        research_schema_version="2",
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
     )
@@ -1317,7 +1317,7 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
             ConfigurationStore(web_settings)
             .resolve_request(request, require_initialized=False)[1]
             .snapshot(),
-            research_schema_version="2",
+            research_schema_version="3",
             information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
             method_snapshot={"schema_version": "1"},
         )
@@ -1403,7 +1403,7 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
             ConfigurationStore(web_settings)
             .resolve_request(request, require_initialized=False)[1]
             .snapshot(),
-            research_schema_version="2",
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
         )
@@ -2236,7 +2236,7 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
             ConfigurationStore(web_settings)
             .resolve_request(request, require_initialized=False)[1]
             .snapshot(),
-            research_schema_version="2",
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
         )

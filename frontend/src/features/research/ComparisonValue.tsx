@@ -9,7 +9,7 @@ type Value = ResearchNodeComparison["decision_sections"][number]["values"][numbe
 export const comparisonLabels: Record<string, string> = {
   rating: "researchRating", confidence: "confidence", executive_summary: "executiveSummary", thesis: "thesis",
   catalysts: "catalysts", risks: "risks", invalidation_conditions: "invalidation", unresolved_questions: "unresolvedQuestions",
-  time_horizon: "horizon", scenarios: "scenarios", valuation_assessment: "valuationAssessment",
+  time_horizon: "horizon", scenarios: "scenarios",
   market_reference_levels: "marketReferenceLevels", risk_review_adjustments: "riskReviewAdjustments",
 };
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -50,7 +50,6 @@ export default function ComparisonValue({ field, value, index, onEvidence }: {
       {Array.isArray(item.reference_ranges) && item.reference_ranges.map((rawRange, j) => { const r = record(rawRange); return <section key={j}><h4>{typeof r.label === "string" ? r.label : t("scenarioReferenceRange")}</h4>{range(r)}{prose(r.interpretation)}{limitations(r.limitations)}</section>; })}{refs(item.evidence_refs)}
     </article>; })}</>;
   }
-  if (field === "valuation_assessment") { const item = record(input); return <>{range(item)}{prose(item.method)}{limitations(item.limitations)}</>; }
   if (field === "market_reference_levels") return Array.isArray(input) ? <>{input.map((raw, n) => { const item = record(raw); return <section key={n}><h4>{typeof item.label === "string" ? item.label : t("referenceItem")}</h4>{endpoint(item, item.unit)}{typeof item.basis === "string" && <p>{t(`marketReferenceBasis.${item.basis}`, { defaultValue: t("comparisonContentUnsupported") })}</p>}{prose(item.interpretation)}</section>; })}</> : unavailable;
   if (field === "risk_review_adjustments") return Array.isArray(input) ? <>{input.map((raw, n) => { const item = record(raw); return <section key={n}>{prose(item.subject)}{typeof item.disposition === "string" && item.disposition.length > 0 && <p>{t(`adjustment${item.disposition[0].toUpperCase()}${item.disposition.slice(1)}`)}</p>}{prose(item.explanation)}{refs(item.evidence_refs)}</section>; })}</> : unavailable;
   return typeof input === "string" ? prose(input) : unavailable;
@@ -59,7 +58,7 @@ export default function ComparisonValue({ field, value, index, onEvidence }: {
 /** Detect schema extensions without presenting technical keys as research prose. */
 export function hasAdditionalComparisonFields(field: string, value: unknown): boolean {
   const extra = (item: unknown, fields: string[]) => Object.keys(record(item)).some(key => !fields.includes(key));
-  const endpointFields = ["value", "as_of_date", "evidence_refs", "date_evidence_refs", "basis", "calculation_id", "source_locator", "temporal_basis"];
+  const endpointFields = ["value", "as_of_date", "evidence_refs", "date_evidence_refs", "basis", "source_locator", "temporal_basis"];
   const rangeFields = ["low", "high", "unit", "measurement_kind", "limitations"];
   const rangeExtra = (input: unknown, fields: string[]) => {
     const item = record(input);
@@ -70,8 +69,7 @@ export function hasAdditionalComparisonFields(field: string, value: unknown): bo
     return !["base", "bull", "bear"].includes(String(item.kind)) || extra(item, ["kind", "outcome", "core_assumptions", "evidence_refs", "reference_ranges"])
       || Array.isArray(item.reference_ranges) && item.reference_ranges.some(range => rangeExtra(range, [...rangeFields, "category", "label", "interpretation"]));
   });
-  if (field === "valuation_assessment") return rangeExtra(value, [...rangeFields, "method"]);
-  if (field === "market_reference_levels" && Array.isArray(value)) return value.some(item => extra(item, [...endpointFields, "calculation_ids", "interpretation", "label", "measurement_kind", "unit"]));
+  if (field === "market_reference_levels" && Array.isArray(value)) return value.some(item => extra(item, [...endpointFields, "interpretation", "label", "measurement_kind", "unit"]));
   if (field === "risk_review_adjustments" && Array.isArray(value)) return value.some(item => extra(item, ["subject", "disposition", "explanation", "source_role", "evidence_refs"]));
   return false;
 }

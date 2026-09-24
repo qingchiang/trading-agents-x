@@ -1,9 +1,7 @@
-import { useContext } from "react";
-import { NumericNoticeHandled } from "./researchWarnings";
 import { useTranslation } from "react-i18next";
 import { researchConfidenceLabel } from "../../shared/i18n";
 
-import type { DecisionNumericAuditAppendix, ResearchDecision, } from "../../shared/api/client";
+import type { ResearchDecision, } from "../../shared/api/client";
 import type { EvidenceReferenceIndex } from "./evidence";
 import { formatDecisionNumber } from "./numericDisplay";
 import { MarkdownList } from "./AnalystReportView";
@@ -12,16 +10,12 @@ import Markdown from "../../shared/Markdown";
 
 export default function ResearchDecisionView({
   decision,
-  numericAudit,
   evidenceIndex,
   onEvidence,
-  onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
-  numericAudit?: DecisionNumericAuditAppendix | null;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
-  onOpenWarnings?: () => void;
 }) {
   const { t } = useTranslation();
   if (!decision) {
@@ -43,10 +37,8 @@ export default function ResearchDecisionView({
     >
       <ResearchDecisionContent
         decision={decision}
-        numericAudit={numericAudit}
         evidenceIndex={evidenceIndex}
         onEvidence={onEvidence}
-        onOpenWarnings={onOpenWarnings}
       />
     </article>
   );
@@ -54,21 +46,16 @@ export default function ResearchDecisionView({
 
 export function ResearchDecisionContent({
   decision,
-  numericAudit,
   evidenceIndex,
   onEvidence,
-  onOpenWarnings,
   embedded = false,
 }: {
   decision: ResearchDecision;
-  numericAudit?: DecisionNumericAuditAppendix | null;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
-  onOpenWarnings?: () => void;
   embedded?: boolean;
 }) {
   const { t, i18n } = useTranslation();
-  const noticeHandled = useContext(NumericNoticeHandled);
   const numberLanguage = i18n.resolvedLanguage ?? i18n.language;
   const visibleRefs = (refs: string[]) => (embedded ? [] : refs);
   const scenarios = [...decision.scenarios].sort(
@@ -116,24 +103,6 @@ export function ResearchDecisionContent({
           />
         </div>
       </header>
-
-      {!noticeHandled && ((decision.numeric_audit_status === "partial" || numericAudit?.status === "partial") ||
-        decision.numeric_audit_status === "incomplete") && (
-        <div className="numeric-audit-notice" role="status">
-          <span>
-            {t(
-              (decision.numeric_audit_status === "partial" || numericAudit?.status === "partial")
-                ? "numericAuditPartial"
-                : "numericAuditIncomplete",
-            )}
-          </span>
-          {onOpenWarnings && (
-            <button type="button" onClick={onOpenWarnings}>
-              {t("openRunWarnings")}
-            </button>
-          )}
-        </div>
-      )}
 
       <section className="decision-section decision-lists-grid">
         <MarkdownList
@@ -280,60 +249,6 @@ export function ResearchDecisionContent({
           ))}
         </div>
       </section>
-
-      {decision.valuation_assessment && (
-        <section className="decision-section valuation-section">
-          <article className="valuation-card">
-              <h2 id={embedded ? undefined : "assessment-valuation"} data-outline={embedded ? undefined : t("valuationAssessment")}>{t("valuationAssessment")}</h2>
-              <p className="valuation-value"
-                title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.unit}`}
-              >
-                {formatRange(
-                  decision.valuation_assessment.low.value,
-                  decision.valuation_assessment.high.value,
-                  decision.valuation_assessment.unit,
-                  numberLanguage,
-                )}
-              </p>
-              <dl>
-                <div>
-                  <dt>{t("method")}</dt>
-                  <dd>{decision.valuation_assessment.method}</dd>
-                </div>
-                <div>
-                  <dt>{t("asOfDate")}</dt>
-                  <dd>
-                    {latestEndpointDate(
-                      decision.valuation_assessment.low.as_of_date,
-                      decision.valuation_assessment.high.as_of_date,
-                    )}
-                    <TemporalBasisBadge
-                      basis={latestTemporalBasis(
-                        decision.valuation_assessment.low.temporal_basis,
-                        decision.valuation_assessment.high.temporal_basis,
-                      )}
-                    />
-                  </dd>
-                </div>
-              </dl>
-              <MarkdownList
-                title={t("limitations")}
-                items={decision.valuation_assessment.limitations}
-                evidenceIndex={evidenceIndex}
-                onEvidence={onEvidence}
-              />
-              <EvidenceLinks
-                refs={visibleRefs([
-                  ...decision.valuation_assessment.low.evidence_refs,
-                  ...decision.valuation_assessment.high.evidence_refs,
-                ])}
-                evidenceIndex={evidenceIndex}
-                onEvidence={onEvidence}
-                compact
-              />
-          </article>
-        </section>
-      )}
 
       {(decision.market_reference_levels ?? []).length > 0 && (
         <section className="decision-section market-reference-section">

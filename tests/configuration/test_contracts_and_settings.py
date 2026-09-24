@@ -87,35 +87,11 @@ def test_research_decision_rejects_account_level_fields() -> None:
         ResearchDecision.model_validate(payload)
 
 
-def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
+def test_research_decision_accepts_nonpersonalized_reference_levels() -> None:
     payload = research_decision().model_dump(mode="json")
     payload.update(
         {
             "rating": "Overweight",
-            "valuation_assessment": {
-                "method": "Comparable multiples",
-                "low": {
-                    "value": 90.0,
-                        "basis": "derived",
-                        "evidence_refs": ["ev_0123456789ab"],
-                        "date_evidence_refs": ["ev_0123456789ab"],
-                        "calculation_id": "calc_valuation_low",
-                    "as_of_date": "2026-07-24",
-                    "temporal_basis": "point_in_time",
-                },
-                "high": {
-                    "value": 110.0,
-                        "basis": "derived",
-                        "evidence_refs": ["ev_0123456789ab"],
-                        "date_evidence_refs": ["ev_0123456789ab"],
-                        "calculation_id": "calc_valuation_high",
-                    "as_of_date": "2026-07-24",
-                    "temporal_basis": "point_in_time",
-                },
-                "measurement_kind": "currency",
-                "unit": "USD",
-                "limitations": ["Peer comparability is imperfect."],
-            },
             "market_reference_levels": [
                 {
                     "label": "Observed support",
@@ -136,7 +112,7 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
     decision = ResearchDecision.model_validate(payload)
 
     assert decision.rating.value == "Overweight"
-    assert decision.valuation_assessment is not None
+    assert "valuation_assessment" not in decision.model_dump()
     assert decision.market_reference_levels[0].label == "Observed support"
 
 

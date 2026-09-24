@@ -175,68 +175,13 @@ class ResearchScenarioKind(_StableStrEnum):
 
 
 class ScenarioReferenceCategory(_StableStrEnum):
-    """Research purpose of a non-valuation scenario reference range."""
+    """Research purpose of a scenario reference range."""
 
     TECHNICAL = "technical"
     HISTORICAL = "historical"
     ANALYST_CONSENSUS = "analyst_consensus"
     FUNDAMENTAL = "fundamental"
     OTHER = "other"
-
-
-class NumericAuditComponentType(_StableStrEnum):
-    """Stable component identity for localized numeric audit omissions."""
-
-    APPENDIX = "appendix"
-    CALCULATION = "calculation"
-    SCENARIO_RANGE = "scenario_range"
-    VALUATION = "valuation"
-    MARKET_REFERENCE = "market_reference"
-    DECISION_CLAIM = "decision_claim"
-
-
-class NumericAuditStatus(_StableStrEnum):
-    COMPLETE = "complete"
-    PARTIAL = "partial"
-    INCOMPLETE = "incomplete"
-    NOT_APPLICABLE = "not_applicable"
-
-
-class NumericAuditAppendixStatus(_StableStrEnum):
-    COMPLETE = "complete"
-    RECOVERED = "recovered"
-    PARTIAL = "partial"
-    INCOMPLETE = "incomplete"
-
-
-class NumericCalculationStatus(_StableStrEnum):
-    VERIFIED = "verified"
-    INVALID = "invalid"
-    MISSING = "missing"
-
-
-class NumericDisplayStatus(_StableStrEnum):
-    MATCHED = "matched"
-    APPROXIMATELY_MATCHED = "approximately_matched"
-    MISMATCHED = "mismatched"
-    NOT_CHECKED = "not_checked"
-
-
-class NumericDisplayScale(_StableStrEnum):
-    """Deterministic scale applied only when comparing reader-facing values."""
-
-    BASE = "base"
-    THOUSAND = "thousand"
-    TEN_THOUSAND = "ten_thousand"
-    MILLION = "million"
-    HUNDRED_MILLION = "hundred_million"
-    BILLION = "billion"
-    TRILLION = "trillion"
-
-
-class NumericAuditPhase(_StableStrEnum):
-    INITIAL = "initial"
-    REPAIR = "repair"
 
 
 class ArtifactGenerationMethod(_StableStrEnum):
@@ -260,4 +205,4 @@ def _field_value(value: Any, field: str) -> Any:
     return None
 
 
-CURRENT_RESEARCH_SCHEMA_VERSION = "2"
+CURRENT_RESEARCH_SCHEMA_VERSION = "3"

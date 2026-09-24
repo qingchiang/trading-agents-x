@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
 import pytest
 
-from tests.support.factories import research_decision
 from tests.support.synthesis import (
-    _core_draft_from_decision,
-    _core_envelope,
     _MarkdownLLM,
-    _numeric_regression_payload,
     _state,
     _state_with_agenda,
     _StaticLLM,
@@ -18,18 +13,8 @@ from tests.support.synthesis import (
 from tradingagents.domain.common import (
     ArtifactGenerationMethod,
     DebateImportance,
-    NumericDisplayScale,
     ReportLanguage,
 )
-from tradingagents.domain.decision import (
-    MarketReferenceLevel,
-)
-from tradingagents.domain.evidence import (
-    EvidenceBundle,
-    EvidenceItem,
-    MeasurementKind,
-)
-from tradingagents.domain.numeric_audit import MarketReferenceBasis
 from tradingagents.domain.reports import (
     DebateAgenda,
     DebateIssue,
@@ -38,7 +23,6 @@ from tradingagents.domain.reports import (
     RiskReview,
 )
 from tradingagents.research.synthesis.decision_prompts import (
-    _numeric_example_pair,
     decision_reference_label_guidance,
     decision_scenario_assumption_guidance,
 )
@@ -51,26 +35,8 @@ from tradingagents.research.synthesis.deliberation import (
     invoke_risk_review,
     write_research_markdown,
 )
-from tradingagents.research.synthesis.drafts import (
-    CalculationInputDraft,
-    CalculationRecordDraft,
-    DecisionNumericRequirementDraft,
-)
-from tradingagents.research.synthesis.numeric_evidence import build_numeric_value_catalog
-from tradingagents.research.synthesis.numeric_generation import (
-    _numeric_audit_snapshot,
-)
-from tradingagents.research.synthesis.numeric_math import (
-    _canonicalize_calculation_result,
-    _evaluate_formula,
-)
-from tradingagents.research.synthesis.numeric_preflight import (
-    _preflight_numeric_requirements,
-)
-from tradingagents.research.synthesis.output_validation import OutputValidationError
 from tradingagents.research.synthesis.structured_output import (
     StructuredOutputError,
-    StructuredOutputFailure,
 )
 
 
@@ -362,88 +328,6 @@ def test_debate_progress_requires_a_changed_open_issue_set() -> None:
     assert debate_round_has_material_progress(state, round_number=2) is True
 
 
-def test_numeric_prompt_example_pair_is_compatible_and_strictly_ordered() -> None:
-    bundle = EvidenceBundle(
-        instrument="NVDA",
-        analysis_date=date(2026, 7, 24),
-        items=tuple(
-            EvidenceItem.create(
-                source="fixture",
-                evidence_type=label,
-                requested_date=date(2026, 7, 24),
-                effective_date=date(2026, 7, 24),
-                value=value,
-                measurement_kind=MeasurementKind.CURRENCY,
-                unit="USD",
-            )
-            for label, value in (("upper", 120), ("lower", 80))
-        ),
-    )
-
-    pair = _numeric_example_pair(build_numeric_value_catalog(bundle))
-
-    assert pair is not None
-    assert pair[0].value == 80
-    assert pair[1].value == 120
-    assert pair[0].measurement_kind is pair[1].measurement_kind
-    assert pair[0].unit == pair[1].unit == "USD"
-
-
-def test_public_decision_rejects_derived_reference_without_calculation() -> None:
-    ref = _state()["evidence_bundle"]["items"][0]["ref"]
-
-    with pytest.raises(ValueError, match="requires a calculation"):
-        MarketReferenceLevel(
-            label="Derived fair value",
-            value=100,
-            unit="USD",
-            as_of_date=date(2026, 7, 24),
-            interpretation="A derived reference only.",
-            evidence_refs=(ref,),
-            date_evidence_refs=(ref,),
-            basis=MarketReferenceBasis.DERIVED,
-        )
-
-
-def test_display_scale_normalization_count_excludes_omitted_duplicate() -> None:
-    state = _state()
-    ref = state["evidence_bundle"]["items"][0]["ref"]
-    core = _core_draft_from_decision(
-        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
-    )
-    retained = DecisionNumericRequirementDraft(
-        id="req_duplicate_ratio",
-        component_path="thesis",
-        label="Retained ratio",
-        stated_value=2,
-        fraction_digits=1,
-        formula="numerator / denominator",
-        inputs=(
-            CalculationInputDraft(name="numerator", value=2_000_000),
-            CalculationInputDraft(name="denominator", value=1_000_000),
-        ),
-        input_evidence_refs=(ref,),
-        unit="x",
-        display_scale=NumericDisplayScale.BASE,
-        limitations=("Fixture limitation.",),
-    )
-    omitted_duplicate = retained.model_copy(
-        update={
-            "label": "Omitted duplicate ratio",
-            "display_scale": NumericDisplayScale.MILLION,
-        }
-    )
-
-    preflight = _preflight_numeric_requirements(
-        _core_envelope(core, requirements=(retained, omitted_duplicate)),
-        valid_evidence_refs={ref},
-    )
-
-    assert [item.id for item in preflight.requirements] == [retained.id]
-    assert preflight.normalized_display_scales == 0
-    assert preflight.omissions[0].issue_codes == ("numeric.requirement_candidate.1.duplicate_id",)
-
-
 @pytest.mark.parametrize(
     ("output_language", "expected_label"),
     (
@@ -464,127 +348,8 @@ def test_singleton_target_label_guidance_is_localized(
 
 
 def test_6501_scenario_assumption_regression_is_covered_by_prompt_guidance() -> None:
-    regression = _numeric_regression_payload()["presentation_regressions"]["scenario_assumption"]
     guidance = decision_scenario_assumption_guidance(ReportLanguage.SIMPLIFIED_CHINESE.prompt_label)
 
-    assert regression["expected"] in guidance
-    assert regression["metric_subject"] in guidance
-    assert f"不要只写‘{regression['ambiguous']}’" in guidance
-
-
-def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
-    schema = CalculationRecordDraft.model_json_schema()
-    input_schema = schema["$defs"]["CalculationInputDraft"]["properties"]
-
-    assert input_schema["name"]["pattern"] == r"^[A-Za-z][A-Za-z0-9_]*$"
-    assert schema["properties"]["inputs"]["items"] == {"$ref": "#/$defs/CalculationInputDraft"}
-
-
-def test_calculation_draft_converts_typed_inputs_to_public_mapping() -> None:
-    draft = CalculationRecordDraft(
-        id="calc_valuation",
-        formula="earnings * multiple",
-        inputs=(
-            CalculationInputDraft(name="earnings", value=10),
-            CalculationInputDraft(name="multiple", value=10),
-        ),
-        input_evidence_refs=("ev_0123456789ab",),
-        unit="USD",
-        limitations=("The multiple is scenario-dependent.",),
-    )
-
-    assert draft.input_mapping() == {"earnings": 10, "multiple": 10}
-
-
-@pytest.mark.parametrize(
-    ("formula", "inputs", "issue"),
-    (
-        (
-            "base * growth",
-            {"base": 100},
-            "numeric.calculation.calc_base.formula.missing_input",
-        ),
-        (
-            "base",
-            {"base": 100, "growth": 1.1},
-            "numeric.calculation.calc_base.formula.unused_input",
-        ),
-    ),
-)
-def test_formula_validation_reports_component_scoped_input_issues(
-    formula: str,
-    inputs: dict[str, float],
-    issue: str,
-) -> None:
-    with pytest.raises(OutputValidationError) as error:
-        _evaluate_formula(
-            formula,
-            inputs,
-            issue_prefix="numeric.calculation.calc_base",
-        )
-
-    assert error.value.issue_code == issue
-
-
-@pytest.mark.parametrize(
-    ("unit", "expected"),
-    (
-        ("%", 45.46),
-        (" percent ", 45.46),
-        ("pct", 45.46),
-        ("pp", 45.46),
-        ("percentage points", 45.46),
-        ("bps", 4546),
-        ("x", 0.4546),
-        ("JPY", 0.4546),
-    ),
-)
-def test_calculation_result_uses_unit_aware_canonical_values(
-    unit: str,
-    expected: float,
-) -> None:
-    assert _canonicalize_calculation_result(0.4546, unit) == pytest.approx(expected)
-
-
-def test_numeric_audit_snapshot_redacts_secrets_and_omits_oversize_candidate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "tradingagents.research.synthesis.numeric_generation._NUMERIC_CANDIDATE_MAX_BYTES",
-        32,
-    )
-    snapshot = _numeric_audit_snapshot(
-        StructuredOutputFailure(
-            phase="repair",
-            method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
-            reason_code="semantic_validation",
-            validation_issues=("semantic.numeric.appendix.invalid",),
-            candidate={"api_key": "private", "payload": "x" * 100},
-        )
-    )
-
-    assert snapshot.candidate is None
-    assert snapshot.candidate_omitted == "oversize"
-    assert snapshot.candidate_digest is not None
-
-
-def test_numeric_audit_snapshot_keeps_only_sanitized_json_candidate() -> None:
-    snapshot = _numeric_audit_snapshot(
-        StructuredOutputFailure(
-            phase="initial",
-            method=ArtifactGenerationMethod.TOOL_CALL,
-            reason_code="schema_validation",
-            candidate={
-                "token": "private",
-                "requested": True,
-                "note": "Authorization: Bearer-private",
-            },
-        )
-    )
-
-    assert snapshot.candidate == {
-        "token": "[REDACTED]",
-        "requested": True,
-        "note": "Authorization: [REDACTED]",
-    }
-    assert snapshot.schema_valid is False
+    assert "分析师 EPS 共识上修至每股 185–195 日元" in guidance
+    assert "EPS" in guidance
+    assert "不要只写‘共识上修至 185–195 日元’" in guidance

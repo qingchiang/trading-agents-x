@@ -334,7 +334,7 @@ test("selects human-readable nodes and renders a structured comparison", async (
         ],
       },
       {
-        key: "valuation_assessment",
+        key: "market_reference_levels",
         values: [
           { state: "null" },
           { state: "empty", value: {} },

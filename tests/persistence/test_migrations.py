@@ -34,7 +34,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0100_independent"
+    assert revision == "0101_remove_numeric_audit"
     assert {
         "id",
         "run_id",
@@ -85,17 +85,9 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "ix_runs_trash_cascade_full_run_id" in run_indexes
     assert "outcomes" not in table_names
     assert "reflections" not in table_names
-    assert "numeric_audit_json" in decision_columns
+    assert "numeric_audit_json" not in decision_columns
     node_columns = {column["name"] for column in inspector.get_columns("research_nodes")}
     assert "incremental_products_json" in node_columns
-
-
-
-
-
-
-
-
 
 
 def test_older_revision_requires_explicit_offline_conversion(

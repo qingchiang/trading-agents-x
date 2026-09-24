@@ -14,7 +14,6 @@ from tradingagents.domain.common import (
     RunStatus,
 )
 from tradingagents.domain.decision import ResearchDecision
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.runs import (
     RunRequestSnapshot,
 )
@@ -37,19 +36,6 @@ _DECISION_SECTION_KEYS = tuple(ResearchDecision.model_fields)
 
 class InvalidPrimaryResearchCycleError(ValueError):
     """A requested Primary Research Cycle is not an active Full Cycle."""
-
-def _numeric_audit_warning_message(
-    appendix: DecisionNumericAuditAppendix | None,
-) -> str:
-    labels = tuple(
-        item.reference_label or item.component_path
-        for item in (appendix.omitted_components if appendix else ())
-    )
-    omitted = f": {', '.join(labels)}" if labels else ""
-    return (
-        "Optional numeric components were omitted because their audit failed"
-        f"{omitted}. The qualitative decision remains audited."
-    )
 
 _SAFE_METRIC_KEYS = {
     "llm_calls",

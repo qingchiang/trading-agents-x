@@ -17,7 +17,6 @@ from tradingagents.domain.decision import ResearchDecision
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceTable
 from tradingagents.domain.evidence_tables import group_evidence_by_content
 from tradingagents.domain.history import RunExport
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.numeric_display import format_decision_number
 from tradingagents.domain.reports import (
     AnalystReport,
@@ -233,17 +232,6 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 ]
             )
 
-    if result.numeric_audit is not None:
-        sections.extend(
-            [
-                "",
-                _render_numeric_audit_appendix(
-                    result.numeric_audit,
-                    labels,
-                    evidence_aliases,
-                ),
-            ]
-        )
 
     warnings = _export_warnings(run_export)
     sections.extend(["", f"## {labels['structured_recoveries']}"])
@@ -694,7 +682,6 @@ def _render_research_decision(
     content: ResearchDecision,
     labels: ExportLabels,
 ) -> str:
-    calculation_uses = _calculation_uses(content, labels)
     lines = [
         f"> {labels['opinion_notice']}",
         "",
@@ -704,15 +691,6 @@ def _render_research_decision(
             f"{labels.enum_name('confidence_level', content.confidence.value)}`"
         ),
         f"- {labels['time_horizon']}: {content.time_horizon}",
-        (
-            f"- {labels['numeric_audit']}: `"
-            + (
-                labels.enum_name("numeric_status", content.numeric_audit_status.value)
-                if content.numeric_audit_status is not None
-                else labels["not_recorded"]
-            )
-            + "`"
-        ),
         f"- {labels['evidence']}: {_render_refs(content.evidence_refs, labels)}",
         "",
         f"### {labels['executive_summary']}",
@@ -783,32 +761,6 @@ def _render_research_decision(
                 f"**{labels['evidence']}:** {_render_refs(scenario.evidence_refs, labels)}",
             ]
         )
-    if content.valuation_assessment is not None:
-        assessment = content.valuation_assessment
-        lines.extend(
-            [
-                "",
-                f"### {labels['valuation_assessment']}",
-                "",
-                f"- {labels['method']}: {assessment.method}",
-                (
-                    f"- {labels['range']}: "
-                    f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
-                    f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
-                    f"{assessment.unit}"
-                ),
-                f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
-                (
-                    f"- {labels['temporal_basis']}: "
-                    f"{labels.enum_name('temporal', assessment.low.temporal_basis.value)} / "
-                    f"{labels.enum_name('temporal', assessment.high.temporal_basis.value)}"
-                ),
-                f"- {labels['input_evidence']}: "
-                + _render_refs(assessment.input_evidence_refs, labels),
-                f"- {labels['calculations']}: " + _render_ids(assessment.calculation_ids, labels),
-            ]
-        )
-        lines.extend(_render_list(labels["limitations"], assessment.limitations, labels=labels))
     lines.extend(["", f"### {labels['market_references']}"])
     if content.market_reference_levels:
         for level in content.market_reference_levels:
@@ -826,44 +778,12 @@ def _render_research_decision(
                     f"- {labels['basis']}: {labels[f'basis.{level.basis.value}']}",
                     f"- {labels['temporal_basis']}: "
                     f"{labels.enum_name('temporal', level.temporal_basis.value)}",
-                    (f"- {labels['calculations']}: " + _render_ids(level.calculation_ids, labels)),
                     "",
                     level.interpretation,
                 ]
             )
     else:
         lines.extend(["", f"_{labels['no_market_references']}_"])
-    lines.extend(["", f"### {labels['calculations']}"])
-    if content.calculation_records:
-        for calculation in content.calculation_records:
-            inputs = ", ".join(
-                f"{name}={format_decision_number(value, output_language=labels.language)}"
-                for name, value in calculation.inputs.items()
-            )
-            lines.extend(
-                [
-                    "",
-                    f"#### `{calculation.id}`",
-                    "",
-                    f"- {labels['used_by']}: "
-                    + ", ".join(calculation_uses.get(calculation.id, ())),
-                    f"- {labels['formula']}: `{calculation.formula}`",
-                    f"- {labels['inputs']}: `{inputs}`",
-                    f"- {labels['result']}: "
-                    f"`{format_decision_number(calculation.result, calculation.unit, output_language=labels.language)}` "
-                    f"{calculation.unit}",
-                    f"- {labels['as_of']}: `{calculation.as_of_date.isoformat()}`",
-                    f"- {labels['temporal_basis']}: "
-                    f"{labels.enum_name('temporal', calculation.temporal_basis.value)}",
-                    f"- {labels['evidence']}: "
-                    + _render_refs(calculation.input_evidence_refs, labels),
-                ]
-            )
-            lines.extend(
-                _render_list(labels["limitations"], calculation.limitations, labels=labels)
-            )
-    else:
-        lines.extend(["", f"_{labels['no_calculations']}_"])
     lines.extend(_render_list(labels["catalysts"], content.catalysts, labels=labels))
     lines.extend(_render_list(labels["risks"], content.risks, labels=labels))
     lines.extend(
@@ -892,209 +812,6 @@ def _render_research_decision(
     else:
         lines.extend(["", f"_{labels['no_adjustments']}_"])
     return "\n".join(lines)
-
-
-def _calculation_uses(
-    content: ResearchDecision,
-    labels: ExportLabels,
-) -> dict[str, tuple[str, ...]]:
-    uses: dict[str, list[str]] = {}
-
-    def add(calculation_ids: tuple[str, ...], label: str) -> None:
-        for calculation_id in calculation_ids:
-            uses.setdefault(calculation_id, []).append(label)
-
-    for calculation in content.calculation_records:
-        for use in calculation.decision_uses:
-            add(
-                (calculation.id,),
-                labels["calculation_use.decision"].format(
-                    location=_decision_component_label(use.component_path, labels),
-                    label=use.label,
-                ),
-            )
-
-    for scenario in content.scenarios:
-        for reference_range in scenario.reference_ranges:
-            add(
-                tuple(
-                    item
-                    for item in (
-                        reference_range.low.calculation_id,
-                        reference_range.high.calculation_id,
-                    )
-                    if item is not None
-                ),
-                labels["calculation_use.scenario"].format(scenario=labels[scenario.kind.value]),
-            )
-    if content.valuation_assessment is not None:
-        add(
-            content.valuation_assessment.calculation_ids,
-            labels["calculation_use.valuation"],
-        )
-    for level in content.market_reference_levels:
-        add(
-            level.calculation_ids,
-            labels["calculation_use.market"].format(label=level.label),
-        )
-    return {calculation_id: tuple(dict.fromkeys(labels)) for calculation_id, labels in uses.items()}
-
-
-def _decision_component_label(component_path: str, labels: ExportLabels) -> str:
-    if component_path == "executive_summary":
-        return labels["executive_summary"]
-    if component_path == "thesis":
-        return labels["thesis"]
-    if component_path.startswith("risks."):
-        return labels["risks"]
-    if component_path.startswith("invalidation_conditions."):
-        return labels["invalidation"]
-    if component_path.startswith("risk_review_adjustments."):
-        return labels["risk_response"]
-    match = re.fullmatch(r"scenarios\.(base|bull|bear)\..+", component_path)
-    if match:
-        return labels["calculation_use.scenario"].format(scenario=labels[match.group(1)])
-    return labels["calculation_use.decision_claim"]
-
-
-def _render_numeric_audit_appendix(
-    appendix: DecisionNumericAuditAppendix,
-    labels: ExportLabels,
-    evidence_aliases: Mapping[str, str],
-) -> str:
-    has_snapshots = bool(appendix.snapshots)
-    has_checks = bool(appendix.requirement_checks)
-    lines = [
-        f"## {labels['decision_requirement_audit'] if has_checks else labels['unverified_numeric'] if has_snapshots else labels['numeric_audit_gaps']}",
-        "",
-        f"- {labels['status_label']}: `{appendix.status.value}`",
-    ]
-    if has_snapshots or appendix.omitted_components:
-        lines[1:1] = [
-            "",
-            f"> **{labels['warnings']}:** "
-            f"{labels['numeric_warning'] if has_snapshots else labels['numeric_gap_warning']}",
-        ]
-    if appendix.requirement_checks:
-        lines.extend(
-            [
-                "",
-                f"### {labels['requirement_comparisons']}",
-                "",
-                (
-                    f"| {labels['requirement_id']} | {labels['structured_value']} | "
-                    f"{labels['canonical_result']} | {labels['comparison_precision']} | "
-                    f"{labels['calculation_status']} | {labels['display_status']} |"
-                ),
-                "|---|---:|---:|---:|---|---|",
-            ]
-        )
-        for check in appendix.requirement_checks:
-            stated = format_decision_number(
-                float(check.stated_value),
-                check.unit,
-                output_language=labels.language,
-            )
-            comparison = (
-                format_decision_number(
-                    float(check.comparison_result),
-                    check.unit,
-                    output_language=labels.language,
-                )
-                if check.comparison_result is not None
-                else "—"
-            )
-            lines.append(
-                f"| {check.label} (`{check.component_path}`) | {stated} {check.unit} | "
-                f"{comparison}{f' {check.unit}' if check.comparison_result is not None else ''} | "
-                f"{check.fraction_digits} | `{check.calculation_status.value}` | "
-                f"`{check.display_status.value}` |"
-            )
-        for check in appendix.requirement_checks:
-            refs = _render_alias_refs(
-                check.input_evidence_refs,
-                evidence_aliases,
-                labels,
-            )
-            rounded = (
-                f"{check.rounded_stated_value} / {check.rounded_canonical_result}"
-                if check.rounded_stated_value is not None
-                and check.rounded_canonical_result is not None
-                else "—"
-            )
-            lines.extend(
-                [
-                    "",
-                    f"- **{check.label}** (`{check.requirement_id}`)",
-                    f"  - {labels['formula']}: `{check.formula}`",
-                    f"  - {labels['inputs']}: `{json.dumps(check.inputs, ensure_ascii=False, sort_keys=True)}`",
-                    f"  - {labels['rounded_comparison']}: `{rounded}`",
-                    f"  - {labels['canonical_result']}: `{check.canonical_result}`",
-                    f"  - {labels['display_scale']}: `{check.display_scale.value}`",
-                    f"  - {labels['evidence']}: {refs or '—'}",
-                ]
-            )
-            if check.issue_codes:
-                lines.append(
-                    f"  - {labels['issues']}: "
-                    + ", ".join(f"`{code}`" for code in check.issue_codes)
-                )
-    elif not has_snapshots and not appendix.omitted_components:
-        lines.extend(["", f"_{labels['comparison_not_recorded']}_"])
-    if appendix.omitted_components:
-        lines.extend(["", f"### {labels['omitted_components']}"])
-        for item in appendix.omitted_components:
-            lines.append(
-                f"- **{_numeric_omission_label(item, labels)}** "
-                f"(`{item.component_path}`): " + ", ".join(f"`{code}`" for code in item.issue_codes)
-            )
-    for snapshot in appendix.snapshots:
-        phase_label = labels.enum_name("numeric_phase", snapshot.phase.value)
-        lines.extend(
-            [
-                "",
-                f"### {phase_label}",
-                "",
-                f"- {labels['method']}: `{snapshot.method.value}`",
-                f"- {labels['reason']}: `{snapshot.reason_code}`",
-                f"- {labels['schema_valid']}: `{str(snapshot.schema_valid).lower()}`",
-                (
-                    f"- {labels['issues']}: "
-                    + (
-                        ", ".join(f"`{code}`" for code in snapshot.validation_issues)
-                        or f"_{labels['no_validation_issues']}_"
-                    )
-                ),
-            ]
-        )
-        if snapshot.candidate is not None:
-            lines.extend(
-                [
-                    "",
-                    "```json",
-                    json.dumps(snapshot.candidate, ensure_ascii=False, indent=2),
-                    "```",
-                ]
-            )
-        elif snapshot.candidate_omitted:
-            lines.append(
-                f"- {labels['candidate_omitted']}: "
-                f"`{snapshot.candidate_omitted}` "
-                f"({labels['candidate_digest']} `{snapshot.candidate_digest}`)"
-            )
-        else:
-            lines.append(f"- {labels['candidate_unparseable']}")
-    return "\n".join(lines)
-
-
-def _numeric_omission_label(item: Any, labels: ExportLabels) -> str:
-    parts: list[str] = []
-    if item.scenario_kind is not None:
-        parts.append(labels[item.scenario_kind.value])
-    parts.append(labels.enum_name("omission", item.component_type.value))
-    if item.reference_label:
-        parts.append(item.reference_label)
-    return " · ".join(parts)
 
 
 def _render_list(

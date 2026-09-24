@@ -188,7 +188,7 @@ test("shows raw evidence tables outside the reading report", () => {
   expect(screen.getByRole("table")).toHaveTextContent("2026-07-24100");
 });
 
-test("uses generic valuation units and omits unknown unit placeholders", () => {
+test("retains market reference values and omits the retired valuation card", () => {
   const decision: ResearchDecision = {
     rating: "Hold",
     confidence: "medium",
@@ -206,30 +206,6 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
       outcome: `${kind} outcome.`,
       evidence_refs: [evidenceRef],
     })),
-    valuation_assessment: {
-      method: "Forward PE",
-      low: {
-        value: 40,
-        basis: "derived",
-        evidence_refs: [evidenceRef],
-        date_evidence_refs: [evidenceRef],
-        calculation_id: "calc_low",
-        as_of_date: "2026-07-24",
-        temporal_basis: "point_in_time",
-      },
-      high: {
-        value: 50,
-        basis: "derived",
-        evidence_refs: [evidenceRef],
-        date_evidence_refs: [evidenceRef],
-        calculation_id: "calc_high",
-        as_of_date: "2026-07-24",
-        temporal_basis: "point_in_time",
-      },
-      measurement_kind: "ratio",
-      unit: "x",
-      limitations: ["Peer comparability is imperfect."],
-    },
     market_reference_levels: [
       {
         label: "Unclassified signal",
@@ -242,10 +218,8 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
         date_evidence_refs: [evidenceRef],
         basis: "interpreted",
         temporal_basis: "point_in_time",
-        calculation_ids: [],
       },
     ],
-    calculation_records: [],
     risk_review_adjustments: [],
   };
 
@@ -257,8 +231,7 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "Valuation assessment" })).toBeVisible();
-  expect(screen.getByText("40–50 x")).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Valuation assessment" })).not.toBeInTheDocument();
   expect(screen.getByText("7.25")).toBeVisible();
   expect(screen.queryByText("Unit unspecified")).not.toBeInTheDocument();
   const horizon = container.querySelector(".decision-horizon-summary");

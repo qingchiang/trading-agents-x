@@ -144,8 +144,7 @@ export function buildRoleMetricGroups(
 export function metricPhase(node: string): MetricPhase {
   if (node.endsWith(".context")) return "context";
   if (
-    node === "debate.agenda.serialize" ||
-    node.endsWith(".serialize.numeric")
+    node === "debate.agenda.serialize"
   ) {
     return "semanticStructured";
   }
@@ -174,18 +173,14 @@ export function nodeOutputStatus(
   for (const event of events) {
     if (event.node !== node) continue;
     let candidate: OutputStatus | null = null;
-    if (event.event_type === "node.numeric_audit_degraded") {
-      candidate = "degraded";
-    } else if (event.event_type === "node.output_failed") {
+    if (event.event_type === "node.output_failed") {
       candidate = node.endsWith(".audit") ? "auditIncomplete" : "failed";
     } else if (
-      event.event_type === "node.output_recovered" ||
-      event.event_type === "node.numeric_audit_recovered"
+      event.event_type === "node.output_recovered"
     ) {
       candidate = "recovered";
     } else if (
-      event.event_type === "node.output_retry" ||
-      event.event_type === "node.numeric_audit_retry"
+      event.event_type === "node.output_retry"
     ) {
       candidate = "retry";
     }

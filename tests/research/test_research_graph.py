@@ -39,10 +39,9 @@ from tradingagents.research.prompts.perspectives import PERSPECTIVE_SPECS
 from tradingagents.research.runtime import RunContext
 from tradingagents.research.synthesis.analyst_synthesis import AnalystAuditDraft
 from tradingagents.research.synthesis.drafts import (
-    DecisionNumericDraft,
     JudgeAudit,
     RebuttalAudit,
-    ResearchDecisionCoreEnvelope,
+    ResearchDecisionDraft,
 )
 
 
@@ -104,7 +103,7 @@ class _StructuredInvoker:
                     ),
                 ),
             )
-        elif self.schema is ResearchDecisionCoreEnvelope:
+        elif self.schema is ResearchDecisionDraft:
             risk_roles = tuple(
                 role
                 for role in (
@@ -138,22 +137,7 @@ class _StructuredInvoker:
                 invalidation_conditions=("The cited evidence is superseded",),
                 risk_review_adjustments=adjustments,
             )
-            payload = decision.model_dump(mode="json")
-            payload.pop("valuation_assessment", None)
-            payload.pop("market_reference_levels", None)
-            payload.pop("calculation_records", None)
-            payload.pop("numeric_audit_status", None)
-            for scenario in payload["scenarios"]:
-                scenario.pop("reference_ranges", None)
-            parsed = ResearchDecisionCoreEnvelope.model_validate(
-                {
-                    **payload,
-                    "numeric_requirements_declared": False,
-                    "numeric_requirement_candidates": [],
-                }
-            )
-        elif self.schema is DecisionNumericDraft:
-            parsed = DecisionNumericDraft(requested=False)
+            parsed = ResearchDecisionDraft.model_validate(decision.model_dump(mode="json"))
         else:
             raise AssertionError(self.schema)
         return {"raw": None, "parsed": parsed, "parsing_error": None}
@@ -357,7 +341,6 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "case.bull.audit",
                 "committee.final.reason",
                 "committee.final.serialize.core",
-                "committee.final.serialize.numeric",
             } <= set(node_metrics)
         assert not any(node.endswith(".prepare") for node in node_metrics)
         assert "case.bull" not in node_metrics
@@ -366,12 +349,12 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         )
         assert (
             decision_artifact.prompt_version
-            == "final-committee-v17-safe-numeric-operands"
+            == "final-committee-v18-research-references"
         )
         final_prompt = next(
             prompt
             for schema, prompt in deep.calls
-            if schema == "ResearchDecisionCoreEnvelope"
+            if schema == "ResearchDecisionDraft"
         )
         assert "DECISION SYNTHESIS BRIEF:" in final_prompt
         assert "RESEARCH CONTEXT:" not in final_prompt
@@ -382,14 +365,9 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             if schema == "ResearchMarkdown" and "SCENARIO ASSUMPTION READABILITY:" in prompt
         )
         assert "Analyst EPS consensus rises to JPY 185-195 per share" in final_reasoning_prompt
-        assert "PERCENTAGE CALCULATION CONTRACT:" in final_reasoning_prompt
-        assert "formulas must return a fractional ratio" in final_reasoning_prompt
-        assert "For every named input, state its exact value" in final_reasoning_prompt
-        assert "Evidence refs that establish its date" in final_reasoning_prompt
-        assert "Mark pure constants as constants without date Evidence" in (
-            final_reasoning_prompt
-        )
-        assert "every numeric value used by the formula" in final_reasoning_prompt
+        assert "PERCENTAGE CALCULATION CONTRACT:" not in final_reasoning_prompt
+        assert "calculation checklist" not in final_reasoning_prompt
+        assert "basis for any adopted valuation range" in final_reasoning_prompt
         agenda_prompt = next(
             prompt for schema, prompt in quick.calls if schema == "DebateAgenda"
         )
@@ -415,8 +393,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "AnalystAuditDraft",
             },
             {
-                "ResearchDecisionCoreEnvelope",
-                "DecisionNumericDraft",
+                "ResearchDecisionDraft",
                 "ResearchMarkdown",
             },
         ),
@@ -431,8 +408,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             },
             {
                 "JudgeAudit",
-                "ResearchDecisionCoreEnvelope",
-                "DecisionNumericDraft",
+                "ResearchDecisionDraft",
                 "ResearchMarkdown",
             },
         ),
@@ -446,8 +422,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "DebateAgenda",
                 "RebuttalAudit",
                 "JudgeAudit",
-                "ResearchDecisionCoreEnvelope",
-                "DecisionNumericDraft",
+                "ResearchDecisionDraft",
                 "ResearchMarkdown",
             },
         ),
@@ -564,7 +539,7 @@ def test_analyst_core_uses_the_dedicated_serializer_client(
     }
 
 
-def test_final_numeric_uses_reasoning_client_while_core_uses_serializer(
+def test_final_decision_uses_serializer_without_numeric_reasoning_call(
     app_settings,
     monkeypatch,
 ) -> None:
@@ -596,16 +571,16 @@ def test_final_numeric_uses_reasoning_client_while_core_uses_serializer(
         checkpoint_thread_id="final-numeric-reasoning-client",
     )
 
-    assert "ResearchDecisionCoreEnvelope" in {
+    assert "ResearchDecisionDraft" in {
         schema for schema, _prompt in serializer.calls
     }
     assert "DecisionNumericDraft" not in {
         schema for schema, _prompt in serializer.calls
     }
-    assert "DecisionNumericDraft" in {
+    assert "DecisionNumericDraft" not in {
         schema for schema, _prompt in reasoning.calls
     }
-    assert "ResearchDecisionCoreEnvelope" not in {
+    assert "ResearchDecisionDraft" not in {
         schema for schema, _prompt in reasoning.calls
     }
 
@@ -650,8 +625,6 @@ def test_debate_agenda_uses_reasoning_client_not_serializer(
     assert "DebateAgenda" not in {
         schema for schema, _prompt in serializer.calls
     }
-
-
 
 
 def test_graph_emits_only_typed_visible_research_artifacts(
@@ -744,12 +717,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
             "client_role": "deep_serializer",
             "generation_method": "tool_call",
         },
-        {
-            "node": "committee.final.serialize.numeric",
-            "task_kind": "semantic_structured",
-            "client_role": "deep_reasoning",
-            "generation_method": "tool_call",
-        },
+
     ]
     brief = next(
         artifact.content

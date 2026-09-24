@@ -1,4 +1,4 @@
-"""Deterministic, presentation-only formatting for audited decision numbers."""
+"""Deterministic, presentation-only formatting for research reference numbers."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def format_decision_number(
     *,
     output_language: str | None = None,
 ) -> str:
-    """Format a finite value for Web/Markdown while retaining raw audit data."""
+    """Format a finite value for Web/Markdown without changing persisted research values."""
 
     del output_language  # en, zh-CN, and ja share stable decimal/group separators.
     if not math.isfinite(value):

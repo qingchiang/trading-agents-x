@@ -28,7 +28,6 @@ from tradingagents.domain.evidence import (
     EvidenceItem,
 )
 from tradingagents.domain.evidence_tables import extract_evidence_tables
-from tradingagents.domain.numeric_audit import DecisionNumericAuditAppendix
 from tradingagents.domain.reporting import order_reports
 from tradingagents.domain.reports import AnalystReport, DecisionBrief, ResearchWarning
 from tradingagents.research.analysts import (
@@ -49,7 +48,6 @@ from tradingagents.research.synthesis.analyst_synthesis import (
 )
 from tradingagents.research.synthesis.decision import invoke_research_decision
 from tradingagents.research.synthesis.decision_prompts import (
-    decision_percentage_calculation_guidance,
     decision_scenario_assumption_guidance,
 )
 from tradingagents.research.synthesis.deliberation import (
@@ -151,11 +149,6 @@ class ResearchGraph:
             }
         )
         decision = ResearchDecision.model_validate(final_state["final_decision"])
-        numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(final_state["numeric_audit"])
-            if final_state.get("numeric_audit")
-            else None
-        )
         warnings = tuple(
             ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
         )
@@ -164,7 +157,6 @@ class ResearchGraph:
             evidence=evidence,
             reports=reports,
             decision=decision,
-            numeric_audit=numeric_audit,
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
@@ -1089,7 +1081,6 @@ class ResearchGraph:
                 ),
             )
             assumption_guidance = decision_scenario_assumption_guidance(state["output_language"])
-            percentage_guidance = decision_percentage_calculation_guidance()
             with self.metrics.phase(
                 f"{node}.reason",
                 event_writer=runtime.stream_writer,
@@ -1101,24 +1092,12 @@ class ResearchGraph:
                         "Cover the rating rationale, thesis, three scenarios, "
                         "catalysts, risks, invalidation, unresolved questions, "
                         "time horizon, any valuation or market-reference "
-                        "calculations, and risk-review dispositions. End with a "
-                        "short decision-critical calculation checklist. For each "
-                        "derived exact number that materially affects the rating, "
-                        "thesis, risks, invalidation, scenarios, or risk-review "
-                        "adjustments, state its formula, named numeric inputs, input "
-                        "Evidence refs, displayed value and precision, unit, and the "
-                        "decision field that uses it. For every named input, state "
-                        "its exact value, the Evidence refs that support that value, "
-                        "and the Evidence refs that establish its date. Mark pure "
-                        "constants as constants without date Evidence. The row-level "
-                        "Evidence refs must include every input Evidence ref. Before finishing "
-                        "each row, verify that every numeric value used by the formula "
-                        "has an explicit input Evidence binding. Write 'none' when no "
-                        "such derived number exists. Directly observed Evidence values "
-                        "do not belong in this checklist.\n\n"
-                        "PERCENTAGE CALCULATION CONTRACT:\n"
-                        + percentage_guidance
-                        + "\n\nSCENARIO ASSUMPTION READABILITY:\n"
+                        "references, and risk-review dispositions. Explain the assumptions "
+                        "and basis for any adopted valuation range, distinguish it from "
+                        "technical or historical market levels, and retain supporting "
+                        "Evidence citations, units and source dates. Do not invent ranges "
+                        "for scenarios without sufficient support.\n\n"
+                        "SCENARIO ASSUMPTION READABILITY:\n"
                         + assumption_guidance
                     ),
                     node=f"{node}.reason",
@@ -1142,7 +1121,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=brief,
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
-                prompt_version="final-committee-brief-v5-observation-aliases",
+                prompt_version="final-committee-brief-v6-research-references",
             )
             self._finish_node(
                 runtime,
@@ -1171,7 +1150,6 @@ class ResearchGraph:
             brief = DecisionBrief.model_validate(state["decision_brief"])
             output = invoke_research_decision(
                 self.deep_serializer_llm,
-                numeric_llm=self.deep_llm,
                 prompt=(
                     "Map the completed decision synthesis brief to the "
                     "strict final decision contract. Preserve its research "
@@ -1205,14 +1183,8 @@ class ResearchGraph:
                         client_role="deep_serializer",
                         generation_method=output.generation_method,
                     ),
-                    ArtifactGenerationObservation(
-                        node=f"{node}.numeric",
-                        task_kind="semantic_structured",
-                        client_role="deep_reasoning",
-                        generation_method=output.numeric_generation_method,
-                    ),
                 ),
-                prompt_version="final-committee-v17-safe-numeric-operands",
+                prompt_version="final-committee-v18-research-references",
             )
             self._finish_node(
                 runtime,
@@ -1225,11 +1197,6 @@ class ResearchGraph:
             )
             return {
                 "final_decision": decision.model_dump(mode="json"),
-                "numeric_audit": (
-                    output.numeric_audit.model_dump(mode="json")
-                    if output.numeric_audit is not None
-                    else None
-                ),
                 "warnings": [
                     *_structured_recovery_warnings(node, output),
                     *(warning.model_dump(mode="json") for warning in output.warnings),

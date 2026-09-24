@@ -41,7 +41,6 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      numeric_audit?: components["schemas"]["DecisionNumericAuditAppendix"] | null;
       recoveries?: components["schemas"]["StructuredRecoveryNotice"][];
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
       run_id: string;
@@ -66,16 +65,6 @@ export interface components {
       node: string;
       task_kind: "semantic_structured" | "schema_serialization";
     };
-    AuditedRangeEndpoint: {
-      as_of_date: string;
-      basis: components["schemas"]["MarketReferenceBasis"];
-      calculation_id?: string | null;
-      date_evidence_refs: string[];
-      evidence_refs: string[];
-      source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
-      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
-      value: number;
-    };
     AzureTransport: {
       api_version?: string | null;
       base_url?: string | null;
@@ -92,19 +81,6 @@ export interface components {
       component: components["schemas"]["PerformanceComponent"];
       name: string;
       reported_difference?: number | null;
-    };
-    CalculationRecord: {
-      as_of_date: string;
-      date_evidence_refs?: string[];
-      decision_uses?: components["schemas"]["DecisionCalculationUse"][];
-      formula: string;
-      id: string;
-      input_evidence_refs: string[];
-      inputs: Record<string, number>;
-      limitations: string[];
-      result: number;
-      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
-      unit: string;
     };
     CapabilitiesResponse: {
       analysts: string[];
@@ -273,16 +249,6 @@ export interface components {
       evidence_refs?: string[];
       markdown: string;
       warnings?: components["schemas"]["ResearchWarning"][];
-    };
-    DecisionCalculationUse: {
-      component_path: string;
-      label: string;
-    };
-    DecisionNumericAuditAppendix: {
-      omitted_components?: components["schemas"]["NumericAuditOmission"][];
-      requirement_checks?: components["schemas"]["NumericRequirementCheck"][];
-      snapshots: components["schemas"]["NumericAuditSnapshot"][];
-      status: components["schemas"]["NumericAuditAppendixStatus"];
     };
     DiscoveredModelView: {
       compatibility: "supported" | "unknown";
@@ -485,7 +451,6 @@ export interface components {
     MarketReferenceLevel: {
       as_of_date: string;
       basis?: components["schemas"]["MarketReferenceBasis"];
-      calculation_ids?: string[];
       date_evidence_refs: string[];
       evidence_refs: string[];
       interpretation: string;
@@ -531,52 +496,6 @@ export interface components {
       reasoning_output_tokens?: number;
       tool_calls?: number;
       wall_time_seconds?: number;
-    };
-    NumericAuditAppendixStatus: "complete" | "recovered" | "partial" | "incomplete";
-    NumericAuditComponentType: "appendix" | "calculation" | "scenario_range" | "valuation" | "market_reference" | "decision_claim";
-    NumericAuditOmission: {
-      component_path: string;
-      component_type: components["schemas"]["NumericAuditComponentType"];
-      issue_codes: string[];
-      reference_label?: string | null;
-      scenario_kind?: components["schemas"]["ResearchScenarioKind"] | null;
-    };
-    NumericAuditPhase: "initial" | "repair";
-    NumericAuditSnapshot: {
-      candidate?: Record<string, unknown> | null;
-      candidate_digest?: string | null;
-      candidate_omitted?: "oversize" | null;
-      method: components["schemas"]["ArtifactGenerationMethod"];
-      phase: components["schemas"]["NumericAuditPhase"];
-      reason_code: string;
-      schema_valid: boolean;
-      validation_issues?: string[];
-    };
-    NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
-    NumericCalculationStatus: "verified" | "invalid" | "missing";
-    NumericDisplayScale: "base" | "thousand" | "ten_thousand" | "million" | "hundred_million" | "billion" | "trillion";
-    NumericDisplayStatus: "matched" | "approximately_matched" | "mismatched" | "not_checked";
-    NumericRequirementCheck: {
-      calculation_id?: string | null;
-      calculation_status: components["schemas"]["NumericCalculationStatus"];
-      canonical_result?: number | null;
-      comparison_difference?: number | null;
-      comparison_result?: number | null;
-      component_path: string;
-      date_evidence_refs?: string[];
-      display_scale?: components["schemas"]["NumericDisplayScale"];
-      display_status: components["schemas"]["NumericDisplayStatus"];
-      formula: string;
-      fraction_digits: number;
-      input_evidence_refs: string[];
-      inputs: Record<string, number>;
-      issue_codes?: string[];
-      label: string;
-      requirement_id: string;
-      rounded_canonical_result?: number | null;
-      rounded_stated_value?: number | null;
-      stated_value: number;
-      unit: string;
     };
     NumericTemporalBasis: "point_in_time" | "live_snapshot";
     PerformanceCalculationRecord: {
@@ -631,6 +550,15 @@ export interface components {
       last_used_at: string;
       ticker: string;
     };
+    ReferenceRangeEndpoint: {
+      as_of_date: string;
+      basis: components["schemas"]["MarketReferenceBasis"];
+      date_evidence_refs: string[];
+      evidence_refs: string[];
+      source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
+      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
+      value: number;
+    };
     ReportAuditStatus: "complete" | "incomplete";
     ReportLanguage: "en" | "zh-CN" | "ja";
     ReportSection: {
@@ -664,7 +592,7 @@ export interface components {
       role: string;
       round?: number;
       run_id: string;
-      schema_version?: "2";
+      schema_version?: "3";
       stage: string;
     };
     ResearchAvailability: {
@@ -690,14 +618,12 @@ export interface components {
       is_primary?: boolean;
     };
     ResearchDecision: {
-      calculation_records?: components["schemas"]["CalculationRecord"][];
       catalysts?: string[];
       confidence: components["schemas"]["ResearchConfidenceLevel"];
       evidence_refs?: string[];
       executive_summary: string;
       invalidation_conditions: string[];
       market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
-      numeric_audit_status?: components["schemas"]["NumericAuditStatus"] | null;
       rating: components["schemas"]["ResearchRating"];
       risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];
       risks: string[];
@@ -705,7 +631,6 @@ export interface components {
       thesis: string;
       time_horizon: string;
       unresolved_questions?: string[];
-      valuation_assessment?: components["schemas"]["ValuationAssessment"] | null;
     };
     ResearchNodeComparison: {
       cross_cycle: boolean;
@@ -1043,11 +968,11 @@ export interface components {
     ScenarioReferenceCategory: "technical" | "historical" | "analyst_consensus" | "fundamental" | "other";
     ScenarioReferenceRange: {
       category: components["schemas"]["ScenarioReferenceCategory"];
-      high: components["schemas"]["AuditedRangeEndpoint"];
+      high: components["schemas"]["ReferenceRangeEndpoint"];
       interpretation: string;
       label: string;
       limitations: string[];
-      low: components["schemas"]["AuditedRangeEndpoint"];
+      low: components["schemas"]["ReferenceRangeEndpoint"];
       measurement_kind?: components["schemas"]["MeasurementKind"];
       unit?: string | null;
     };
@@ -1071,14 +996,6 @@ export interface components {
       loc: (string | number)[];
       msg: string;
       type: string;
-    };
-    ValuationAssessment: {
-      high: components["schemas"]["AuditedRangeEndpoint"];
-      limitations: string[];
-      low: components["schemas"]["AuditedRangeEndpoint"];
-      measurement_kind: components["schemas"]["MeasurementKind"];
-      method: string;
-      unit: string;
     };
   };
 }

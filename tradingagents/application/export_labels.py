@@ -73,9 +73,6 @@ _EN_LABELS = {
     "validation_issues": "Validation issues",
     "retry_count": "Extra calls",
     "recovered_at": "Recovered at",
-    "unverified_numeric": "Unverified Numeric Drafts",
-    "numeric_audit_gaps": "Unverified Derived Values",
-    "decision_requirement_audit": "Decision-Critical Calculation Audit",
     "requirement_comparisons": "Requirement Comparisons",
     "requirement_id": "Requirement",
     "structured_value": "Structured display value",
@@ -86,14 +83,6 @@ _EN_LABELS = {
     "calculation_status": "Calculation status",
     "display_status": "Display status",
     "comparison_not_recorded": "This run did not record requirement comparison details.",
-    "numeric_warning": (
-        "The following model-proposed numeric content did not pass audit and "
-        "was not used in the canonical research decision."
-    ),
-    "numeric_gap_warning": (
-        "The following decision-critical derived values were not fully verified. "
-        "The qualitative decision is retained, but these values are excluded from canonical calculations."
-    ),
     "omitted_components": "Omitted Components",
     "executive_summary": "Executive Summary",
     "thesis": "Thesis",
@@ -119,7 +108,6 @@ _EN_LABELS = {
     "basis.observed": "direct observation",
     "basis.interpreted": "research interpretation",
     "basis.derived": "formula-derived",
-    "valuation_assessment": "Valuation Assessment",
     "market_references": "Market Reference Levels",
     "calculations": "Decision-Critical Calculations",
     "catalysts": "Catalysts",
@@ -127,7 +115,6 @@ _EN_LABELS = {
     "invalidation": "Invalidation Conditions",
     "unresolved": "Unresolved Questions",
     "risk_response": "Final Committee Response to Risk Review",
-    "no_calculations": "No decision-critical calculations were recorded.",
     "no_adjustments": "No risk-review adjustments were recorded.",
     "debate_agenda": "Debate Agenda",
     "material_issues": "Material Issues",
@@ -162,7 +149,6 @@ _EN_LABELS = {
     "implication": "Implication",
     "rating": "Rating",
     "time_horizon": "Time horizon",
-    "numeric_audit": "Numeric audit",
     "usage_note": (
         "Usage is the cumulative amount observed and persisted by this application. "
         "A hard process crash can prevent the final provider callback from being recorded."
@@ -220,12 +206,6 @@ _EN_LABELS = {
     ),
     "warning.deliberation.audit_incomplete": (
         "The readable deliberation was preserved, but its navigation audit is incomplete."
-    ),
-    "warning.decision.numeric_audit_partial": (
-        "Some optional numeric components were omitted after audit; the qualitative decision remains audited."
-    ),
-    "warning.decision.numeric_audit_incomplete": (
-        "Optional numeric components were omitted after audit; the qualitative decision remains audited."
     ),
     "none": "None identified.",
     "calculation_use.scenario": "{scenario} scenario reference range",
@@ -300,9 +280,6 @@ _ZH_LABELS = {
     "validation_issues": "校验问题",
     "retry_count": "额外调用",
     "recovered_at": "恢复时间",
-    "unverified_numeric": "未验证数值草案",
-    "numeric_audit_gaps": "未验证派生值",
-    "decision_requirement_audit": "决策关键计算审计",
     "requirement_comparisons": "Requirement 对照",
     "requirement_id": "Requirement",
     "structured_value": "结构化显示值",
@@ -313,8 +290,6 @@ _ZH_LABELS = {
     "calculation_status": "计算状态",
     "display_status": "显示状态",
     "comparison_not_recorded": "该运行未记录 Requirement 比较详情。",
-    "numeric_warning": "以下模型提出的数值内容未通过审计，未用于正式研究结论。",
-    "numeric_gap_warning": "以下影响最终结论的派生值尚未通过完整计算审计；定性结论会保留，但这些数值不会进入正式计算记录。",
     "omitted_components": "已省略组件",
     "executive_summary": "执行摘要",
     "thesis": "核心论点",
@@ -340,7 +315,6 @@ _ZH_LABELS = {
     "basis.observed": "直接观察",
     "basis.interpreted": "研究解读",
     "basis.derived": "公式推导",
-    "valuation_assessment": "估值评估",
     "market_references": "市场参考位置",
     "calculations": "决策关键计算",
     "catalysts": "催化因素",
@@ -348,7 +322,6 @@ _ZH_LABELS = {
     "invalidation": "失效条件",
     "unresolved": "未解决问题",
     "risk_response": "最终委员会对风险审查的回应",
-    "no_calculations": "未记录决策关键计算。",
     "no_adjustments": "未记录风险审查调整。",
     "debate_agenda": "辩论议程",
     "material_issues": "重要争议",
@@ -383,7 +356,6 @@ _ZH_LABELS = {
     "implication": "含义",
     "rating": "研究评级",
     "time_horizon": "研究周期",
-    "numeric_audit": "数值审计",
     "usage_note": "用量为本应用已观测并持久化的累计值；进程硬崩溃可能导致最后一次供应商回调无法记录。",
     "llm_calls": "LLM 调用",
     "tool_calls": "工具调用",
@@ -426,8 +398,6 @@ _ZH_LABELS = {
     "warning.report.unknown_evidence_ref": "可读报告中的未知证据引用已忽略。",
     "warning.research.unknown_evidence_ref": "未知的研究证据引用已忽略。",
     "warning.deliberation.audit_incomplete": "可读研究过程已保留，但导航审计不完整。",
-    "warning.decision.numeric_audit_partial": "部分可选数值组件经审计后被省略；定性结论仍已完成审计。",
-    "warning.decision.numeric_audit_incomplete": "可选数值组件经审计后被省略；定性结论仍已完成审计。",
     "none": "未识别到相关内容。",
     "calculation_use.scenario": "{scenario}情景参考区间",
     "calculation_use.valuation": "估值评估",
@@ -503,9 +473,6 @@ _JA_LABELS = {
     "validation_issues": "検証上の問題",
     "retry_count": "追加呼び出し",
     "recovered_at": "復旧日時",
-    "unverified_numeric": "未検証の数値ドラフト",
-    "numeric_audit_gaps": "未検証の導出値",
-    "decision_requirement_audit": "意思決定上の重要計算監査",
     "requirement_comparisons": "Requirement 比較",
     "requirement_id": "Requirement",
     "structured_value": "構造化表示値",
@@ -516,8 +483,6 @@ _JA_LABELS = {
     "calculation_status": "計算状態",
     "display_status": "表示状態",
     "comparison_not_recorded": "この実行では Requirement の比較詳細を記録していません。",
-    "numeric_warning": "以下の数値案は監査を通過せず、正式結論には使用されていません。",
-    "numeric_gap_warning": "最終判断に影響する以下の導出値は計算監査を完全には通過していません。定性的判断は保持されますが、正式な計算記録から除外されます。",
     "omitted_components": "省略された項目",
     "executive_summary": "要約",
     "thesis": "中核仮説",
@@ -543,7 +508,6 @@ _JA_LABELS = {
     "basis.observed": "直接観測",
     "basis.interpreted": "リサーチ解釈",
     "basis.derived": "数式による導出",
-    "valuation_assessment": "バリュエーション評価",
     "market_references": "市場参考水準",
     "calculations": "意思決定上の重要計算",
     "catalysts": "カタリスト",
@@ -551,7 +515,6 @@ _JA_LABELS = {
     "invalidation": "無効化条件",
     "unresolved": "未解決事項",
     "risk_response": "リスクレビューへの最終委員会の回答",
-    "no_calculations": "意思決定上の重要計算は記録されていません。",
     "no_adjustments": "リスクレビューによる調整は記録されていません。",
     "debate_agenda": "討論アジェンダ",
     "material_issues": "重要論点",
@@ -586,7 +549,6 @@ _JA_LABELS = {
     "implication": "示唆",
     "rating": "評価",
     "time_horizon": "期間",
-    "numeric_audit": "数値監査",
     "usage_note": "使用量は本アプリが観測し保存した累計値です。プロセスの強制終了時は最後のプロバイダーコールバックを記録できない場合があります。",
     "llm_calls": "LLM 呼び出し",
     "tool_calls": "ツール呼び出し",
@@ -629,8 +591,6 @@ _JA_LABELS = {
     "warning.report.unknown_evidence_ref": "可読レポート内の不明な証拠参照を無視しました。",
     "warning.research.unknown_evidence_ref": "不明なリサーチ証拠参照を無視しました。",
     "warning.deliberation.audit_incomplete": "可読の審議内容は保持されましたが、ナビゲーション監査は不完全です。",
-    "warning.decision.numeric_audit_partial": "一部の任意数値項目は監査後に省略されました。定性的結論の監査は完了しています。",
-    "warning.decision.numeric_audit_incomplete": "任意数値項目は監査後に省略されました。定性的結論の監査は完了しています。",
     "none": "該当項目なし。",
     "calculation_use.scenario": "{scenario}シナリオ参考レンジ",
     "calculation_use.valuation": "バリュエーション評価",

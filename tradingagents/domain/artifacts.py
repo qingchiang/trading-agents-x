@@ -82,7 +82,7 @@ class ResearchArtifactDraft(FrozenModel):
         pattern=r"^[a-z][a-z0-9_.-]*$",
     )
     round: int = Field(default=0, ge=0)
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     prompt_version: str = Field(
         default="research-v1",
         min_length=1,
@@ -125,7 +125,7 @@ class ResearchArtifact(FrozenModel):
         pattern=r"^[a-z][a-z0-9_.-]*$",
     )
     round: int = Field(default=0, ge=0)
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     prompt_version: str = Field(
         default="research-v1",
         min_length=1,

@@ -1193,7 +1193,6 @@ class AnalysisService:
             instrument_local_name=instrument_local_name,
             reports=execution.reports,
             decision=execution.decision,
-            numeric_audit=execution.numeric_audit,
             evidence=execution.evidence,
             metrics=metrics.snapshot(),
             recoveries=self.repository.list_recoveries(run_id),

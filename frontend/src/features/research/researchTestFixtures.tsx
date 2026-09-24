@@ -278,26 +278,7 @@ const detail = {
           evidence_refs: ["ev_0123456789ab"],
           date_evidence_refs: ["ev_0123456789ab"],
           basis: "observed",
-          calculation_ids: [],
           temporal_basis: "live_snapshot",
-        },
-      ],
-      calculation_records: [
-        {
-          id: "calc_market_reference",
-          formula: "close",
-          inputs: { close: 100 },
-          input_evidence_refs: ["ev_0123456789ab"],
-          result: 100,
-          unit: "USD",
-          as_of_date: "2026-07-24",
-          limitations: ["One point-in-time market observation."],
-          decision_uses: [
-            {
-              component_path: "thesis",
-              label: "Observed market anchor",
-            },
-          ],
         },
       ],
     },
