@@ -6,11 +6,14 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Literal, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
 from tradingagents.domain.common import ArtifactGenerationMethod
+from tradingagents.research.synthesis.diagnostics import exception_diagnostic
 from tradingagents.research.synthesis.output_validation import OutputValidationError
 
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
@@ -132,6 +135,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         example: dict[str, Any],
         allowed_evidence_refs: tuple[str, ...],
     ) -> StructuredOutputResult[StructuredModel]:
+        self._diagnostic_phase = "initial"
         primary_reason = "structured_binding_error"
         primary_validation_issues: tuple[str, ...] = ()
         primary_candidate: dict[str, Any] | None = None
@@ -153,7 +157,8 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                 include_raw=True,
                 **bind_kwargs,
             )
-        except Exception:
+        except Exception as exc:
+            self._binding_diagnostic(exc)
             primary = None
         if primary is not None:
             try:
@@ -329,6 +334,7 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
             repair_instructions=repair_instructions,
             candidate_only=self.candidate_only_repair,
         )
+        self._diagnostic_phase = "repair"
         try:
             if self.repair_mode == "preferred":
                 recovery = self.llm.with_structured_output(
@@ -343,7 +349,8 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
                     include_raw=True,
                     **bind_kwargs,
                 )
-        except Exception:
+        except Exception as exc:
+            self._binding_diagnostic(exc)
             recovery = None
 
         failure_reason = "structured_binding_error"
@@ -504,13 +511,54 @@ class StructuredOutputRunner[StructuredModel: BaseModel]:
         prompt: str,
         **kwargs: Any,
     ) -> Any:
-        if self.invoke_config is None:
-            return target.invoke(prompt, **kwargs)
-        return target.invoke(
-            prompt,
-            config=self.invoke_config,
-            **kwargs,
-        )
+        payload: dict[str, Any] = {
+            "call_id": str(uuid4()), "schema": self.schema.__name__,
+            "phase": self._diagnostic_phase,
+            "input_characters": len(prompt), "usage_available": False,
+        }
+        started = monotonic()
+        try:
+            response = target.invoke(
+                prompt,
+                **({"config": self.invoke_config} if self.invoke_config is not None else {}),
+                **kwargs,
+            )
+        except Exception as exc:
+            payload.update(outcome="failed", exception=exception_diagnostic(exc))
+            raise
+        else:
+            payload["outcome"] = "returned"
+            raw = response.get("raw") if isinstance(response, dict) else response
+            usage = getattr(raw, "usage_metadata", None)
+            if isinstance(usage, dict):
+                retained = {key: usage[key] for key in ("input_tokens", "output_tokens")
+                            if type(usage.get(key)) is int}
+                payload["usage_available"] = bool(retained)
+                payload["usage"] = retained
+            content = getattr(raw, "content", None)
+            if isinstance(content, str):
+                payload["output_characters"] = len(content)
+            metadata = getattr(raw, "response_metadata", None) or {}
+            reason = metadata.get("finish_reason") if isinstance(metadata, dict) else None
+            if reason in ("stop", "length", "tool_calls", "content_filter"):
+                payload["finish_reason"] = reason
+            parsing_error = response.get("parsing_error") if isinstance(response, dict) else None
+            if isinstance(parsing_error, BaseException):
+                payload["parsing_exception"] = exception_diagnostic(parsing_error)
+            return response
+        finally:
+            payload["elapsed_seconds"] = round(monotonic() - started, 3)
+            if self.event_writer is not None:
+                self.event_writer({"event_type": "node.model_call_diagnostic",
+                                   "node": self.node, "payload": payload})
+
+    def _binding_diagnostic(self, error: BaseException) -> None:
+        if self.event_writer is not None:
+            self.event_writer({
+                "event_type": "node.model_binding_diagnostic", "node": self.node,
+                "payload": {"phase": self._diagnostic_phase, "schema": self.schema.__name__,
+                            "exception": exception_diagnostic(error)},
+            })
 
     def _emit(
         self,

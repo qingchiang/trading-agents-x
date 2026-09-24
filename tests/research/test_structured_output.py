@@ -137,7 +137,7 @@ def test_first_typed_output_succeeds_with_one_logical_call() -> None:
     assert result.value == _review()
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
     assert [method for method, _prompt in llm.calls] == ["tool_call"]
-    assert events == []
+    assert not [e for e in events if e["event_type"].startswith("node.output_")]
 
 
 def test_raw_json_is_recovered_without_second_call() -> None:
@@ -306,7 +306,7 @@ def test_json_mode_recovery_succeeds_with_two_calls() -> None:
         "tool_call",
         "json_mode",
     ]
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.output_")] == [
         "node.output_retry",
         "node.output_recovered",
     ]
@@ -407,7 +407,7 @@ def test_truncated_primary_output_uses_specific_recovery_reason() -> None:
 
     _invoke(_runner(llm, events))
 
-    assert events[0]["payload"]["reason_code"] == "output_truncated"
+    assert next(e for e in events if e["event_type"] == "node.output_retry")["payload"]["reason_code"] == "output_truncated"
 
 
 def test_configured_schema_failure_uses_sectioned_recovery() -> None:
@@ -439,7 +439,7 @@ def test_configured_schema_failure_uses_sectioned_recovery() -> None:
     assert result.value == _review()
     assert result.generation_method is ArtifactGenerationMethod.SECTIONED_RECOVERY
     assert [method for method, _prompt in llm.calls] == ["tool_call"]
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.output_")] == [
         "node.output_retry",
         "node.output_recovered",
     ]
@@ -469,7 +469,7 @@ def test_disabled_repair_fails_after_primary_attempt() -> None:
 
     assert exc_info.value.reason_code == "schema_validation"
     assert [method for method, _prompt in llm.calls] == ["tool_call"]
-    assert [event["event_type"] for event in events] == ["node.output_failed"]
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.output_")] == ["node.output_failed"]
 
 
 def test_sectioned_recovery_can_be_disabled_after_generic_repair() -> None:
@@ -626,3 +626,56 @@ def test_invalid_decision_contract_fails_after_one_recovery(
         "tool_call",
         "tool_call",
     ]
+
+
+def test_recovered_call_retains_content_free_failure_diagnostics() -> None:
+    secret = "sensitive-provider-body"
+    failure = TimeoutError(secret)
+    failure.__cause__ = ConnectionError(secret)
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary=failure,
+        recovery={"raw": AIMessage(content=""), "parsed": _review(), "parsing_error": None},
+    )
+
+    assert _invoke(_runner(llm, events)).value == _review()
+
+    calls = [event["payload"] for event in events if event["event_type"] == "node.model_call_diagnostic"]
+    assert [call["outcome"] for call in calls] == ["failed", "returned"]
+    assert [call["phase"] for call in calls] == ["initial", "repair"]
+    assert calls[0]["exception"]["type"] == "builtins.TimeoutError"
+    assert calls[0]["exception"]["cause_types"] == ["builtins.ConnectionError"]
+    assert calls[0]["input_characters"] == len("Produce a bearish review.")
+    assert calls[0]["elapsed_seconds"] >= 0
+    assert calls[0]["usage_available"] is False
+    assert secret not in json.dumps(events)
+
+
+def test_model_diagnostics_survive_run_event_persistence(repository, app_settings) -> None:
+    from tradingagents.credentials import use_credentials
+    from tradingagents.domain.runs import AnalysisRequest
+    from tradingagents.persistence.configuration import ConfigurationStore
+
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    settings = ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1]
+    run, _ = repository.create_run(request, settings.snapshot())
+    events = []
+    llm = _FakeLLM(
+        primary=ConnectionError("api_key=private-provider-payload"),
+        recovery={"raw": AIMessage(content="private-response", usage_metadata={
+            "input_tokens": 12, "output_tokens": 3, "total_tokens": 15,
+        }), "parsed": _review(), "parsing_error": None},
+    )
+    runner = _runner(llm, events)
+    runner.event_writer = lambda event: repository.append_event(
+        run.id, event["event_type"], node=event["node"], payload=event["payload"],
+    )
+    with use_credentials({"provider": "private-provider-payload"}):
+        _invoke(runner)
+    stored = [event.payload for event in repository.list_events(run.id)
+              if event.event_type == "node.model_call_diagnostic"]
+    assert stored[0]["exception"]["type"] == "builtins.ConnectionError"
+    assert stored[1]["usage"] == {"input_tokens": 12, "output_tokens": 3}
+    assert stored[1]["usage_available"] is True
+    assert "private-provider-payload" not in json.dumps(stored)
+    assert "private-response" not in json.dumps(stored)

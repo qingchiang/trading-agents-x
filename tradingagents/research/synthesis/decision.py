@@ -274,6 +274,8 @@ def invoke_research_decision(
     requirement_preflight = _preflight_numeric_requirements(
         core_envelope,
         valid_evidence_refs=set(valid_refs),
+        event_writer=event_writer,
+        node=f"{node}.numeric",
     )
     numeric_node = f"{node}.numeric"
     if event_writer is not None and requirement_preflight.normalized_display_scales:

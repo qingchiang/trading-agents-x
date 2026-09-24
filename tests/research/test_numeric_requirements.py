@@ -1126,3 +1126,47 @@ def test_scalar_requirement_cannot_cover_multiple_calculations() -> None:
         )
 
     assert "numeric.requirement.req_scalar.multiple_calculations" in error.value.issue_codes
+
+
+@pytest.mark.parametrize("oversize", [False, True])
+def test_rejected_numeric_candidate_retains_bounded_redacted_operands(oversize: bool) -> None:
+    from tradingagents.credentials import use_credentials
+
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(research_decision(evidence_refs=(ref,)).model_dump(mode="json"))
+    invalid_name = "cash-total" if not oversize else "cash-" + "x" * 9000
+    candidate = {
+        "id": "req_cash", "component_path": "thesis", "label": "Net cash",
+        "stated_value": 1, "fraction_digits": 1, "formula": invalid_name + " - debt",
+        "inputs": [{"name": invalid_name, "value": 2}, {"name": "debt", "value": 1}],
+        "input_evidence_refs": [ref], "unit": "USD", "display_scale": "base",
+        "limitations": ["must-not-retain-unrelated-prose"],
+        "extra": "must-not-retain-unrelated-prose",
+    }
+    envelope = ResearchDecisionCoreEnvelope.model_validate({
+        **core.model_dump(mode="json"), "numeric_requirements_declared": True,
+        "numeric_requirement_candidates": [candidate],
+    })
+    llm = _SequenceLLM({"ResearchDecisionCoreEnvelope": [envelope],
+                        "DecisionNumericDraft": [DecisionNumericDraft(requested=False)]})
+    events = []
+    with use_credentials({"fixture": "debt"}):
+        result = invoke_research_decision(
+            llm, prompt="Form the decision.", state=state, node="committee.final",
+            require_risk_adjustments=False, event_writer=events.append,
+        )
+    diagnostics = [e["payload"] for e in events if e["event_type"] == "decision.numeric_candidate_rejected"]
+    assert len(diagnostics) == 1
+    record = diagnostics[0]
+    assert record["candidate_index"] == 0
+    assert any(issue.endswith(".name.pattern") for issue in record["validation_issues"])
+    if oversize:
+        assert record["original"]["candidate_omitted"] == "oversize"
+        assert "candidate" not in record["original"]
+    else:
+        assert record["original"]["candidate"]["formula"] == "cash-total - [REDACTED]"
+        assert record["original"]["candidate"]["inputs"][0]["name"] == "cash-total"
+    assert "debt" not in json.dumps(diagnostics)
+    assert "must-not-retain-unrelated-prose" not in json.dumps(diagnostics)
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL

@@ -22,8 +22,10 @@ from tradingagents.domain.numeric_audit import (
     NumericAuditOmission,
 )
 from tradingagents.research.synthesis.decision_prompts import _decision_component_text
+from tradingagents.research.synthesis.diagnostics import requirement_diagnostic
 from tradingagents.research.synthesis.drafts import (
     DecisionNumericRequirementDraft,
+    EventWriter,
     ResearchDecisionCoreEnvelope,
 )
 from tradingagents.research.synthesis.numeric_math import (
@@ -162,6 +164,8 @@ def _preflight_numeric_requirements(
     envelope: ResearchDecisionCoreEnvelope,
     *,
     valid_evidence_refs: set[str],
+    event_writer: EventWriter | None = None,
+    node: str = "committee.final.numeric",
 ) -> _NumericRequirementPreflight:
     requirements: list[DecisionNumericRequirementDraft] = []
     issues: list[str] = []
@@ -169,7 +173,22 @@ def _preflight_numeric_requirements(
     seen_ids: set[str] = set()
     normalized_display_scale_ids: set[str] = set()
     core = envelope.qualitative_core()
+    rejected_count = 0
+
+    def record_rejection(index: int, original: Any, normalized: Any, codes: tuple[str, ...]) -> None:
+        nonlocal rejected_count
+        rejected_count += 1
+        if event_writer is not None and rejected_count <= 8:
+            payload = {"candidate_index": index, "validation_issues": list(codes),
+                       "original": requirement_diagnostic(original),
+                       "normalization_changed": original != normalized}
+            if original != normalized:
+                payload["normalized"] = requirement_diagnostic(normalized)
+            event_writer({"event_type": "decision.numeric_candidate_rejected",
+                          "node": node, "payload": payload})
+
     for index, candidate in enumerate(envelope.numeric_requirement_candidates):
+        original_candidate = candidate
         candidate = _normalize_numeric_requirement_candidate(candidate)
         prefix = f"numeric.requirement_candidate.{index}"
         candidate_path = prefix
@@ -194,6 +213,7 @@ def _preflight_numeric_requirements(
                     issue_codes=candidate_issues,
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         except (TypeError, ValueError):
             issue = f"{prefix}.schema_invalid"
@@ -206,6 +226,7 @@ def _preflight_numeric_requirements(
                     issue_codes=(issue,),
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         normalized_display_scale = False
         if (
@@ -225,6 +246,7 @@ def _preflight_numeric_requirements(
                     issue_codes=(issue,),
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         if _decision_component_text(core, requirement.component_path) is None:
             issue = f"{prefix}.unknown_component"
@@ -237,6 +259,7 @@ def _preflight_numeric_requirements(
                     issue_codes=(issue,),
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         try:
             require_valid_refs(
@@ -255,6 +278,7 @@ def _preflight_numeric_requirements(
                     issue_codes=(issue,),
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         date_evidence_refs = set(_calculation_date_refs(requirement.inputs))
         date_ref_issues: list[str] = []
@@ -274,6 +298,7 @@ def _preflight_numeric_requirements(
                     issue_codes=tuple(date_ref_issues),
                 )
             )
+            record_rejection(index, original_candidate, candidate, omissions[-1].issue_codes)
             continue
         seen_ids.add(requirement.id)
         if normalized_display_scale:
@@ -319,6 +344,9 @@ def _preflight_numeric_requirements(
                 issue_codes=(issue,),
             )
         )
+    if event_writer is not None and rejected_count > 8:
+        event_writer({"event_type": "decision.numeric_candidate_diagnostics_limited",
+                      "node": node, "payload": {"omitted_count": rejected_count - 8}})
     return _NumericRequirementPreflight(
         requirements=tuple(requirements),
         issues=tuple(issues),

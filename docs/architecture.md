@@ -516,6 +516,22 @@ numeric fields are omitted with an explicit warning instead of discarding the
 strict qualitative conclusion. Failed initial and repair candidates are kept
 only as a size-bounded, recursively redacted numeric audit appendix; raw
 provider messages, prompts, and hidden reasoning are never persisted.
+Structured calls retain a content-free `node.model_call_diagnostic` event for
+both initial and repair invocations, including failures that later recover.
+It records a local call ID, schema, phase, character counts, elapsed time,
+available usage and finish reason, and bounded exception types/cause types and
+stack locations. Binding errors have their own diagnostic event. Provider
+messages, stack source lines and response bodies are excluded. Run/attempt and
+model configuration remain linked through the existing Run records.
+Numeric preflight rejection diagnostics retain only allowlisted operands,
+formula and Evidence references before normalization, plus changed normalized
+fragments. Credentials are redacted before event delivery. At most eight
+rejected candidates are recorded per preflight, with an 8 KiB limit per fragment;
+oversized fragments retain only a digest and size, and additional candidates
+are counted. These events use normal Run persistence and purge semantics and
+do not require optional worker file logs. Audit omissions and validation rules
+remain authoritative; diagnostics never enter model inputs or the Decision.
+
 Numeric repair includes its value/scenario/requirement catalogs exactly once:
 repairs with a parsed candidate receive the catalogs as supplemental context,
 while repairs without a candidate retain them in the original task. The repair
