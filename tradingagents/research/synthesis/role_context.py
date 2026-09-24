@@ -17,6 +17,7 @@ from tradingagents.research.synthesis.evidence_context import (
     evidence_query_deltas,
     get_evidence_item_payload,
 )
+from tradingagents.research.synthesis.observation_context import OBSERVATION_ALIAS_RULES
 
 _EVIDENCE_REF_RE = re.compile(r"\bev_[a-f0-9]{12}\b")
 _RISK_HEADING_RE = re.compile(
@@ -224,7 +225,8 @@ class RoleContextBuilder:
             f"instruction: {self.output_language}. Keep IDs, enums, Evidence refs, "
             "and other wire values unchanged."
         )
-        return _SYSTEM_RULES + language_rule + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
+        alias_rules = "\n" + OBSERVATION_ALIAS_RULES if self.catalog.get("observation_groups") else ""
+        return _SYSTEM_RULES + alias_rules + language_rule + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
             dossier
         )
 

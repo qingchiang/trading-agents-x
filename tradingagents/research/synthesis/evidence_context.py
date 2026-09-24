@@ -14,6 +14,11 @@ from tradingagents.domain.evidence import (
     EvidenceTable,
     EvidenceTableCell,
 )
+from tradingagents.research.synthesis.observation_context import (
+    OBSERVATION_ALIAS_RULES,
+    observation_aliases,
+    observation_groups,
+)
 
 _MAX_ROWS = 120
 _LARGE_TABULAR_CONTENT = 20_000
@@ -72,7 +77,9 @@ def build_evidence_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
     for table in bundle.tables:
         for ref in table.evidence_refs:
             table_refs.setdefault(ref, []).append(table.id)
+    groups = observation_groups([item.model_dump(mode="json") for item in bundle.items])
     return {
+        **({"observation_groups": groups} if groups else {}),
         "version": bundle.version,
         "digest": bundle.digest,
         "instrument": bundle.instrument,
@@ -263,6 +270,7 @@ def prepared_evidence_prompt(prepared: PreparedEvidence) -> str:
             ensure_ascii=False, separators=(",", ":"),
         )
         + "\n\nEPHEMERAL EVIDENCE MEMO:\n"
+        + (OBSERVATION_ALIAS_RULES if prepared.catalog.get("observation_groups") else "")
         + prepared.memo
         + "\n\nACTUAL READ-ONLY QUERY RESULTS "
         "(inherit unchanged metadata from the catalog by ref):\n"
@@ -285,14 +293,27 @@ def evidence_query_deltas(
     pass through unchanged.
     """
     by_ref = {item["ref"]: item for item in catalog["items"]}
+    aliases = observation_aliases(catalog.get("observation_groups", []))
+    bodies: dict[str, tuple[str, str]] = {}
     projected = []
     for result in results:
         metadata = by_ref.get(result.get("ref"), {})
-        projected.append({
+        delta = {
             key: value
             for key, value in result.items()
             if key == "ref" or key not in metadata or value != metadata[key]
-        })
+        }
+        ref = result.get("ref")
+        body = result.get("content")
+        if isinstance(ref, str) and isinstance(body, str):
+            canonical = aliases.get(ref, ref)
+            previous = bodies.get(canonical)
+            if previous is not None and previous[1] == body:
+                delta.pop("content", None)
+                delta["content_from_ref"] = previous[0]
+            else:
+                bodies[canonical] = (ref, body)
+        projected.append(delta)
     return tuple(projected)
 
 
@@ -310,15 +331,21 @@ def compact_evidence_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
         if all(key in item for item in items)
         and sum(item[key] == value for item in items) > 1
     }
-    return {
-        **catalog,
-        "item_defaults": defaults,
-        "items": [
-            {key: value for key, value in item.items()
-             if key not in defaults or value != defaults[key]}
-            for item in items
-        ],
-    }
+    aliases = observation_aliases(catalog.get("observation_groups", []))
+    by_ref = {item["ref"]: item for item in items}
+    projected = []
+    for item in items:
+        canonical = aliases.get(item["ref"])
+        if canonical is not None:
+            projected.append({
+                "same_observation_as": canonical,
+                **{key: value for key, value in item.items()
+                   if key == "ref" or value != by_ref[canonical].get(key)},
+            })
+        else:
+            projected.append({key: value for key, value in item.items()
+                              if key not in defaults or value != defaults[key]})
+    return {**catalog, "item_defaults": defaults, "items": projected}
 
 
 def _catalog_item(item: EvidenceItem, table_ids: list[str]) -> dict[str, Any]:

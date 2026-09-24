@@ -717,8 +717,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v7-compact-evidence"),
-        ("news", "analyst-news-v7-compact-evidence"),
+        ("market", "analyst-market-v8-observation-aliases"),
+        ("news", "analyst-news-v8-observation-aliases"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
     agenda = next(artifact for artifact in artifacts if artifact.stage == "agenda")

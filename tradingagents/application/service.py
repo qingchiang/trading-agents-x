@@ -331,13 +331,13 @@ class AnalysisService:
             "research_schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
             "application_version": __version__,
             "prompt_versions": {
-                "analyst": "v7-compact-evidence",
-                "research_case": "v7-compact-evidence",
+                "analyst": "v8-observation-aliases",
+                "research_case": "v8-observation-aliases",
                 "debate_agenda": "v10-focused-context",
-                "rebuttal": "v6-compact-evidence",
-                "research_judge": "v7-compact-evidence",
-                "risk_review": "v7-compact-evidence",
-                "final_committee_brief": "v4-compact-evidence",
+                "rebuttal": "v7-observation-aliases",
+                "research_judge": "v8-observation-aliases",
+                "risk_review": "v8-observation-aliases",
+                "final_committee_brief": "v5-observation-aliases",
                 "final_committee": "v17-safe-numeric-operands",
             },
             "research_kind": request.research_kind,
@@ -382,7 +382,7 @@ class AnalysisService:
         }
         if request.research_kind == "incremental":
             method_snapshot["prompt_versions"] = {
-                "incremental_synthesis": "v2-compact-source-content",
+                "incremental_synthesis": "v3-observation-aliases",
             }
         canonical = json.dumps(
             method_snapshot,

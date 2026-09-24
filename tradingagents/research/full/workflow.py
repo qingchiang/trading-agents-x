@@ -490,7 +490,7 @@ class ResearchGraph:
                 role=analyst,
                 content=typed,
                 generation_method=output.generation_method,
-                prompt_version=f"analyst-{analyst}-v7-compact-evidence",
+                prompt_version=f"analyst-{analyst}-v8-observation-aliases",
             )
             self._finish_node(
                 runtime,
@@ -649,7 +649,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=case,
                 generation_method=output.generation_method,
-                prompt_version=f"research-case-{spec.key}-v7-compact-evidence",
+                prompt_version=f"research-case-{spec.key}-v8-observation-aliases",
             )
             self._finish_node(
                 runtime,
@@ -814,7 +814,7 @@ class ResearchGraph:
                 round=round_number,
                 content=rebuttal,
                 generation_method=output.generation_method,
-                prompt_version=f"rebuttal-{spec.key}-v6-compact-evidence",
+                prompt_version=f"rebuttal-{spec.key}-v7-observation-aliases",
             )
             self._finish_node(
                 runtime,
@@ -937,7 +937,7 @@ class ResearchGraph:
             role="research_judge",
             content=draft,
             generation_method=output.generation_method,
-            prompt_version="research-judge-v7-compact-evidence",
+            prompt_version="research-judge-v8-observation-aliases",
         )
         self._finish_node(
             runtime,
@@ -1023,7 +1023,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=review,
                 generation_method=output.generation_method,
-                prompt_version=f"risk-review-{spec.key}-v7-compact-evidence",
+                prompt_version=f"risk-review-{spec.key}-v8-observation-aliases",
             )
             self._finish_node(
                 runtime,
@@ -1142,7 +1142,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=brief,
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
-                prompt_version="final-committee-brief-v4-compact-evidence",
+                prompt_version="final-committee-brief-v5-observation-aliases",
             )
             self._finish_node(
                 runtime,

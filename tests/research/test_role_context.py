@@ -242,3 +242,29 @@ def test_role_context_size_does_not_scale_with_raw_market_rows() -> None:
     assert "2024-01-02,99,102,98,100,1000000" not in short.prompt
     assert "2024-01-02,99,102,98,100,1000000" not in long.prompt
     assert abs(long.inline_characters - short.inline_characters) < 500
+
+
+def test_role_can_route_an_observation_alias_without_its_canonical_passage() -> None:
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from tradingagents.domain.data import SourceObservation
+
+    observation = SourceObservation(source="fixture", kind="financial_income", key="annual",
+        values={"fact": "ROUTED-OBSERVATION-BODY"},
+        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC))
+    items = tuple(value.evidence(date(2026, 7, 24), instrument="NVDA") for value in (
+        observation, replace(observation, retrieved_at=datetime(2026, 7, 24, 13, tzinfo=UTC)),
+    ))
+    bundle = EvidenceBundle(instrument="NVDA", analysis_date=date(2026, 7, 24), items=items)
+    state = _state()
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    state["analyst_reports"] = {"market": analyst_report(evidence_ref=items[1].ref).model_dump(mode="json")}
+    builder = RoleContextBuilder(state)
+    for refs in ((items[1].ref,), (items[0].ref, items[1].ref)):
+        context = builder.build(title="Risk", objective="Assess risks.", stage="risk_review", evidence_refs=refs)
+        assert context.prompt.count("ROUTED-OBSERVATION-BODY") == 1
+        assert all(item.ref in context.prompt for item in items)
+        assert "2026-07-24T12:00:00+00:00" in context.prompt
+        assert "2026-07-24T13:00:00+00:00" in context.prompt
+    assert state["evidence_bundle"] == bundle.model_dump(mode="json")

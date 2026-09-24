@@ -456,6 +456,18 @@ each item's explicit fields override those defaults. Source-query passages
 inherit unchanged catalog metadata by Evidence ref rather than repeating it.
 Read-only query results and sealed Evidence remain complete. This is a rendering
 projection, not a change to source selection, Evidence identity or PIT admission.
+Prompt-only observation aliases share bodies and metadata only when the stable
+observation identity matches and every Evidence field is equal apart from ref
+and known retrieval timestamps (`origins[*].retrieved_at` and the provenance
+retrieval fields). Source, fallback, quality, publication/effective dates,
+producer values and all other provenance must still match exactly. Aliases keep
+all original refs and explicit per-ref retrieval path/value overrides. Full
+query bodies use `content_from_ref` only if the referenced body is actually in
+the same workset; routing an alias alone retains its body. Incremental inputs
+inherit the complete canonical observation and then apply retrieval overrides.
+Sealed bundles, query results, digests, table links and historical refs are not
+rewritten. Repeated retrievals do not constitute independent corroboration.
+
 Analyst context character metrics measure the rendered prepared Evidence text;
 they exclude the collection memo and remaining report instructions.
 

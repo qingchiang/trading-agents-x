@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
+import pytest
+
 from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
 from tradingagents.domain.evidence_tables import extract_evidence_tables
 from tradingagents.research.synthesis.evidence_context import (
@@ -190,3 +192,59 @@ def test_table_query_rejects_future_cutoff() -> None:
     )
 
     assert result["error"] == "future_data_forbidden"
+
+
+@pytest.mark.parametrize("difference", [None, "source", "fallback", "quality", "effective_date",
+                                      "available_at", "content", "producer_retrieved_at", "identity"])
+def test_retrieved_observation_body_is_shared_but_both_refs_and_times_survive(difference) -> None:
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from tradingagents.domain.data import SourceObservation
+
+    observed = SourceObservation(source="fixture", kind="financial_income", key="annual",
+        values={"fact": "UNIQUE-OBSERVATION-BODY", "income": 125},
+        effective_date=date(2026, 7, 20), available_on=date(2026, 7, 22),
+        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC))
+    items = tuple(value.evidence(date(2026, 7, 24), instrument="NVDA") for value in (
+        observed, replace(observed, retrieved_at=datetime(2026, 7, 24, 13, tzinfo=UTC)),
+    ))
+    if difference is not None:
+        payload = items[1].model_dump(mode="python", exclude={"ref", "origins"})
+        payload["origins"] = items[1].origins
+        if difference == "source":
+            payload["source"] = "other-source"
+        elif difference == "fallback":
+            payload["fallback"] = True
+        elif difference == "quality":
+            payload["quality"] = "low"
+        elif difference == "effective_date":
+            payload["effective_date"] = date(2026, 7, 21)
+        elif difference == "available_at":
+            payload["available_at"] = datetime(2026, 7, 23, 12, tzinfo=UTC)
+        elif difference == "content":
+            payload["content"] += " Additional limitation."
+        elif difference == "producer_retrieved_at":
+            payload["provenance"]["observation"]["values"]["retrieved_at"] = "a factual field"
+        else:
+            payload["provenance"]["observation_identity"] = "ob_0123456789abcdef"
+        items = (items[0], EvidenceItem.create(**payload))
+    bundle = EvidenceBundle(instrument="NVDA", analysis_date=date(2026, 7, 24), items=items)
+    original = bundle.model_dump_json()
+    prepared = build_analyst_evidence_context(bundle, evidence_refs=tuple(i.ref for i in items))
+    prompt = prepared_evidence_prompt(prepared)
+    assert prompt.count("UNIQUE-OBSERVATION-BODY") == (1 if difference is None else 2)
+    assert all(item.ref in prompt for item in items)
+    if difference is None:
+        assert "2026-07-24T12:00:00+00:00" in prompt
+        assert "2026-07-24T13:00:00+00:00" in prompt
+        assert prepared.query_results[0]["content"] == prepared.query_results[1]["content"]
+        catalog = json.loads(prompt.split("\n", 1)[1].split("\n\nEPHEMERAL")[0])
+        restored = []
+        for item in catalog["items"]:
+            item = dict(item)
+            canonical = item.pop("same_observation_as", None)
+            parent = next(value for value in restored if value["ref"] == canonical) if canonical else catalog["item_defaults"]
+            restored.append({**parent, **item})
+        assert restored == prepared.catalog["items"]
+    assert bundle.model_dump_json() == original

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, date, datetime
 
@@ -866,6 +867,7 @@ def test_incremental_assessment_respects_one_repair_budget(
         ("updated", True),
     ),
 )
+@pytest.mark.parametrize("repeat_retrieval", [False, True])
 @pytest.mark.parametrize("extra_source_text", ["", "\nAdditional source limitation."])
 def test_production_incremental_synthesis_generates_decision_only_when_updated(
     app_settings,
@@ -873,6 +875,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     outcome: str,
     full_research_required: bool,
     extra_source_text: str,
+    repeat_retrieval: bool,
 ) -> None:
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
@@ -894,17 +897,30 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
             content=observation.content + extra_source_text,
         )
     candidate = IncrementalEvidenceCandidate(evidence=evidence)
+    candidates = (candidate,)
+    if repeat_retrieval:
+        from dataclasses import replace
+
+        later_observation = replace(observation, retrieved_at=datetime(2026, 7, 24, 13, tzinfo=UTC))
+        later = later_observation.evidence(date(2026, 7, 24), instrument="NVDA")
+        if extra_source_text:
+            later = EvidenceItem.create(
+                **later.model_dump(exclude={"ref", "content", "origins"}), origins=later.origins,
+                content=later_observation.content + extra_source_text,
+            )
+        candidates += (IncrementalEvidenceCandidate(evidence=later),)
     component_ids = baseline_component_ids(baseline_decision)
 
     def collect(request, *, data_context):
         result = _pit_collection(request, candidate)
         domains = tuple(
             domain.model_copy(update={"sources": _sources(
-                candidate.evidence.source, observation.retrieved_at, fallback=True,
-            )}) if domain.domain == "news" else domain
+                candidate.evidence.source, datetime(2026, 7, 24, 13 if repeat_retrieval else 12, tzinfo=UTC), fallback=True,
+            ), "evidence_refs": tuple(c.evidence.ref for c in candidates)}) if domain.domain == "news" else domain
             for domain in result.collection_summary.domains
         )
         return result.model_copy(update={
+            "evidence": candidates,
             "collection_summary": result.collection_summary.model_copy(
                 update={"domains": domains},
             ),
@@ -1036,12 +1052,37 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     assert semantic.prompts
     assert serializer.prompts
     saved = repository.get_evidence(result.run_id)
-    assert saved.items == (candidate.evidence,)
+    assert {i.ref for i in saved.items} == {c.evidence.ref for c in candidates}
+    assert all(c.evidence in saved.items for c in candidates)
     for prompt in (*semantic.prompts, *serializer.prompts):
         assert prompt.count("UNIQUE-SOURCE-FACT") == (2 if extra_source_text else 1)
         if extra_source_text:
             assert "Additional source limitation." in prompt
-        assert candidate.evidence.ref in prompt
+        assert all(c.evidence.ref in prompt for c in candidates)
+        if repeat_retrieval:
+            assert "2026-07-24T13:00:00+00:00" in prompt
+            payload, _ = json.JSONDecoder().raw_decode(prompt[prompt.index('{"full_baseline_run_id":'):])
+            projected = payload["incremental_evidence"]
+            expanded = {}
+            for item in projected["items"]:
+                item = deepcopy(item)
+                canonical = item.pop("same_observation_as", None)
+                if canonical:
+                    item = {**deepcopy(expanded[canonical]), **item}
+                if item.pop("content_from_observation", False):
+                    observed = item["provenance"]["observation"]
+                    item["content"] = f"{observed['kind']}: {observed['key']}\n" + json.dumps(
+                        observed["values"], ensure_ascii=False, sort_keys=True,
+                    )
+                expanded[item["ref"]] = item
+            for group in projected["observation_groups"]:
+                for retrieval in group["retrievals"]:
+                    for field in retrieval["fields"]:
+                        parent = expanded[retrieval["ref"]]
+                        for part in field["path"][:-1]:
+                            parent = parent[part]
+                        parent[field["path"][-1]] = field["value"]
+            assert expanded == {item.ref: item.model_dump(mode="json") for item in saved.items}
         assert "2026-07-22T12:00:00Z" in prompt
         assert "2026-07-24T12:00:00+00:00" in prompt
         assert "Publication time verified" in prompt
