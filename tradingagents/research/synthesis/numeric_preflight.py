@@ -125,7 +125,7 @@ def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
         # A digit-prefixed Unicode identifier is unambiguous, but a Python
         # numeric literal (including scientific/hex/complex notation) is not.
         if not name.isidentifier() and not (
-            name and name[0].isdecimal() and ("_" + name).isidentifier()
+            name and not name.isdecimal() and name[0].isdecimal() and ("_" + name).isidentifier()
         ):
             return candidate
         try:

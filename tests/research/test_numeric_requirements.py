@@ -1204,7 +1204,7 @@ def test_decision_preserves_unambiguous_operands_through_numeric_audit(names) ->
     assert '"formula": "v1 - v2"' in llm.prompts[1][1]
 
 
-@pytest.mark.parametrize("numeric_literal", ["1e3", "0x10", "1_000", "2j"])
+@pytest.mark.parametrize("numeric_literal", ["1e3", "0x10", "1_000", "2j", "٢٠٢٦"])
 def test_numeric_literal_operand_is_not_reinterpreted_as_a_variable(numeric_literal) -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
