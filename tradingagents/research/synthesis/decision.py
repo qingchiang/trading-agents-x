@@ -27,6 +27,7 @@ from tradingagents.research.synthesis.decision_prompts import (
     _decision_example_text,
     _decision_language_rules,
     decision_display_scale_guidance,
+    decision_operand_guidance,
     decision_percentage_calculation_guidance,
 )
 from tradingagents.research.synthesis.drafts import (
@@ -75,7 +76,7 @@ def invoke_research_decision(
     )
     example_text = _decision_example_text(resolved_language)
     language_rules = _decision_language_rules(resolved_language)
-    percentage_rules = decision_percentage_calculation_guidance()
+    calculation_rules = decision_operand_guidance() + decision_percentage_calculation_guidance()
     display_scale_rules = decision_display_scale_guidance()
     example_adjustments = (
         (
@@ -233,7 +234,7 @@ def invoke_research_decision(
                 "derived range requires two requirements with the same display_group_id "
                 "and distinct range_low/range_high display_role values; never attach "
                 "one scalar requirement to two calculations. "
-                f"{percentage_rules} {display_scale_rules} "
+                f"{calculation_rules} {display_scale_rules} "
                 "scenarios must contain "
                 "exactly one base, one bull, and one bear case. Required "
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
@@ -258,7 +259,7 @@ def invoke_research_decision(
             "in catalysts, but do not annotate unresolved questions. Use paired "
             "range_low/range_high requirements with one display_group_id for a "
             "derived range. "
-            + percentage_rules
+            + calculation_rules
             + " "
             + display_scale_rules
             + " "

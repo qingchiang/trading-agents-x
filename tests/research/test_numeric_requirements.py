@@ -1170,3 +1170,62 @@ def test_rejected_numeric_candidate_retains_bounded_redacted_operands(oversize: 
     assert "debt" not in json.dumps(diagnostics)
     assert "must-not-retain-unrelated-prose" not in json.dumps(diagnostics)
     assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+
+
+@pytest.mark.parametrize("names", [("2026年现金", "2025年债务"), ("class", "debt")])
+def test_decision_preserves_unambiguous_operands_through_numeric_audit(names) -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(research_decision(evidence_refs=(ref,)).model_dump(mode="json"))
+    core = core.model_copy(update={"thesis": "Net cash is 25 USD."})
+    candidate = {
+        "id": "req_cash", "component_path": "thesis", "label": "Net cash",
+        "stated_value": 25, "fraction_digits": 0, "formula": f"{names[0]} - {names[1]}",
+        "inputs": [{"name": names[0], "value": 125}, {"name": names[1], "value": 100}],
+        "input_evidence_refs": [ref], "unit": "USD", "display_scale": "base",
+        "limitations": ["Fixture limitation."],
+    }
+    envelope = ResearchDecisionCoreEnvelope.model_validate({
+        **core.model_dump(mode="json"), "numeric_requirements_declared": True,
+        "numeric_requirement_candidates": [candidate],
+    })
+    numeric = DecisionNumericDraft(requested=True, calculation_records=(CalculationRecordDraft(
+        id="calc_cash", formula="v1 - v2",
+        inputs=(CalculationInputDraft(name="v1", value=125), CalculationInputDraft(name="v2", value=100)),
+        input_evidence_refs=(ref,), unit="USD", limitations=("Fixture limitation.",),
+        requirement_ids=("req_cash",),
+    ),))
+    llm = _SequenceLLM({"ResearchDecisionCoreEnvelope": [envelope], "DecisionNumericDraft": [numeric]})
+    result = invoke_research_decision(llm, prompt="Form the decision.", state=state,
+                                     node="committee.final", require_risk_adjustments=False)
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert result.value.calculation_records[0].result == 25
+    assert result.numeric_audit.omitted_components == ()
+    assert '"formula": "v1 - v2"' in llm.prompts[1][1]
+
+
+@pytest.mark.parametrize("numeric_literal", ["1e3", "0x10", "1_000", "2j"])
+def test_numeric_literal_operand_is_not_reinterpreted_as_a_variable(numeric_literal) -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(research_decision(evidence_refs=(ref,)).model_dump(mode="json"))
+    candidate = {
+        "id": "req_ambiguous", "component_path": "thesis", "label": "Ambiguous input",
+        "stated_value": 25, "fraction_digits": 0, "formula": f"{numeric_literal} - debt",
+        "inputs": [{"name": numeric_literal, "value": 125}, {"name": "debt", "value": 100}],
+        "input_evidence_refs": [ref], "unit": "USD", "display_scale": "base",
+        "limitations": ["Fixture limitation."],
+    }
+    envelope = ResearchDecisionCoreEnvelope.model_validate({
+        **core.model_dump(mode="json"), "numeric_requirements_declared": True,
+        "numeric_requirement_candidates": [candidate],
+    })
+    llm = _SequenceLLM({"ResearchDecisionCoreEnvelope": [envelope],
+                        "DecisionNumericDraft": [DecisionNumericDraft(requested=False)]})
+    events = []
+    result = invoke_research_decision(llm, prompt="Form the decision.", state=state,
+        node="committee.final", require_risk_adjustments=False, event_writer=events.append)
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert any(issue.endswith(".name.pattern") for omission in result.numeric_audit.omitted_components
+               for issue in omission.issue_codes)
+    assert any(e["event_type"] == "decision.numeric_candidate_rejected" for e in events)

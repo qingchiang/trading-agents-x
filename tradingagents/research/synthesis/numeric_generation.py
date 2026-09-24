@@ -32,6 +32,7 @@ from tradingagents.research.synthesis.decision_prompts import (
     _decision_language_rules,
     _numeric_example_pair,
     decision_display_scale_guidance,
+    decision_operand_guidance,
     decision_percentage_calculation_guidance,
     decision_reference_label_guidance,
 )
@@ -144,7 +145,7 @@ def _invoke_decision_numeric(
     )
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
-    percentage_rules = decision_percentage_calculation_guidance()
+    calculation_rules = decision_operand_guidance() + decision_percentage_calculation_guidance()
     display_scale_rules = decision_display_scale_guidance()
     reference_label_rules = decision_reference_label_guidance(output_language)
     scenario_catalog = tuple(
@@ -329,7 +330,7 @@ def _invoke_decision_numeric(
             "without changing them, including every input's date_evidence_refs. "
             "Those refs date the calculation; explanatory Evidence must not be added. "
             "When requirements are present, requested must be "
-            f"true. {percentage_rules} {display_scale_rules} "
+            f"true. {calculation_rules} {display_scale_rules} "
             f"{reference_label_rules} {language_rules}\n"
         ),
         candidate_repair_context=(
@@ -356,7 +357,7 @@ def _invoke_decision_numeric(
             "Do not supply units on ranges, valuation assessments, or market references; "
             "the application inherits them from catalog anchors or calculations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
-            + percentage_rules
+            + calculation_rules
             + " "
             + display_scale_rules
             + " "

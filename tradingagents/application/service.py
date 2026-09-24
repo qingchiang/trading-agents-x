@@ -338,7 +338,7 @@ class AnalysisService:
                 "research_judge": "v7-compact-evidence",
                 "risk_review": "v7-compact-evidence",
                 "final_committee_brief": "v4-compact-evidence",
-                "final_committee": "v16-shared-numeric-sources",
+                "final_committee": "v17-safe-numeric-operands",
             },
             "research_kind": request.research_kind,
             "quick_binding": snapshot.get("quick_binding") if request.research_kind == "full" else None,

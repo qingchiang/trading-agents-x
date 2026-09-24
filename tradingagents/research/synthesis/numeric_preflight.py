@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import keyword
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -114,18 +115,26 @@ def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
     names = [item.get("name") if isinstance(item, Mapping) else None for item in raw_inputs]
     if not names or any(not isinstance(name, str) for name in names):
         return candidate
-    if all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names):
+    if all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) and not keyword.iskeyword(name) for name in names):
         return candidate
     normalized_names = [unicodedata.normalize("NFKC", name) for name in names]
     normalized_formula = unicodedata.normalize("NFKC", formula)
     if len(set(normalized_names)) != len(normalized_names):
         return candidate
-    digit_prefixed_identifier = re.compile(r"^(?=[0-9A-Za-z_]*[A-Za-z_])[0-9][0-9A-Za-z_]*$")
-    if any(
-        not name.isidentifier() and not digit_prefixed_identifier.fullmatch(name)
-        for name in normalized_names
-    ):
-        return candidate
+    for name in normalized_names:
+        # A digit-prefixed Unicode identifier is unambiguous, but a Python
+        # numeric literal (including scientific/hex/complex notation) is not.
+        if not name.isidentifier() and not (
+            name and name[0].isdecimal() and ("_" + name).isidentifier()
+        ):
+            return candidate
+        try:
+            expression = ast.parse(name, mode="eval").body
+        except SyntaxError:
+            pass
+        else:
+            if isinstance(expression, ast.Constant):
+                return candidate
     replacements = {name: f"v{index}" for index, name in enumerate(normalized_names, start=1)}
     operand_pattern = re.compile(
         r"(?<!\w)(?:"

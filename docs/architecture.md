@@ -129,11 +129,13 @@ The application deterministically normalizes percentage, percentage-point,
 basis-point, and multiple results to `base`; compact amount scales remain
 explicit serializer declarations.
 Serializer-facing operands remain ASCII identifiers. If a provider returns an
-otherwise unambiguous Unicode identifier or an identifier-like token beginning
-with a digit, the application performs boundary-aware token replacement and
+otherwise unambiguous Unicode identifier (including year-prefixed Unicode
+labels) or a declared keyword used as an operand, the application performs
+boundary-aware token replacement and
 rewrites the formula AST and operands to stable `v1`, `v2`, and later names
-before validation. Pure numeric or punctuation-bearing names, collisions, and
-incomplete mappings remain invalid; the application never guesses an ambiguous
+before validation. Numeric literals (including scientific, hexadecimal and
+complex notation), punctuation-bearing names, collisions, and incomplete mappings
+remain invalid; the application never guesses an ambiguous
 mapping. Each observed formula input binds its value and date to Evidence; the
 union of input date refs must be a subset of the calculation's input Evidence
 refs. Unknown date refs and valid date refs omitted from that input set remain

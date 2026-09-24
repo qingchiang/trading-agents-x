@@ -41,6 +41,18 @@ def decision_scenario_assumption_guidance(output_language: str) -> str:
     )
 
 
+def decision_operand_guidance() -> str:
+    """Give both serializers one unambiguous operand naming convention."""
+    return (
+        "Use short ASCII operand names such as v1, v2, cash, or total_debt, "
+        "matching [A-Za-z][A-Za-z0-9_]* and avoiding Python keywords. "
+        "Keep dates, units and human-readable labels outside operand names. "
+        "Each name must be unique and appear exactly as that identifier in the formula; "
+        "use every declared input and no undeclared names. Never use numeric literals "
+        "such as 2026 or 1e3, spaces, punctuation or hyphens as operand names. "
+    )
+
+
 def decision_percentage_calculation_guidance() -> str:
     """Return the stable wire contract for decision percentage calculations."""
 
