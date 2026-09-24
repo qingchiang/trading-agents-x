@@ -532,6 +532,13 @@ are counted. These events use normal Run persistence and purge semantics and
 do not require optional worker file logs. Audit omissions and validation rules
 remain authoritative; diagnostics never enter model inputs or the Decision.
 
+The prompt-only Numeric Value Catalog shares repeated table-label prefixes and
+Evidence reference lists through explicit source IDs. Values retain their original
+value IDs, suffix labels, numbers, dates and measurement IDs; concatenating the
+source prefix and suffix reconstructs the original label. Source IDs never replace
+Evidence/value IDs in model output or canonical locators. No values are filtered
+by this projection, and PIT limitations apply to every linked value.
+
 Numeric repair includes its value/scenario/requirement catalogs exactly once:
 repairs with a parsed candidate receive the catalogs as supplemental context,
 while repairs without a candidate retain them in the original task. The repair

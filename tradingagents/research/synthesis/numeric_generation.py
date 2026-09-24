@@ -136,6 +136,12 @@ def _invoke_decision_numeric(
     )
     value_catalog_by_id = {item.id: item for item in value_catalog}
     value_catalog_prompt = compact_numeric_value_catalog(value_catalog)
+    catalog_rules = (
+        "Catalog values with source_id inherit evidence_refs from sources[source_id]; "
+        "their complete label is that source's label_prefix followed by the value label. "
+        "measurement_id resolves through measurements. All inherited source limitations "
+        "apply to every linked value. Select the original value_ref; never cite source_id. "
+    )
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
     percentage_rules = decision_percentage_calculation_guidance()
@@ -287,7 +293,7 @@ def _invoke_decision_numeric(
         candidate_only_repair=True,
         invoke_config={"metadata": {"research_node": node}},
         repair_instructions=(
-            "Repair only the optional numeric appendix. Calculation input "
+            catalog_rules + "Repair only the optional numeric appendix. Calculation input "
             "names must be ASCII identifiers and the formula must use every "
             "input exactly. Technical levels, historical highs/lows, and analyst "
             "target prices are observed only when selected by value_ref from the "
@@ -328,7 +334,7 @@ def _invoke_decision_numeric(
         ),
         candidate_repair_context=(
             "VALID OBSERVED VALUE REFS:\n"
-            + json.dumps(value_catalog_prompt, ensure_ascii=False)
+            + json.dumps(value_catalog_prompt, ensure_ascii=False, separators=(",", ":"))
             + "\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
             + "\nDECISION NUMERIC REQUIREMENTS:\n"
@@ -337,7 +343,7 @@ def _invoke_decision_numeric(
     )
     try:
         output = runner.invoke(
-            prompt + "\n\nExtract only optional decision-critical numeric content. "
+            prompt + "\n\n" + catalog_rules + "Extract only optional decision-critical numeric content. "
             "Set requested=false and return empty collections only when the brief "
             "does not support a numeric appendix and DECISION NUMERIC REQUIREMENTS "
             "is empty. Do not copy ordinary report "
@@ -358,7 +364,7 @@ def _invoke_decision_numeric(
             + " "
             + language_rules
             + "\n\nNUMERIC VALUE CATALOG:\n"
-            + json.dumps(value_catalog_prompt, ensure_ascii=False)
+            + json.dumps(value_catalog_prompt, ensure_ascii=False, separators=(",", ":"))
             + "\n\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
             + "\n\nDECISION NUMERIC REQUIREMENTS:\n"

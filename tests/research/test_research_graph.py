@@ -366,7 +366,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         )
         assert (
             decision_artifact.prompt_version
-            == "final-committee-v15-numeric-repair-context"
+            == "final-committee-v16-shared-numeric-sources"
         )
         final_prompt = next(
             prompt

@@ -1212,7 +1212,7 @@ class ResearchGraph:
                         generation_method=output.numeric_generation_method,
                     ),
                 ),
-                prompt_version="final-committee-v15-numeric-repair-context",
+                prompt_version="final-committee-v16-shared-numeric-sources",
             )
             self._finish_node(
                 runtime,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -29,6 +30,7 @@ class NumericValueCatalogEntry:
     evidence_refs: tuple[str, ...]
     locator: EvidenceValueLocator
     observed_date: date | None = None
+    label_prefix: str | None = None
 
 def compact_numeric_value_catalog(
     entries: tuple[NumericValueCatalogEntry, ...],
@@ -54,6 +56,15 @@ def compact_numeric_value_catalog(
         }
         for measurement in known_measurements
     }
+    source_counts = Counter(
+        (entry.label_prefix, entry.evidence_refs) for entry in entries
+        if entry.label_prefix and entry.label.startswith(entry.label_prefix)
+    )
+    source_ids = {source: f"s{index:02d}" for index, source in enumerate(
+        (source for source, count in source_counts.items() if count > 1), start=1,
+    )}
+    sources = {source_id: {"label_prefix": source[0], "evidence_refs": list(source[1])}
+               for source, source_id in source_ids.items()}
     values = []
     for entry in entries:
         payload = {
@@ -65,13 +76,18 @@ def compact_numeric_value_catalog(
                 entry.observed_date.isoformat() if entry.observed_date else None
             ),
         }
+        source_id = source_ids.get((entry.label_prefix, entry.evidence_refs))
+        if source_id is not None:
+            payload["source_id"] = source_id
+            payload["label"] = entry.label[len(entry.label_prefix):]
+            del payload["evidence_refs"]
         measurement_id = measurement_ids.get(
             (entry.measurement_kind.value, entry.unit)
         )
         if measurement_id is not None:
             payload["measurement_id"] = measurement_id
         values.append(payload)
-    return {"measurements": measurements, "values": values}
+    return {"measurements": measurements, "sources": sources, "values": values}
 
 
 def build_numeric_value_catalog(
@@ -132,6 +148,7 @@ def build_numeric_value_catalog(
                     # heterogeneous value columns.
                     _entry(
                         label=f"{table.title} · {row_label} · {column.label}",
+                        label_prefix=f"{table.title} · ",
                         value=float(cell.raw_value),
                         measurement_kind=(
                             column.measurement_kind
@@ -169,6 +186,7 @@ def _entry(
     evidence_refs: tuple[str, ...],
     locator: EvidenceValueLocator,
     observed_date: date | None = None,
+    label_prefix: str | None = None,
 ) -> NumericValueCatalogEntry:
     identity = {
         "locator": locator.model_dump(mode="json"),
@@ -186,6 +204,7 @@ def _entry(
         evidence_refs=tuple(dict.fromkeys(evidence_refs)),
         locator=locator,
         observed_date=observed_date,
+        label_prefix=label_prefix,
     )
 
 

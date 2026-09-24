@@ -316,3 +316,35 @@ def test_compact_numeric_catalog_shares_measurements_and_omits_unknowns() -> Non
     ]
     assert all("measurement_kind" not in item for item in payload["values"])
     assert all("unit" not in item for item in payload["values"])
+
+
+def test_numeric_table_context_is_shared_without_losing_values_or_source_links() -> None:
+    ref = "ev_0123456789ab"
+    title = "Financial statements; fiscal periods are not publication timestamps."
+    table = EvidenceTable.create(
+        title=title, purpose="Financial facts", source_format="structured", evidence_refs=(ref,),
+        columns=(EvidenceTableColumn(key="metric", label="Metric", data_type=TableDataType.TEXT),
+                 EvidenceTableColumn(key="amount", label="Amount", data_type=TableDataType.NUMBER,
+                                     measurement_kind=MeasurementKind.CURRENCY, unit="USD")),
+        rows=tuple(EvidenceTableRow(id=f"row_{index}", cells={
+            "metric": EvidenceTableCell(raw_value=label),
+            "amount": EvidenceTableCell(raw_value=value),
+        }) for index, (label, value) in enumerate((("Cash", 125), ("Debt", 25)))),
+    )
+    bundle = EvidenceBundle(instrument="NVDA", analysis_date=date(2026, 8, 1), tables=(table,),
+        items=(EvidenceItem(ref=ref, source="fixture", evidence_type="financials",
+                            requested_date=date(2026, 8, 1)),))
+    entries = build_numeric_value_catalog(bundle)
+    payload = compact_numeric_value_catalog(entries)
+    assert json.dumps(payload).count(title) == 1
+    assert len(payload["values"]) == 2
+    expanded = []
+    for value in payload["values"]:
+        source = payload["sources"][value["source_id"]]
+        expanded.append((source["label_prefix"] + value["label"], value["value"],
+                         source["evidence_refs"], value["observed_date"], value["measurement_id"]))
+    assert expanded == [(f"{title} · Cash · Amount", 125, [ref], None, "m01"),
+                        (f"{title} · Debt · Amount", 25, [ref], None, "m01")]
+    assert [v["value_ref"] for v in payload["values"]] == [e.id for e in entries]
+    assert [e.locator.row_id for e in entries] == ["row_0", "row_1"]
+    assert bundle.tables[0].title == title
