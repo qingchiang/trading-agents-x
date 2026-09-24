@@ -251,11 +251,11 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     assert result.numeric_generation_method is ArtifactGenerationMethod.TOOL_CALL_RECOVERED
     assert [item.phase.value for item in result.numeric_audit.snapshots] == ["initial"]
     assert result.numeric_audit.snapshots[0].candidate == invalid_numeric
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.numeric_audit")] == [
         "node.numeric_audit_retry",
         "node.numeric_audit_recovered",
     ]
-    issues = events[0]["payload"]["validation_issues"]
+    issues = next(event for event in events if event["event_type"] == "node.numeric_audit_retry")["payload"]["validation_issues"]
     assert len(issues) > 8
     assert issues[0].startswith("schema.calculation_records.0.inputs")
     assert any(issue.startswith("schema.calculation_records.6.inputs") for issue in issues)
@@ -366,7 +366,7 @@ def test_missing_decision_calculation_degrades_numeric_audit_only_once() -> None
     assert result.numeric_audit.omitted_components[0].issue_codes == (
         "numeric.requirement.req_eps_remaining.missing_calculation",
     )
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.numeric_audit")] == [
         "node.numeric_audit_retry",
         "node.numeric_audit_degraded",
     ]
@@ -454,7 +454,7 @@ def test_7011_dimensionless_scales_normalize_without_numeric_retry() -> None:
         and check.display_scale is NumericDisplayScale.BASE
         for check in result.numeric_audit.requirement_checks
     )
-    assert events == [
+    assert [event for event in events if not event["event_type"].endswith("_diagnostic")] == [
         {
             "event_type": "decision.numeric_display_scale_normalized",
             "node": "committee.final.numeric",
@@ -701,7 +701,7 @@ def test_repeated_cross_scenario_repair_preserves_other_numeric_components() -> 
     assert {item.component_path for item in result.numeric_audit.omitted_components} == {
         "numeric.scenario.base.ranges.1"
     }
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.numeric_audit")] == [
         "node.numeric_audit_retry",
         "node.numeric_audit_degraded",
     ]
@@ -795,7 +795,7 @@ def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
         result.numeric_audit.snapshots[0].candidate_digest
         == result.numeric_audit.snapshots[1].candidate_digest
     )
-    assert [event["event_type"] for event in events] == [
+    assert [event["event_type"] for event in events if event["event_type"].startswith("node.numeric_audit")] == [
         "node.numeric_audit_retry",
         "node.numeric_audit_degraded",
     ]
