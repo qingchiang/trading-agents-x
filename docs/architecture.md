@@ -87,6 +87,11 @@ The final serializer produces the strict research core and optional scenario
 reference ranges and market reference levels in one response. Optional candidates
 are validated individually: finite numeric values, ordered ranges, required
 metadata, Evidence reference closure, source locators and temporal constraints.
+References supported by live-only sources must retain the live-snapshot label
+and their latest market-local retrieval date; invalid or out-of-window retrieval
+metadata causes omission. Incremental validation resolves source locators against
+the direct Full Baseline Evidence as well as current Evidence. The baseline
+bundle is local validation context excluded from model prompts.
 An invalid candidate is omitted without retrying the model or discarding the
 core; a content-free `decision.reference_omitted` event records its field path
 and bounded issue codes. Unparseable responses and invalid core fields still use

@@ -880,6 +880,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     from dataclasses import replace
 
     from tradingagents.domain.decision import MarketReferenceLevel
+    from tradingagents.domain.evidence import EvidenceTable, EvidenceTableColumn, EvidenceTableRow
 
     class ReferenceGraph(_Graph):
         def execute(self, context, **kwargs):
@@ -888,7 +889,19 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
             reference = MarketReferenceLevel(label="Baseline conditional value", value=100,
                 basis="derived", evidence_refs=(ref,), date_evidence_refs=(ref,),
                 as_of_date=date(2026, 7, 20), unit="USD", interpretation="Baseline assumptions.")
-            return replace(execution, decision=execution.decision.model_copy(
+            table = EvidenceTable.create(
+                title="LOCAL-BASELINE-VALIDATION-ONLY", purpose="Historical price",
+                columns=(EvidenceTableColumn(key="close", label="Close"),),
+                rows=(EvidenceTableRow(id="quote", cells={"close": {"raw_value": 100}}),),
+                evidence_refs=(ref,), source_format="structured",
+            )
+            evidence = EvidenceBundle(
+                instrument=execution.evidence.instrument,
+                analysis_date=execution.evidence.analysis_date,
+                items=execution.evidence.items, tables=(table,),
+                sealed_at=execution.evidence.sealed_at,
+            )
+            return replace(execution, evidence=evidence, decision=execution.decision.model_copy(
                 update={"market_reference_levels": (reference,)}))
 
     baseline = _service(app_settings, repository, graph_factory=ReferenceGraph).run(
@@ -1030,7 +1043,18 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
                         scenario.pop('reference_ranges')
                 else:
                     updated['market_reference_levels'][0]['value'] = 140
-                    updated['market_reference_levels'].append({"label": "Invalid optional reference"})
+                    observed = {**updated['market_reference_levels'][0], "basis": "observed",
+                                "value": 100, "source_locator": {
+                                    "evidence_ref": baseline_decision.evidence_refs[0],
+                                    "table_id": repository.get_result(baseline.run_id).evidence.tables[0].id,
+                                    "row_id": "quote", "column": "close",
+                                }}
+                    updated['market_reference_levels'].extend([
+                        observed,
+                        {**observed, "source_locator": {**observed["source_locator"],
+                                                       "table_id": "et_000000000000"}},
+                        {"label": "Invalid optional reference"},
+                    ])
                 return _Invoker({"decision": updated}, self.prompts)
             raise AssertionError(f"unexpected schema: {schema.__name__}")
 
@@ -1078,6 +1102,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     assert {i.ref for i in saved.items} == {c.evidence.ref for c in candidates}
     assert all(c.evidence in saved.items for c in candidates)
     for prompt in (*semantic.prompts, *serializer.prompts):
+        assert "LOCAL-BASELINE-VALIDATION-ONLY" not in prompt
         assert prompt.count("UNIQUE-SOURCE-FACT") == (2 if extra_source_text else 1)
         if extra_source_text:
             assert "Additional source limitation." in prompt
@@ -1123,7 +1148,12 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     elif core_recovery:
         assert result.decision.market_reference_levels == ()
     else:
-        assert [level.value for level in result.decision.market_reference_levels] == [140]
+        assert [level.value for level in result.decision.market_reference_levels] == [140, 100]
+        assert any(
+            event.event_type == "decision.reference_omitted"
+            and event.payload["validation_issues"] == ["reference.locator_invalid"]
+            for event in repository.list_events(result.run_id)
+        )
     if outcome == "updated":
         assert any(event.event_type == 'decision.reference_omitted'
                    for event in repository.list_events(result.run_id))

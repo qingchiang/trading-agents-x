@@ -612,6 +612,7 @@ class AnalysisService:
                     synthesis_input = IncrementalSynthesisInput(
                         full_baseline_run_id=baseline.id,
                         full_baseline_decision=baseline_result.decision,
+                        full_baseline_evidence=baseline_evidence,
                         permitted_baseline_evidence_refs=tuple(
                             item.ref for item in baseline_evidence.items
                         ),

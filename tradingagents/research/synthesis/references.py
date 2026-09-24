@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
 
+from tradingagents.data.lookahead import is_near_live
 from tradingagents.domain.decision import (
     MarketReferenceLevel,
     NumericTemporalBasis,
     ResearchDecision,
     ScenarioReferenceRange,
 )
-from tradingagents.domain.evidence import EvidenceBundle
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceTemporalScope
 from tradingagents.domain.instruments import market_timezone
 from tradingagents.research.synthesis.drafts import EventWriter, ResearchDecisionDraft
 from tradingagents.research.synthesis.output_validation import OutputValidationError
@@ -39,10 +41,18 @@ def assemble_decision(
     *,
     bundle: EvidenceBundle,
     allowed_evidence_refs: set[str],
+    baseline_bundle: EvidenceBundle | None = None,
     node: str,
     event_writer: EventWriter | None = None,
 ) -> ResearchDecision:
     """Keep the strict core and drop only invalid optional reference candidates."""
+
+    sources = {
+        item.ref: (item, source_bundle)
+        for source_bundle in (baseline_bundle, bundle)
+        if source_bundle is not None
+        for item in source_bundle.items
+    }
 
     def omit(path: str, codes: list[str]) -> None:
         if event_writer is not None:
@@ -69,13 +79,42 @@ def assemble_decision(
                 > bundle.sealed_at.astimezone(market_timezone(bundle.instrument)).date()
             ):
                 raise OutputValidationError("reference.future_snapshot")
+            live_dates = []
+            for ref in endpoint.evidence_refs:
+                if ref not in sources:
+                    raise OutputValidationError("reference.source_unavailable")
+                item, source_bundle = sources[ref]
+                live_origins = [
+                    origin
+                    for origin in item.origins
+                    if origin.temporal_scope is EvidenceTemporalScope.LIVE_ONLY
+                ]
+                if not live_origins:
+                    continue
+                if endpoint.temporal_basis is not NumericTemporalBasis.LIVE_SNAPSHOT:
+                    raise OutputValidationError("reference.temporal_basis_mismatch")
+                for origin in live_origins:
+                    try:
+                        retrieved = datetime.fromisoformat(origin.retrieved_at or "")
+                    except ValueError as exc:
+                        raise OutputValidationError("reference.snapshot_date_unavailable") from exc
+                    if retrieved.utcoffset() is None or retrieved > source_bundle.sealed_at:
+                        raise OutputValidationError("reference.snapshot_date_invalid")
+                    if not is_near_live(
+                        source_bundle.analysis_date.isoformat(),
+                        source_bundle.instrument,
+                        now=retrieved,
+                    ):
+                        raise OutputValidationError("reference.snapshot_outside_window")
+                    live_dates.append(
+                        retrieved.astimezone(market_timezone(bundle.instrument)).date()
+                    )
+            if live_dates and endpoint.as_of_date != max(live_dates):
+                raise OutputValidationError("reference.snapshot_date_mismatch")
             locator = endpoint.source_locator
-            if (
-                locator
-                and locator.table_id
-                and locator.evidence_ref in {item.ref for item in bundle.items}
-            ):
-                table = next((t for t in bundle.tables if t.id == locator.table_id), None)
+            if locator and locator.table_id:
+                source_bundle = sources[locator.evidence_ref][1]
+                table = next((t for t in source_bundle.tables if t.id == locator.table_id), None)
                 row = (
                     next((r for r in table.rows if r.id == locator.row_id), None) if table else None
                 )

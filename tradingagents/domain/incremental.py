@@ -109,6 +109,8 @@ class FullResearchRequiredReason(FrozenModel):
 class IncrementalSynthesisInput(FrozenModel):
     full_baseline_run_id: str = Field(min_length=1, max_length=36)
     full_baseline_decision: ResearchDecision
+    # Local validation context only; never duplicate the baseline bundle in prompts.
+    full_baseline_evidence: EvidenceBundle = Field(exclude=True, repr=False)
     permitted_baseline_evidence_refs: tuple[str, ...] = ()
     incremental_evidence: EvidenceBundle
     collection_summary: CollectionSummary

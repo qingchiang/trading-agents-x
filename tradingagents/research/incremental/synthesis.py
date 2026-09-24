@@ -285,6 +285,7 @@ def synthesize_incremental(
             candidate = assemble_decision(
                 value.decision,
                 bundle=synthesis_input.incremental_evidence,
+                baseline_bundle=synthesis_input.full_baseline_evidence,
                 allowed_evidence_refs=set(allowed_evidence_refs),
                 node="incremental.synthesis.decision",
             )
@@ -378,6 +379,7 @@ def synthesize_incremental(
         decision = assemble_decision(
             decision_output.value.decision,
             bundle=synthesis_input.incremental_evidence,
+            baseline_bundle=synthesis_input.full_baseline_evidence,
             allowed_evidence_refs=set(allowed_evidence_refs),
             node="incremental.synthesis.decision",
             event_writer=event_writer,
