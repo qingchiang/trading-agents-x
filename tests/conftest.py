@@ -72,7 +72,7 @@ def _dummy_api_keys(monkeypatch, request):
                 monkeypatch.setenv(env_var, value)
 
     from tradingagents.credentials import use_credentials
-    with use_credentials({name: os.environ[name] for name in _CREDENTIAL_ENV_VARS}):
+    with use_credentials({**{name: os.environ[name] for name in _CREDENTIAL_ENV_VARS}, "connection:test:api_key": "placeholder", "connection:default:api_key": "placeholder"}):
         yield
 
 
@@ -82,8 +82,8 @@ def _isolate_config():
     import copy
     import tempfile
 
-    import tradingagents.default_config as default_config
-    from tradingagents.dataflows.config import bind_config, reset_config
+    import tradingagents.configuration.defaults as default_config
+    from tests.support.data_policy import configure_data, reset_data
 
     def _fresh(cache_dir):
         cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -91,11 +91,11 @@ def _isolate_config():
         return cfg
 
     with tempfile.TemporaryDirectory() as cache_dir:
-        token = bind_config(_fresh(cache_dir), merge=False)
+        token = configure_data(_fresh(cache_dir), merge=False)
         try:
             yield
         finally:
-            reset_config(token)
+            reset_data(token)
 
 
 @pytest.fixture()
@@ -103,7 +103,7 @@ def mock_llm_client():
     client = MagicMock()
     client.get_llm.return_value = MagicMock()
     with patch(
-        "tradingagents.llm_clients.factory.create_llm_client",
+        "tradingagents.llm.factory.create_llm_client",
         return_value=client,
     ):
         yield client
@@ -111,7 +111,7 @@ def mock_llm_client():
 
 @pytest.fixture
 def app_settings(tmp_path: Path):
-    from tradingagents.application.settings import AppSettings
+    from tradingagents.configuration.settings import AppSettings
 
     settings = AppSettings.from_env(
         environ={
@@ -129,10 +129,10 @@ def app_settings(tmp_path: Path):
 
 @pytest.fixture
 def repository(app_settings):
-    from tradingagents.application.repository import RunRepository
     from tradingagents.persistence import upgrade_database
+    from tradingagents.persistence.repository import RunRepository
 
     upgrade_database(app_settings)
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(app_settings)
     return RunRepository(app_settings)

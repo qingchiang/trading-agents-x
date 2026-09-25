@@ -7,39 +7,29 @@ from datetime import UTC, date, datetime
 import httpx2 as httpx
 import pytest
 
-from tests.factories import (
-    analyst_report,
-    research_case,
-    research_decision,
-)
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    ArtifactGenerationObservation,
+from tests.research_helpers import default_incremental_synthesizer, stub_run_llms
+from tests.support.factories import analyst_report, research_case, research_decision
+from tests.support.source_results import market_fixture, scoped_fixture
+from tradingagents.application.service import AnalysisService
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.data import incremental_cn, incremental_jp, incremental_us
+from tradingagents.data.cn import calendar as cn_calendar
+from tradingagents.domain.artifacts import ArtifactGenerationObservation, ResearchArtifactDraft
+from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
     CollectionSourceProvenance,
     CollectionSummary,
-    EvidenceBundle,
-    EvidenceItem,
     IncrementalCollectionRequest,
-    IncrementalCollectionResult,
-    IncrementalDecisionOutcome,
     IncrementalEvidenceCandidate,
-    ResearchArtifactDraft,
-    RunStatus,
 )
-from tradingagents.application.database import RunRecord
-from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
-from tradingagents.application.settings import AppSettings
-from tradingagents.dataflows import incremental_cn, incremental_jp, incremental_us
-from tradingagents.dataflows.cn import calendar as cn_calendar
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    attach_evidence_span,
-    attach_provenance,
-)
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.incremental import IncrementalCollectionResult, IncrementalDecisionOutcome
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.configuration import ConfigurationStore
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
@@ -74,11 +64,12 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 21, 3, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -105,15 +96,9 @@ async def test_default_us_incremental_collector_reads_back_through_asgi_timeline
         ),
         evidence=baseline_evidence,
     )
-    market_response = attach_provenance(
-        """# Stock data for NVDA from 2026-07-20 to 2026-07-24
-# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)
-# Actual data source: yfinance
-
-Date,Open,High,Low,Close,Volume
-2026-07-20,100,102,99,101,1000
-2026-07-24,109,111,108,110,1000
-""",
+    market_response = market_fixture(
+        "# Stock data for NVDA from 2026-07-20 to 2026-07-24\n# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)\n# Actual data source: yfinance\n\nDate,Open,High,Low,Close,Volume\n2026-07-20,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="yfinance",
@@ -121,7 +106,7 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-20 to 2026-07-24",
             timing="market-date filtered",
             retrieved_at="2026-07-25T01:00:00Z",
-        ),
+        )
     )
     monkeypatch.setattr(
         incremental_us,
@@ -131,8 +116,11 @@ Date,Open,High,Low,Close,Volume
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        llm_factory=stub_run_llms,
+        eligibility_resolver=lambda symbol, *, data_context: {
+            "symbol": symbol,
+            "quote_type": "EQUITY",
+        },
         incremental_synthesizer=default_incremental_synthesizer,
     )
 
@@ -168,11 +156,12 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 17, 14, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -197,15 +186,9 @@ async def test_default_japan_incremental_collector_reads_back_through_asgi_timel
         ),
         evidence=baseline_evidence,
     )
-    market_response = attach_provenance(
-        """# Stock data for 7203.T from 2026-07-10 to 2026-07-24
-# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)
-
-Date,Open,High,Low,Close,Volume
-2026-07-17,99,101,98,100,1000
-2026-07-21,100,102,99,101,1000
-2026-07-24,109,111,108,110,1000
-""",
+    market_response = market_fixture(
+        "# Stock data for 7203.T from 2026-07-10 to 2026-07-24\n# Price adjustment: J-Quants split/dividend-adjusted close (AdjC)\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-21,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="jquants",
@@ -213,10 +196,11 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="market-date filtered",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
-    news_response = attach_provenance(
-        "No EDINET disclosures found for 7203.T between 2026-07-17 and 2026-07-24",
+    news_response = DataResult(
+        "No EDINET disclosures found for 7203.T between 2026-07-17 and 2026-07-24"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_news",
             source="EDINET",
@@ -224,10 +208,11 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="available; no relevant items in window",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
-    fundamentals_response = attach_provenance(
-        "Live analyst consensus snapshot for 7203.T",
+    fundamentals_response = DataResult(
+        "Live analyst consensus snapshot for 7203.T"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_fundamentals",
             source="yfinance",
@@ -235,7 +220,7 @@ Date,Open,High,Low,Close,Volume
             effective="retrieval-time analyst snapshot",
             timing="live non-point-in-time",
             retrieved_at="2026-07-24T15:00:00Z",
-        ),
+        )
     )
 
     def route(method, *_args, **_kwargs):
@@ -247,16 +232,21 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_jp, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel",
+        lambda *_a, data_context: DataResult(""),
     )
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_market_investor_flows", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_market_investor_flows",
+        lambda *_a: DataResult(""),
     )
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        llm_factory=stub_run_llms,
+        eligibility_resolver=lambda symbol, *, data_context: {
+            "symbol": symbol,
+            "quote_type": "EQUITY",
+        },
         incremental_synthesizer=default_incremental_synthesizer,
     )
 
@@ -288,7 +278,7 @@ Date,Open,High,Low,Close,Volume
     }
     news = domains["news"]
     assert news["state"] == "empty"
-    assert news["diagnostic"] == {"code": "bounded_feed_no_observed_records.news_context_partial"}
+    assert news["diagnostic"] == {"code": "news_context_partial"}
     assert news["sources"] == [
         {
             "source": "edinet",
@@ -331,11 +321,12 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
     )
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 17, 15, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -362,16 +353,9 @@ async def test_default_mainland_incremental_collector_reads_back_through_asgi_ti
         ),
         evidence=baseline_evidence,
     )
-    market_response = attach_provenance(
-        """# Stock data for 600519.SS from 2026-07-17 to 2026-07-24
-# Price adjustment: qfq (forward-adjusted)
-# Actual data source: AkShare / Tencent
-
-Date,Open,High,Low,Close,Volume
-2026-07-17,99,101,98,100,1000
-2026-07-20,100,102,99,101,1000
-2026-07-24,109,111,108,110,1000
-""",
+    market_response = market_fixture(
+        "# Stock data for 600519.SS from 2026-07-17 to 2026-07-24\n# Price adjustment: qfq (forward-adjusted)\n# Actual data source: AkShare / Tencent\n\nDate,Open,High,Low,Close,Volume\n2026-07-17,99,101,98,100,1000\n2026-07-20,100,102,99,101,1000\n2026-07-24,109,111,108,110,1000\n"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_stock_data",
             source="AkShare / Tencent",
@@ -379,10 +363,11 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="market-date filtered; qfq adjusted; future rows excluded",
             retrieved_at="2026-07-24T08:00:00Z",
-        ),
+        )
     )
-    news_response = attach_provenance(
-        "No CNINFO announcements found for 600519.SS in the bounded window",
+    news_response = DataResult(
+        "No CNINFO announcements found for 600519.SS in the bounded window"
+    ).with_provenance(
         ProvenanceRecord(
             evidence="get_news",
             source="CNINFO",
@@ -390,12 +375,12 @@ Date,Open,High,Low,Close,Volume
             effective="2026-07-17 to 2026-07-24",
             timing="available; no relevant items in window; returned_items=0",
             retrieved_at="2026-07-24T08:00:00Z",
-        ),
+        )
     )
-    fundamentals_response = attach_evidence_span(
-        attach_provenance(
-            "## Company profile (CNINFO; current reference, not historical PIT)\n"
-            "主营业务: 白酒生产",
+    fundamentals_response = scoped_fixture(
+        DataResult(
+            "## Company profile (CNINFO; current reference, not historical PIT)\n主营业务: 白酒生产"
+        ).with_provenance(
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="AkShare / CNINFO company profile",
@@ -403,9 +388,9 @@ Date,Open,High,Low,Close,Volume
                 effective="current reference",
                 timing="live-only current company reference; not historical PIT",
                 retrieved_at="2026-07-24T08:00:00Z",
-            ),
+            )
         ),
-        temporal_scope="live_only",
+        "live_only",
     )
 
     def route(method, *_args, **_kwargs):
@@ -417,7 +402,8 @@ Date,Open,High,Low,Close,Volume
 
     monkeypatch.setattr(incremental_cn, "DEFAULT_ROUTE_TO_VENDOR", route)
     monkeypatch.setattr(
-        "tradingagents.dataflows.incremental_inputs.get_global_macro_panel", lambda *_a: ""
+        "tradingagents.data.incremental_inputs.get_global_macro_panel",
+        lambda *_a, data_context: DataResult(""),
     )
     synthesis_inputs = []
 
@@ -428,8 +414,8 @@ Date,Open,High,Low,Close,Volume
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        eligibility_resolver=lambda symbol: {
+        llm_factory=stub_run_llms,
+        eligibility_resolver=lambda symbol, *, data_context: {
             "symbol": symbol,
             "quote_type": "EQUITY",
         },
@@ -460,9 +446,7 @@ Date,Open,High,Low,Close,Volume
     assert node["performance"]["stock"]["status"] == "calculated"
     assert domains["market"]["sources"][0]["source"] == "akshare_tencent"
     assert domains["news"]["state"] == "empty"
-    assert domains["news"]["diagnostic"] == {
-        "code": "bounded_feed_no_observed_records.news_context_partial"
-    }
+    assert domains["news"]["diagnostic"] == {"code": "news_context_partial"}
     assert domains["fundamentals"]["diagnostic"] == {
         "code": "near_live_snapshot.financial_inputs_partial"
     }
@@ -488,11 +472,12 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     baseline_request = AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     baseline_item = EvidenceItem.create(
@@ -527,7 +512,9 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         content=f"admissible {ticker} evidence",
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -568,8 +555,11 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        llm_factory=stub_run_llms,
+        eligibility_resolver=lambda symbol, *, data_context: {
+            "symbol": symbol,
+            "quote_type": "EQUITY",
+        },
         incremental_collector=collect,
         incremental_synthesizer=lambda input_: default_incremental_synthesizer(input_).model_copy(
             update={
@@ -649,7 +639,7 @@ async def test_evidence_bearing_incremental_nodes_read_back_through_timeline_pro
         exported.json()["research_node"]["information_advancement"]
         == node["information_advancement"]
     )
-    assert exported.json()["schema_version"] == "11"
+    assert exported.json()["schema_version"] == "12"
     assert (
         exported.json()["incremental_context"]["analysis_brief"]["generation_method"]
         == "markdown_audited"
@@ -724,11 +714,12 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -799,11 +790,12 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
     baseline_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -862,11 +854,12 @@ async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
     baseline_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     baseline, _ = web_repository.create_run(
         baseline_request,
-        web_settings.resolve_run(baseline_request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(baseline_request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(baseline.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -923,11 +916,12 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -983,7 +977,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
                 "cycle_id": run.id,
                 "instrument": "NVDA",
                 "analysis_date": "2026-07-24",
-                "research_schema_version": "2",
+                "research_schema_version": "3",
                 "information_cutoff_at": "2026-07-24T23:59:59Z",
                 "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
                 "research_kind": "full",
@@ -1020,7 +1014,7 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         analysis_date: date,
         *,
         make_primary: bool | None = None,
-        research_schema_version: str = "2",
+        research_schema_version: str = "3",
     ) -> str:
         request = AnalysisRequest(
             ticker="NVDA",
@@ -1029,11 +1023,12 @@ async def test_timeline_detail_paginates_complete_cycles_primary_then_newest(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(web_settings)
+            .resolve_request(request, require_initialized=False)[1]
+            .snapshot(),
             research_schema_version=research_schema_version,
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -1125,11 +1120,12 @@ async def test_timeline_list_api_derives_timeline_summaries_from_nodes(
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -1213,11 +1209,12 @@ async def test_baseline_candidates_are_primary_first_and_decision_informative(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
-            research_schema_version="2",
+            ConfigurationStore(web_settings)
+            .resolve_request(request, require_initialized=False)[1]
+            .snapshot(),
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
         web_repository.set_instrument_local_name(run.id, "英伟达")
@@ -1279,11 +1276,12 @@ async def test_terminal_run_creation_template_is_lightweight_and_uses_today_inde
     request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings)
+        .resolve_request(request, require_initialized=False)[1]
+        .snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     web_repository.fail(run.id, RuntimeError("fixture"))
@@ -1316,11 +1314,12 @@ async def test_primary_cycle_api_selects_an_active_full_cycle_idempotently(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
-            research_schema_version="2",
+            ConfigurationStore(web_settings)
+            .resolve_request(request, require_initialized=False)[1]
+            .snapshot(),
+            research_schema_version="3",
             information_cutoff_at=datetime(2026, 7, 24, 23, 59, 59, tzinfo=UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -1401,11 +1400,12 @@ async def test_cycle_lifecycle_api_requires_primary_choice_and_retains_audit_opt
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
-            research_schema_version="2",
+            ConfigurationStore(web_settings)
+            .resolve_request(request, require_initialized=False)[1]
+            .snapshot(),
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.claim_run(run.id, "fixture", 30)
         item = EvidenceItem.create(
@@ -1483,7 +1483,7 @@ async def test_run_creation_distinguishes_typed_admission_failures(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: result,
+        eligibility_resolver=lambda _ticker, *, data_context: result,
     )
     transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
     async with httpx.AsyncClient(
@@ -1500,59 +1500,6 @@ async def test_run_creation_distinguishes_typed_admission_failures(
     assert payload["error"]["code"] == code
     assert payload["error"]["message"]
     assert web_repository.list_runs().total == 0
-
-
-@pytest.mark.anyio
-async def test_legacy_crypto_retry_returns_stable_unsupported_response(
-    web_client: httpx.AsyncClient,
-    web_repository,
-    web_service,
-) -> None:
-    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    web_repository.claim_run(queued.id, "legacy-fixture", 30)
-    web_repository.fail(queued.id, RuntimeError("fixture failure"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, queued.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
-    response = await web_client.post(f"/api/v1/runs/{queued.id}/retry")
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "unsupported_instrument"
-    unchanged = web_repository.get_run(queued.id)
-    assert unchanged.status is RunStatus.FAILED
-    assert unchanged.attempt == 1
-
-
-@pytest.mark.anyio
-async def test_legacy_crypto_source_returns_stable_unsupported_response(
-    web_client: httpx.AsyncClient,
-    web_repository,
-    web_service,
-) -> None:
-    source = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    web_repository.claim_run(source.id, "legacy-fixture", 30)
-    web_repository.fail(source.id, RuntimeError("fixture failure"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, source.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
-    response = await web_client.post(
-        "/api/v1/runs",
-        json={**_payload("AAPL"), "source_run_id": source.id},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "unsupported_instrument"
-    assert web_repository.list_runs().total == 1
 
 
 @pytest.mark.anyio
@@ -1728,7 +1675,7 @@ async def test_analysis_cutoff_context_is_market_local_without_vendor_admission(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+        eligibility_resolver=lambda _ticker, *, data_context: (_ for _ in ()).throw(
             AssertionError("date context must not call the eligibility vendor")
         ),
         now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
@@ -1766,7 +1713,7 @@ async def test_future_analysis_cutoff_returns_context_without_creating_a_run(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },
@@ -1802,7 +1749,7 @@ async def test_future_analysis_cutoff_precedes_vendor_admission_failure(
     service = AnalysisService(
         web_settings,
         repository=web_repository,
-        eligibility_resolver=lambda _ticker: (_ for _ in ()).throw(
+        eligibility_resolver=lambda _ticker, *, data_context: (_ for _ in ()).throw(
             RuntimeError("vendor unavailable")
         ),
         now=lambda: datetime(2026, 9, 1, 15, 30, tzinfo=UTC),
@@ -1843,7 +1790,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/instruments/{instrument}/analysis-cutoff-context",
         "/api/v1/instruments/recent",
         "/api/v1/capabilities",
-        "/api/v1/providers/{provider}/models",
+        "/api/v1/settings/connections/{identity}/models",
         "/api/v1/health",
     } <= set(paths)
     assert "/api/v1/runs/{run_id}/rerun" not in paths
@@ -2133,16 +2080,9 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
         payload["defaults"]
         | {
             "output_language": "en",
-            "quick_reasoning_effort": None,
-            "deep_reasoning_effort": None,
         }
         == payload["defaults"]
     )
-    assert payload["providers"]["openai"]["label"] == "OpenAI"
-    assert payload["providers"]["openai"]["api_key_required"] is True
-    assert payload["providers"]["openai"]["configured"] is True
-    assert payload["providers"]["openai"]["selectable"] is True
-    assert "quick_models" not in payload["providers"]["openai"]
     assert payload["defaults"]["trash_retention_days"] == 30
 
 
@@ -2159,11 +2099,12 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
         },
         load_env_files=False,
     )
-    from tests.configuration_helpers import import_configuration
+    from tests.support.configuration_helpers import import_configuration
+
     import_configuration(settings)
     service = AnalysisService(
         settings,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },
@@ -2195,11 +2136,17 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
     web_client: httpx.AsyncClient,
     web_settings,
 ) -> None:
-    from tests.configuration_helpers import save_configuration
-    save_configuration(web_settings, credentials={"OPENAI_API_KEY": None})
+    from tests.support.configuration_helpers import save_configuration
 
-    response = await web_client.get("/api/v1/providers/openai/models")
-    unknown = await web_client.get("/api/v1/providers/not-real/models")
+    save_configuration(
+        web_settings,
+        connection_changes=[
+            {"action": "update", "id": "default", "credentials": {"api_key": None}}
+        ],
+    )
+
+    response = await web_client.get("/api/v1/settings/connections/default/models")
+    unknown = await web_client.get("/api/v1/settings/connections/not-real/models")
 
     assert response.status_code == 200
     assert response.json()["source"] == "fallback"
@@ -2208,7 +2155,7 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
         "gpt-5.5",
     }
     assert response.json()["warning"]["code"] == "provider_not_configured"
-    assert unknown.status_code == 404
+    assert unknown.status_code == 422
 
 
 @pytest.mark.anyio
@@ -2218,15 +2165,6 @@ async def test_health_reports_database_and_queue_status(
     web_repository,
 ) -> None:
     web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
-    legacy = web_service.enqueue(AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24"))
-    with web_repository.sessions.begin() as session:
-        record = session.get(RunRecord, legacy.id)
-        record.request_json = {
-            **record.request_json,
-            "ticker": "BTC-USD",
-            "asset_type": "crypto",
-        }
-
     response = await web_client.get("/api/v1/health")
 
     assert response.status_code == 200
@@ -2295,11 +2233,12 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
         )
         run, _ = web_repository.create_run(
             request,
-            web_settings.resolve_run(request).snapshot(),
-            research_schema_version="2",
+            ConfigurationStore(web_settings)
+            .resolve_request(request, require_initialized=False)[1]
+            .snapshot(),
+            research_schema_version="3",
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1"},
-            research_kind="full",
         )
         web_repository.set_instrument_name(run.id, "NVIDIA Corporation")
         web_repository.set_instrument_local_name(run.id, "英伟达")
@@ -2345,3 +2284,24 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
     assert named["total"] == 3
     assert named["items"][0]["instrument"] == "MSFT"
     assert (await web_client.get("/api/v1/timelines?warning_only=true")).json()["total"] == 0
+
+
+@pytest.mark.anyio
+async def test_sse_generic_messages_replay_all_diagnostic_event_types(web_client, web_service):
+    import json
+
+    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+    kinds = ("decision.reference_omitted", "node.numeric_audit_degraded", "future.diagnostic")
+    for kind in kinds:
+        web_service.repository.append_event(queued.id, kind, payload={"field_path": "market_reference_levels.0"})
+    web_service.cancel(queued.id)
+    response = await web_client.get(
+        f"/api/v1/runs/{queued.id}/events?event_format=message&after=0",
+        headers={"Last-Event-ID": "1"},
+    )
+    assert response.status_code == 200
+    frames = [frame for frame in response.text.split("\n\n") if frame.strip()]
+    assert all("\nevent: message\n" in frame for frame in frames)
+    events = [json.loads(frame.split("\ndata: ", 1)[1]) for frame in frames]
+    assert [event["event_type"] for event in events] == [*kinds, "run.cancelled"]
+    assert [event["sequence"] for event in events] == [2, 3, 4, 5]

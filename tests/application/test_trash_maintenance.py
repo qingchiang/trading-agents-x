@@ -7,20 +7,15 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import (
-    analyst_report,
-    research_decision,
-)
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    ArtifactGenerationMethod,
-    EvidenceBundle,
-    EvidenceItem,
-    ResearchArtifactDraft,
-    RunStatus,
-)
-from tradingagents.application.database import (
+from tests.support.factories import analyst_report, research_decision
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.domain.artifacts import ResearchArtifactDraft
+from tradingagents.domain.common import ArtifactGenerationMethod, RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence._repository_common import RunNotFoundError
+from tradingagents.persistence.configuration import ConfigurationStore
+from tradingagents.persistence.models import (
     DecisionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
@@ -28,15 +23,13 @@ from tradingagents.application.database import (
     RunEvidenceRecord,
     RunRecord,
 )
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import RunNotFoundError
 
 
 def _cancel_and_trash(repository, app_settings, ticker: str):
     request = AnalysisRequest(ticker=ticker, analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     repository.request_cancel(run.id)
     repository.trash_runs((run.id,))
@@ -77,7 +70,7 @@ def _complete_trashed_run(repository, app_settings):
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     repository.claim_run(run.id, "fixture-worker", 30)
     evidence_item = EvidenceItem.create(
@@ -147,7 +140,7 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
     )
     child, _ = repository.create_run(
         child_request,
-        app_settings.resolve_run(child_request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(child_request, require_initialized=False)[1].snapshot(),
         source_run_id=run.id,
     )
     checkpoint_thread = repository.checkpoint_thread(run.id)
@@ -227,7 +220,7 @@ def test_trash_maintenance_honors_cutoff_restore_and_disabled_retention(
     assert repository.get_run(newer.id).trashed_at is not None
     assert repository.get_run(restored.id).trashed_at is None
 
-    from tests.configuration_helpers import save_configuration
+    from tests.support.configuration_helpers import save_configuration
     save_configuration(app_settings, {"trash_retention_days": 0})
     disabled = app_settings
     _set_trashed_at(repository, newer.id, now - timedelta(days=90))

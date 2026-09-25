@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from importlib import resources
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 
 
 class IncompatibleDatabaseError(RuntimeError):
@@ -16,10 +19,9 @@ class IncompatibleDatabaseError(RuntimeError):
 
 
 def upgrade_database(settings: AppSettings, revision: str = "head") -> None:
+    database = settings.database_path
     settings.prepare_filesystem()
-    migration_root = resources.files("tradingagents.persistence").joinpath(
-        "alembic"
-    )
+    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
     with resources.as_file(migration_root) as script_location:
         config = Config()
         config.set_main_option("script_location", str(script_location))
@@ -28,6 +30,26 @@ def upgrade_database(settings: AppSettings, revision: str = "head") -> None:
             f"sqlite+pysqlite:///{settings.database_path}",
         )
         config.attributes["busy_timeout_ms"] = settings.busy_timeout_ms
+        known_revisions = {
+            item.revision for item in ScriptDirectory.from_config(config).walk_revisions()
+        }
+        if database.exists():
+            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as source:
+                has_version = source.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='alembic_version'"
+                ).fetchone()
+                revisions = (
+                    source.execute("SELECT version_num FROM alembic_version").fetchall()
+                    if has_version
+                    else []
+                )
+                if revisions and (len(revisions) != 1 or revisions[0][0] not in known_revisions):
+                    raise IncompatibleDatabaseError(
+                        "This database requires offline conversion. Stop Web and worker, "
+                        "upgrade to 0013_submission_identity using the old program if necessary, "
+                        "then run tradingagents db migrate-current --source <0013.db> "
+                        "--destination <new.db>. Keep the original for rollback."
+                    )
         try:
             command.upgrade(config, revision)
         except CommandError as exc:
@@ -39,7 +61,8 @@ def upgrade_database(settings: AppSettings, revision: str = "head") -> None:
                 raise
             database = settings.database_path
             raise IncompatibleDatabaseError(
-                "The local database uses an incompatible unreleased schema. "
-                "Stop Web and worker processes, remove "
-                f"{database}, {database}-wal, and {database}-shm, then restart."
+                "This database predates the independent migration baseline. "
+                "Stop Web and worker. Upgrade older databases with the old program to "
+                "0013_submission_identity, then run tradingagents db migrate-current "
+                f"--source {database} --destination <new.db>. Keep the original for rollback."
             ) from exc

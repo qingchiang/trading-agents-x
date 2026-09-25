@@ -26,12 +26,11 @@ COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
-COPY cli ./cli
 COPY tradingagents ./tradingagents
 COPY --from=frontend-builder /src/tradingagents/web/static ./tradingagents/web/static
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv build --wheel --out-dir /wheels \
+    uv build --out-dir /wheels \
  && uv pip install \
       --python /opt/venv/bin/python \
       --no-deps \

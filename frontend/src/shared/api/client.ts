@@ -1,0 +1,241 @@
+import type { components } from "./types.generated";
+
+export type ModelConnection = components["schemas"]["ModelConnection"];
+export type ConnectionChange = components["schemas"]["ConnectionChange"];
+export type ConnectionView = components["schemas"]["ConnectionView"];
+
+export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
+export type AnalysisCutoffContext =
+  components["schemas"]["AnalysisCutoffContext"];
+export type AnalysisCutoffErrorResponse =
+  components["schemas"]["AnalysisCutoffErrorResponse"];
+export type RunCreateRequest = components["schemas"]["RunCreateRequest"];
+export type RunView = components["schemas"]["RunView"];
+export type RunSummaryView = components["schemas"]["RunSummaryView"];
+export type RunGroupPage = components["schemas"]["RunGroupPage"];
+export type RunGroupView = components["schemas"]["RunGroupView"];
+export type RunLifecyclePreview = components["schemas"]["RunLifecyclePreview"];
+export type RunPage = components["schemas"]["RunPage"];
+export type RunBatchResult = components["schemas"]["RunBatchResult"];
+export type RunDetail = components["schemas"]["RunDetail"];
+export type RunCreationTemplate = components["schemas"]["RunCreationTemplate"];
+export type TimelineDetail = components["schemas"]["TimelineDetail"];
+export type ResearchNodeView = components["schemas"]["ResearchNodeView"];
+export type IncrementalAnalysisBrief =
+  components["schemas"]["IncrementalAnalysisBrief"];
+export type IncrementalRunContext =
+  components["schemas"]["IncrementalRunContext"];
+export type ResearchCycleView = components["schemas"]["ResearchCycleView"];
+export type FullBaselineCandidate = components["schemas"]["FullBaselineCandidate"];
+export type FullBaselineCandidates = components["schemas"]["FullBaselineCandidates"];
+export type ResearchNodeComparison =
+  components["schemas"]["ResearchNodeComparison"];
+export type ResearchNodeComparisonSelection =
+  components["schemas"]["ResearchNodeComparisonSelection"];
+export type PrimaryCycleSelectionRequest =
+  components["schemas"]["PrimaryCycleSelectionRequest"];
+export type ResearchTimelinePage =
+  components["schemas"]["ResearchTimelinePage"];
+export type AnalysisResult = components["schemas"]["AnalysisResult"];
+export type RunEvent = components["schemas"]["RunEvent"];
+export type ResearchArtifact = components["schemas"]["ResearchArtifact"];
+export type ArtifactGenerationObservation =
+  components["schemas"]["ArtifactGenerationObservation"];
+export type DecisionBrief = components["schemas"]["DecisionBrief"];
+export type AnalystReport = components["schemas"]["AnalystReport"];
+export type ResearchCase = components["schemas"]["ResearchCase"];
+export type DebateAgenda = components["schemas"]["DebateAgenda"];
+export type RebuttalReview = components["schemas"]["RebuttalReview"];
+export type JudgeDraft = components["schemas"]["JudgeDraft"];
+export type RiskReview = components["schemas"]["RiskReview"];
+export type ResearchDecision = components["schemas"]["ResearchDecision"];
+
+
+export type EvidenceBundle = components["schemas"]["EvidenceBundle"];
+export type EvidenceItem = components["schemas"]["EvidenceItem"];
+export type EvidenceTable = components["schemas"]["EvidenceTable"];
+export type EvidenceTableColumn =
+  components["schemas"]["EvidenceTableColumn"];
+export type EvidenceTableCell = components["schemas"]["EvidenceTableCell"];
+export type EvidenceTableRow = components["schemas"]["EvidenceTableRow"];
+export type Capabilities = components["schemas"]["CapabilitiesResponse"];
+export type ConfigurationView = components["schemas"]["ConfigurationView"];
+export type ConfigurationValues = components["schemas"]["ConfigurationValues"];
+export type ConfigurationSchema = components["schemas"]["ConfigurationSchema"];
+export type ConfigurationField = components["schemas"]["ConfigurationField"];
+export type ConfigurationPatch = components["schemas"]["ConfigurationPatch"];
+export type ImportRequest = components["schemas"]["ImportRequest"];
+export type ImportPreview = components["schemas"]["ImportPreview"];
+export type ConnectionModelCatalog =
+  components["schemas"]["ConnectionModelCatalog"];
+export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
+export type Health = components["schemas"]["HealthResponse"];
+export type RunMetrics = components["schemas"]["RunMetrics"];
+export type RunAttemptView = components["schemas"]["RunAttemptView"];
+export type StructuredRecoveryNotice =
+  components["schemas"]["StructuredRecoveryNotice"];
+export type RecentInstrument = components["schemas"]["RecentInstrument"];
+export type InstrumentAdmissionErrorCode =
+  components["schemas"]["InstrumentAdmissionErrorCode"];
+export type InstrumentAdmissionErrorResponse =
+  components["schemas"]["InstrumentAdmissionErrorResponse"];
+export type RequestValidationErrorCode =
+  components["schemas"]["RequestValidationErrorCode"];
+export type RequestValidationErrorResponse =
+  components["schemas"]["RequestValidationErrorResponse"];
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string | undefined,
+    message: string,
+    public context?: AnalysisCutoffContext,
+    public requestedAnalysisDate?: string,
+    public details?: { location: string[]; message: string }[],
+  ) {
+    super(message);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+  if (!response.ok) {
+    let message = response.statusText;
+    let code: string | undefined;
+    let context: AnalysisCutoffContext | undefined;
+    let requestedAnalysisDate: string | undefined;
+    let details: { location: string[]; message: string }[] | undefined;
+    try {
+      const payload = await response.json();
+      message = payload.error?.message || payload.detail || message;
+      code = payload.error?.code;
+      context = payload.context;
+      requestedAnalysisDate = payload.requested_analysis_date;
+      details = payload.details;
+    } catch {
+      // Preserve the HTTP status text.
+    }
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent("tradingagents:auth-required"));
+    }
+    throw new ApiError(
+      response.status,
+      code,
+      message,
+      context,
+      requestedAnalysisDate,
+      details,
+    );
+  }
+  return (await response.json()) as T;
+}
+
+export const api = {
+  settings: () => request<ConfigurationView>("/api/v1/settings"),
+  settingsSchema: () => request<ConfigurationSchema>("/api/v1/settings/schema"),
+  saveSettings: (patch: ConfigurationPatch) => request<ConfigurationView>("/api/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  revealCredential: (name: string, connection_id?: string) => request<{ value: string | null }>("/api/v1/settings/credentials/reveal", { method: "POST", body: JSON.stringify({ name, connection_id }) }),
+  previewSettingsImport: (input: ImportRequest) => request<ImportPreview>("/api/v1/settings/import/preview", { method: "POST", body: JSON.stringify(input) }),
+  applySettingsImport: (input: ImportRequest) => request<ConfigurationView>("/api/v1/settings/import/apply", { method: "POST", body: JSON.stringify(input) }),
+  analysisCutoffContext: (instrument: string) =>
+    request<AnalysisCutoffContext>(
+      `/api/v1/instruments/${encodeURIComponent(instrument)}/analysis-cutoff-context`,
+    ),
+  health: () => request<Health>("/api/v1/health"),
+  capabilities: () =>
+    request<Capabilities>("/api/v1/capabilities"),
+  connectionModels: (id: string, refresh = false) => request<ConnectionModelCatalog>(`/api/v1/settings/connections/${encodeURIComponent(id)}/models${refresh ? "?refresh=true" : ""}`),
+  runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
+  runGroups: (query = "") => request<RunGroupPage>(`/api/v1/run-groups${query}`),
+  previewLifecycle: (runIds: string[], action: "trash" | "restore" | "purge") => request<RunLifecyclePreview>("/api/v1/runs/lifecycle-preview", { method: "POST", body: JSON.stringify({ run_ids: runIds, action }) }),
+  trashRuns: (runIds: string[], primaryReplacements: Record<string, string> = {}, expected?: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/trash", {
+      method: "POST",
+      body: JSON.stringify({
+        run_ids: runIds,
+        primary_replacements: primaryReplacements,
+        expected_affected_run_ids: expected,
+      }),
+    }),
+  restoreRuns: (runIds: string[], expected?: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/restore", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds, expected_affected_run_ids: expected }),
+    }),
+  purgeRuns: (runIds: string[], expected?: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/purge", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds, expected_affected_run_ids: expected }),
+    }),
+  recentInstruments: (limit = 50) =>
+    request<RecentInstrument[]>(
+      `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
+    ),
+  run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  creationTemplate: (id: string) =>
+    request<RunCreationTemplate>(
+      `/api/v1/runs/${encodeURIComponent(id)}/creation-template`,
+    ),
+  timeline: (
+    instrument: string,
+    cycleLimit = 20,
+    cycleOffset = 0,
+    trashState: "active" | "trashed" | "all" = "active",
+    focusNodeId?: string,
+  ) =>
+    request<TimelineDetail>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?cycle_limit=${encodeURIComponent(cycleLimit)}&cycle_offset=${encodeURIComponent(cycleOffset)}&trash_state=${trashState}${focusNodeId ? `&focus_node_id=${encodeURIComponent(focusNodeId)}` : ""}`,
+    ),
+  baselineCandidates: (instrument: string, before: string) =>
+    request<FullBaselineCandidates>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/baseline-candidates?before=${encodeURIComponent(before)}`,
+    ),
+  compareResearchNodes: (
+    instrument: string,
+    nodes: ResearchNodeComparisonSelection[],
+  ) =>
+    request<ResearchNodeComparison>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/compare`,
+      { method: "POST", body: JSON.stringify({ nodes }) },
+    ),
+  timelines: (limit = 50, offset = 0, q = "", warningOnly = false, sort: "analysis_date" | "recent_activity" = "analysis_date") =>
+    request<ResearchTimelinePage>(
+      `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&q=${encodeURIComponent(q)}&warning_only=${warningOnly}&sort=${sort}`,
+    ),
+  selectPrimaryCycle: (instrument: string, fullRunId: string) =>
+    request<TimelineDetail>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}/primary-cycle`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ full_run_id: fullRunId }),
+      },
+    ),
+  evidence: (id: string) =>
+    request<EvidenceBundle>(`/api/v1/runs/${id}/evidence`),
+  artifacts: (id: string, attempt?: number) =>
+    request<ResearchArtifact[]>(
+      `/api/v1/runs/${id}/artifacts${
+        attempt === undefined ? "" : `?attempt=${attempt}`
+      }`,
+    ),
+  createRun: (payload: RunCreateRequest, idempotencyKey: string) =>
+    request<RunView>("/api/v1/runs", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  action: (id: string, action: "cancel" | "retry") =>
+    request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
+  login: (token: string) =>
+    request<{ authenticated: boolean }>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+};

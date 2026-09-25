@@ -1,3 +1,4 @@
+import { capabilities as makeCapabilities, modelCatalog } from "./fixtures/models";
 import configurationFixture from "./fixtures/configuration.json" with { type: "json" };
 import { expect, test } from "@playwright/test";
 import { makeRun, result, cycleTimeline } from "./fixtures/research";
@@ -41,10 +42,10 @@ for (const locale of ["en", "zh-CN", "ja"]) {
         json = { run: inc ? increment : full, result: report, research_node: inc ? incNode : node, incremental_context: inc ? { analysis_brief: { markdown: `# Brief opening\n\n${text}\n\n## Changes\n\n${text.repeat(30)}`, report_sections: [{ id: "opening", title: "Brief opening", anchor: "brief-opening", source_refs: [] }, { id: "changes", title: "Changes", anchor: "changes", source_refs: [] }], evidence_refs: [], warnings: [] }, full_baseline: { run_id: "full", analysis_date: "2026-07-20", decision: report.decision } } : null };
       }
       else if (path === "/api/v1/instruments/recent") json = [];
-      else if (path.includes("/models")) json = { models: [], source: "fixture", fetched_at: "2026-07-25T00:00:00Z" };
+      else if (path.includes("/models")) json = modelCatalog;
       else if (path === "/api/v1/settings") json = configurationFixture.view;
       else if (path === "/api/v1/settings/schema") json = configurationFixture.schema;
-      else if (path === "/api/v1/capabilities") json = { defaults: { trash_retention_days: 30, profile: "standard", llm_provider: "openai", quick_model: "quick", deep_model: "deep", quick_reasoning_effort: "provider_default", deep_reasoning_effort: "provider_default", output_language: "en", lan_enabled: false }, profiles: ["fast", "standard", "deep"], analysts: ["market", "news"], output_languages: ["en", "zh-CN", "ja"], providers: { openai: { label: "OpenAI", configured: true, selectable: true, api_key_configured: true } } };
+      else if (path === "/api/v1/capabilities") json = makeCapabilities("en");
       return route.fulfill({ json });
     });
     for (const [width, height] of sizes) {
@@ -107,9 +108,9 @@ for (const locale of ["en", "zh-CN", "ja"]) {
           await expect(page.locator(".model-group")).toHaveCount(2);
           for (const group of await page.locator(".model-group").all()) {
             await expect(group.locator("legend")).toBeVisible();
-            await expect(group.locator("select")).toHaveCount(2);
+            await expect(group.getByRole("combobox")).toHaveCount(2);
           }
-          await page.locator(".model-groups").scrollIntoViewIfNeeded();
+          await page.locator(".role-connections").scrollIntoViewIfNeeded();
           expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
         }
         await page.screenshot({ path: info.outputPath(`${locale}-${width}-${label}.png`), fullPage: false });

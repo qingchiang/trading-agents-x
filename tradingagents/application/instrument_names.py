@@ -6,9 +6,9 @@ from typing import Any
 
 import pandas as pd
 
-from tradingagents.dataflows.cn.company import get_company_profile
-from tradingagents.dataflows.jp.company_info import get_company_name
-from tradingagents.dataflows.symbol_utils import match_exchange_suffix
+from tradingagents.data.cn.company import get_company_profile
+from tradingagents.data.jp.company_info import get_company_name
+from tradingagents.domain.instruments import match_exchange_suffix
 
 _JP_NAME_VENDORS = frozenset(
     {"jquants", "jp_fundamentals", "jp_news", "jp_statements"}

@@ -5,6 +5,9 @@
 - Partially superseded by: [ADR 0005](0005-bounded-best-effort-incremental-data.md)
   for the Incremental Outcome Review product described here only
 
+- Partially superseded by: [ADR 0007](0007-independent-runtime-cutover.md)
+  for pre-Timeline Run readability and the offline cutover boundary
+
 ## Context
 
 The legacy Memory model settles completed Runs on a fixed schedule, stores

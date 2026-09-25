@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from tradingagents.application.contracts import AnalysisRequest, RunStatus
 from tradingagents.application.worker import AnalysisWorker
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
 class _Service:
     def __init__(self, repository):
         self.repository = repository
-        from tradingagents.application.configuration import ConfigurationStore
+        from tradingagents.persistence.configuration import ConfigurationStore
         self.configuration = ConfigurationStore(repository.settings)
         self.executed = []
 
@@ -35,7 +37,7 @@ def test_worker_prioritizes_queued_analysis(
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     queued, _ = repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     service = _Service(repository)
     worker = AnalysisWorker(
@@ -59,7 +61,7 @@ def test_busy_worker_runs_maintenance_immediately_and_every_24_hours(
         request = AnalysisRequest(ticker=ticker, analysis_date="2026-07-24")
         repository.create_run(
             request,
-            app_settings.resolve_run(request).snapshot(),
+            ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         )
     clock = [100.0]
     maintenance = _Maintenance()
@@ -88,7 +90,7 @@ def test_maintenance_failure_retries_after_one_hour_without_blocking_work(
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     repository.create_run(
         request,
-        app_settings.resolve_run(request).snapshot(),
+        ConfigurationStore(app_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
     )
     clock = [50.0]
     maintenance = _Maintenance(failures=1)

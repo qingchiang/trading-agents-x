@@ -39,8 +39,8 @@ When an existing Branch 3 application database is opened, Alembic revision
 Before:
 
 ```python
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.configuration.defaults import DEFAULT_CONFIG
+from tradingagents.research.synthesis.trading_graph import TradingAgentsGraph
 
 config = DEFAULT_CONFIG.copy()
 graph = TradingAgentsGraph(config=config)
@@ -81,7 +81,7 @@ owning modules when internal integration work requires them.
 The following compatibility surfaces are removed:
 
 - `TradingAgentsGraph` public export;
-- `tradingagents.graph.trading_graph`;
+- `tradingagents.research.synthesis.trading_graph`;
 - legacy graph setup, propagation, reflection, and signal modules;
 - direct `save_reports()` lifecycle;
 - Markdown memory writer;

@@ -5,20 +5,16 @@ from datetime import date
 import pytest
 from sqlalchemy import select
 
-from tests.application.test_cycle_trash_lifecycle import _commit_node, _warning_products
-from tests.application.test_service import _equity_resolver, _Graph
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    ResearchNodeComparisonSelection,
-    RunStatus,
-)
-from tradingagents.application.database import (
-    DecisionRecord,
-    ResearchNodeRecord,
-    RunRecord,
-)
-from tradingagents.application.errors import InvalidResearchNodeComparisonError
+from tests.research_helpers import stub_run_llms
+from tests.support.cycles import _commit_node, _warning_products
+from tests.support.service import _equity_resolver, _Graph
 from tradingagents.application.service import AnalysisService
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.errors import InvalidResearchNodeComparisonError
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.domain.timeline import ResearchNodeComparisonSelection
+from tradingagents.persistence.configuration import ConfigurationStore
+from tradingagents.persistence.models import DecisionRecord, ResearchNodeRecord, RunRecord
 
 
 def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(
@@ -35,7 +31,7 @@ def test_service_compares_two_full_nodes_without_writes_or_semantic_calls(
     writer = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
@@ -196,7 +192,7 @@ def test_comparison_distinguishes_schema_absence_null_empty_and_semantic_values(
         )
         historical = dict(old_decision.decision_json)
         historical.pop("unresolved_questions")
-        historical["valuation_assessment"] = None
+        historical["market_reference_levels"] = None
         historical["catalysts"] = []
         historical["time_horizon"] = "unavailable / not applicable / unchanged / unsupported"
         old_decision.decision_json = historical
@@ -218,7 +214,7 @@ def test_comparison_distinguishes_schema_absence_null_empty_and_semantic_values(
     assert sections["unresolved_questions"].values[0].state == (
         "not_recorded_under_this_schema"
     )
-    assert sections["valuation_assessment"].values[0].state == "null"
+    assert sections["market_reference_levels"].values[0].state == "null"
     assert sections["catalysts"].values[0].state == "empty"
     assert sections["time_horizon"].values[0].state == "recorded"
 
@@ -382,7 +378,7 @@ def test_comparison_rejects_failed_and_cancelled_run_backed_nodes(
         )
 
 
-def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_implicit_trash(
+def test_comparison_rejects_invalid_identity_count_uncommitted_missing_purged_and_implicit_trash(
     app_settings,
     repository,
 ) -> None:
@@ -402,15 +398,15 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
     foreign = AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=stub_run_llms,
         graph_factory=_Graph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         eligibility_resolver=_equity_resolver,
     ).run(AnalysisRequest(ticker="AAPL", analysis_date=date(2026, 7, 20)))
-    legacy_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19))
-    legacy, _ = repository.create_run(
-        legacy_request,
-        app_settings.resolve_run(legacy_request).snapshot(),
+    uncommitted_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19), make_primary=False)
+    uncommitted, _ = repository.create_run(
+        uncommitted_request,
+        ConfigurationStore(app_settings).resolve_request(uncommitted_request, require_initialized=False)[1].snapshot(),
     )
     repository.trash_runs((trashed.id,))
     repository.trash_runs((other.id,))
@@ -426,7 +422,7 @@ def test_comparison_rejects_invalid_identity_count_legacy_missing_purged_and_imp
             ResearchNodeComparisonSelection(node_id=first.id),
             ResearchNodeComparisonSelection(node_id=first.id),
         )
-    for rejected_id in (legacy.id, "missing-node", other.id):
+    for rejected_id in (uncommitted.id, "missing-node", other.id):
         with pytest.raises(InvalidResearchNodeComparisonError, match="retained Research Node"):
             compare(
                 ResearchNodeComparisonSelection(node_id=first.id),

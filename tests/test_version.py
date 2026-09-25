@@ -1,9 +1,9 @@
 from importlib.metadata import version
 
 import tradingagents
-from tradingagents.dataflows import cn_macro, reddit, stocktwits
-from tradingagents.dataflows.cn import cn_sentiment, google_news, sina_ratings
-from tradingagents.dataflows.jp import http_util
+from tradingagents.data import cn_macro, reddit, stocktwits
+from tradingagents.data.cn import cn_sentiment, google_news, sina_ratings
+from tradingagents.data.jp import http_util
 from tradingagents.version import (
     BROWSER_USER_AGENT,
     DISTRIBUTION_NAME,

@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.research.prompts.instrument import build_instrument_context
+
+
+def test_request_preserves_exchange_suffix() -> None:
+    request = AnalysisRequest(ticker=" 7203.t ", analysis_date="2026-07-24")
+
+    assert request.ticker == "7203.T"
+
+
+def test_request_infers_mainland_exchange() -> None:
+    assert (
+        AnalysisRequest(ticker="600519", analysis_date="2026-07-24").ticker
+        == "600519.SS"
+    )
+    assert (
+        AnalysisRequest(ticker="000651", analysis_date="2026-07-24").ticker
+        == "000651.SZ"
+    )
+    assert (
+        AnalysisRequest(ticker="600519.SH", analysis_date="2026-07-24").ticker
+        == "600519.SS"
+    )
+
+
+def test_build_instrument_context_mentions_exact_symbol() -> None:
+    context = build_instrument_context("7203.T")
+
+    assert "7203.T" in context
+    assert "exchange suffix" in context

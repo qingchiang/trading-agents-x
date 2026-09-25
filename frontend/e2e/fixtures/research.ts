@@ -1,3 +1,5 @@
+import { models } from "./models";
+
 export const timestamp = "2026-07-24T00:00:00Z";
 
 export type MockRun = ReturnType<typeof makeRun>;
@@ -18,7 +20,9 @@ export function makeRun(
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
     instrument_local_name: options.instrumentLocalName ?? null,
-    research_schema_version: status === "succeeded" ? "1" : null,
+    research_schema_version: "2",
+    research_kind: "full",
+    is_research_node: status === "succeeded",
     information_cutoff_at: status === "succeeded" ? "2026-07-24T23:59:59Z" : null,
     method_snapshot: status === "succeeded" ? { llm_provider: "openai" } : null,
     research_rating: status === "succeeded" ? "Hold" : null,
@@ -27,14 +31,9 @@ export function makeRun(
     request: {
       ticker: options.ticker ?? "NVDA",
       analysis_date: "2026-07-24",
-      asset_type: "stock",
       profile: "standard",
       analysts: ["market", "news"],
-      llm_provider: "openai",
-      quick_model: "gpt-5.4-mini",
-      deep_model: "gpt-5.5",
-      quick_reasoning_effort: "provider_default",
-      deep_reasoning_effort: "provider_default",
+      models,
       output_language: "en",
       research_kind: "full",
       full_baseline_run_id: null,
@@ -177,25 +176,8 @@ export function result(id: string) {
           reference_ranges: [],
         },
       ],
-      valuation_assessment: null,
       market_reference_levels: [],
       risk_review_adjustments: [],
-      calculation_records: Array.from({ length: 16 }, (_, index) => ({
-        id: `calc_fixture_${index + 1}`,
-        formula: "observed_value",
-        inputs: { observed_value: 100 + index },
-        input_evidence_refs: ["ev_0123456789ab"],
-        result: 100 + index,
-        unit: "USD",
-        as_of_date: "2026-07-24",
-        limitations: [],
-        decision_uses: [
-          {
-            component_path: "thesis",
-            label: `Observed anchor ${index + 1}`,
-          },
-        ],
-      })),
     },
     evidence: {
       version: "5",

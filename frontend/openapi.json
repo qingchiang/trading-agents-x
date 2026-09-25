@@ -120,60 +120,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AssetType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -187,17 +133,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -208,6 +143,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -226,39 +164,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -334,16 +239,6 @@
           },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
-          },
-          "numeric_audit": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DecisionNumericAuditAppendix"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "recoveries": {
             "default": [],
@@ -535,81 +430,6 @@
         "title": "ArtifactGenerationObservation",
         "type": "object"
       },
-      "AssetType": {
-        "enum": [
-          "stock"
-        ],
-        "title": "AssetType",
-        "type": "string"
-      },
-      "AuditedRangeEndpoint": {
-        "additionalProperties": false,
-        "description": "One evidence-backed endpoint of a scenario or valuation range.",
-        "properties": {
-          "as_of_date": {
-            "format": "date",
-            "title": "As Of Date",
-            "type": "string"
-          },
-          "basis": {
-            "$ref": "#/components/schemas/MarketReferenceBasis"
-          },
-          "calculation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Calculation Id"
-          },
-          "date_evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Date Evidence Refs",
-            "type": "array"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "source_locator": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/EvidenceValueLocator"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "temporal_basis": {
-            "$ref": "#/components/schemas/NumericTemporalBasis",
-            "default": "point_in_time"
-          },
-          "value": {
-            "title": "Value",
-            "type": "number"
-          }
-        },
-        "required": [
-          "value",
-          "basis",
-          "evidence_refs",
-          "date_evidence_refs",
-          "as_of_date"
-        ],
-        "title": "AuditedRangeEndpoint",
-        "type": "object"
-      },
       "AzureTransport": {
         "additionalProperties": false,
         "properties": {
@@ -726,107 +546,6 @@
         "title": "BenchmarkContext",
         "type": "object"
       },
-      "CalculationRecord": {
-        "additionalProperties": false,
-        "description": "A decision-critical calculation, not a presentation-table cell.",
-        "properties": {
-          "as_of_date": {
-            "format": "date",
-            "title": "As Of Date",
-            "type": "string"
-          },
-          "date_evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Date Evidence Refs",
-            "type": "array"
-          },
-          "decision_uses": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/DecisionCalculationUse"
-            },
-            "title": "Decision Uses",
-            "type": "array"
-          },
-          "formula": {
-            "minLength": 1,
-            "title": "Formula",
-            "type": "string"
-          },
-          "id": {
-            "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "input_evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Input Evidence Refs",
-            "type": "array"
-          },
-          "inputs": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                }
-              ]
-            },
-            "minProperties": 1,
-            "title": "Inputs",
-            "type": "object"
-          },
-          "limitations": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Limitations",
-            "type": "array"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Result"
-          },
-          "temporal_basis": {
-            "$ref": "#/components/schemas/NumericTemporalBasis",
-            "default": "point_in_time"
-          },
-          "unit": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Unit",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "formula",
-          "inputs",
-          "input_evidence_refs",
-          "result",
-          "unit",
-          "as_of_date",
-          "limitations"
-        ],
-        "title": "CalculationRecord",
-        "type": "object"
-      },
       "CapabilitiesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -852,13 +571,6 @@
           "defaults": {
             "$ref": "#/components/schemas/CapabilityDefaults"
           },
-          "legacy_connections": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Legacy Connections",
-            "type": "object"
-          },
           "output_languages": {
             "items": {
               "type": "string"
@@ -872,20 +584,12 @@
             },
             "title": "Profiles",
             "type": "array"
-          },
-          "providers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderCapabilities"
-            },
-            "title": "Providers",
-            "type": "object"
           }
         },
         "required": [
           "profiles",
           "analysts",
           "output_languages",
-          "providers",
           "defaults"
         ],
         "title": "CapabilitiesResponse",
@@ -901,39 +605,12 @@
             "title": "Analysts",
             "type": "array"
           },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "title": "Deep Model",
-            "type": "string"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "lan_enabled": {
             "title": "Lan Enabled",
             "type": "boolean"
           },
-          "llm_provider": {
-            "title": "Llm Provider",
-            "type": "string"
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "title": "Output Language",
@@ -943,32 +620,6 @@
             "title": "Profile",
             "type": "string"
           },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "title": "Quick Model",
-            "type": "string"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
-          },
           "trash_retention_days": {
             "minimum": 0.0,
             "title": "Trash Retention Days",
@@ -976,12 +627,8 @@
           }
         },
         "required": [
+          "models",
           "profile",
-          "llm_provider",
-          "quick_model",
-          "deep_model",
-          "quick_reasoning_effort",
-          "deep_reasoning_effort",
           "output_language",
           "lan_enabled",
           "trash_retention_days"
@@ -1240,7 +887,7 @@
               "list",
               "choice",
               "routes",
-              "providers"
+              "models"
             ],
             "title": "Kind",
             "type": "string"
@@ -1396,13 +1043,6 @@
             "title": "Presets",
             "type": "object"
           },
-          "provider_defaults": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderConnection"
-            },
-            "title": "Provider Defaults",
-            "type": "object"
-          },
           "providers": {
             "additionalProperties": {
               "type": "string"
@@ -1434,7 +1074,6 @@
         "required": [
           "fields",
           "providers",
-          "provider_defaults",
           "credential_owners",
           "route_options",
           "tool_options"
@@ -1459,17 +1098,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "anthropic_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Anthropic Effort"
-          },
           "cn_news_candidate_limit": {
             "default": 100,
             "maximum": 100.0,
@@ -1493,34 +1121,6 @@
             },
             "title": "Data Vendors By Market",
             "type": "object"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
-          "deep_think_llm": {
-            "default": "gpt-5.5",
-            "minLength": 1,
-            "title": "Deep Think Llm",
-            "type": "string"
           },
           "global_news_article_limit": {
             "default": 10,
@@ -1554,17 +1154,6 @@
             "title": "Global News Query Limit",
             "type": "integer"
           },
-          "google_thinking_level": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Thinking Level"
-          },
           "llm_max_retries": {
             "anyOf": [
               {
@@ -1577,10 +1166,8 @@
             ],
             "title": "Llm Max Retries"
           },
-          "llm_provider": {
-            "default": "openai",
-            "title": "Llm Provider",
-            "type": "string"
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "news_article_limit": {
             "default": 30,
@@ -1617,17 +1204,6 @@
             "title": "News Cache Total Limit",
             "type": "integer"
           },
-          "openai_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Openai Reasoning Effort"
-          },
           "output_language": {
             "default": "en",
             "minLength": 1,
@@ -1642,41 +1218,6 @@
               "deep"
             ],
             "title": "Profile",
-            "type": "string"
-          },
-          "providers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ProviderConnection"
-            },
-            "title": "Providers",
-            "type": "object"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
-          },
-          "quick_think_llm": {
-            "default": "gpt-5.4-mini",
-            "minLength": 1,
-            "title": "Quick Think Llm",
             "type": "string"
           },
           "sentiment_filing_limit": {
@@ -1915,26 +1456,16 @@
             ],
             "title": "Preset"
           },
-          "reasoning_defaults": {
+          "reasoning_effort": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "type": "object"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reasoning Defaults"
+            "title": "Reasoning Effort"
           },
           "transport": {
             "anyOf": [
@@ -1974,6 +1505,59 @@
           "id"
         ],
         "title": "ConnectionChange",
+        "type": "object"
+      },
+      "ConnectionModelCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredModelView"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "live",
+              "cache",
+              "fallback"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDiscoveryWarningView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "connection_id",
+          "models",
+          "source",
+          "fetched_at",
+          "stale"
+        ],
+        "title": "ConnectionModelCatalog",
         "type": "object"
       },
       "ConnectionView": {
@@ -2186,68 +1770,6 @@
           "markdown"
         ],
         "title": "DecisionBrief",
-        "type": "object"
-      },
-      "DecisionCalculationUse": {
-        "additionalProperties": false,
-        "description": "One readable decision component that relies on a calculation.",
-        "properties": {
-          "component_path": {
-            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
-            "title": "Component Path",
-            "type": "string"
-          },
-          "label": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          }
-        },
-        "required": [
-          "component_path",
-          "label"
-        ],
-        "title": "DecisionCalculationUse",
-        "type": "object"
-      },
-      "DecisionNumericAuditAppendix": {
-        "additionalProperties": false,
-        "description": "Decision calculation comparisons and unverified numeric proposals.",
-        "properties": {
-          "omitted_components": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/NumericAuditOmission"
-            },
-            "title": "Omitted Components",
-            "type": "array"
-          },
-          "requirement_checks": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/NumericRequirementCheck"
-            },
-            "title": "Requirement Checks",
-            "type": "array"
-          },
-          "snapshots": {
-            "items": {
-              "$ref": "#/components/schemas/NumericAuditSnapshot"
-            },
-            "maxItems": 2,
-            "title": "Snapshots",
-            "type": "array"
-          },
-          "status": {
-            "$ref": "#/components/schemas/NumericAuditAppendixStatus"
-          }
-        },
-        "required": [
-          "status",
-          "snapshots"
-        ],
-        "title": "DecisionNumericAuditAppendix",
         "type": "object"
       },
       "DiscoveredModelView": {
@@ -3619,14 +3141,6 @@
             "$ref": "#/components/schemas/MarketReferenceBasis",
             "default": "observed"
           },
-          "calculation_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Calculation Ids",
-            "type": "array"
-          },
           "date_evidence_refs": {
             "items": {
               "type": "string"
@@ -3777,19 +3291,16 @@
             ],
             "title": "Preset"
           },
-          "reasoning_defaults": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Reasoning Defaults",
-            "type": "object"
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
           },
           "revision": {
             "default": 1,
@@ -3864,6 +3375,49 @@
         "title": "ModelDiscoveryWarningView",
         "type": "object"
       },
+      "ModelSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          }
+        },
+        "title": "ModelSelection",
+        "type": "object"
+      },
       "NodeMetrics": {
         "additionalProperties": false,
         "description": "Resource usage attributed to one research graph node.",
@@ -3926,402 +3480,8 @@
         "title": "NodeMetrics",
         "type": "object"
       },
-      "NumericAuditAppendixStatus": {
-        "enum": [
-          "complete",
-          "recovered",
-          "partial",
-          "incomplete"
-        ],
-        "title": "NumericAuditAppendixStatus",
-        "type": "string"
-      },
-      "NumericAuditComponentType": {
-        "description": "Stable component identity for localized numeric audit omissions.",
-        "enum": [
-          "appendix",
-          "calculation",
-          "scenario_range",
-          "valuation",
-          "market_reference",
-          "decision_claim"
-        ],
-        "title": "NumericAuditComponentType",
-        "type": "string"
-      },
-      "NumericAuditOmission": {
-        "additionalProperties": false,
-        "properties": {
-          "component_path": {
-            "pattern": "^[a-z0-9_.-]+$",
-            "title": "Component Path",
-            "type": "string"
-          },
-          "component_type": {
-            "$ref": "#/components/schemas/NumericAuditComponentType"
-          },
-          "issue_codes": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Issue Codes",
-            "type": "array"
-          },
-          "reference_label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reference Label"
-          },
-          "scenario_kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResearchScenarioKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "component_path",
-          "component_type",
-          "issue_codes"
-        ],
-        "title": "NumericAuditOmission",
-        "type": "object"
-      },
-      "NumericAuditPhase": {
-        "enum": [
-          "initial",
-          "repair"
-        ],
-        "title": "NumericAuditPhase",
-        "type": "string"
-      },
-      "NumericAuditSnapshot": {
-        "additionalProperties": false,
-        "description": "One sanitized failed numeric serializer candidate.",
-        "properties": {
-          "candidate": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Candidate"
-          },
-          "candidate_digest": {
-            "anyOf": [
-              {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Candidate Digest"
-          },
-          "candidate_omitted": {
-            "anyOf": [
-              {
-                "const": "oversize",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Candidate Omitted"
-          },
-          "method": {
-            "$ref": "#/components/schemas/ArtifactGenerationMethod"
-          },
-          "phase": {
-            "$ref": "#/components/schemas/NumericAuditPhase"
-          },
-          "reason_code": {
-            "pattern": "^[a-z0-9_.-]+$",
-            "title": "Reason Code",
-            "type": "string"
-          },
-          "schema_valid": {
-            "title": "Schema Valid",
-            "type": "boolean"
-          },
-          "validation_issues": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Validation Issues",
-            "type": "array"
-          }
-        },
-        "required": [
-          "phase",
-          "method",
-          "reason_code",
-          "schema_valid"
-        ],
-        "title": "NumericAuditSnapshot",
-        "type": "object"
-      },
-      "NumericAuditStatus": {
-        "enum": [
-          "complete",
-          "partial",
-          "incomplete",
-          "not_applicable"
-        ],
-        "title": "NumericAuditStatus",
-        "type": "string"
-      },
-      "NumericCalculationStatus": {
-        "enum": [
-          "verified",
-          "invalid",
-          "missing"
-        ],
-        "title": "NumericCalculationStatus",
-        "type": "string"
-      },
-      "NumericDisplayScale": {
-        "description": "Deterministic scale applied only when comparing reader-facing values.",
-        "enum": [
-          "base",
-          "thousand",
-          "ten_thousand",
-          "million",
-          "hundred_million",
-          "billion",
-          "trillion"
-        ],
-        "title": "NumericDisplayScale",
-        "type": "string"
-      },
-      "NumericDisplayStatus": {
-        "enum": [
-          "matched",
-          "approximately_matched",
-          "mismatched",
-          "not_checked"
-        ],
-        "title": "NumericDisplayStatus",
-        "type": "string"
-      },
-      "NumericRequirementCheck": {
-        "additionalProperties": false,
-        "description": "Auditable comparison between a stated value and a canonical result.",
-        "properties": {
-          "calculation_id": {
-            "anyOf": [
-              {
-                "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Calculation Id"
-          },
-          "calculation_status": {
-            "$ref": "#/components/schemas/NumericCalculationStatus"
-          },
-          "canonical_result": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Canonical Result"
-          },
-          "comparison_difference": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comparison Difference"
-          },
-          "comparison_result": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comparison Result"
-          },
-          "component_path": {
-            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
-            "title": "Component Path",
-            "type": "string"
-          },
-          "date_evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Date Evidence Refs",
-            "type": "array"
-          },
-          "display_scale": {
-            "$ref": "#/components/schemas/NumericDisplayScale",
-            "default": "base"
-          },
-          "display_status": {
-            "$ref": "#/components/schemas/NumericDisplayStatus"
-          },
-          "formula": {
-            "minLength": 1,
-            "title": "Formula",
-            "type": "string"
-          },
-          "fraction_digits": {
-            "maximum": 8.0,
-            "minimum": 0.0,
-            "title": "Fraction Digits",
-            "type": "integer"
-          },
-          "input_evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Input Evidence Refs",
-            "type": "array"
-          },
-          "inputs": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                }
-              ]
-            },
-            "minProperties": 1,
-            "title": "Inputs",
-            "type": "object"
-          },
-          "issue_codes": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Issue Codes",
-            "type": "array"
-          },
-          "label": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          },
-          "requirement_id": {
-            "pattern": "^req_[a-z0-9][a-z0-9_.-]*$",
-            "title": "Requirement Id",
-            "type": "string"
-          },
-          "rounded_canonical_result": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounded Canonical Result"
-          },
-          "rounded_stated_value": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounded Stated Value"
-          },
-          "stated_value": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Stated Value"
-          },
-          "unit": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Unit",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requirement_id",
-          "component_path",
-          "label",
-          "stated_value",
-          "fraction_digits",
-          "unit",
-          "formula",
-          "inputs",
-          "input_evidence_refs",
-          "calculation_status",
-          "display_status"
-        ],
-        "title": "NumericRequirementCheck",
-        "type": "object"
-      },
       "NumericTemporalBasis": {
-        "description": "How the application determined the date of a formal numeric value.",
+        "description": "Temporal scope of the supporting evidence, not a forecast date.",
         "enum": [
           "point_in_time",
           "live_snapshot"
@@ -4536,182 +3696,6 @@
         "title": "PrimaryCycleSelectionRequest",
         "type": "object"
       },
-      "ProviderCapabilities": {
-        "additionalProperties": false,
-        "properties": {
-          "api_key_configured": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key Configured"
-          },
-          "api_key_required": {
-            "title": "Api Key Required",
-            "type": "boolean"
-          },
-          "configured": {
-            "title": "Configured",
-            "type": "boolean"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "model_discovery_supported": {
-            "title": "Model Discovery Supported",
-            "type": "boolean"
-          },
-          "selectable": {
-            "title": "Selectable",
-            "type": "boolean"
-          },
-          "unavailable_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unavailable Reason"
-          }
-        },
-        "required": [
-          "label",
-          "api_key_required",
-          "api_key_configured",
-          "configured",
-          "selectable",
-          "model_discovery_supported"
-        ],
-        "title": "ProviderCapabilities",
-        "type": "object"
-      },
-      "ProviderConnection": {
-        "additionalProperties": false,
-        "properties": {
-          "api_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Version"
-          },
-          "auth_mode": {
-            "default": "system",
-            "enum": [
-              "bearer",
-              "system",
-              "static"
-            ],
-            "title": "Auth Mode",
-            "type": "string"
-          },
-          "aws_profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Aws Profile"
-          },
-          "base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Url"
-          },
-          "deployment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployment"
-          },
-          "region": {
-            "default": "us-west-2",
-            "title": "Region",
-            "type": "string"
-          }
-        },
-        "title": "ProviderConnection",
-        "type": "object"
-      },
-      "ProviderModelCatalog": {
-        "additionalProperties": false,
-        "properties": {
-          "fetched_at": {
-            "format": "date-time",
-            "title": "Fetched At",
-            "type": "string"
-          },
-          "models": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoveredModelView"
-            },
-            "title": "Models",
-            "type": "array"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "source": {
-            "enum": [
-              "live",
-              "cache",
-              "fallback"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "stale": {
-            "title": "Stale",
-            "type": "boolean"
-          },
-          "warning": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelDiscoveryWarningView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "provider",
-          "models",
-          "source",
-          "fetched_at",
-          "stale"
-        ],
-        "title": "ProviderModelCatalog",
-        "type": "object"
-      },
       "QueueHealth": {
         "additionalProperties": false,
         "properties": {
@@ -4830,6 +3814,63 @@
           "last_used_at"
         ],
         "title": "RecentInstrument",
+        "type": "object"
+      },
+      "ReferenceRangeEndpoint": {
+        "additionalProperties": false,
+        "description": "One evidence-backed endpoint of a scenario or valuation range.",
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/MarketReferenceBasis"
+          },
+          "date_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceValueLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "basis",
+          "evidence_refs",
+          "date_evidence_refs",
+          "as_of_date"
+        ],
+        "title": "ReferenceRangeEndpoint",
         "type": "object"
       },
       "ReportAuditStatus": {
@@ -5046,8 +4087,8 @@
             "type": "string"
           },
           "schema_version": {
-            "const": "2",
-            "default": "2",
+            "const": "3",
+            "default": "3",
             "title": "Schema Version",
             "type": "string"
           },
@@ -5210,14 +4251,6 @@
         "additionalProperties": false,
         "description": "Research-only conclusion; deliberately excludes account-level advice.",
         "properties": {
-          "calculation_records": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/CalculationRecord"
-            },
-            "title": "Calculation Records",
-            "type": "array"
-          },
           "catalysts": {
             "default": [],
             "items": {
@@ -5257,16 +4290,6 @@
             },
             "title": "Market Reference Levels",
             "type": "array"
-          },
-          "numeric_audit_status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NumericAuditStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
@@ -5313,16 +4336,6 @@
             },
             "title": "Unresolved Questions",
             "type": "array"
-          },
-          "valuation_assessment": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ValuationAssessment"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -6405,6 +5418,33 @@
         "title": "RiskReviewDisposition",
         "type": "string"
       },
+      "RoleSelections": {
+        "additionalProperties": false,
+        "properties": {
+          "deep": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quick": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RoleSelections",
+        "type": "object"
+      },
       "RunAttemptView": {
         "additionalProperties": false,
         "description": "Observed execution usage and lifecycle for one retry attempt.",
@@ -6567,60 +5607,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AssetType"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -6634,17 +5620,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -6655,6 +5630,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -6673,39 +5651,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -7309,7 +6254,7 @@
       },
       "RunRequestSnapshot": {
         "additionalProperties": false,
-        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version (including ``asset_type='crypto'``).  Snapshot\nvalidation does not normalize symbols, infer an asset type, or otherwise\nrewrite persisted request data.",
+        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version. Snapshot validation does not normalize symbols or otherwise\nrewrite persisted request data.",
         "properties": {
           "analysis_date": {
             "format": "date",
@@ -7335,61 +6280,6 @@
             "title": "Analysts",
             "type": "array"
           },
-          "asset_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asset Type"
-          },
-          "connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connection Id"
-          },
-          "deep_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Connection Id"
-          },
-          "deep_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Model"
-          },
-          "deep_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deep Reasoning Effort"
-          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -7401,17 +6291,6 @@
             ],
             "title": "Full Baseline Run Id"
           },
-          "llm_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Provider"
-          },
           "make_primary": {
             "anyOf": [
               {
@@ -7422,6 +6301,9 @@
               }
             ],
             "title": "Make Primary"
+          },
+          "models": {
+            "$ref": "#/components/schemas/RoleSelections"
           },
           "output_language": {
             "anyOf": [
@@ -7440,39 +6322,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
-          },
-          "quick_connection_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Connection Id"
-          },
-          "quick_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Model"
-          },
-          "quick_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quick Reasoning Effort"
           },
           "research_kind": {
             "default": "full",
@@ -7514,6 +6363,18 @@
           "attempt": {
             "title": "Attempt",
             "type": "integer"
+          },
+          "audit_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Snapshot"
           },
           "cancel_requested": {
             "title": "Cancel Requested",
@@ -7762,6 +6623,18 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "audit_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit Snapshot"
+          },
           "cancel_requested": {
             "title": "Cancel Requested",
             "type": "boolean"
@@ -7974,7 +6847,7 @@
         "type": "object"
       },
       "ScenarioReferenceCategory": {
-        "description": "Research purpose of a non-valuation scenario reference range.",
+        "description": "Research purpose of a scenario reference range.",
         "enum": [
           "technical",
           "historical",
@@ -7993,7 +6866,7 @@
             "$ref": "#/components/schemas/ScenarioReferenceCategory"
           },
           "high": {
-            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+            "$ref": "#/components/schemas/ReferenceRangeEndpoint"
           },
           "interpretation": {
             "minLength": 1,
@@ -8015,7 +6888,7 @@
             "type": "array"
           },
           "low": {
-            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+            "$ref": "#/components/schemas/ReferenceRangeEndpoint"
           },
           "measurement_kind": {
             "$ref": "#/components/schemas/MeasurementKind",
@@ -8165,49 +7038,6 @@
           "type"
         ],
         "title": "ValidationError",
-        "type": "object"
-      },
-      "ValuationAssessment": {
-        "additionalProperties": false,
-        "properties": {
-          "high": {
-            "$ref": "#/components/schemas/AuditedRangeEndpoint"
-          },
-          "limitations": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Limitations",
-            "type": "array"
-          },
-          "low": {
-            "$ref": "#/components/schemas/AuditedRangeEndpoint"
-          },
-          "measurement_kind": {
-            "$ref": "#/components/schemas/MeasurementKind"
-          },
-          "method": {
-            "minLength": 1,
-            "title": "Method",
-            "type": "string"
-          },
-          "unit": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Unit",
-            "type": "string"
-          }
-        },
-        "required": [
-          "method",
-          "low",
-          "high",
-          "measurement_kind",
-          "unit",
-          "limitations"
-        ],
-        "title": "ValuationAssessment",
         "type": "object"
       }
     }
@@ -8430,55 +7260,6 @@
           }
         },
         "summary": "Analysis Cutoff Context"
-      }
-    },
-    "/api/v1/providers/{provider}/models": {
-      "get": {
-        "operationId": "provider_models_api_v1_providers__provider__models_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider",
-            "required": true,
-            "schema": {
-              "title": "Provider",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "refresh",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Refresh",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderModelCatalog"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Provider Models"
       }
     },
     "/api/v1/run-groups": {
@@ -9195,6 +7976,20 @@
             }
           },
           {
+            "in": "query",
+            "name": "event_format",
+            "required": false,
+            "schema": {
+              "default": "named",
+              "enum": [
+                "named",
+                "message"
+              ],
+              "title": "Event Format",
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "Last-Event-ID",
             "required": false,
@@ -9442,7 +8237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderModelCatalog"
+                  "$ref": "#/components/schemas/ConnectionModelCatalog"
                 }
               }
             },

@@ -4,10 +4,7 @@ import logging
 
 import pytest
 
-from tradingagents.web.access_logging import (
-    SuccessfulStaticAssetFilter,
-    uvicorn_log_config,
-)
+from tradingagents.web.access_logging import SuccessfulStaticAssetFilter, uvicorn_log_config
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,7 @@ async function settingsServer(page: Page, conflict = false, shared?: Configurati
   const secrets: Record<string, string> = {};
   let saved: Record<string, unknown> = {};
   let previewed = false;
-  const id = view.values.quick_connection_id!;
+  const id = view.values.models.quick.connection_id;
   secrets[`${id}:api_key`] = "offline-key";
   await page.route("**/api/v1/**", async route => {
     const path = new URL(route.request().url()).pathname;
@@ -88,8 +88,8 @@ for (const locale of ["en", "zh-CN", "ja"] as const) {
     await expect(page.locator("#setting-output_language")).toHaveValue("ja");
     await page.locator("#configuration-research > .configuration-actions button").first().click();
     await expect.poll(() => server.saved().output_language).toBe("ja");
-    await page.getByRole("searchbox").fill("OPENAI_API_KEY");
-    await page.locator(".configuration-search-results a").filter({ hasText: "OPENAI_API_KEY" }).first().click();
+    await page.getByRole("searchbox").fill("api_key");
+    await page.locator('.configuration-search-results a[href$="#credential-api_key"]').first().click();
     const editor = page.locator(".connection-editor");
     await editor.locator("#credential-api_key").fill("browser-test-secret");
     await editor.locator(".settings-save-bar button").first().click();
@@ -160,11 +160,11 @@ for (const locale of ["en", "zh-CN", "ja"]) {
       await page.getByRole("searchbox").fill("FRED_API_KEY");
       await page.locator('.configuration-search-results a[href$="#credential-FRED_API_KEY"]').click();
       await expect(page.locator("#credential-FRED_API_KEY")).toBeFocused();
-      await page.getByRole("searchbox").fill("openai_reasoning_effort");
+      await page.getByRole("searchbox").fill("base_url");
       await expect(page.locator(".configuration-search-results a")).toHaveCount(2);
       await page.locator('.configuration-search-results a[href*="connection=second"]').click();
       await expect(page.locator("#connection-name")).toHaveValue("Second endpoint");
-      await expect(page.locator("#setting-openai_reasoning_effort")).toBeFocused();
+      await expect(page.locator("#connection-base_url")).toBeFocused();
       // Keyboard operation keeps a visible focus target and enables save.
       await page.locator("#connection-name").focus();
       await page.keyboard.press("End"); await page.keyboard.type(" edited");

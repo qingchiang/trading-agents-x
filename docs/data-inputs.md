@@ -112,7 +112,7 @@ can be set with `TRADINGAGENTS_CACHE_DIR`. A custom Python entry point can lower
 the Yahoo candidate budget and disable the news cache before creating Runs:
 
 ```python
-from tradingagents.application.settings import AppSettings, RunSettings
+from tradingagents.configuration.settings import AppSettings, RunSettings
 
 settings = AppSettings.from_env()
 base = settings.default_run_settings
@@ -129,7 +129,7 @@ settings = settings.model_copy(update={"default_run_settings": run_settings})
 ```
 
 The shipped CLI/Web/worker entry points use the defaults from
-`tradingagents/default_config.py`; changing deployment defaults requires the same
+`tradingagents/configuration/defaults.py`; changing deployment defaults requires the same
 configuration in each process. New Runs snapshot those settings. Do not mutate
 configuration for an already active Run.
 

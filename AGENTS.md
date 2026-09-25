@@ -51,7 +51,7 @@ and `--no-dev` for source-checkout runtime sync and run commands.
 uv sync --locked
 
 uv run --locked pytest -q
-uv run --locked pytest tests/test_market_routing.py
+uv run --locked pytest tests/data/test_market_routing.py
 uv run --locked ruff check .
 
 npm ci --prefix frontend
@@ -154,7 +154,7 @@ silently changing package sources.
   an unconfigured vendor or add ad hoc fallback outside the routing/assembler
   design.
 - Vendor failures use the typed taxonomy in
-  `tradingagents/dataflows/errors.py`. Preserve actual-source and fallback
+  `tradingagents/domain/vendor_errors.py`. Preserve actual-source and fallback
   provenance when adding or changing a source.
 - Strict historical/PIT inputs must fail closed for live-only or non-point-in-
   time data and be truncated to the analysis cutoff. The sole bounded exception

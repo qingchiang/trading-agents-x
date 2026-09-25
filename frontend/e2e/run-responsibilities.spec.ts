@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/**", route => route.fulfill({ json: respond(new URL(route.request().url()), route.request().method(), route.request().postData()) }));
 });
 
-test("defaults completed runs to progress and normalizes precise historical reading links", async ({ page }) => {
+test("separates completed run progress from Timeline research reading", async ({ page }) => {
   await page.goto("/runs/full");
   await expect(page.getByRole("heading", { name: "Run progress" })).toBeVisible();
   await expect(page.locator(".decision-summary")).toHaveCount(0);
@@ -16,11 +16,9 @@ test("defaults completed runs to progress and normalizes precise historical read
   await expect(page.locator(".decision-summary")).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Run progress" })).toBeVisible();
-  await page.goto("/runs/increment?view=incremental#workspace-period-performance");
-  await expect(page).toHaveURL(/\/timelines\/NVDA\?view=brief&node=increment#workspace-period-performance/);
+  await page.goto("/timelines/NVDA?node=increment&view=brief#workspace-period-performance");
   await expect(page.locator(".performance-section")).toBeInViewport();
-  await page.goto("/runs/full?view=reports&report=market#market-summary");
-  await expect(page).toHaveURL(/\/timelines\/NVDA\?view=reports&report=market&node=full#market-summary/);
+  await page.goto("/timelines/NVDA?node=full&view=reports&report=market#market-summary");
   await expect(page.locator("#run-view-reports")).toBeVisible();
   await page.goto("/runs/full?view=diagnostics");
   await expect(page).toHaveURL(/\/runs\/full\?view=diagnostics/);

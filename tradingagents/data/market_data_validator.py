@@ -1,0 +1,230 @@
+"""Deterministic market-data verification snapshot.
+
+The market analyst is an LLM that can confabulate exact numbers — citing a
+Bollinger band or a "historically validated bounce" that the underlying data
+doesn't support (#830). This module computes a ground-truth snapshot (latest
+OHLCV row on or before the analysis date, common indicators, recent closes)
+the analyst is told to treat as the source of truth for any exact numeric
+claim. Deterministic, no LLM involved.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+import pandas as pd
+from stockstats import wrap
+
+from tradingagents.data.context import DataRequestContext
+from tradingagents.data.result_metadata import source_metadata
+from tradingagents.data.stockstats_utils import _assert_ohlcv_not_stale, load_ohlcv
+from tradingagents.domain.data import ProvenanceRecord
+from tradingagents.domain.data_result import DataResult
+from tradingagents.domain.measurement import instrument_currency
+
+# A fixed, common indicator set so the snapshot is the same shape every run.
+DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
+    "close_10_ema",
+    "close_50_sma",
+    "close_200_sma",
+    "rsi",
+    "boll",
+    "boll_ub",
+    "boll_lb",
+    "macd",
+    "macds",
+    "macdh",
+    "atr",
+)
+
+
+def _indicator_measurement(name: str, currency: str) -> tuple[str, str | None]:
+    if name == "rsi" or name.startswith("rsi_"):
+        return "index", None
+    return "currency", currency
+
+
+def _verified_rows(data: pd.DataFrame, symbol: str, curr_date: str) -> pd.DataFrame:
+    """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
+
+    Vendor loaders normally normalize and filter already, but this verification
+    path defensively re-applies the cutoff to any supplied frame.
+    """
+    if data is None or data.empty:
+        raise ValueError(f"No OHLCV data available for {symbol}.")
+
+    df = data.copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.dropna(subset=["Date"])
+    df = df[df["Date"] <= pd.to_datetime(curr_date)].sort_values("Date")
+    if df.empty:
+        raise ValueError(f"No OHLCV rows on or before {curr_date} for {symbol}.")
+    return df
+
+
+def _fmt(value) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int,)):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+@source_metadata("get_verified_market_snapshot", "yfinance")
+def build_verified_market_snapshot(
+    symbol: str,
+    curr_date: str,
+    look_back_days: int = 30,
+    indicators: Iterable[str] | None = None,
+    *,
+    data_context: DataRequestContext,
+) -> DataResult[str]:
+    """Build a yfinance-backed snapshot (the default US vendor implementation)."""
+    return render_verified_market_snapshot(
+        load_ohlcv(symbol, curr_date, data_context=data_context),
+        symbol,
+        curr_date,
+        look_back_days,
+        indicators,
+        source="yfinance",
+        adjustment="auto-adjusted prices (yfinance auto_adjust=True)",
+    )
+
+
+def render_verified_market_snapshot(
+    data: pd.DataFrame,
+    symbol: str,
+    curr_date: str,
+    look_back_days: int = 30,
+    indicators: Iterable[str] | None = None,
+    *,
+    source: str,
+    adjustment: str | None = None,
+    provenance_timing: str | None = None,
+) -> DataResult[str]:
+    """Render a deterministic snapshot from a vendor-supplied OHLCV frame."""
+    # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
+    # Volume); stockstats `wrap()` lowercases columns and adds indicator
+    # columns, so read raw prices from `df` and indicators from `stock_df`.
+    observations = []
+    df = _verified_rows(data, symbol, curr_date)
+    # Some generic vendor loaders only apply a date range. Enforce freshness at
+    # the shared verification boundary so a stale but non-empty frame triggers
+    # router fallback instead of becoming the numeric source of truth.
+    _assert_ohlcv_not_stale(df, curr_date, symbol)
+    stock_df = wrap(df.copy())
+
+    selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
+    currency = instrument_currency(symbol)
+    indicator_values: dict[str, str] = {}
+    for name in selected:
+        required = {
+            "close_10_ema": 10,
+            "close_50_sma": 50,
+            "close_200_sma": 200,
+            "rsi": 15,
+            "boll": 20,
+            "boll_ub": 20,
+            "boll_lb": 20,
+            "macd": 35,
+            "macds": 35,
+            "macdh": 35,
+            "atr": 15,
+        }.get(name, 1)
+        if len(stock_df) < required:
+            indicator_values[name] = f"N/A (requires {required} observations; got {len(stock_df)})"
+            continue
+        try:
+            stock_df[name]  # triggers stockstats calculation
+            indicator_values[name] = _fmt(stock_df.iloc[-1][name])
+        except Exception as exc:  # noqa: BLE001 — one bad indicator shouldn't sink the snapshot
+            indicator_values[name] = f"N/A ({type(exc).__name__})"
+
+    latest = df.iloc[-1]
+    latest_date = _fmt(latest["Date"])
+    window = max(1, min(int(look_back_days), 30))
+    recent = df.tail(window)
+
+    lines = [
+        f"## Verified market data snapshot for {symbol.upper()}",
+        "",
+        f"- Data source: {source}",
+        *([f"- Price adjustment: {adjustment}"] if adjustment else []),
+        f"- Requested analysis date: {curr_date}",
+        f"- Latest trading row used: {latest_date}",
+        "- Rows after the requested analysis date are excluded before verification.",
+        "",
+        "### Latest verified OHLCV row",
+        "",
+        "| Field | Value | Measurement | Unit |",
+        "|---|---:|---|---|",
+    ]
+    for field in ("Open", "High", "Low", "Close", "Volume"):
+        measurement, unit = ("quantity", "shares") if field == "Volume" else ("currency", currency)
+        lines.append(f"| {field} | {_fmt(latest.get(field))} | {measurement} | {unit} |")
+
+    lines += [
+        "",
+        "### Verified technical indicators (latest row)",
+        "",
+        "| Indicator | Value | Measurement | Unit |",
+        "|---|---:|---|---|",
+    ]
+    for name, value in indicator_values.items():
+        measurement, unit = _indicator_measurement(name, currency)
+        lines.append(f"| {name} | {value} | {measurement} | {unit or '—'} |")
+
+    lines += [
+        "",
+        f"### Recent verified closes (last {len(recent)} rows)",
+        "",
+        "| Date | Close | Measurement | Unit |",
+        "|---|---:|---|---|",
+    ]
+    for _, row in recent.iterrows():
+        lines.append(f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} | currency | {currency} |")
+
+    lines += [
+        "",
+        "Use this snapshot as the source of truth for exact OHLCV, price-level, "
+        "and indicator-value claims. If another tool output conflicts with it, "
+        "flag the discrepancy rather than inventing a reconciled number. Do not "
+        "claim historical validation, support/resistance bounces, or exact "
+        "percentage moves unless directly supported by tool output with concrete "
+        "dates and prices.",
+    ]
+    from tradingagents.data.source_observations import make_observation
+
+    observations.append(
+        make_observation(
+            source,
+            "verified_market_snapshot",
+            symbol,
+            {
+                "latest": {
+                    field: latest.get(field) for field in ("Open", "High", "Low", "Close", "Volume")
+                },
+                "indicators": indicator_values,
+                "currency": currency,
+                "adjustment_basis": adjustment,
+            },
+            effective_date=latest_date,
+            available_on=latest_date,
+            timing="market-date filtered snapshot; conservatively available at market day end",
+        )
+    )
+    return DataResult("\n".join(lines), observations=tuple(observations)).with_provenance(
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested=curr_date,
+            effective=latest_date,
+            timing=provenance_timing or "market-date filtered; rows after cutoff excluded",
+        )
+    )

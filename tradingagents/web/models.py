@@ -8,23 +8,26 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from tradingagents.application.contracts import (
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.history import RunAttemptView
+from tradingagents.domain.incremental import IncrementalRunContext
+from tradingagents.domain.model_selection import RoleSelections
+from tradingagents.domain.runs import (
     AnalysisCutoffContext,
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
+    RunRequestSnapshot,
+    RunView,
+)
+from tradingagents.domain.timeline import (
     FullBaselineCandidate,
-    IncrementalRunContext,
     ResearchNodeComparisonSelection,
     ResearchNodeView,
     ResearchTimeline,
-    RunAttemptView,
     RunLifecycleImpact,
-    RunRequestSnapshot,
-    RunStatus,
-    RunView,
 )
-from tradingagents.application.model_connections import ConnectionView
+from tradingagents.llm.models import ConnectionView
 
 
 class ApiModel(BaseModel):
@@ -135,7 +138,9 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}, exclude_unset=True))
+        return AnalysisRequest.model_validate(
+            self.model_dump(exclude={"source_run_id"}, exclude_unset=True)
+        )
 
 
 class RunLifecyclePreviewRequest(ApiModel):
@@ -189,16 +194,6 @@ class QueueHealth(ApiModel):
     running: int
 
 
-class ProviderCapabilities(ApiModel):
-    label: str
-    api_key_required: bool
-    api_key_configured: bool | None
-    configured: bool
-    selectable: bool
-    unavailable_reason: str | None = None
-    model_discovery_supported: bool
-
-
 class DiscoveredModelView(ApiModel):
     id: str
     label: str
@@ -212,8 +207,8 @@ class ModelDiscoveryWarningView(ApiModel):
     message: str
 
 
-class ProviderModelCatalog(ApiModel):
-    provider: str
+class ConnectionModelCatalog(ApiModel):
+    connection_id: str
     models: list[DiscoveredModelView]
     source: Literal["live", "cache", "fallback"]
     fetched_at: datetime
@@ -222,15 +217,11 @@ class ProviderModelCatalog(ApiModel):
 
 
 class CapabilityDefaults(ApiModel):
-    quick_connection_id: str | None = None
-    deep_connection_id: str | None = None
-    analysts: list[str] = Field(default_factory=lambda: ["market", "social", "news", "fundamentals"])
+    models: RoleSelections
+    analysts: list[str] = Field(
+        default_factory=lambda: ["market", "social", "news", "fundamentals"]
+    )
     profile: str
-    llm_provider: str
-    quick_model: str
-    deep_model: str
-    quick_reasoning_effort: str | None
-    deep_reasoning_effort: str | None
     output_language: str
     lan_enabled: bool
     trash_retention_days: int = Field(ge=0)
@@ -238,10 +229,8 @@ class CapabilityDefaults(ApiModel):
 
 class CapabilitiesResponse(ApiModel):
     connections: dict[str, ConnectionView] = Field(default_factory=dict)
-    legacy_connections: dict[str, str] = Field(default_factory=dict)
     configuration_initialized: bool = False
     profiles: list[str]
     analysts: list[str]
     output_languages: list[str]
-    providers: dict[str, ProviderCapabilities]
     defaults: CapabilityDefaults

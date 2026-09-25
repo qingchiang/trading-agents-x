@@ -10,16 +10,15 @@ from pathlib import Path
 from zipfile import ZipFile
 
 _REQUIRED_FILES = {
-    "cli/main.py",
-    "tradingagents/application/configuration.py",
-    "tradingagents/application/submissions.py",
-    "tradingagents/application/model_connections.py",
-    "tradingagents/persistence/alembic/versions/0012_model_connections.py",
-    "tradingagents/persistence/alembic/versions/0013_submission_identity.py",
-    "tradingagents/persistence/alembic/versions/0011_application_configuration.py",
+    "tradingagents/cli/main.py",
+    "tradingagents/persistence/configuration.py",
+    "tradingagents/domain/submissions.py",
+    "tradingagents/llm/models.py",
+    "tradingagents/persistence/alembic/versions/0100_independent.py",
+    "tradingagents/persistence/alembic/baseline.sql",
     "tradingagents/client.py",
-    "tradingagents/graph/research_graph.py",
-    "tradingagents/persistence/alembic/versions/0001_markdown_research.py",
+    "tradingagents/research/full/workflow.py",
+    "tradingagents/data/resources/edinet_code_map.json",
     "tradingagents/web/static/index.html",
 }
 _FORBIDDEN_FILES = {
@@ -85,7 +84,10 @@ def verify(wheel: Path) -> None:
         missing = sorted(_REQUIRED_FILES - names)
         forbidden = sorted(_FORBIDDEN_FILES & names)
         forbidden.extend(
-            sorted(name for name in names if name.startswith("tradingagents/evals/"))
+            sorted(name for name in names if name.startswith((
+                "tradingagents/evals/", "tradingagents/agents/", "tradingagents/graph/",
+                "tradingagents/dataflows/", "tradingagents/llm_clients/", "cli/",
+            )))
         )
         if missing:
             raise ValueError(f"wheel is missing required files: {', '.join(missing)}")
@@ -155,7 +157,7 @@ def verify(wheel: Path) -> None:
             name for name in names if name.endswith(".dist-info/entry_points.txt")
         )
         entry_points = archive.read(entry_points_name).decode("utf-8")
-        if "tradingagents = cli.main:app" not in entry_points:
+        if "tradingagents = tradingagents.cli.main:app" not in entry_points:
             raise ValueError("wheel is missing the tradingagents CLI entry point")
 
 

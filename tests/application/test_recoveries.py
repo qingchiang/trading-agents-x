@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from tradingagents.application.contracts import (
-    ArtifactGenerationMethod,
-    RunEvent,
-)
-from tradingagents.application.recoveries import rebuild_structured_recoveries
+from tradingagents.domain.common import ArtifactGenerationMethod
+from tradingagents.domain.recoveries import rebuild_structured_recoveries
+from tradingagents.domain.runs import RunEvent
 
 
 def _event(
@@ -31,7 +29,7 @@ def _event(
     )
 
 
-def test_rebuilds_structured_and_numeric_recoveries_by_attempt_and_node() -> None:
+def test_rebuilds_structured_recoveries_and_ignores_retired_numeric_events() -> None:
     events = (
         _event(
             1,
@@ -72,7 +70,6 @@ def test_rebuilds_structured_and_numeric_recoveries_by_attempt_and_node() -> Non
 
     assert [notice.node for notice in notices] == [
         "analyst.fundamentals.audit",
-        "committee.final.serialize.numeric",
     ]
     assert notices[0].initial_reason_code == "semantic_validation"
     assert notices[0].validation_issue_codes == ("semantic.refs.missing",)

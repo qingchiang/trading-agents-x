@@ -5,9 +5,9 @@ from pathlib import Path
 import httpx2 as httpx
 import pytest
 
-from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.persistence.repository import RunRepository
 from tradingagents.web import create_app
 
 
@@ -22,13 +22,13 @@ def _lan_app(tmp_path: Path):
         },
         load_env_files=False,
     )
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(settings)
     repository = RunRepository(settings)
     service = AnalysisService(
         settings,
         repository=repository,
-        eligibility_resolver=lambda ticker: {
+        eligibility_resolver=lambda ticker, *, data_context: {
             "symbol": ticker,
             "quote_type": "EQUITY",
         },

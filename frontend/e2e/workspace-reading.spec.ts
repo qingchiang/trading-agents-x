@@ -63,7 +63,7 @@ test("returns from baseline evidence to the exact update and reads performance w
   await expect(page.locator(".performance-section details")).toHaveCount(0);
 });
 
-test("keeps long tokens, paragraphs and table endpoints readable and resolves old section links", async ({ page }) => {
+test("keeps long tokens, paragraphs and table endpoints readable and restores stable section links", async ({ page }) => {
   const respond = workspaceFixture();
   const token = "LONGTOKEN".repeat(150) + "ENDTOKEN";
   await page.addInitScript(() => localStorage.setItem("tradingagents-locale", "en"));
@@ -78,9 +78,9 @@ test("keeps long tokens, paragraphs and table endpoints readable and resolves ol
   });
   for (const width of [390, 1080, 2560]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto("/timelines/NVDA?node=full#research-section-1");
+    await page.goto("/timelines/NVDA?node=full#assessment-thesis");
     const thesis = page.locator("#assessment-thesis");
-    await expect(thesis, `Historical thesis link at ${width}px`).toBeInViewport();
+    await expect(thesis, `Thesis link at ${width}px`).toBeInViewport();
     const paragraph = page.getByText(token, { exact: true });
     const geometry = await paragraph.evaluate(element => {
       const parent = element.parentElement!;
@@ -97,8 +97,8 @@ test("keeps long tokens, paragraphs and table endpoints readable and resolves ol
     const right = (await table.boundingBox())!;
     expect((await end.boundingBox())!.x).toBeLessThan(right.x + right.width);
   }
-  await page.goto("/timelines/NVDA?node=full#research-section-999");
+  await page.goto("/timelines/NVDA?node=full#missing-section");
   await expect(page.getByText("This chapter could not be located. Choose a section from Contents.")).toBeVisible();
-  await page.goto("/timelines/NVDA?view=compare&compare=active:full&compare=active:increment#research-section-999");
+  await page.goto("/timelines/NVDA?view=compare&compare=active:full&compare=active:increment#missing-section");
   await expect(page.getByText("This chapter could not be located. Choose a section from Contents.")).toBeVisible();
 });

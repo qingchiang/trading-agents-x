@@ -1,0 +1,416 @@
+import type { TFunction } from "i18next";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import type {
+  DebateAgenda,
+  DecisionBrief,
+  JudgeDraft,
+  RebuttalReview,
+  ResearchArtifact,
+  ResearchCase,
+  ResearchDecision,
+  RiskReview,
+} from "../../shared/api/client";
+import type { EvidenceReferenceIndex } from "./evidence";
+import FloatingSectionNavigation, {
+  type SectionNavigationEntry,
+} from "./FloatingSectionNavigation";
+import Markdown from "../../shared/Markdown";
+import { ResearchDecisionContent } from "./ResearchDecisionView";
+
+export default function DeliberationView({
+  artifacts,
+  evidenceIndex,
+  onEvidence,
+}: {
+  artifacts: ResearchArtifact[];
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  const visible = artifacts.filter((artifact) => artifact.stage !== "analyst");
+  const cases = typedArtifacts(visible, isResearchCase);
+  const agendas = typedArtifacts(visible, isDebateAgenda);
+  const rebuttals = typedArtifacts(visible, isRebuttalReview);
+  const judges = typedArtifacts(visible, isJudgeDraft);
+  const risks = typedArtifacts(visible, isRiskReview);
+  const briefs = typedArtifacts(visible, isDecisionBrief);
+  const decisions = typedArtifacts(visible, isResearchDecision);
+  const dispositionByIssue = new Map(
+    (judges.at(-1)?.content.issue_dispositions ?? []).map((item) => [
+      item.issue_id,
+      item.status,
+    ]),
+  );
+  const rebuttalsByRound = useMemo(() => {
+    const grouped = new Map<number, typeof rebuttals>();
+    rebuttals.forEach((artifact) => {
+      const round = artifact.content.round;
+      grouped.set(round, [...(grouped.get(round) ?? []), artifact]);
+    });
+    return [...grouped.entries()].sort(([left], [right]) => left - right);
+  }, [rebuttals]);
+  const navigation = useMemo<DeliberationNavigationEntry[]>(() => {
+    const entries: DeliberationNavigationEntry[] = [];
+    if (cases.length > 0) {
+      entries.push({ id: "deliberation-case", label: t("bullBearCases") });
+    }
+    agendas.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-agenda-${index + 1}`,
+        label: numberedLabel(t("debateAgenda"), index, agendas.length),
+      }),
+    );
+    rebuttalsByRound.forEach(([round]) =>
+      entries.push({
+        id: `deliberation-rebuttal-${round}`,
+        label: t("rebuttalRound", { round }),
+      }),
+    );
+    judges.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-judge-${index + 1}`,
+        label: numberedLabel(t("judgeDraft"), index, judges.length),
+      }),
+    );
+    if (risks.length > 0) {
+      entries.push({ id: "deliberation-risk", label: t("riskLenses") });
+    }
+    briefs.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-decision-brief-${index + 1}`,
+        label: numberedLabel(t("decisionBrief"), index, briefs.length),
+      }),
+    );
+    decisions.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-final-${index + 1}`,
+        label: numberedLabel(t("finalResearchOpinion"), index, decisions.length),
+      }),
+    );
+    const reportEntries = (items: ResearchArtifact[]) => items.map(artifact => ({ id: `deliberation-report-${artifact.id}`, label: `${roleLabel(t, artifact.role)}${(artifact.round ?? 0) > 0 ? ` · ${t("round")} ${artifact.round}` : ""}`, level: 3 }));
+    return entries.flatMap(entry => {
+      const items = entry.id === "deliberation-case" ? cases : entry.id === "deliberation-risk" ? risks : entry.id.startsWith("deliberation-rebuttal-") ? (rebuttalsByRound.find(([round]) => entry.id === `deliberation-rebuttal-${round}`)?.[1] ?? []) : [];
+      return [entry, ...(items.length > 1 ? reportEntries(items) : [])];
+    });
+  }, [agendas, briefs, cases, decisions, judges, rebuttalsByRound, risks, t]);
+
+  if (visible.length === 0) {
+    return (
+      <div className="empty-state">
+        {artifacts.length === 0
+          ? t("noArtifactsRecorded")
+          : t("noDeliberation")}
+      </div>
+    );
+  }
+
+  const markdown = (value: string) => (
+    <Markdown
+      evidenceAliases={evidenceIndex.aliases}
+      onEvidence={onEvidence}
+    >
+      {value}
+    </Markdown>
+  );
+
+  return (
+    <div className="deliberation-reading-layout" data-process-outline>
+      <DeliberationNavigation entries={navigation} />
+      <div className="deliberation-flow">
+      {cases.length > 0 && (
+        <section
+          className="deliberation-stage"
+          id="deliberation-case"
+          tabIndex={-1}
+        >
+          <StageHeading title={t("bullBearCases")} />
+          <div className="case-comparison">
+            {cases.map((artifact) => (
+              <ArtifactFrame artifact={artifact} key={artifact.id}>
+                {markdown(artifact.content.markdown)}
+              </ArtifactFrame>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {agendas.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-agenda-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
+          <StageHeading title={t("debateAgenda")} />
+          <ArtifactFrame artifact={artifact}>
+            <p>{artifact.content.summary}</p>
+            <ol className="agenda-list">
+              {artifact.content.issues.map((issue) => (
+                <li key={issue.id}>
+                  <strong>{issue.question}</strong>
+                  <span>
+                    {issue.importance}
+                    {dispositionByIssue.has(issue.id)
+                      ? ` · ${dispositionByIssue.get(issue.id)}`
+                      : ""}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </ArtifactFrame>
+        </section>
+      ))}
+
+      {rebuttalsByRound.map(([round, entries]) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-rebuttal-${round}`}
+          tabIndex={-1}
+          key={round}
+        >
+          <StageHeading title={t("rebuttalRound", { round })} />
+          <div className="rebuttal-round">
+            {entries.map((artifact) => (
+              <ArtifactFrame artifact={artifact} key={artifact.id}>
+                {markdown(artifact.content.markdown)}
+              </ArtifactFrame>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {judges.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-judge-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
+          <StageHeading title={t("judgeDraft")} />
+          <ArtifactFrame artifact={artifact}>
+            <div className="artifact-rating">
+              <strong>{artifact.content.preliminary_rating ?? "—"}</strong>
+              <span>
+                {t("confidence")}{" "}
+                {artifact.content.confidence == null
+                  ? "—"
+                  : `${Math.round(artifact.content.confidence * 100)}%`}
+              </span>
+            </div>
+            {markdown(artifact.content.markdown)}
+          </ArtifactFrame>
+        </section>
+      ))}
+
+      {risks.length > 0 && (
+        <section
+          className="deliberation-stage"
+          id="deliberation-risk"
+          tabIndex={-1}
+        >
+          <StageHeading title={t("riskLenses")} />
+          <div className="risk-review-grid">
+            {risks.map((artifact) => (
+              <ArtifactFrame artifact={artifact} key={artifact.id}>
+                {markdown(artifact.content.markdown)}
+              </ArtifactFrame>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {briefs.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-decision-brief-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
+          <StageHeading title={t("decisionBrief")} />
+          <ArtifactFrame artifact={artifact}>
+            <div className="decision-brief-notice" role="note">
+              {t("decisionBriefNotice")}
+            </div>
+            {markdown(artifact.content.markdown)}
+          </ArtifactFrame>
+        </section>
+      ))}
+
+      {decisions.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-final-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
+          <StageHeading title={t("finalResearchOpinion")} />
+          <ArtifactFrame artifact={artifact}>
+            <ResearchDecisionContent
+              decision={artifact.content}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+              embedded
+            />
+          </ArtifactFrame>
+        </section>
+      ))}
+      </div>
+    </div>
+  );
+}
+
+type DeliberationNavigationEntry = SectionNavigationEntry;
+
+function DeliberationNavigation({
+  entries,
+}: {
+  entries: DeliberationNavigationEntry[];
+}) {
+  const { t } = useTranslation();
+  const [active, setActive] = useState(entries[0]?.id ?? "");
+  const entryIds = entries.map((entry) => entry.id).join("|");
+
+  useEffect(() => {
+    setActive(entries[0]?.id ?? "");
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (observations) => {
+        const visible = observations
+          .filter((item) => item.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+        const id = visible[0]?.target.id;
+        if (id) setActive(id);
+      },
+      { rootMargin: "-18% 0px -68% 0px", threshold: 0 },
+    );
+    entries.forEach((entry) => {
+      const target = document.getElementById(entry.id);
+      if (target) observer.observe(target);
+    });
+    return () => observer.disconnect();
+  }, [entryIds]);
+
+  if (entries.length === 0) return null;
+  const jump = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView?.({ behavior: "auto", block: "start" });
+    target.focus({ preventScroll: true });
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${id}`);
+    window.dispatchEvent(new Event("hashchange"));
+    setActive(id);
+  };
+
+  return (
+    <FloatingSectionNavigation
+      entries={entries}
+      active={active}
+      title={t("researchStages")}
+      ariaLabel={t("deliberationNavigation")}
+      selectLabel={t("jumpToStage")}
+      storageKey="tradingagents-toc:deliberation"
+      ariaCurrent="step"
+      onSelect={jump}
+    />
+  );
+}
+
+function numberedLabel(label: string, index: number, count: number): string {
+  return count > 1 ? `${label} ${index + 1}` : label;
+}
+
+function ArtifactFrame({
+  artifact,
+  children,
+}: {
+  artifact: ResearchArtifact;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article className="artifact-card typed-artifact-card" id={`deliberation-report-${artifact.id}`} tabIndex={-1}>
+      <header className="artifact-header compact">
+        <div>
+          <h3>{roleLabel(t, artifact.role)}</h3>
+        </div>
+        <small>
+          {(artifact.round ?? 0) > 0 ? `${t("round")} ${artifact.round}` : ""}
+        </small>
+      </header>
+      <div className="artifact-body">{children}</div>
+    </article>
+  );
+}
+
+function StageHeading({ title }: { title: string }) {
+  return (
+    <div className="stage-heading">
+      <h2>{title}</h2>
+    </div>
+  );
+}
+
+function typedArtifacts<T extends ResearchArtifact["content"]>(
+  artifacts: ResearchArtifact[],
+  guard: (value: ResearchArtifact["content"]) => value is T,
+): Array<ResearchArtifact & { content: T }> {
+  return artifacts.filter(
+    (artifact): artifact is ResearchArtifact & { content: T } =>
+      guard(artifact.content),
+  );
+}
+
+function isResearchCase(value: ResearchArtifact["content"]): value is ResearchCase {
+  return (
+    "role" in value &&
+    !("addressed_issue_ids" in value) &&
+    "markdown" in value &&
+    (value.role === "bull" || value.role === "bear")
+  );
+}
+
+function isDebateAgenda(value: ResearchArtifact["content"]): value is DebateAgenda {
+  return "summary" in value && "issues" in value;
+}
+
+function isRebuttalReview(
+  value: ResearchArtifact["content"],
+): value is RebuttalReview {
+  return "round" in value && "addressed_issue_ids" in value && "markdown" in value;
+}
+
+function isJudgeDraft(value: ResearchArtifact["content"]): value is JudgeDraft {
+  return "preliminary_rating" in value && "issue_dispositions" in value;
+}
+
+function isRiskReview(value: ResearchArtifact["content"]): value is RiskReview {
+  return "challenged_issue_ids" in value && "unresolved_issue_ids" in value;
+}
+
+function isDecisionBrief(
+  value: ResearchArtifact["content"],
+): value is DecisionBrief {
+  return (
+    "markdown" in value &&
+    "evidence_refs" in value &&
+    "warnings" in value &&
+    !("role" in value)
+  );
+}
+
+function isResearchDecision(
+  value: ResearchArtifact["content"],
+): value is ResearchDecision {
+  return "rating" in value && "thesis" in value && "scenarios" in value;
+}
+
+function humanize(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function roleLabel(t: TFunction, role: string): string {
+  const keys: Record<string, string> = { bull: "bullCase", bear: "bearCase", moderator: "debateModerator", research_judge: "researchJudge", final_committee: "finalCommittee", integrated: "riskLenses", neutral: "riskLenses" };
+  return keys[role] ? t(keys[role]) : humanize(role);
+}

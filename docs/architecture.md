@@ -74,10 +74,8 @@ invalidation_conditions
 unresolved_questions
 time_horizon
 scenarios[base, bull, bear]
-valuation_assessment
 market_reference_levels
 risk_review_adjustments
-numeric_audit_status
 ```
 
 Final Decision confidence is a rubric-based `low`, `medium`, or `high` research
@@ -85,63 +83,35 @@ support level rather than a numeric probability. Numeric confidence retained by
 analyst, judge, and sentiment-stage contracts describes their bounded process
 outputs and is not projected onto the final Decision contract.
 
-Failed optional numeric candidates never enter `ResearchDecision`. A separate
-`DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
-snapshots (initial and repair), their safe validation issue codes, and the
-components omitted from the canonical decision. It is persisted atomically
-with the decision for user inspection and export, while ratings and thesis
-generation use only the canonical decision.
+The final serializer produces the strict research core and optional scenario
+reference ranges and market reference levels in one response. Optional candidates
+are validated individually: finite numeric values, ordered ranges, required
+metadata, Evidence reference closure, source locators and temporal constraints.
+References supported by live-only sources must retain the live-snapshot label
+and their latest market-local retrieval date; invalid or out-of-window retrieval
+metadata causes omission. Incremental validation resolves source locators against
+the direct Full Baseline Evidence as well as current Evidence. The baseline
+bundle is local validation context excluded from model prompts.
+An invalid candidate is omitted without retrying the model or discarding the
+core; a content-free `decision.reference_omitted` event records its field path
+and bounded issue codes. Unparseable responses and invalid core fields still use
+the ordinary bounded structured-output recovery.
 
-Decision-critical calculations keep model-proposed formulas, named numeric
-inputs, units, limitations, and evidence references. The strict qualitative
-decision core also declares every derived exact number that materially affects
-its thesis, risks, invalidation conditions, scenarios, or risk-review response.
-Final qualitative serialization uses the provider's schema-focused client,
-while Final numeric selection uses the corresponding reasoning client. For
-DeepSeek V4 this means thinking-mode JSON Output followed by local Pydantic,
-Evidence, formula, date, and semantic validation; JSON validity is not treated
-as schema or research correctness.
-Debate Agenda likewise uses the profile-selected reasoning client because
-identifying material disagreements is a semantic research task rather than a
-mechanical audit. Shallow Analyst and deliberation audits continue to use
-schema-focused clients or deterministic extraction.
-The numeric serializer must satisfy those declarations with calculation IDs;
-each retained calculation publishes its decision-component uses. The
-application evaluates formulas with a restricted arithmetic interpreter and is
-the sole source of the canonical result and date. A missing or invalid optional
-calculation degrades numeric audit status to `partial` without discarding an
-otherwise valid qualitative decision. Canonical dates come from the latest
-relevant Evidence Ledger effective date and are never guessed from the analysis
-date.
+Reference values are model-reported research content, not locally recomputed or
+program-verified numbers. `observed`, `interpreted` and `derived` describe their
+basis. Dates describe supporting data, not forecast horizons. Current synthesis
+prompt versions are shared by new Run method snapshots and Full artifact metadata;
+stored historical snapshots remain immutable. There is no
+independent valuation card, numeric catalog generation, formula interpreter,
+calculation record, numeric audit status or numeric repair phase. Normal
+presentation rounding does not change persisted values.
 
-Formula results remain in canonical units. Reader-facing compact quantities use
-a separate, typed display scale (for example `hundred_million`); unit text is
-never parsed to infer that scale. Ratio formulas for percent and percentage-point
-values are converted by the application, as are ratio formulas expressed in
-basis points. The persisted audit comparison therefore retains both the raw
-canonical result and the deterministically scaled reader-facing value.
-Reader-facing values that differ by no more than one declared last-place unit
-and one percent relative error are retained as `approximately_matched`; this
-does not weaken formula, unit, sign, Evidence, or PIT validation and does not
-degrade an otherwise complete numeric audit. Display scale describes only the
-formula result and is never inherited from an input's source measurement scale.
-The application deterministically normalizes percentage, percentage-point,
-basis-point, and multiple results to `base`; compact amount scales remain
-explicit serializer declarations.
-Serializer-facing operands remain ASCII identifiers. If a provider returns an
-otherwise unambiguous Unicode identifier or an identifier-like token beginning
-with a digit, the application performs boundary-aware token replacement and
-rewrites the formula AST and operands to stable `v1`, `v2`, and later names
-before validation. Pure numeric or punctuation-bearing names, collisions, and
-incomplete mappings remain invalid; the application never guesses an ambiguous
-mapping. Each observed formula input binds its value and date to Evidence; the
-union of input date refs must be a subset of the calculation's input Evidence
-refs. Unknown date refs and valid date refs omitted from that input set remain
-distinct audit failures. A displayed derived range declares separate
-low and high requirements, so one scalar requirement cannot validate two
-different calculations.
+Incremental `unchanged` reuses the complete direct Full Baseline Decision.
+Incremental `updated` serializes current references together with the current
+conclusion. Core-only recovery leaves optional references empty and records an
+omission; it never automatically attaches baseline numbers to changed prose.
 
-Non-personalized ratings, conditional investment views, auditable valuation
+Non-personalized ratings, conditional investment views, scenario valuation
 ranges, scenarios, and market reference levels are allowed. Position
 percentage, account configuration, order quantity/type, broker instructions,
 mandatory entry/stop/take-profit levels, guarantees, and personalized
@@ -158,11 +128,13 @@ configuration. Provider keys are excluded from Run configuration snapshots. Mode
 have stable IDs independent of vendor presets. Each quick/deep binding retains
 a typed transport, compatibility policy, model and reasoning selection; the
 application layer delegates vendor-specific behavior to the LLM subsystem.
+The LLM subsystem resolves typed role and connection selections directly;
+provider-specific environment aliases are handled only by explicit import
+and the one-time predecessor conversion.
 Connection credentials are scoped by ID and bound once per attempt. Admission
 and retry recheck connection references under their SQLite write transaction,
 so deletion cannot race a new queued reference.
-Incremental creation resolves only the deep role; its new quick binding is a
-compatibility placeholder copied from deep. Internal submission identity retains
+Incremental creation resolves only the deep role and retains no quick binding. Internal submission identity retains
 explicit overrides separately from resolved snapshots and is not exported.
 See [Application configuration](configuration.md) for migration and precedence.
 
@@ -170,10 +142,18 @@ Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
 context, dataflow configuration, cancellation callbacks, and artifact/evidence
 writers; the LangGraph runtime provides the event stream writer separately.
-Runs carry no historical review context. The dataflow
-`ContextVar` bridge exists only to support established adapter signatures
-during one scoped invocation; there is no mutable package configuration or
-`set_config()` operation.
+Analyst nodes read language and source policy from that explicit runtime
+context. Every model-facing data tool requires this context and an injected
+analysis date; each tool has one internal implementation. The sentiment analyst
+prefetches its inputs and has no tool-call loop. Pure language and instrument prompt helpers live in `research/prompts`;
+there is no mixed tool-and-prompt catalog. Full orchestration owns graph assembly,
+while `research/full/evidence.py` seals producer material and
+`research/full/state.py` owns graph state/output. Perspective objectives live in
+`research/prompts/perspectives.py`. Runs carry no historical review context. Routing, adapters, assemblers and source
+caches receive an explicit `DataRequestContext`; tool calls obtain it from the
+Run runtime, and Incremental collection receives it from the application service.
+No ambient configuration bridge remains. Credential redaction and bounded source
+request scopes retain their separate isolation responsibilities.
 
 Two runs with different provider, model, reasoning, language, or vendor
 settings must remain isolated even if worker concurrency changes in the future.
@@ -196,9 +176,9 @@ Creation and retained history use separate request contracts.
 `AnalysisRequest` is the admission contract for new research and for any
 action that can launch research, including retry and source-based creation.
 `RunRequestSnapshot` is a tolerant, read-only representation of the JSON
-stored on a Run; it preserves legacy request values such as
-`asset_type="crypto"` for history views and exports without rewriting stored
-JSON or implying that those values remain admitted for new research. Execution
+stored on a Run. Offline conversion retains predecessor JSON in a separate
+audit snapshot and generates this normalized reading projection. Missing facts
+remain missing; current settings never supply historical identity. Execution
 crosses back through `AnalysisRequest` explicitly, so tightening admission
 cannot make a retained Run unreadable or create a second creation path.
 
@@ -310,7 +290,7 @@ generated by the existing semantic synthesis pass; it is attached outside the
 strict serializer and therefore does not enlarge the structured-output schema.
 Historical products may omit the brief. Run Detail exposes a bounded
 `incremental_context` containing that brief and the direct Full baseline date
-and Decision without reading baseline reports or artifacts. Export schema 11
+and Decision without reading baseline reports or artifacts. Export schema 12
 adds the same brief plus the baseline Evidence bundle so JSON, Markdown, and
 package exports remain self-contained.
 
@@ -321,6 +301,20 @@ is treated as PIT Evidence or model output.
 
 ### Database
 
+New installations use the independent Alembic baseline. Existing databases
+must be converted offline from revision `0013_submission_identity` into a new
+file; normal startup refuses the predecessor without upgrading it. See
+[Offline database cutover](database-cutover.md) and [ADR 0007](adr/0007-independent-runtime-cutover.md).
+
+Revision `0101_remove_numeric_audit` converts Decision rows and Decision artifact
+copies to Research/Artifact Schema 3, recomputes changed artifact hashes, and drops
+the numeric audit column. It preserves reference values, research prose, Evidence
+digests, baseline relationships, original events, metrics and method snapshots.
+The migration refuses active runs and retained checkpoints, and executes inside
+an explicit SQLite transaction. Back up before upgrading; rollback requires the
+backup and old program. Runtime hydration and UI accept only the current numeric
+contract; historical raw events remain generic diagnostic records.
+
 Alembic manages application tables:
 
 | Table | Responsibility |
@@ -330,7 +324,7 @@ Alembic manages application tables:
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
-| `decisions` | typed final decision, numeric audit appendix, market identity |
+| `decisions` | typed final decision and market identity |
 | `research_nodes` | same-identity successful Run role, direct Full-baseline relation, and Node-owned Incremental product JSON |
 | `primary_research_cycles` | the only mutable per-instrument Timeline pointer |
 
@@ -359,6 +353,11 @@ within a run.
 2. replays committed events after that sequence;
 3. polls for new events and emits periodic keepalives;
 4. closes after the run reaches a terminal state.
+
+The default SSE format retains named events. The Web requests
+`event_format=message` to receive every event through a single standard message
+listener, retaining the original `event_type` in each payload. Diagnostic and
+historical events therefore require no frontend event-type whitelist.
 
 Browser refresh therefore does not lose progress. SSE is one-way by design;
 run mutations use ordinary HTTP endpoints.
@@ -423,8 +422,8 @@ The sealed bundle is written to `run_evidence` independently of the run's final
 status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
 running or failed run can still expose the immutable ledger. Analyst artifacts,
 deliberation artifacts, and the final decision are also durable as soon as each
-stage completes; Run Detail and exports therefore show partial research rather
-than treating an unsuccessful attempt as empty.
+stage completes. Run diagnostics and explicit exports retain these partial
+artifacts even when an attempt does not commit a Research Node.
 
 `EvidenceTable` is an audit fact table containing canonical raw values and
 source mappings. It is available on the Evidence page and as CSV in the
@@ -434,13 +433,32 @@ analytical views, table summaries/resampling, and source passages that do not
 duplicate a large fact table. Read-only local lookups operate on the sealed
 artifacts without recontacting the provider.
 
+Model-facing catalogs factor repeated metadata into explicit `item_defaults`;
+each item's explicit fields override those defaults. Source-query passages
+inherit unchanged catalog metadata by Evidence ref rather than repeating it.
+Read-only query results and sealed Evidence remain complete. This is a rendering
+projection, not a change to source selection, Evidence identity or PIT admission.
+Prompt-only observation aliases share bodies and metadata only when the stable
+observation identity matches and every Evidence field is equal apart from ref
+and known retrieval timestamps (`origins[*].retrieved_at` and the provenance
+retrieval fields). Source, fallback, quality, publication/effective dates,
+producer values and all other provenance must still match exactly. Aliases keep
+all original refs and explicit per-ref retrieval path/value overrides. Full
+query bodies use `content_from_ref` only if the referenced body is actually in
+the same workset; routing an alias alone retains its body. Incremental inputs
+inherit the complete canonical observation and then apply retrieval overrides.
+Sealed bundles, query results, digests, table links and historical refs are not
+rewritten. Repeated retrievals do not constitute independent corroboration.
+
+Analyst context character metrics measure the rendered prepared Evidence text;
+they exclude the collection memo and remaining report instructions.
+
 Data adapters may attach small producer-owned structured numeric facts (for
 example analyst target prices and consensus EPS) beside readable source prose.
 Evidence sealing converts those facts into `source_format=structured` tables,
-so Final numeric audit does not scrape narrative text for a number, unit, or
-observation date. Calculation inputs may identify only the Evidence refs that
-establish their dates; explanatory background refs remain auditable without
-advancing or blocking the calculation date.
+preserving exact source values, units, dates and provenance independently of
+Decision serialization. Removing decision recomputation does not remove these
+producer facts, data-side indicators or the Evidence table browser.
 
 ### Markdown-first deliberation
 
@@ -471,7 +489,7 @@ DebateAgenda       short summary plus prioritized issue IDs and questions
 RebuttalReview     role Markdown plus addressed and open issue IDs
 JudgeDraft         judge Markdown, preliminary rating, and issue dispositions
 RiskReview         role Markdown plus challenged and unresolved issue IDs
-ResearchDecision   strict final opinion, scenarios, calculations, and evidence
+ResearchDecision   strict final opinion, scenario ranges, market references, and evidence
 ```
 
 Cases and risk reviews use a reasoning-model Markdown write followed by a
@@ -483,31 +501,40 @@ continues with no open rebuttal issues, Deep conservatively keeps agenda issues
 open, and a judge fallback leaves rating/confidence unknown while marking every
 issue unresolved. Graph routing depends on stable issue IDs and dispositions,
 not on parsing prose. The Final Committee uses a reasoning pass to form the
-synthesis brief, a strict serializer for the qualitative decision core, and a
-reasoning-client structured generation pass for the optional numeric appendix. Only derived,
-decision-critical valuation, scenario, or market-reference arithmetic uses
-`CalculationRecord`; directly observed market references remain evidence-backed
-observations. A numeric appendix gets one bounded repair. If it still cannot be
-fully audited, independently valid components are retained and the remaining
-numeric fields are omitted with an explicit warning instead of discarding the
-strict qualitative conclusion. Failed initial and repair candidates are kept
-only as a size-bounded, recursively redacted numeric audit appendix; raw
-provider messages, prompts, and hidden reasoning are never persisted.
+synthesis brief and a single serializer for the Decision and its optional
+references. The brief explains assumptions and reference-level meanings without
+a mandatory formula/operand checklist. Serialization preserves adopted research
+content and does not invent ranges for scenarios without support.
+Structured calls retain a content-free `node.model_call_diagnostic` event for
+both initial and repair invocations, including failures that later recover.
+It records a local call ID, schema, phase, character counts, elapsed time,
+available usage and finish reason, and bounded exception types/cause types and
+stack locations. Binding errors have their own diagnostic event. Provider
+messages, stack source lines and response bodies are excluded. Run/attempt and
+model configuration remain linked through the existing Run records.
+Analyst and deliberation prompts ask for material reasoning and counterevidence
+without repeated report retelling; they impose no hard narrative-length cap.
 
 Every artifact records its prompt version and top-level structured generation
 method. Agenda's top-level method describes Agenda generation; Final's
 top-level method continues to describe the qualitative core. Component-level
 `generation_observations` identify the logical client role, semantic-structured
-or schema-serialization task, node, and final method for Agenda, Final core,
-and Final numeric generation. These logical roles remain explicit even when a
+or schema-serialization task, node, and final method for Agenda and Final
+Decision serialization. These logical roles remain explicit even when a
 provider reuses the same physical client. Historical artifacts without these
 observations remain valid and are displayed as not recorded. No artifact stores
 hidden reasoning traces or raw provider conversations.
 
-Adapters may still encode transport provenance in versioned markers. Analyst
-nodes extract those markers from tool messages into typed evidence and remove
-the control syntax from human narrative. Prose is never the canonical
-provenance transport between graph stages.
+All routed adapters return `DataResult`: human content, producer observations,
+provenance, diagnostics and explicitly scoped spans travel together. Tools emit
+model-visible content and a separate checkpointed artifact; prefetching analysts
+carry the same serialized result. News caches store article identities, revisions
+and original retrieval times. Neither graph stages nor Incremental collectors
+recover provenance or news observations from Markdown or hidden text markers.
+Stock adapters also return portable OHLCV rows with an explicit instrument and
+adjustment basis. Full analytical views and Incremental Performance consume
+these rows directly. Financial spans carry producer disclosure and period dates;
+market calendars and cutoff admission remain in the market collectors.
 
 ### Profiles
 
@@ -557,7 +584,7 @@ responsibility rather than separate public graph nodes:
 | `context` | Deterministic role-context assembly; no provider call |
 | `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
 | `audit` | Schema-focused extraction of a small report/deliberation audit envelope |
-| `debate.agenda.serialize`, `committee.final.serialize.numeric` | Semantic structured generation by the selected reasoning client |
+| `debate.agenda.serialize` | Semantic structured generation by the selected reasoning client |
 | `committee.final.serialize.core` and other `serialize` phases | Schema serialization by a schema-focused client |
 | other suffixes | Workflow or system activity outside the standard phases |
 
@@ -589,6 +616,14 @@ referenceable but is never copied into the current Node.
 
 The semantic synthesis call produces both the readable Incremental analysis
 brief and the source text used by strict structured serializers.
+All synthesis stages use the same compact input projection. When source content
+exactly matches a producer observation's kind, key and serialized values, the
+projection supplies that structured observation once and labels the omitted
+duplicate body. Any additional source text prevents this substitution. Original
+Evidence, provenance, retrieval/publication times, source limitations and fallback
+facts remain in the immutable bundle. The input also enumerates the valid Full
+Baseline component IDs so serializers can copy them without inventing names.
+The Method Snapshot versions this projection; historical snapshots are not rewritten.
 Markdown Evidence references are normalized against the baseline and current
 bundles before the brief is committed. A bounded assessment serializer then
 produces the required Research Reassessment, whole-Decision outcome, outcome
@@ -699,6 +734,13 @@ at assembly time.
 
 ### Shared observations and bounded news continuity
 
+`domain/data_result.py` defines source content, observations, provenance,
+diagnostics and bounded temporal spans independently of transport text.
+Professional signals and the cross-region macro panel return this result directly;
+Full and Incremental read their producer observations and numeric facts without
+an ambient observation sink.
+The market signal registry adds source policy and retains bounded failure handling.
+
 `source_observations` transports producer-owned records beside existing tool
 strings. Full fundamental prefetch and Incremental collectors consume the same
 financial summaries; professional signals and macro observations retain their
@@ -787,7 +829,8 @@ roles, tenant isolation, or Internet-facing hardening.
 
 ## Validation boundaries
 
-The default suite is offline. It covers configuration isolation, lifecycle
+The default suite is offline; [test responsibilities](testing.md) identifies each
+behavior owner and verification boundary. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
 SSE replay, cancellation/retry/run templates, SQLite backup, migration,
 point-in-time evidence sealing, API security, frontend behavior,
@@ -801,24 +844,44 @@ recorded.
 ## Implementation map
 
 The root package intentionally exposes only `TradingAgents`, `AnalysisRequest`,
-`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__` as its
+`AnalysisResult`, `ArtifactGenerationObservation`, `ResearchDecision`,
+`RunProfile`, and `__version__` as its
 public Python API. Specialized contracts remain owned by their subsystem
 modules.
 
 - Public API: `tradingagents/client.py`,
-  `tradingagents/application/contracts.py`
+  `tradingagents/domain/runs.py` and `tradingagents/domain/decision.py`
 - Lifecycle: `tradingagents/application/service.py`
 - Worker: `tradingagents/application/worker.py`
-- Repository/schema: `tradingagents/application/repository.py`,
-  `tradingagents/application/database.py`
+- Repository/schema: `tradingagents/persistence/repository.py`,
+  `tradingagents/persistence/models.py`
+- Configuration documents and resolution: `tradingagents/configuration/`
+- Configuration persistence: `tradingagents/persistence/configuration.py`
+- Model protocols and construction: `tradingagents/llm/`
 - Migrations: `tradingagents/persistence/`
-- Graph: `tradingagents/graph/research_graph.py`
-- Agent tools: `tradingagents/agents/utils/`
+- Graph: `tradingagents/research/full/workflow.py`
+- Analysts, tools, prompts and state: `tradingagents/research/`
+- Incremental synthesis and recovery: `tradingagents/research/incremental/synthesis.py`
+- CLI: `tradingagents/cli/`
 - HTTP/security: `tradingagents/web/`
 - React application: `frontend/`
-- Routing: `tradingagents/dataflows/interface.py`
-- Japan/China: `tradingagents/dataflows/jp/`,
-  `tradingagents/dataflows/cn/`
+- Routing: `tradingagents/data/interface.py`
+- Japan/China: `tradingagents/data/jp/`,
+  `tradingagents/data/cn/`
+
+The domain package owns typed research contracts and pure rules; it does not
+import application orchestration, persistence, market adapters or SDK clients.
+Research receives a scoped runtime context and explicit artifact/evidence sinks.
+Research synthesis separates readable deliberation, serializer drafts, decision
+prompt guidance, Decision serialization, optional reference validation and
+presentation formatting. These modules preserve generation budgets and exchange
+typed products; reference validation does not invoke providers.
+The repository composes private execution, research-write, Timeline-query,
+artifact and lifecycle operations over a shared session factory. Operations that
+commit a research result retain their complete transaction boundary. Full
+completion always commits a Decision and Research Node; Incremental uses its
+own atomic product commit. Runs without Nodes represent uncommitted execution
+history and cannot use the old successful-without-Node completion path.
 
 ### Research workspace presentation
 
@@ -829,10 +892,11 @@ pagination. `total` counts the filtered set. `primary_head_run_id`,
 Cycle head; `latest_analysis_date` still describes the latest active research
 across cycles. These are derived reads and introduce no persistence migration.
 
-The instrument route `/timelines/:instrument?node=:id` shares the Run reader
-with legacy `/runs/:id` links. Selecting history does not select a Primary
-Cycle. Technical snapshots, recovery records, numeric audit appendices, and
-raw events are available under `view=diagnostics`; evidence and consequential
+The instrument route `/timelines/:instrument?node=:id` is the research reader.
+Run routes `/runs/:id` show execution and diagnostics; retired reading query
+values do not redirect to research. Selecting history does not select a Primary
+Cycle. Technical snapshots, recovery records, and
+raw events are available on the Run diagnostics page; evidence and consequential
 limitations stay reachable from research reading. Presentation never rewrites
 stored reports or export products. The dashboard uses bounded summary and Run
 list requests, without loading individual reports.
@@ -848,7 +912,7 @@ from the Primary assessment, including when another cycle completed more recentl
 `GET /api/v1/run-groups` matches the existing task filters before paging complete
 groups. A committed Full baseline supplies the parent context even when only an
 Incremental task matches. Committed children and related uncommitted tasks occupy
-separate arrays. Independent Full tasks and Legacy runs are standalone groups.
+separate arrays. Independent Full tasks are standalone groups.
 These reads do not load reports, Evidence or artifacts and create no new tables.
 
 `POST /api/v1/runs/lifecycle-preview` is a read-only ownership preview. It returns
@@ -859,3 +923,8 @@ scope before any mutation. Existing callers may omit the field. Actual transitio
 compatibility and uniqueness validations remain authoritative at submission.
 Related uncommitted tasks never become owned nodes merely because they are grouped
 under a baseline in the UI. Restore retains the existing cascade provenance rules.
+
+Frontend composition and routing live in `frontend/src/app`. Research reading
+and creation, execution diagnostics, and settings live in `features/research`,
+`features/runs`, and `features/settings`, with adjacent tests and styles. Shared
+UI primitives, hooks, and generated API contracts live in `shared`.

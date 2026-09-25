@@ -11,36 +11,17 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import (
-    FastAPI,
-    Header,
-    HTTPException,
-    Path as PathParam,
-    Query,
-    Request,
-    Response,
-)
+from fastapi import FastAPI, Header, HTTPException, Path as PathParam, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from tradingagents.application.contracts import (
-    AnalysisCutoffContext,
-    EvidenceBundle,
-    RecentInstrument,
-    ResearchArtifact,
-    ResearchNodeComparison,
-    ResearchTimelinePage,
-    RunEvent,
-    RunGroupPage,
-    RunLifecyclePreview,
-    RunPage,
-    RunStatus,
-    RunTrashState,
-    RunView,
-    report_language_value,
-)
-from tradingagents.application.errors import (
+from tradingagents.application.maintenance import TrashMaintenance
+from tradingagents.application.service import AnalysisService
+from tradingagents.configuration.settings import AppSettings
+from tradingagents.domain.artifacts import ResearchArtifact
+from tradingagents.domain.common import RunStatus, RunTrashState, report_language_value
+from tradingagents.domain.errors import (
     FutureAnalysisCutoffError,
     IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
@@ -48,8 +29,16 @@ from tradingagents.application.errors import (
     InvalidResearchNodeComparisonError,
     UnsupportedInstrumentError,
 )
-from tradingagents.application.maintenance import TrashMaintenance
-from tradingagents.application.repository import (
+from tradingagents.domain.evidence import EvidenceBundle
+from tradingagents.domain.history import RecentInstrument, RunGroupPage, RunPage
+from tradingagents.domain.runs import AnalysisCutoffContext, RunEvent, RunView
+from tradingagents.domain.timeline import (
+    ResearchNodeComparison,
+    ResearchTimelinePage,
+    RunLifecyclePreview,
+)
+from tradingagents.llm.model_discovery import ModelDiscoveryService
+from tradingagents.persistence._repository_common import (
     ArtifactConflictError,
     EvidenceConflictError,
     EvidenceNotSealedError,
@@ -58,24 +47,17 @@ from tradingagents.application.repository import (
     InvalidRunTransitionError,
     RunNotFoundError,
 )
-from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
-from tradingagents.llm_clients.model_discovery import (
-    ModelDiscoveryService,
-    UnknownProviderError,
-)
 from tradingagents.version import __version__
-
-from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
-from .models import (
+from tradingagents.web.auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
+from tradingagents.web.models import (
     AnalysisCutoffErrorResponse,
     CapabilitiesResponse,
+    ConnectionModelCatalog,
     FullBaselineCandidates,
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
     PrimaryCycleSelectionRequest,
-    ProviderModelCatalog,
     RequestValidationErrorResponse,
     ResearchNodeComparisonRequest,
     RunBatchRequest,
@@ -106,7 +88,9 @@ def create_app(
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
-    model_discovery = model_discovery or ModelDiscoveryService(settings, configuration=service.configuration)
+    model_discovery = model_discovery or ModelDiscoveryService(
+        service.configuration.connection_discovery_snapshot
+    )
     maintenance = maintenance or TrashMaintenance(settings, repository)
     auth = LanSessionManager(settings)
 
@@ -127,7 +111,8 @@ def create_app(
         description="Local evidence-first investment research run center.",
         lifespan=lifespan,
     )
-    from .settings_api import register_settings_routes
+    from tradingagents.web.settings_api import register_settings_routes
+
     register_settings_routes(app, service.configuration)
     app.state.settings = settings
     app.state.service = service
@@ -657,6 +642,7 @@ def create_app(
             Header(alias="Last-Event-ID"),
         ] = None,
         after: Annotated[int, Query(ge=0)] = 0,
+        event_format: Literal["named", "message"] = "named",
     ):
         repository.get_run(run_id)
         cursor = after
@@ -685,7 +671,8 @@ def create_app(
                     for event in events:
                         cursor = event.sequence
                         data = event.model_dump_json()
-                        yield (f"id: {event.sequence}\nevent: {event.event_type}\ndata: {data}\n\n")
+                        event_name = event.event_type if event_format == "named" else "message"
+                        yield (f"id: {event.sequence}\nevent: {event_name}\ndata: {data}\n\n")
                 else:
                     idle_ticks += 1
                     view = repository.get_run(run_id)
@@ -739,42 +726,17 @@ def create_app(
         response_model=CapabilitiesResponse,
     )
     def capabilities():
-        providers = {}
-        for provider, (definition, availability) in model_discovery.providers().items():
-            providers[provider] = {
-                "label": definition.label,
-                "api_key_required": definition.api_key_required,
-                "api_key_configured": availability.api_key_configured,
-                "configured": availability.configured,
-                "selectable": availability.selectable,
-                "unavailable_reason": availability.reason,
-                "model_discovery_supported": definition.adapter != "custom",
-            }
-        from tradingagents.application.model_connections import legacy_connection_id
-
         configuration = service.configuration.read()
         defaults = service.configuration.default_run_settings()
         return CapabilitiesResponse(
             configuration_initialized=configuration.initialized,
             connections=configuration.connections,
-            legacy_connections={name: legacy_connection_id(name) for name in providers},
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
             output_languages=["en", "zh-CN", "ja"],
-            providers=providers,
             defaults={
-                "quick_connection_id": (
-                    defaults.quick_binding.connection.id if defaults.quick_binding else None
-                ),
-                "deep_connection_id": (
-                    defaults.deep_binding.connection.id if defaults.deep_binding else None
-                ),
+                "models": configuration.values.models,
                 "profile": defaults.profile.value,
-                "llm_provider": defaults.llm_provider,
-                "quick_model": defaults.quick_model,
-                "deep_model": defaults.deep_model,
-                "quick_reasoning_effort": defaults.quick_reasoning_effort,
-                "deep_reasoning_effort": defaults.deep_reasoning_effort,
                 "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
                 "trash_retention_days": configuration.values.trash_retention_days,
@@ -783,24 +745,8 @@ def create_app(
         )
 
     @app.get(
-        f"{API_PREFIX}/providers/{{provider}}/models",
-        response_model=ProviderModelCatalog,
-    )
-    def provider_models(
-        provider: str,
-        refresh: bool = False,
-    ):
-        try:
-            return model_discovery.discover(provider, refresh=refresh)
-        except UnknownProviderError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail="Unknown model provider",
-            ) from exc
-
-    @app.get(
         f"{API_PREFIX}/settings/connections/{{identity}}/models",
-        response_model=ProviderModelCatalog,
+        response_model=ConnectionModelCatalog,
     )
     def connection_models(identity: str, refresh: bool = False):
         return model_discovery.discover_connection(identity, refresh=refresh)

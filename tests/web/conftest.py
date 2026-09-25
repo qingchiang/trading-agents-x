@@ -6,14 +6,14 @@ from pathlib import Path
 import httpx2 as httpx
 import pytest
 
-from tradingagents.application.repository import RunRepository
 from tradingagents.application.service import AnalysisService
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 from tradingagents.persistence import upgrade_database
+from tradingagents.persistence.repository import RunRepository
 from tradingagents.web import create_app
 
 
-def _equity_resolver(ticker: str) -> dict[str, str]:
+def _equity_resolver(ticker: str, *, data_context) -> dict[str, str]:
     return {"symbol": ticker, "quote_type": "EQUITY"}
 
 
@@ -28,7 +28,7 @@ def web_settings(tmp_path: Path) -> AppSettings:
         load_env_files=False,
     )
 
-    from tests.configuration_helpers import initialize_configuration
+    from tests.support.configuration_helpers import initialize_configuration
     initialize_configuration(settings)
     return settings
 

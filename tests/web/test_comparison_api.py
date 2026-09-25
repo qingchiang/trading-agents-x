@@ -5,16 +5,13 @@ from datetime import UTC, date, datetime
 import httpx2 as httpx
 import pytest
 
-from tests.application.test_cycle_trash_lifecycle import _commit_node
-from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    EvidenceBundle,
-    EvidenceItem,
-    RunStatus,
-)
-from tradingagents.application.database import RunRecord
+from tests.support.cycles import _commit_node
+from tests.support.factories import research_decision
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.configuration import ConfigurationStore
+from tradingagents.persistence.models import RunRecord
 
 
 def _selection(node_id: str, lifecycle_state: str = "active") -> dict[str, str]:
@@ -43,11 +40,10 @@ def _commit_full(repository, settings, ticker: str, analysis_date: date) -> str:
     request = AnalysisRequest(ticker=ticker, analysis_date=analysis_date)
     run, _ = repository.create_run(
         request,
-        settings.resolve_run(request).snapshot(),
+        ConfigurationStore(settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         research_schema_version="1",
         information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
         method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
-        research_kind="full",
     )
     repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -168,10 +164,10 @@ async def test_comparison_api_rejects_every_invalid_selection_path(
         make_primary=False,
     )
     foreign = _commit_full(web_repository, web_settings, "AAPL", date(2026, 7, 20))
-    legacy_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19))
-    legacy, _ = web_repository.create_run(
-        legacy_request,
-        web_settings.resolve_run(legacy_request).snapshot(),
+    uncommitted_request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 19), make_primary=False)
+    uncommitted, _ = web_repository.create_run(
+        uncommitted_request,
+        ConfigurationStore(web_settings).resolve_request(uncommitted_request, require_initialized=False)[1].snapshot(),
     )
     web_repository.trash_runs((trashed.id,))
     web_repository.trash_runs((purged.id,))
@@ -181,7 +177,7 @@ async def test_comparison_api_rejects_every_invalid_selection_path(
         session.get(RunRecord, cancelled.id).status = RunStatus.CANCELLED.value
 
     invalid_pairs = (
-        (legacy.id, "retained Research Node"),
+        (uncommitted.id, "retained Research Node"),
         (failed.id, "Failed or cancelled"),
         (cancelled.id, "Failed or cancelled"),
         (foreign, "Instrument Key"),

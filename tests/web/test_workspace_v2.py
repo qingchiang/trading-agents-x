@@ -2,14 +2,11 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from tests.factories import research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    AnalysisResult,
-    EvidenceBundle,
-    EvidenceItem,
-    RunStatus,
-)
+from tests.support.factories import research_decision
+from tradingagents.domain.common import RunStatus
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem
+from tradingagents.domain.runs import AnalysisRequest, AnalysisResult
+from tradingagents.persistence.configuration import ConfigurationStore
 
 
 def commit_full(
@@ -22,11 +19,10 @@ def commit_full(
     )
     run, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_schema_version="2",
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
+        research_schema_version="3",
         information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
         method_snapshot={"schema_version": "1"},
-        research_kind="full",
     )
     web_repository.claim_run(run.id, "fixture", 30)
     item = EvidenceItem.create(
@@ -66,9 +62,7 @@ async def test_group_search_keeps_baseline_context_for_pending_incremental(
     )
     child, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_kind="incremental",
-        full_baseline_run_id=baseline,
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         incremental_input_fingerprint="fixture-pending",
     )
     response = await web_client.get("/api/v1/run-groups?status=queued&limit=1")
@@ -96,9 +90,7 @@ async def test_lifecycle_preview_excludes_uncommitted_tasks_and_checks_scope(
     )
     child, _ = web_repository.create_run(
         request,
-        web_settings.resolve_run(request).snapshot(),
-        research_kind="incremental",
-        full_baseline_run_id=baseline,
+        ConfigurationStore(web_settings).resolve_request(request, require_initialized=False)[1].snapshot(),
         incremental_input_fingerprint="fixture-pending",
     )
     preview = await web_client.post(
@@ -152,7 +144,7 @@ async def test_recent_summary_keeps_primary_judgment_separate_from_newer_cycle(
 async def test_preview_scope_changes_when_a_child_commits_and_restore_preserves_independent_trash(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     first = _commit_node(
@@ -212,7 +204,7 @@ async def test_preview_scope_changes_when_a_child_commits_and_restore_preserves_
 async def test_groups_page_whole_cycles_and_do_not_count_hidden_trash(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     child = _commit_node(
@@ -236,7 +228,7 @@ async def test_groups_page_whole_cycles_and_do_not_count_hidden_trash(
 async def test_restore_preview_reports_existing_cycle_cutoff_conflict(
     web_client, web_repository, web_settings
 ):
-    from tests.application.test_cycle_trash_lifecycle import _commit_node
+    from tests.support.cycles import _commit_node
 
     baseline = _commit_node(web_repository, web_settings, analysis_date=date(2026, 7, 20))
     child = _commit_node(

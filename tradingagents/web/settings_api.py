@@ -3,13 +3,9 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from tradingagents.application.configuration import (
-    ConfigurationConflict,
-    ConfigurationError,
-    ConfigurationStore,
-)
-from tradingagents.application.configuration_catalog import configuration_schema
-from tradingagents.application.configuration_models import (
+from tradingagents.configuration.catalog import configuration_schema
+from tradingagents.configuration.errors import ConfigurationConflict, ConfigurationError
+from tradingagents.configuration.models import (
     ConfigurationPatch,
     ConfigurationSchema,
     ConfigurationView,
@@ -18,8 +14,8 @@ from tradingagents.application.configuration_models import (
     ImportPreview,
     ImportRequest,
 )
-
-from .auth import LanSessionManager
+from tradingagents.persistence.configuration import ConfigurationStore
+from tradingagents.web.auth import LanSessionManager
 
 
 def register_settings_routes(app: FastAPI, store: ConfigurationStore):

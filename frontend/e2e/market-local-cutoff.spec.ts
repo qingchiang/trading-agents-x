@@ -1,3 +1,4 @@
+import { capabilities as makeCapabilities, modelCatalog } from "./fixtures/models";
 import { expect, test } from "@playwright/test";
 
 const serverMarketDate = "2026-09-04";
@@ -14,28 +15,10 @@ for (const timezoneId of ["Pacific/Kiritimati", "Pacific/Honolulu"]) {
         const url = new URL(request.url());
         const path = url.pathname;
         if (path === "/api/v1/capabilities") {
-          return route.fulfill({ json: {
-            profiles: ["fast", "standard", "deep"],
-            analysts: ["market", "social", "news", "fundamentals"],
-            output_languages: ["en", "zh-CN", "ja"],
-            providers: { openai: { label: "OpenAI", api_key_required: true,
-              api_key_configured: true, configured: true, selectable: true,
-              unavailable_reason: null, model_discovery_supported: true } },
-            defaults: { profile: "standard", llm_provider: "openai",
-              quick_model: "gpt-5.4-mini", deep_model: "gpt-5.5",
-              quick_reasoning_effort: "provider_default",
-              deep_reasoning_effort: "provider_default", output_language: "en",
-              lan_enabled: false, trash_retention_days: 30 },
-          } });
+          return route.fulfill({ json: makeCapabilities("en") });
         }
-        if (path === "/api/v1/providers/openai/models") {
-          return route.fulfill({ json: { provider: "openai", models: [
-            { id: "gpt-5.4-mini", label: "Quick", compatibility: "supported",
-              reasoning_efforts: ["provider_default"], default_roles: ["quick"] },
-            { id: "gpt-5.5", label: "Deep", compatibility: "supported",
-              reasoning_efforts: ["provider_default"], default_roles: ["deep"] },
-          ], source: "fixture", fetched_at: "2026-09-04T10:30:00Z",
-          stale: false, warning: null } });
+        if (path === "/api/v1/settings/connections/default/models") {
+          return route.fulfill({ json: modelCatalog });
         }
         if (path === "/api/v1/instruments/recent") {
           return route.fulfill({ json: [] });

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from tradingagents.application.settings import AppSettings
+from tradingagents.configuration.settings import AppSettings
 
 COOKIE_NAME = "tradingagents_session"
 SESSION_MAX_AGE = 12 * 60 * 60

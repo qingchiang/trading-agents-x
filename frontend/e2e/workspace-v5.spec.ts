@@ -66,15 +66,14 @@ test("reads diagnostics directly and searches and downloads complete JSON beyond
     const url = new URL(route.request().url());
     const value = respond(url, route.request().method()) as Record<string, any>;
     if (url.pathname === '/api/v1/runs/full') {
-      value.run.config_snapshot = { quick_model: 'quick-recorded', quick_reasoning_effort: 'medium', deep_model: 'deep-recorded', deep_reasoning_effort: 'high', temperature: 0, extra };
+      value.run.config_snapshot = { quick_binding: { model: 'quick-recorded', reasoning_effort: 'medium' }, deep_binding: { model: 'deep-recorded', reasoning_effort: 'high' }, temperature: 0, extra };
       value.run.metrics = { llm_calls: 0, input_tokens: 1250 };
-      value.result.numeric_audit = null;
     }
     return route.fulfill({ json: value });
   });
   await page.goto('/runs/full?view=diagnostics');
   await expect(page.getByRole('heading', { name: 'Run metrics and diagnostics' })).toBeVisible();
-  await expect(page.getByText('Audit not recorded', { exact: true })).toBeVisible();
+  await expect(page.locator('.numeric-audit-appendix')).toHaveCount(0);
   await expect(page.getByText('quick-recorded', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Raw record: Configuration snapshot', exact: true }).click();
   const viewer = page.getByRole('region', { name: 'Raw record: Configuration snapshot', exact: true });
@@ -101,43 +100,29 @@ test("reads diagnostics directly and searches and downloads complete JSON beyond
   }
 });
 
-test('preserves baseline audit problems and evidence through incremental diagnostics at every viewport', async ({ page }) => {
+test('reads generic diagnostic history without old audit UI at every viewport', async ({ page }) => {
   const respond = workspaceFixture();
   await page.addInitScript(() => localStorage.setItem('tradingagents-locale', 'en'));
   await page.route('**/api/v1/**', route => {
     const url = new URL(route.request().url());
-    const value = structuredClone(respond(url, route.request().method())) as Record<string, any>;
-    if (url.pathname === '/api/v1/runs/full') {
-      const calculation = value.result.decision.calculation_records[0];
-      value.result.numeric_audit = { status: 'complete', requirement_checks: [{ requirement_id: 'display-check', calculation_id: calculation.id, component_path: 'thesis', label: calculation.decision_uses[0].label, stated_value: 1000, canonical_result: 100, comparison_result: 100, comparison_difference: -900, rounded_stated_value: 1000, rounded_canonical_result: 100, fraction_digits: 2, display_scale: 'base', unit: 'USD', formula: calculation.formula, inputs: calculation.inputs, input_evidence_refs: calculation.input_evidence_refs, calculation_status: 'verified', display_status: 'mismatched', issue_codes: ['numeric.display_mismatch'] }], omitted_components: [], snapshots: [] };
+    if (url.pathname === '/api/v1/runs/increment/events') {
+      const events = ['decision.reference_omitted', 'node.numeric_audit_degraded', 'run.succeeded'].map((event_type, index) => ({
+        run_id: 'increment', sequence: index + 1, attempt: 1, event_type, node: 'incremental.synthesis.decision',
+        payload: { field_path: 'market_reference_levels.0', validation_issues: ['reference.refs_invalid'] },
+        created_at: '2026-07-24T12:00:00Z',
+      }));
+      return route.fulfill({ contentType: 'text/event-stream', body: events.map(event =>
+        `id: ${event.sequence}\nevent: message\ndata: ${JSON.stringify(event)}\n\n`).join('') });
     }
-    if (url.pathname === '/api/v1/runs/increment') {
-      value.result.numeric_audit = null;
-      value.result.evidence.items = [];
-    }
-    return route.fulfill({ json: value });
+    return route.fulfill({ json: respond(url, route.request().method()) });
   });
   for (const [width, height] of [[390,844], [768,1024], [1080,1920], [1440,1000], [1920,1080], [2560,1440]]) {
     await page.setViewportSize({ width, height });
     await page.goto('/runs/increment?view=diagnostics');
-    const audit = page.locator('.numeric-audit-appendix');
-    await expect(audit.getByText('Audit not recorded', {exact: true})).toBeVisible();
-    await expect(audit.getByRole('heading', { name: 'Baseline audit result', exact: true })).toBeVisible();
-    await expect(audit.getByText('Display mismatched')).toBeVisible();
-    const row = audit.locator('article').first();
-    expect((await row.boundingBox())!.height, 'Default audit row stays compact while retaining its status and comparison values').toBeLessThan(260);
-    await row.getByText('Formula and Evidence', { exact: true }).click();
-    const trigger = row.getByRole('button', { name: /Open evidence/ }).last();
-    await trigger.click();
-    await expect(page.getByRole('dialog')).toContainText('Full baseline');
-    await expect(page.getByRole('dialog')).toContainText('100 USD');
-    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-    await expect(trigger).toBeFocused();
+    await expect(page.locator('.numeric-audit-appendix')).toHaveCount(0);
+    await expect(page.getByRole('option', { name: 'node.numeric_audit_degraded' })).toBeAttached();
+    await page.getByRole('button', { name: 'Raw record: 1 · decision.reference_omitted', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Raw record: 1 · decision.reference_omitted', exact: true })).toContainText('reference.refs_invalid');
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-    await audit.getByRole('link', { name: /View baseline audit/ }).click();
-    await expect(page).toHaveURL(/runs\/full\?view=diagnostics#numeric-audit/);
-    await expect(page.getByRole('heading', { name: 'Current audit result', exact: true })).toBeVisible();
-    await expect(page.getByText('Display mismatched')).toBeVisible();
-    await expect(page.locator('#numeric-audit > header')).toBeInViewport();
   }
 });

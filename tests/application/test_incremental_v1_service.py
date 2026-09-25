@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, date, datetime
 
@@ -7,80 +8,57 @@ import pytest
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
-from tests.application.test_service import _equity_resolver, _Graph, _service
-from tests.factories import analyst_report, research_decision
-from tradingagents.application.contracts import (
-    AnalysisRequest,
-    BenchmarkSeriesResult,
+from tests.research_helpers import default_incremental_synthesizer
+from tests.support.factories import analyst_report, research_decision
+from tests.support.incremental import (
+    _incremental_service,
+    _pit_collection,
+    _sources,
+    _unavailable_domains,
+)
+from tests.support.service import _equity_resolver, _Graph, _service
+from tradingagents.application.service import AnalysisService
+from tradingagents.domain.collection import (
     CollectionDiagnostic,
     CollectionDomainResult,
-    CollectionSourceProvenance,
     CollectionSummary,
-    EvidenceBundle,
-    EvidenceItem,
-    EvidenceOrigin,
-    FullResearchRequiredReason,
     IncrementalCollectionRequest,
+    IncrementalEvidenceCandidate,
+)
+from tradingagents.domain.common import ReportLanguage, RunStatus
+from tradingagents.domain.data import SourceObservation
+from tradingagents.domain.decision_components import baseline_component_ids
+from tradingagents.domain.errors import (
+    InvalidIncrementalBaselineError,
+    NoInformationAdvancementError,
+    UnsupportedInstrumentError,
+)
+from tradingagents.domain.evidence import EvidenceBundle, EvidenceItem, EvidenceOrigin
+from tradingagents.domain.incremental import (
+    FullResearchRequiredReason,
     IncrementalCollectionResult,
     IncrementalDecisionOutcome,
-    IncrementalEvidenceCandidate,
+    ReassessmentDisposition,
+)
+from tradingagents.domain.performance import (
+    BenchmarkSeriesResult,
     MarketSeriesPoint,
     MarketSeriesResult,
-    NumericAuditStatus,
-    ReassessmentDisposition,
-    ReportLanguage,
-    RunStatus,
 )
-from tradingagents.application.database import (
+from tradingagents.domain.runs import AnalysisRequest
+from tradingagents.llm.runtime import RunLLMs
+from tradingagents.persistence._repository_common import EvidenceConflictError
+from tradingagents.persistence.models import (
     DecisionRecord,
     ResearchNodeRecord,
     RunEvidenceRecord,
     RunRecord,
 )
-from tradingagents.application.errors import (
-    InvalidIncrementalBaselineError,
-    NoInformationAdvancementError,
-    UnsupportedInstrumentError,
-)
-from tradingagents.application.llms import RunLLMs
-from tradingagents.application.repository import EvidenceConflictError
-from tradingagents.application.service import (
-    AnalysisService,
-    _baseline_component_ids,
+from tradingagents.research.full.state import GraphExecution
+from tradingagents.research.incremental.synthesis import (
     _incremental_brief_fallback_title,
-    _incremental_decision_core,
-    _incremental_decision_from_core,
-    default_incremental_synthesizer,
 )
-from tradingagents.dataflows.config import get_config
-from tradingagents.graph.research_graph import GraphExecution
-from tradingagents.graph.structured_output import StructuredOutputError
-
-
-def _unavailable_domains(request: IncrementalCollectionRequest):
-    return tuple(
-        CollectionDomainResult(
-            domain=domain,
-            state="unavailable",
-            diagnostic=CollectionDiagnostic(code="not_configured"),
-        )
-        for domain in request.enabled_domains
-    )
-
-
-def _sources(
-    source: str,
-    retrieved_at: datetime,
-    *,
-    fallback: bool = False,
-) -> tuple[CollectionSourceProvenance, ...]:
-    return (
-        CollectionSourceProvenance(
-            source=source,
-            fallback=fallback,
-            retrieved_at=retrieved_at,
-        ),
-    )
+from tradingagents.research.synthesis.structured_output import StructuredOutputError
 
 
 @pytest.mark.parametrize(
@@ -96,60 +74,6 @@ def test_incremental_brief_fallback_title_is_localized(
     expected: str,
 ) -> None:
     assert _incremental_brief_fallback_title(language) == expected
-
-
-def _incremental_service(
-    app_settings,
-    repository,
-    *,
-    collector,
-    synthesizer=default_incremental_synthesizer,
-    eligibility_resolver=_equity_resolver,
-    identity_resolver=lambda symbol, _date: {"company_name": symbol},
-    local_name_resolver=lambda _ticker, _date, _config: None,
-    now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
-) -> AnalysisService:
-    return AnalysisService(
-        app_settings,
-        repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        graph_factory=_Graph,
-        identity_resolver=identity_resolver,
-        eligibility_resolver=eligibility_resolver,
-        local_name_resolver=local_name_resolver,
-        incremental_collector=collector,
-        incremental_synthesizer=synthesizer,
-        now=now,
-    )
-
-
-def _pit_collection(
-    request: IncrementalCollectionRequest,
-    candidate: IncrementalEvidenceCandidate,
-    *,
-    domain: str = "news",
-) -> IncrementalCollectionResult:
-    domains = list(_unavailable_domains(request))
-    index = request.enabled_domains.index(domain)
-    domains[index] = CollectionDomainResult(
-        domain=domain,
-        state="data",
-        sources=_sources(
-            candidate.evidence.source,
-            request.window_end,
-            fallback=candidate.evidence.fallback,
-        ),
-        temporal_bases=("pit",),
-        evidence_refs=(candidate.evidence.ref,),
-    )
-    return IncrementalCollectionResult(
-        collection_summary=CollectionSummary(
-            version=request.version,
-            market=request.market,
-            domains=tuple(domains),
-        ),
-        evidence=(candidate,),
-    )
 
 
 def test_real_full_social_observation_does_not_advance_for_incremental_retrieval_spelling(
@@ -211,7 +135,9 @@ def test_real_full_social_observation_does_not_advance_for_incremental_retrieval
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domains[request.enabled_domains.index("social")] = CollectionDomainResult(
             domain="social",
@@ -350,7 +276,7 @@ PE Ratio (TTM): 42"""
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _fundamentals_collection(request, candidate),
+        collector=lambda request, *, data_context: _fundamentals_collection(request, candidate),
         synthesizer=lambda input_: synthesis_inputs.append(input_),
     )
 
@@ -414,7 +340,7 @@ Market Cap: 456"""
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _fundamentals_collection(request, candidate),
+        collector=lambda request, *, data_context: _fundamentals_collection(request, candidate),
         synthesizer=synthesize,
     ).run(
         AnalysisRequest(
@@ -452,7 +378,9 @@ def test_incremental_service_commits_simplified_actual_result_products(
     )
     synthesis_inputs = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = []
         for domain in request.enabled_domains:
             if domain == "news":
@@ -525,6 +453,9 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert node.decision is not None
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
+    assert repository.get_run(result.run_id).method_snapshot["prompt_versions"] == {
+        "incremental_synthesis": "v4-research-references",
+    }
     assert result.metrics.llm_calls == 0
     assert result.instrument_name == "NVIDIA Corporation"
     assert result.instrument_local_name == "英伟达"
@@ -595,7 +526,7 @@ def test_incremental_service_rejects_inconsistent_decision_outcomes_atomically(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             synthesizer=synthesize,
         ).run(
             AnalysisRequest(
@@ -633,7 +564,7 @@ def test_incremental_outcome_is_optional_only_when_reading_historical_products(
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
     ).run(
         AnalysisRequest(
             ticker="NVDA",
@@ -688,7 +619,7 @@ def test_incremental_name_resolution_failure_does_not_block_research(
     result = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
         identity_resolver=fail_identity,
         local_name_resolver=fail_local_name,
     ).run(
@@ -863,7 +794,7 @@ def test_incremental_assessment_respects_one_repair_budget(
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -929,35 +860,101 @@ def test_incremental_assessment_respects_one_repair_budget(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "full_research_required"),
+    ("outcome", "full_research_required", "core_recovery"),
     (
-        ("unchanged", False),
-        ("unchanged", True),
-        ("updated", False),
-        ("updated", True),
+        ("unchanged", False, False),
+        ("unchanged", True, False),
+        ("updated", False, False),
+        ("updated", False, True),
+        ("updated", True, False),
     ),
 )
+@pytest.mark.parametrize("repeat_retrieval", [False, True])
+@pytest.mark.parametrize("extra_source_text", ["", "\nAdditional source limitation."])
 def test_production_incremental_synthesis_generates_decision_only_when_updated(
     app_settings,
     repository,
     outcome: str,
     full_research_required: bool,
+    core_recovery: bool,
+    extra_source_text: str,
+    repeat_retrieval: bool,
 ) -> None:
-    baseline = _service(app_settings, repository).run(
+    from dataclasses import replace
+
+    from tradingagents.domain.decision import MarketReferenceLevel
+    from tradingagents.domain.evidence import EvidenceTable, EvidenceTableColumn, EvidenceTableRow
+
+    class ReferenceGraph(_Graph):
+        def execute(self, context, **kwargs):
+            execution = super().execute(context, **kwargs)
+            ref = execution.evidence.items[0].ref
+            reference = MarketReferenceLevel(label="Baseline conditional value", value=100,
+                basis="derived", evidence_refs=(ref,), date_evidence_refs=(ref,),
+                as_of_date=date(2026, 7, 20), unit="USD", interpretation="Baseline assumptions.")
+            table = EvidenceTable.create(
+                title="LOCAL-BASELINE-VALIDATION-ONLY", purpose="Historical price",
+                columns=(EvidenceTableColumn(key="close", label="Close"),),
+                rows=(EvidenceTableRow(id="quote", cells={"close": {"raw_value": 100}}),),
+                evidence_refs=(ref,), source_format="structured",
+            )
+            evidence = EvidenceBundle(
+                instrument=execution.evidence.instrument,
+                analysis_date=execution.evidence.analysis_date,
+                items=execution.evidence.items, tables=(table,),
+                sealed_at=execution.evidence.sealed_at,
+            )
+            return replace(execution, evidence=evidence, decision=execution.decision.model_copy(
+                update={"market_reference_levels": (reference,)}))
+
+    baseline = _service(app_settings, repository, graph_factory=ReferenceGraph).run(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
     baseline_decision = repository.get_result(baseline.run_id).decision
     assert baseline_decision is not None
-    candidate = IncrementalEvidenceCandidate(
-        evidence=EvidenceItem.create(
-            source="fixture.news",
-            evidence_type="filing",
-            requested_date=date(2026, 7, 24),
-            available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
-            content="A bounded update for conditional Decision generation.",
-        )
+    observation = SourceObservation(
+        source="fixture.news", kind="filing", key="quarterly-update",
+        values={"detail": "UNIQUE-SOURCE-FACT", "amount": 0, "unit": "USD"},
+        retrieved_at=datetime(2026, 7, 24, 12, tzinfo=UTC),
+        available_at=datetime(2026, 7, 22, 12, tzinfo=UTC),
+        timing="Publication time verified", fallback=True,
     )
-    component_ids = _baseline_component_ids(baseline_decision)
+    evidence = observation.evidence(date(2026, 7, 24), instrument="NVDA")
+    if extra_source_text:
+        evidence = EvidenceItem.create(
+            **evidence.model_dump(exclude={"ref", "content", "origins"}),
+            origins=evidence.origins,
+            content=observation.content + extra_source_text,
+        )
+    candidate = IncrementalEvidenceCandidate(evidence=evidence)
+    candidates = (candidate,)
+    if repeat_retrieval:
+        from dataclasses import replace
+
+        later_observation = replace(observation, retrieved_at=datetime(2026, 7, 24, 13, tzinfo=UTC))
+        later = later_observation.evidence(date(2026, 7, 24), instrument="NVDA")
+        if extra_source_text:
+            later = EvidenceItem.create(
+                **later.model_dump(exclude={"ref", "content", "origins"}), origins=later.origins,
+                content=later_observation.content + extra_source_text,
+            )
+        candidates += (IncrementalEvidenceCandidate(evidence=later),)
+    component_ids = baseline_component_ids(baseline_decision)
+
+    def collect(request, *, data_context):
+        result = _pit_collection(request, candidate)
+        domains = tuple(
+            domain.model_copy(update={"sources": _sources(
+                candidate.evidence.source, datetime(2026, 7, 24, 13 if repeat_retrieval else 12, tzinfo=UTC), fallback=True,
+            ), "evidence_refs": tuple(c.evidence.ref for c in candidates)}) if domain.domain == "news" else domain
+            for domain in result.collection_summary.domains
+        )
+        return result.model_copy(update={
+            "evidence": candidates,
+            "collection_summary": result.collection_summary.model_copy(
+                update={"domains": domains},
+            ),
+        })
 
     class _Invoker:
         def __init__(self, parsed, prompts):
@@ -967,6 +964,8 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         def invoke(self, prompt, config=None):
             del config
             self.prompts.append(prompt)
+            if isinstance(self.parsed, dict) and "raw" in self.parsed:
+                return self.parsed
             return {
                 "raw": AIMessage(content=""),
                 "parsed": self.parsed,
@@ -1036,14 +1035,30 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
                     },
                     self.prompts,
                 )
-            if schema.__name__ == "_IncrementalDecisionPayload":
-                updated = baseline_decision.model_copy(
-                    update={"thesis": "The new filing materially updates the thesis."}
-                )
-                return _Invoker(
-                    {"decision": updated.model_dump(mode="json")},
-                    self.prompts,
-                )
+            if schema.__name__ == "_IncrementalDecisionPayload" and core_recovery:
+                return _Invoker({"raw": AIMessage(content="", response_metadata={"finish_reason": "length"}), "parsed": None}, self.prompts)
+            if schema.__name__ in {"_IncrementalDecisionPayload", "_IncrementalDecisionSection"}:
+                updated = baseline_decision.model_dump(mode="json")
+                updated['thesis'] = "The new filing materially updates the thesis."
+                if schema.__name__ == "_IncrementalDecisionSection":
+                    updated.pop('market_reference_levels')
+                    for scenario in updated['scenarios']:
+                        scenario.pop('reference_ranges')
+                else:
+                    updated['market_reference_levels'][0]['value'] = 140
+                    observed = {**updated['market_reference_levels'][0], "basis": "observed",
+                                "value": 100, "source_locator": {
+                                    "evidence_ref": baseline_decision.evidence_refs[0],
+                                    "table_id": repository.get_result(baseline.run_id).evidence.tables[0].id,
+                                    "row_id": "quote", "column": "close",
+                                }}
+                    updated['market_reference_levels'].extend([
+                        observed,
+                        {**observed, "source_locator": {**observed["source_locator"],
+                                                       "table_id": "et_000000000000"}},
+                        {"label": "Invalid optional reference"},
+                    ])
+                return _Invoker({"decision": updated}, self.prompts)
             raise AssertionError(f"unexpected schema: {schema.__name__}")
 
     serializer = _SerializerLLM()
@@ -1061,7 +1076,7 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=collect,
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1078,21 +1093,73 @@ def test_production_incremental_synthesis_generates_decision_only_when_updated(
     expected_calls = [("_IncrementalAssessmentPayload", None)]
     if outcome == "updated":
         expected_calls.append(("_IncrementalDecisionPayload", None))
+    if core_recovery:
+        expected_calls.append(("_IncrementalDecisionSection", None))
     assert serializer.calls == expected_calls
     confidence_instruction = (
-        "Never express final Decision confidence as a number, decimal, percentage, "
-        "or probability"
+        "Never express final Decision confidence as a number, decimal, percentage, or probability"
     )
     assert semantic.prompts
     assert serializer.prompts
+    saved = repository.get_evidence(result.run_id)
+    assert {i.ref for i in saved.items} == {c.evidence.ref for c in candidates}
+    assert all(c.evidence in saved.items for c in candidates)
+    for prompt in (*semantic.prompts, *serializer.prompts):
+        assert "LOCAL-BASELINE-VALIDATION-ONLY" not in prompt
+        assert prompt.count("UNIQUE-SOURCE-FACT") == (2 if extra_source_text else 1)
+        if extra_source_text:
+            assert "Additional source limitation." in prompt
+        assert all(c.evidence.ref in prompt for c in candidates)
+        if repeat_retrieval:
+            assert "2026-07-24T13:00:00+00:00" in prompt
+            payload, _ = json.JSONDecoder().raw_decode(prompt[prompt.index('{"full_baseline_run_id":'):])
+            projected = payload["incremental_evidence"]
+            expanded = {}
+            for item in projected["items"]:
+                item = deepcopy(item)
+                canonical = item.pop("same_observation_as", None)
+                if canonical:
+                    item = {**deepcopy(expanded[canonical]), **item}
+                if item.pop("content_from_observation", False):
+                    observed = item["provenance"]["observation"]
+                    item["content"] = f"{observed['kind']}: {observed['key']}\n" + json.dumps(
+                        observed["values"], ensure_ascii=False, sort_keys=True,
+                    )
+                expanded[item["ref"]] = item
+            for group in projected["observation_groups"]:
+                for retrieval in group["retrievals"]:
+                    for field in retrieval["fields"]:
+                        parent = expanded[retrieval["ref"]]
+                        for part in field["path"][:-1]:
+                            parent = parent[part]
+                        parent[field["path"][-1]] = field["value"]
+            assert expanded == {item.ref: item.model_dump(mode="json") for item in saved.items}
+        assert "2026-07-22T12:00:00Z" in prompt
+        assert "2026-07-24T12:00:00+00:00" in prompt
+        assert "Publication time verified" in prompt
+        assert '"fallback":true' in prompt
     assert all(
-        confidence_instruction in prompt
-        for prompt in (*semantic.prompts, *serializer.prompts)
+        confidence_instruction in prompt for prompt in (*semantic.prompts, *serializer.prompts)
     )
     assert result.decision is not None
     assert (
         result.decision.model_dump(mode="json") == baseline_decision.model_dump(mode="json")
     ) is (outcome == "unchanged")
+    assert baseline_decision.market_reference_levels[0].value == 100
+    if outcome == "unchanged":
+        assert result.decision.market_reference_levels[0].value == 100
+    elif core_recovery:
+        assert result.decision.market_reference_levels == ()
+    else:
+        assert [level.value for level in result.decision.market_reference_levels] == [140, 100]
+        assert any(
+            event.event_type == "decision.reference_omitted"
+            and event.payload["validation_issues"] == ["reference.locator_invalid"]
+            for event in repository.list_events(result.run_id)
+        )
+    if outcome == "updated":
+        assert any(event.event_type == 'decision.reference_omitted'
+                   for event in repository.list_events(result.run_id))
     node = repository.get_research_node(result.run_id)
     assert node is not None
     assert node.decision_outcome is IncrementalDecisionOutcome(outcome)
@@ -1108,7 +1175,7 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
     )
     baseline_decision = repository.get_result(baseline.run_id).decision
     assert baseline_decision is not None
-    component_ids = _baseline_component_ids(baseline_decision)
+    component_ids = baseline_component_ids(baseline_decision)
     candidate = IncrementalEvidenceCandidate(
         evidence=EvidenceItem.create(
             source="fixture.news",
@@ -1192,7 +1259,7 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
         identity_resolver=lambda symbol, _date: {"company_name": symbol},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
-        incremental_collector=lambda request: _pit_collection(request, candidate),
+        incremental_collector=lambda request, *, data_context: _pit_collection(request, candidate),
         incremental_synthesizer=None,
         now=lambda: datetime(2026, 7, 24, 20, tzinfo=UTC),
     )
@@ -1217,20 +1284,6 @@ def test_incremental_assessment_repair_consumes_the_shared_decision_repair_budge
     assert repository.get_research_node(failed_run.id) is None
 
 
-def test_incremental_decision_core_preserves_baseline_numeric_appendix() -> None:
-    baseline = research_decision().model_copy(
-        update={"numeric_audit_status": NumericAuditStatus.NOT_APPLICABLE}
-    )
-    core = _incremental_decision_core(baseline).model_copy(
-        update={"thesis": "Updated qualitative thesis."}
-    )
-
-    decision = _incremental_decision_from_core(core, baseline)
-
-    assert decision.thesis == "Updated qualitative thesis."
-    assert decision.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
-
-
 def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
     app_settings,
     repository,
@@ -1249,8 +1302,10 @@ def test_incremental_collector_uses_the_frozen_run_dataflow_configuration(
     )
     observed = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
-        observed.append((get_config(), request))
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
+        observed.append((dict(data_context.config), request))
         return _pit_collection(request, candidate)
 
     _incremental_service(
@@ -1290,7 +1345,7 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
     )
     calls = 0
 
-    def eligibility(symbol: str):
+    def eligibility(symbol: str, *, data_context):
         nonlocal calls
         calls += 1
         return {
@@ -1302,7 +1357,7 @@ def test_incremental_service_revalidates_eligibility_immediately_before_commit(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             eligibility_resolver=eligibility,
         ).run(
             AnalysisRequest(
@@ -1328,14 +1383,14 @@ def test_incremental_retry_uses_the_retained_run_dataflow_configuration(
     )
     observed_news_routes = []
 
-    def eligibility(symbol: str):
-        observed_news_routes.append(get_config()["data_vendors"]["news_data"])
+    def eligibility(symbol: str, *, data_context):
+        observed_news_routes.append(data_context.config["data_vendors"]["news_data"])
         return {"symbol": symbol, "quote_type": "EQUITY"}
 
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: IncrementalCollectionResult(
+        collector=lambda request, *, data_context: IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
                 market=request.market,
@@ -1402,7 +1457,7 @@ def test_incremental_commit_revalidates_baseline_schema_after_synthesis(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
             synthesizer=synthesize,
         ).run(
             AnalysisRequest(
@@ -1427,7 +1482,9 @@ def test_incremental_service_rejects_no_information_advancement_before_synthesis
     )
     synthesized = []
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1482,26 +1539,43 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
             value=110,
             content="The completed 2026-07-24 adjusted close.",
             fallback=True,
-            origins=(EvidenceOrigin(
-                source="fixture.market", evidence_type="adjusted_close",
-                retrieved_at="2026-07-24T21:00:00Z", fallback=True,
-                temporal_scope="point_in_time",
-            ),) if later_market_snapshot else (),
+            origins=(
+                EvidenceOrigin(
+                    source="fixture.market",
+                    evidence_type="adjusted_close",
+                    retrieved_at="2026-07-24T21:00:00Z",
+                    fallback=True,
+                    temporal_scope="point_in_time",
+                ),
+            )
+            if later_market_snapshot
+            else (),
         ),
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
-        extra = IncrementalEvidenceCandidate(evidence=EvidenceItem.create(
-            source="fixture.market", evidence_type="market_snapshot",
-            requested_date=date(2026, 7, 24), available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
-            content="A separate snapshot from the same provider, retrieved one minute later.",
-            fallback=True, origins=(EvidenceOrigin(
-                source="fixture.market", evidence_type="market_snapshot",
-                retrieved_at="2026-07-24T21:01:00Z", fallback=True,
-                temporal_scope="point_in_time",
-            ),),
-        ))
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
+        extra = IncrementalEvidenceCandidate(
+            evidence=EvidenceItem.create(
+                source="fixture.market",
+                evidence_type="market_snapshot",
+                requested_date=date(2026, 7, 24),
+                available_at=datetime(2026, 7, 24, 20, tzinfo=UTC),
+                content="A separate snapshot from the same provider, retrieved one minute later.",
+                fallback=True,
+                origins=(
+                    EvidenceOrigin(
+                        source="fixture.market",
+                        evidence_type="market_snapshot",
+                        retrieved_at="2026-07-24T21:01:00Z",
+                        fallback=True,
+                        temporal_scope="point_in_time",
+                    ),
+                ),
+            )
+        )
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1513,7 +1587,8 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
                 fallback=True,
             ),
             temporal_bases=("pit",),
-            evidence_refs=(market_evidence.evidence.ref,) + ((extra.evidence.ref,) if later_market_snapshot else ()),
+            evidence_refs=(market_evidence.evidence.ref,)
+            + ((extra.evidence.ref,) if later_market_snapshot else ()),
         )
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
@@ -1574,7 +1649,9 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
         now=lambda: datetime(2026, 7, 25, 5, tzinfo=UTC),
     )
     request = AnalysisRequest(
-        ticker="NVDA", analysis_date=date(2026, 7, 24), research_kind="incremental",
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
         full_baseline_run_id=baseline.run_id,
     )
     if series_minute:
@@ -1584,7 +1661,9 @@ def test_completed_stock_session_advances_and_persists_one_sealed_calculation(
     result = service.run(request)
     events = [event.event_type for event in repository.list_events(result.run_id)]
     assert events.index("run.started") < events.index("incremental.collection_started")
-    assert events.index("incremental.collection_started") < events.index("incremental.collection_completed")
+    assert events.index("incremental.collection_started") < events.index(
+        "incremental.collection_completed"
+    )
     assert events.index("incremental.synthesis_completed") < events.index("run.commit_started")
     assert events.index("run.commit_started") < events.index("run.succeeded")
 
@@ -1626,7 +1705,9 @@ def test_completed_stock_session_rejects_unrelated_market_evidence(
         available_on=date(2026, 7, 24),
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         market = request.enabled_domains.index("market")
         domains[market] = CollectionDomainResult(
@@ -1694,7 +1775,9 @@ def test_incremental_service_rejects_unadmitted_stock_series_advancement(
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return IncrementalCollectionResult(
             collection_summary=CollectionSummary(
                 version=request.version,
@@ -1757,7 +1840,9 @@ def test_incremental_service_calculates_benchmark_from_its_actual_series(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         return _pit_collection(request, candidate).model_copy(
             update={
                 "benchmark_series": (
@@ -1835,7 +1920,9 @@ def test_near_live_five_day_observation_is_admitted_without_claiming_pit(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         fundamentals = request.enabled_domains.index("fundamentals")
         domains[fundamentals] = CollectionDomainResult(
@@ -1943,7 +2030,9 @@ def test_incremental_service_persists_bounded_best_effort_collection_states(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = {
             "fundamentals": CollectionDomainResult(
                 domain="fundamentals",
@@ -2084,7 +2173,9 @@ def test_incremental_atomic_commit_failure_keeps_only_the_full_baseline(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         news = request.enabled_domains.index("news")
         domains[news] = CollectionDomainResult(
@@ -2143,7 +2234,9 @@ def test_incremental_synthesis_excludes_sibling_evidence_from_its_reference_clos
         AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         available_at = datetime(
             2026,
             7,
@@ -2252,7 +2345,9 @@ def test_incremental_service_rejects_copying_a_full_baseline_evidence_reference(
         }
     )
 
-    def collect_copied(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect_copied(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         domains = list(_unavailable_domains(request))
         domain = request.enabled_domains.index("news")
         domains[domain] = CollectionDomainResult(
@@ -2344,7 +2439,7 @@ def test_incremental_commit_rejects_collection_refs_outside_current_bundle(
         _incremental_service(
             app_settings,
             repository,
-            collector=lambda request: _pit_collection(request, candidate),
+            collector=lambda request, *, data_context: _pit_collection(request, candidate),
         ).run(
             AnalysisRequest(
                 ticker="NVDA",
@@ -2378,7 +2473,9 @@ def test_incremental_commit_revalidates_a_baseline_trashed_during_execution(
         )
     )
 
-    def collect(request: IncrementalCollectionRequest) -> IncrementalCollectionResult:
+    def collect(
+        request: IncrementalCollectionRequest, *, data_context
+    ) -> IncrementalCollectionResult:
         if mutation_phase == "collection":
             repository.trash_runs((baseline.run_id,))
         return _pit_collection(request, candidate)
@@ -2448,7 +2545,7 @@ def test_full_research_required_warning_allows_no_ref_but_rejects_a_dangling_ref
     service = _incremental_service(
         app_settings,
         repository,
-        collector=lambda request: _pit_collection(request, candidate),
+        collector=lambda request, *, data_context: _pit_collection(request, candidate),
         synthesizer=synthesize,
     )
     request = AnalysisRequest(
