@@ -99,7 +99,9 @@ the ordinary bounded structured-output recovery.
 
 Reference values are model-reported research content, not locally recomputed or
 program-verified numbers. `observed`, `interpreted` and `derived` describe their
-basis. Dates describe supporting data, not forecast horizons. There is no
+basis. Dates describe supporting data, not forecast horizons. Current synthesis
+prompt versions are shared by new Run method snapshots and Full artifact metadata;
+stored historical snapshots remain immutable. There is no
 independent valuation card, numeric catalog generation, formula interpreter,
 calculation record, numeric audit status or numeric repair phase. Normal
 presentation rounding does not change persisted values.
@@ -351,6 +353,11 @@ within a run.
 2. replays committed events after that sequence;
 3. polls for new events and emits periodic keepalives;
 4. closes after the run reaches a terminal state.
+
+The default SSE format retains named events. The Web requests
+`event_format=message` to receive every event through a single standard message
+listener, retaining the original `event_type` in each payload. Diagnostic and
+historical events therefore require no frontend event-type whitelist.
 
 Browser refresh therefore does not lose progress. SSE is one-way by design;
 run mutations use ordinary HTTP endpoints.

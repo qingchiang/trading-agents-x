@@ -2,32 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type RunDetail, type ResearchArtifact, type RunEvent } from "./api/client";
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
-const eventNames = [
-  "run.queued",
-  "run.started",
-  "run.commit_started",
-  "run.resumed",
-  "node.started",
-  "node.completed",
-  "phase.started",
-  "phase.completed",
-  "node.context_prepared",
-  "evidence.sealed",
-  "node.output_retry",
-  "node.output_recovered",
-  "node.output_failed",
-  "artifact.created",
-  "run.succeeded",
-  "run.failed",
-  "run.cancelled",
-  "run.cancel_requested",
-  "run.retry_queued",
-  "incremental.collection_completed",
-  "incremental.collection_started",
-  "incremental.no_advancement",
-  "incremental.synthesis_started",
-  "incremental.synthesis_completed",
-];
 
 /** Own requests and event subscriptions per record identity, including rapid A/B/A switches. */
 export function useRunRecord(runId: string, view: string) {
@@ -65,7 +39,7 @@ export function useRunRecord(runId: string, view: string) {
   useEffect(() => {
     if (!detail || (terminal.has(detail.run.status) && !["timeline", "diagnostics", "deliberation"].includes(view))) return;
     const attempt = detail.run.attempt;
-    const source = new EventSource(`/api/v1/runs/${runId}/events?after=${sequence.current}`);
+    const source = new EventSource(`/api/v1/runs/${runId}/events?after=${sequence.current}&event_format=message`);
     let active = true;
     const receive = (raw: MessageEvent<string>) => {
       if (!active || current.current !== identity) return;
@@ -80,7 +54,7 @@ export function useRunRecord(runId: string, view: string) {
       if (event.event_type === "artifact.created") setRevision(value => value + 1);
       if (event.attempt === attempt && ["run.succeeded", "run.failed", "run.cancelled"].includes(event.event_type)) source.close();
     };
-    eventNames.forEach(name => source.addEventListener(name, receive as EventListener));
+    source.addEventListener("message", receive as EventListener);
     source.onerror = () => { if (active) void refresh(); };
     return () => { active = false; source.close(); };
   }, [identity, runId, detail?.run.status, detail?.run.attempt, Boolean(detail), view, refresh]);

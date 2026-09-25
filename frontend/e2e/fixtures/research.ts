@@ -176,25 +176,8 @@ export function result(id: string) {
           reference_ranges: [],
         },
       ],
-      valuation_assessment: null,
       market_reference_levels: [],
       risk_review_adjustments: [],
-      calculation_records: Array.from({ length: 16 }, (_, index) => ({
-        id: `calc_fixture_${index + 1}`,
-        formula: "observed_value",
-        inputs: { observed_value: 100 + index },
-        input_evidence_refs: ["ev_0123456789ab"],
-        result: 100 + index,
-        unit: "USD",
-        as_of_date: "2026-07-24",
-        limitations: [],
-        decision_uses: [
-          {
-            component_path: "thesis",
-            label: `Observed anchor ${index + 1}`,
-          },
-        ],
-      })),
     },
     evidence: {
       version: "5",

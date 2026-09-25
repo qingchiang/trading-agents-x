@@ -642,6 +642,7 @@ def create_app(
             Header(alias="Last-Event-ID"),
         ] = None,
         after: Annotated[int, Query(ge=0)] = 0,
+        event_format: Literal["named", "message"] = "named",
     ):
         repository.get_run(run_id)
         cursor = after
@@ -670,7 +671,8 @@ def create_app(
                     for event in events:
                         cursor = event.sequence
                         data = event.model_dump_json()
-                        yield (f"id: {event.sequence}\nevent: {event.event_type}\ndata: {data}\n\n")
+                        event_name = event.event_type if event_format == "named" else "message"
+                        yield (f"id: {event.sequence}\nevent: {event_name}\ndata: {data}\n\n")
                 else:
                     idle_ticks += 1
                     view = repository.get_run(run_id)

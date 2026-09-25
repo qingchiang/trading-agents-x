@@ -41,8 +41,9 @@ class FakeEventSource {
   }
 
   emit(name: string, event: RunEvent) {
-    this.listeners.get(name)?.(
-      new MessageEvent(name, { data: JSON.stringify(event) }),
+    const transportName = new URL(this.url, "http://localhost").searchParams.get("event_format") === "message" ? "message" : name;
+    this.listeners.get(transportName)?.(
+      new MessageEvent(transportName, { data: JSON.stringify(event) }),
     );
   }
 }

@@ -453,6 +453,9 @@ def test_incremental_service_commits_simplified_actual_result_products(
     assert node.decision is not None
     assert len(synthesis_inputs) == 1
     assert not hasattr(synthesis_inputs[0], "outcome_review_status")
+    assert repository.get_run(result.run_id).method_snapshot["prompt_versions"] == {
+        "incremental_synthesis": "v4-research-references",
+    }
     assert result.metrics.llm_calls == 0
     assert result.instrument_name == "NVIDIA Corporation"
     assert result.instrument_local_name == "英伟达"

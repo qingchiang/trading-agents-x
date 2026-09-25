@@ -2284,3 +2284,24 @@ async def test_library_filters_before_paging_and_keeps_primary_judgment_date(
     assert named["total"] == 3
     assert named["items"][0]["instrument"] == "MSFT"
     assert (await web_client.get("/api/v1/timelines?warning_only=true")).json()["total"] == 0
+
+
+@pytest.mark.anyio
+async def test_sse_generic_messages_replay_all_diagnostic_event_types(web_client, web_service):
+    import json
+
+    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
+    kinds = ("decision.reference_omitted", "node.numeric_audit_degraded", "future.diagnostic")
+    for kind in kinds:
+        web_service.repository.append_event(queued.id, kind, payload={"field_path": "market_reference_levels.0"})
+    web_service.cancel(queued.id)
+    response = await web_client.get(
+        f"/api/v1/runs/{queued.id}/events?event_format=message&after=0",
+        headers={"Last-Event-ID": "1"},
+    )
+    assert response.status_code == 200
+    frames = [frame for frame in response.text.split("\n\n") if frame.strip()]
+    assert all("\nevent: message\n" in frame for frame in frames)
+    events = [json.loads(frame.split("\ndata: ", 1)[1]) for frame in frames]
+    assert [event["event_type"] for event in events] == [*kinds, "run.cancelled"]
+    assert [event["sequence"] for event in events] == [2, 3, 4, 5]

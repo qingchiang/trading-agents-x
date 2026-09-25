@@ -7976,6 +7976,20 @@
             }
           },
           {
+            "in": "query",
+            "name": "event_format",
+            "required": false,
+            "schema": {
+              "default": "named",
+              "enum": [
+                "named",
+                "message"
+              ],
+              "title": "Event Format",
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "Last-Event-ID",
             "required": false,

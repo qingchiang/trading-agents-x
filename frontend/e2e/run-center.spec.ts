@@ -241,9 +241,9 @@ test("runs, templates, trash, and restores local research", async ({
               run_id: eventMatch[1],
               sequence: index + 1,
               attempt: 1,
-              event_type: "node.completed",
+              event_type: index === 0 ? "node.numeric_audit_degraded" : index === 1 ? "decision.reference_omitted" : "node.completed",
               node: `fixture.stage.${index}`,
-              payload: {},
+              payload: index === 1 ? { field_path: "market_reference_levels.0", validation_issues: ["reference.refs_invalid"] } : {},
               created_at: new Date(
                 Date.parse(timestamp) + index * 1_000,
               ).toISOString(),
@@ -271,7 +271,7 @@ test("runs, templates, trash, and restores local research", async ({
         headers: { "Content-Type": "text/event-stream" },
         body: events
           .map((event) =>
-            `id: ${event.sequence}\nevent: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
+            `id: ${event.sequence}\nevent: ${url.searchParams.get("event_format") === "message" ? "message" : event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
           )
           .join(""),
       });
@@ -435,15 +435,12 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page.getByText("Decision-critical calculation audit")).toHaveCount(0);
   await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("link", { name: "Run & diagnostics" }).click();
-  await expect(page.locator(".calculation-record-list article")).toHaveCount(16);
-  await expect(page.getByText("calc_fixture_1", { exact: true })).toBeHidden();
-  await expect(
-    page
-      .locator(".numeric-calculation-detail")
-      .first()
-      .getByText("observed_value", { exact: true })
-      .first(),
-  ).toBeHidden();
+  await expect(page.locator(".calculation-record-list article")).toHaveCount(0);
+  await expect(page.locator(".numeric-audit-appendix")).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "decision.reference_omitted" })).toBeAttached();
+  await expect(page.getByRole("option", { name: "node.numeric_audit_degraded" })).toBeAttached();
+  await page.getByRole("button", { name: "Raw record: 2 · decision.reference_omitted", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Raw record: 2 · decision.reference_omitted" })).toContainText("reference.refs_invalid");
 
   await page.getByRole("link", { name: "Run progress" }).click();
   await expect(page.getByText("Run metrics and diagnostics")).toHaveCount(0);

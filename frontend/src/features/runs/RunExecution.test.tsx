@@ -93,7 +93,7 @@ test("opens a fresh event stream from the last sequence after retry", async () =
 
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
-  expect(FakeEventSource.instance.url).toBe("/api/v1/runs/run-1/events?after=11");
+  expect(FakeEventSource.instance.url).toBe("/api/v1/runs/run-1/events?after=11&event_format=message");
 });
 
 test("localizes Incremental activity and keeps one technical event log per attempt", async () => {
@@ -255,3 +255,23 @@ vi.mock("../../shared/api/client", () => ({
   },
 }));
 
+
+
+test("diagnostics receives arbitrary replayed and live events without an event-type whitelist", async () => {
+  render(<Router initialPath="/runs/run-1?view=diagnostics"><ReaderFixture /></Router>);
+  await screen.findByRole("heading", { name: "Execution events" });
+  const stream = FakeEventSource.instance;
+  const emit = (sequence: number, event_type: string) => stream.emit("message", {
+    run_id: "run-1", sequence, attempt: 1, event_type, node: "decision",
+    payload: { field_path: "market_reference_levels.0", validation_issues: ["reference.refs_invalid"] },
+    created_at: "2026-08-27T09:59:17Z",
+  });
+  await act(async () => { emit(1, "node.numeric_audit_degraded"); emit(2, "decision.reference_omitted"); });
+  expect(screen.getByRole("option", { name: "node.numeric_audit_degraded" })).toBeVisible();
+  expect(screen.getByRole("option", { name: "decision.reference_omitted" })).toBeVisible();
+  await act(async () => { emit(3, "future.diagnostic"); emit(3, "future.diagnostic"); });
+  expect(screen.getByRole("option", { name: "future.diagnostic" })).toBeVisible();
+  expect(document.querySelectorAll(".diagnostic-event")).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: "Raw record: 2 · decision.reference_omitted" }));
+  expect((await screen.findAllByText(/reference.refs_invalid/)).length).toBeGreaterThan(0);
+});

@@ -39,6 +39,10 @@ from tradingagents.research.analysts import (
 from tradingagents.research.full.evidence import collect_evidence
 from tradingagents.research.full.state import GraphExecution, ResearchState
 from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.prompt_versions import (
+    FINAL_COMMITTEE_BRIEF_VERSION,
+    FINAL_COMMITTEE_VERSION,
+)
 from tradingagents.research.prompts.perspectives import PERSPECTIVE_SPECS, RoleSpec
 from tradingagents.research.runtime import RunContext, check_cancelled
 from tradingagents.research.state import AgentState
@@ -1121,7 +1125,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=brief,
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
-                prompt_version="final-committee-brief-v6-research-references",
+                prompt_version=f"final-committee-brief-{FINAL_COMMITTEE_BRIEF_VERSION}",
             )
             self._finish_node(
                 runtime,
@@ -1184,7 +1188,7 @@ class ResearchGraph:
                         generation_method=output.generation_method,
                     ),
                 ),
-                prompt_version="final-committee-v18-research-references",
+                prompt_version=f"final-committee-{FINAL_COMMITTEE_VERSION}",
             )
             self._finish_node(
                 runtime,

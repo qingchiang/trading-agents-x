@@ -87,6 +87,11 @@ from tradingagents.research.incremental.collection import (
 )
 from tradingagents.research.incremental.synthesis import synthesize_incremental
 from tradingagents.research.metrics import MetricsCallback
+from tradingagents.research.prompt_versions import (
+    FINAL_COMMITTEE_BRIEF_VERSION,
+    FINAL_COMMITTEE_VERSION,
+    INCREMENTAL_SYNTHESIS_VERSION,
+)
 from tradingagents.research.prompts.instrument import build_instrument_context
 from tradingagents.research.runtime import RunCancelled, RunContext, WorkerShutdown
 from tradingagents.version import __version__
@@ -337,8 +342,8 @@ class AnalysisService:
                 "rebuttal": "v7-observation-aliases",
                 "research_judge": "v8-observation-aliases",
                 "risk_review": "v8-observation-aliases",
-                "final_committee_brief": "v5-observation-aliases",
-                "final_committee": "v17-safe-numeric-operands",
+                "final_committee_brief": FINAL_COMMITTEE_BRIEF_VERSION,
+                "final_committee": FINAL_COMMITTEE_VERSION,
             },
             "research_kind": request.research_kind,
             "quick_binding": snapshot.get("quick_binding") if request.research_kind == "full" else None,
@@ -382,7 +387,7 @@ class AnalysisService:
         }
         if request.research_kind == "incremental":
             method_snapshot["prompt_versions"] = {
-                "incremental_synthesis": "v3-observation-aliases",
+                "incremental_synthesis": INCREMENTAL_SYNTHESIS_VERSION,
             }
         canonical = json.dumps(
             method_snapshot,
